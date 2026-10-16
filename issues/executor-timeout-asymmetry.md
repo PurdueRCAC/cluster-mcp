@@ -32,7 +32,7 @@ timed-out command correctly in development fails in production.
 
 There is a second, smaller problem stacked on the first: `exit_code=-1` is overloaded. A real
 subprocess killed by SIGHUP also returns `-1`, so a caller cannot distinguish "timed out" from "died
-on signal 1". `AGENTS.md` § *Executors* and `invariants.md` §3 both record the current state and the
+on signal 1". `AGENTS.md` § Invariants §3 records the current state and the
 rule that new "never ran" sentinels go below `-1000`.
 
 ## Why it was deferred
@@ -65,14 +65,14 @@ below `-1000`, or an explicit field, so "timed out" and "killed by SIGHUP" are d
 - **R3** — A timed-out command SHALL be distinguishable from a command killed by SIGHUP.
 - **R4** — Tests SHALL cover the timeout path for the local and delegating executors without invoking
   `sudo`, and for the SSH executor without a real cluster (a stubbed connection is acceptable —
-  `.agents/factory/bin/sandbox.sh` cannot reach one by design).
-- **R5** — `AGENTS.md` § *Executors* and `invariants.md` §3 SHALL be updated in the same commit; they
-  currently describe the asymmetry as the state of the world.
+  `bin/sandbox.sh` cannot reach one by design).
+- **R5** — `AGENTS.md` § Invariants §3, its checklist and its operating-manual text alike, SHALL be
+  updated in the same commit; both currently describe the asymmetry as the state of the world.
 
 ## Notes
 
 - Exception provenance: Fabric's timeout surfaces as `invoke.exceptions.CommandTimedOut`. Confirm the
-  exact type and module against the installed version during `/cm-plan` rather than trusting this
+  exact type and module against the installed version during the plan step rather than trusting this
   note.
 - Related: this is the third of the four defects found during the harness port, and the only one
   touching the protocol — so it is the only one of the four where all three backends must change

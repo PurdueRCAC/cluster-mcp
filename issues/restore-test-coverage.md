@@ -21,7 +21,7 @@ Every test in this repository is a documentation-index test:
 81 of 81. `tests/conftest.py` provides only docs fixtures. So
 [`strip-docs-subsystem.md`](strip-docs-subsystem.md) removes the whole suite, and what it leaves
 behind has **never had a test at all** — including every path
-`.agents/factory/invariants.md` marks highest-blast-radius:
+`AGENTS.md` § Invariants marks highest-blast-radius:
 
 - the `ContextVar` isolation contract (`context.py`, `middleware.py`) — the thing that keeps one
   user's tool call from running as another;
@@ -53,7 +53,7 @@ root, a sudoers rule, or two real identities to run.
 The hard part is the second clause. `DelegatingExecutor` is testable without `sudo` by asserting the
 **argv it builds** rather than running it; middleware is testable by driving `on_call_tool` with a
 stub token; isolation is testable with two concurrent `asyncio` tasks and a stub executor each.
-`.agents/factory/review-rubric.md` § *Refutation protocol* already anticipates exactly these
+The KB's `method/review-rubric.md` § *Refutation protocol* already anticipates exactly these
 stand-ins — this cycle is where they become real tests instead of a reviewer's improvisation.
 
 ## Sketch of the acceptance criteria
@@ -71,7 +71,7 @@ stand-ins — this cycle is where they become real tests instead of a reviewer's
 - **R5** — Tests SHALL cover all five rungs of `_resolve_exec_mode()`.
 - **R6** — A test SHALL assert `isinstance(x, Executor)` for all three backends.
 - **R7** — Every test SHALL carry `@mark.unit` or `@mark.integration`; the suite SHALL pass under
-  `--strict-markers`; integration tests SHALL run under `.agents/factory/bin/sandbox.sh`.
+  `--strict-markers`; integration tests SHALL run under `bin/sandbox.sh`.
 
 ## Notes
 

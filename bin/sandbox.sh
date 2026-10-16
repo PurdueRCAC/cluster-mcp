@@ -26,8 +26,8 @@
 #      the developer's real secret.
 #
 # Usage:
-#   .agents/factory/bin/sandbox.sh uv run rcac-mcp --help
-#   .agents/factory/bin/sandbox.sh sh -c "uv run rcac-mcp -e local --generate-token"
+#   bin/sandbox.sh uv run rcac-mcp --help
+#   bin/sandbox.sh sh -c "uv run rcac-mcp -e local --generate-token"
 #
 # CWD IS THE SANDBOX, NOT THE REPO. That is protection 2 working as intended, but it breaks any
 # tool that discovers the project by walking up from the working directory. `uv run` is handled
@@ -36,23 +36,25 @@
 # test drive, step back into the repo explicitly — you keep the HOME, auth, and fail-closed-SSH
 # guarantees and give up only cwd containment, which pytest's own tmp_path fixture replaces:
 #
-#   .agents/factory/bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
+#   bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
 #
 # The sandbox directory is created under $TMPDIR and removed on exit (any path).
+# The script writes nothing of its own to stdout, and its exit status is the command's.
 set -eu
 
 # Capture the repo root before we cd into the sandbox below. `uv run` discovers
 # the project by walking up from the working directory, so once cwd is the /tmp
 # sandbox it can no longer find pyproject.toml; UV_PROJECT pins discovery back
-# to the repo. (Callers invoke this from the repo root, per the usage examples.)
-root="$(pwd)"
+# to the repo. The root is the checkout this script lives in (bin/..), not the
+# caller's cwd, so a drive always exercises this tree, from any directory.
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 # Resolve uv's cache from the REAL home before HOME is replaced, or every drive
 # re-downloads the whole dependency tree into a directory we then delete.
 UV_CACHE_DIR="${UV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/uv}"
 
 sandbox="$(mktemp -d "${TMPDIR:-/tmp}/cluster-mcp-sandbox.XXXXXX")"
-trap 'rm -rf "$sandbox"' EXIT INT TERM
+trap 'rm -rf "$sandbox"' EXIT HUP INT TERM
 
 HOME="$sandbox"
 XDG_CONFIG_HOME="$sandbox/.config"
@@ -73,7 +75,7 @@ CLUSTER_MCP_REPO="$root"
 export CLUSTER_MCP_SANDBOX CLUSTER_MCP_REPO
 
 # Run inside the sandbox so relative writes (e.g. `sh -c "… > out.txt"`) stay
-# contained instead of escaping into the working tree, where cm-build's
+# contained instead of escaping into the working tree, where a build phase's
 # `git add -A` would sweep them into the atomic commit.
 cd "$sandbox"
 "$@"

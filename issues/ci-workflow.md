@@ -16,8 +16,9 @@ anyway.
 
 This costs more now than it did before the factory arrived, in two specific ways:
 
-1. **`/cm-release`'s local gate is the only thing between a bad build and a permanent tag.** The skill
-   says so out loud and discourages `--skip-dry-run` for exactly that reason. A gate that runs only on
+1. **The release recipe's local gate is the only thing between a bad build and a permanent tag.** The
+   recipe's caveats say so out loud, and its `final: true` forbids skipping the rehearsal for exactly
+   that reason (`AGENTS.md` § Factory → Release recipe). A gate that runs only on
    the machine of whoever cuts the release is a gate that eventually does not run.
 2. **The sdist-hygiene assertion has no automatic enforcement.** Verified during the harness port: the
    sdist built from `main` shipped `.agents/` wholesale before `pyproject.toml` was given exclude
@@ -43,24 +44,25 @@ explicitly, not inherit from a workflow that grew.
 
 ## Sketch of the acceptance criteria
 
-- **R1** — WHEN a commit is pushed or a PR is opened against `main`, a workflow SHALL run
+- **R1** — WHEN a commit is pushed to `develop` or `main`, or a PR is opened against either, a workflow SHALL run
   `uv run pytest` on the supported Python version and SHALL fail the check on any test failure.
-- **R2** — The same workflow SHALL build the sdist and FAIL if the tarball contains any of `.agents/`,
-  `.security/`, `spec/`, `issues/`, or `tests/fixtures/`.
+- **R2** — The same workflow SHALL build the sdist and FAIL if the tarball contains any path the
+  release recipe's sdist-hygiene gate rejects (`AGENTS.md` § Factory → Release recipe).
 - **R3** — The workflow SHALL run `uvx twine check --strict` on the built artifacts.
 - **R3a** — The workflow SHALL run `uv lock --check` and fail if `uv.lock` has drifted from
   `pyproject.toml`. The lock is tracked and is what pins the transitive tree for anyone installing
   from `git+https://…`, so a stale one is a silently wrong install, not a formatting nit.
 - **R4** — The workflow SHALL NOT publish to any package index, push a container, or require any
   repository secret.
-- **R5** — `AGENTS.md` § *Packaging* SHALL be updated — it currently states there is no CI — and
-  `/cm-release` Step 4 SHALL note that CI now mirrors its gate.
+- **R5** — `AGENTS.md` § *Packaging* SHALL be updated — it currently states there is no CI — the
+  profile's `ci` key SHALL name the workflow, and the release recipe's caveats SHALL note that CI now
+  mirrors its `gate`.
 
 ## Notes
 
 - The supported Python is `>=3.14`, which is aggressive; confirm runner availability before designing
   a matrix. A single-version job is fine and honest for now.
-- R2 duplicates `/cm-release` Step 4's hygiene check by design: the release skill keeps its local copy
+- R2 duplicates the release recipe's sdist-hygiene gate by design: the recipe keeps its local copy
   because a release can be cut from a machine before CI has run on that commit.
 - Related: [`restore-test-coverage.md`](restore-test-coverage.md) (strict prerequisite).
 - Found by: the harness port, 2026-08-26 (out of cycle).

@@ -2,7 +2,7 @@
 
 The ordered index of work that is **not yet in flight**. One entry per `issues/{slug}.md` seed; the
 seed holds the evidence and the draft criteria, this file holds the order and the reasoning about
-order. Nothing here is a contract — `/cm-feature` promotes a seed into a `spec/{slug}/GOAL.md`, and
+order. Nothing here is a contract — the factory's feature step promotes a seed into a `spec/{slug}/GOAL.md`, and
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
 Three Parts, and they are sequenced for a reason. **Part I** is the arc this project is actually on:
@@ -12,8 +12,8 @@ them shipped by a cycle that knew about them. **Part III** is the project infras
 assumes exists and which mostly does not yet.
 
 Read `AGENTS.md` § *Direction* before starting anything in Part I; it states the destination that
-these entries are steps toward. `.agents/factory/methodology.md` explains the lifecycle that
-consumes these seeds.
+these entries are steps toward. `AGENTS.md` § Factory describes the lifecycle that consumes these
+seeds; its method lives in the operator's KB.
 
 ---
 
@@ -47,7 +47,7 @@ while `SERVER_INSTRUCTIONS` is currently a Purdue document that needs splitting 
 and a site overlay.
 
 The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in every user's MCP
-client config, and `.agents/factory/bin/sandbox.sh` unsets it by name to fail closed. A deprecation
+client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
 window, not a hard break.
 
 *Horizon: near-term · Depends on: the docs strip (smaller surface to rename) · Refs: —*
@@ -63,7 +63,7 @@ mechanism that can omit a tool group cleanly rather than importing it and hoping
 This is the load-bearing cycle of Part I: it establishes the mechanism that `lmod`, the site extras,
 and every future capability plug into. It also collides directly with an existing invariant —
 registration is currently an import-time side effect driven by a hardcoded list at the bottom of
-`tools/__init__.py` (`AGENTS.md` § *Tools*) — so the design has to replace that contract, not work
+`tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract, not work
 around it.
 
 *Horizon: near-term · Depends on: the rename (the extras are named `cluster-mcp[…]`) · Refs: prerequisite for both extras entries below*
@@ -107,7 +107,7 @@ implementation and an honest "unknown" rather than a parse failure.
 # Part II — Correctness debt found while porting the factory
 
 Four defects, all found and **verified by execution** while writing `AGENTS.md` and
-`.agents/factory/invariants.md` on 2026-08-26 — the invariant-writing pass was itself the review that
+the invariant checklist (now `AGENTS.md` § Invariants) on 2026-08-26 — the invariant-writing pass was itself the review that
 nobody had run. None was introduced by that pass; all four are pre-existing on `main`. They are small
 and independent, which makes them good first cycles for a factory that has never been driven here.
 
@@ -116,7 +116,7 @@ and independent, which makes them good first cycles for a factory that has never
 `resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
 `fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
 `TypeError: 'FunctionTool' object is not callable` on every read. Reproduced directly. The generic
-lesson is already recorded as an invariant (`AGENTS.md` § *Tools*: a decorated tool cannot be called
+lesson is already recorded as an invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called
 from Python; factor shared logic into an undecorated helper), but the resource itself is still broken.
 
 *Horizon: now · Depends on: — · Refs: the same helper split that `generalize-storage-discovery` needs*
@@ -144,7 +144,7 @@ and the cache is never invalidated. Today the content is world-readable administ
 the impact is bounded; the *mechanism* is a cross-user cache in the one mode that exists to keep
 users apart, and it is the shape of the bug rather than today's payload that matters.
 
-*Horizon: now · Depends on: — · Refs: `AGENTS.md` § *Resources* documents the defect as a known one*
+*Horizon: now · Depends on: — · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one*
 **Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
 
 ## run() has two different contracts depending on the backend
@@ -162,8 +162,8 @@ with a real SIGHUP death.
 
 # Part III — The infrastructure the factory assumes
 
-Three gaps between what `.agents/` expects and what this repository has. None is a product feature;
-all three change how much a green gate is worth.
+Two gaps between what the factory expects and what this repository has. Neither is a product feature;
+both change how much a green gate is worth.
 
 ## Every test in the suite is a docs test
 
@@ -171,7 +171,7 @@ All 81 tests cover the documentation index — `test_database.py` (22), `test_in
 `test_tools.py` (19), `test_cli.py` (5). `strip-docs-subsystem` therefore takes the entire suite with
 it, and the coupled core it leaves behind — the `ContextVar` isolation contract, the identity-claim
 precedence, the user-map enforcement, the `sudo` argv, the exec-mode ladder — has **never had a
-test**. Those are exactly the paths `invariants.md` marks highest-blast-radius, and a `verify:` gate
+test**. Those are exactly the paths `AGENTS.md` § Invariants marks highest-blast-radius, and a `verify:` gate
 over an empty suite is theatre.
 
 *Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem · Refs: gates the credibility of every later cycle's verify command*
@@ -179,25 +179,13 @@ over an empty suite is theatre.
 
 ## Nothing runs on push
 
-There is no `.github/` at all: no test workflow, no publish workflow, no container build. `/cm-release`
-says so out loud and its local gate is currently the only thing between a bad build and a permanent
-tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so `.agents/`
-and `.security/` can never reach a published artifact — is the cheap half.
+There is no `.github/` at all: no test workflow, no publish workflow, no container build. The release
+recipe says so out loud and its local gate is currently the only thing between a bad build and a
+permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so
+`spec/` and `.security/` can never reach a published artifact — is the cheap half.
 
-*Horizon: near-term · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: `/cm-release` Step 4 duplicates the gate locally until this exists*
+*Horizon: near-term · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*
-
-## The factory has no front door
-
-The upstream HyperShell harness ships `factory/getting-started.html`, a 60KB self-contained
-introduction to agents, harnesses, Shape Up and this factory, written for practitioners *and*
-institutional leadership. It was deliberately not copied during the port — duplicating near-identical
-prose across two repositories invites exactly the silent drift the upstream ledger already filed a
-finding about. But this repository now has eight skills and no on-ramp, and `/cm-harness` Step 6
-carries a staleness check that is conditional on a file that does not exist.
-
-*Horizon: later · Depends on: — · Refs: `.agents/factory/harness-log.md` bootstrap entry, divergence 4*
-**Seed:** [`issues/factory-onboarding-page.md`](issues/factory-onboarding-page.md) · *status: unshaped*
 
 ---
 
@@ -208,7 +196,9 @@ Deferrals closed **without** shipping — `declined` (considered and not taken o
 nothing else in the repository records that the question was asked. Shipped work leaves no entry
 here: `spec/{slug}/` holds that account and the code itself refutes a re-filing.
 
-*(None yet.)*
+- **The factory has no front door** — *declined 2026-10-16.* The factory's front door is the
+  operator's KB, where its method and skills now live; this repository carries only its profile
+  (`AGENTS.md` § Factory). Record: [`issues/factory-onboarding-page.md`](issues/factory-onboarding-page.md).
 
 ---
 

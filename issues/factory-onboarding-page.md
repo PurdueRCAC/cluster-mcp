@@ -1,11 +1,18 @@
 ---
-status: unshaped
+status: declined
 kind: docs
 appetite: small
 lane: public
 ---
 
 # The factory has no front door
+
+> **Declined 2026-10-16.** The repository moved to the KB-hosted factory: the method, the skills and
+> the templates live in the operator's KB, and this repository carries only its profile and
+> invariants (`AGENTS.md` § Factory, § Invariants) and its records. The factory's front door is the
+> operator's KB, so an on-ramp here would duplicate it. The `.agents/` harness, the `/cm-harness`
+> staleness check and the harness ledger named below were retired with that move. What would change
+> the answer: this repository taking its own harness back. The body below is the record as filed.
 
 ## Problem
 

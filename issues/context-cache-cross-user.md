@@ -26,7 +26,7 @@ Two problems compound:
    `socket.gethostname()` (`executor/delegate.py:84`) — identical for every authenticated user on the
    server. So in `delegate` mode the first user to read `rcac://context` populates the cache from
    *their* `sudo -u <them> cat`, and every subsequent user is served that value.
-   `AGENTS.md` § *Executors* now records the general form: `hostname` is not a user-distinguishing
+   `AGENTS.md` § Invariants §3 now records the general form: `hostname` is not a user-distinguishing
    key.
 2. **The cache is never invalidated.** The comment says "loaded once per connection", but the dict is
    module-global and lives for the process. `clear_context_cache()` exists (`:88`) and nothing calls
@@ -37,8 +37,8 @@ process-global cache inside it.
 
 ## Why it was deferred
 
-Not deferred — found while writing `invariants.md` §8 and filed rather than fixed, because the harness
-port was not a cycle.
+Not deferred — found while writing the invariant checklist (now `AGENTS.md` § Invariants §8) and filed
+rather than fixed, because the harness port was not a cycle.
 
 **Pre-existing:** yes — on `main` as of `2def4a4`.
 
@@ -57,7 +57,7 @@ cache — the uncached path is a `find` plus one `cat` per file over SSH on ever
   without a restart, within a documented bound.
 - **R3** — The `/etc/agents.d` contract SHALL be unchanged: `maxdepth 1` glob, `sort` order,
   `<!-- Source: {filename} -->` headers, and empty-string-not-error on a missing directory
-  (`invariants.md` §8).
+  (`AGENTS.md` § Invariants §8).
 - **R4** — A test SHALL exercise two distinct identities against the cache and assert isolation —
   without requiring `sudo` (assert against a stub executor whose `hostname` is deliberately identical
   for both).
@@ -71,6 +71,6 @@ cache — the uncached path is a `find` plus one `cat` per file over SSH on ever
   directly anyway — so there is no exploitable disclosure to conceal, only a caching bug whose *shape*
   is cross-user. Had it cached anything user-private, it would have gone hidden. If the plan discovers
   the cache can hold user-private content on some path, **stop and move the seed to `.security/`.**
-- Related: `AGENTS.md` § *Resources* documents this as a known defect and forbids building new
+- Related: `AGENTS.md` § Invariants §8 documents this as a known defect and forbids building new
   per-user state on the cache.
 - Found by: the harness port, 2026-08-26 (out of cycle).

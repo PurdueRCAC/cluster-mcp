@@ -21,10 +21,10 @@ the capabilities you have. That needs two things this repository does not have �
 `pyproject.toml`, and a registration mechanism that can **omit a group cleanly** rather than importing
 it and hoping the import fails in a useful way.
 
-This collides with a documented invariant rather than sitting beside it. `AGENTS.md` § *Tools* and
-`invariants.md` §7 both currently state that registration is an import-time side effect driven by that
-hardcoded list, and that a module missing from it silently registers nothing. This cycle **replaces**
-that contract, so both documents move in the same commit as the code.
+This collides with a documented invariant rather than sitting beside it. `AGENTS.md` § Invariants §7
+currently states that registration is an import-time side effect driven by that hardcoded list, and
+that a module missing from it silently registers nothing. This cycle **replaces** that contract, so
+that section moves in the same commit as the code.
 
 ## Why it was deferred
 
@@ -71,7 +71,7 @@ connection is established eagerly, and it fails differently in `local` mode.
 
 ## Notes
 
-- `invariants.md` §7 must be rewritten in lockstep — it is the checklist `cm-review` grades against,
+- `AGENTS.md` § Invariants §7 must be rewritten in lockstep — it is the checklist the review step grades against,
   and leaving it describing the old mechanism makes every subsequent review wrong.
 - The `@mcp_tool`-returns-a-`FunctionTool` gotcha (see
   [`storage-paths-resource-typeerror.md`](storage-paths-resource-typeerror.md)) is a property of the

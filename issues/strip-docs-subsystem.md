@@ -28,10 +28,11 @@ evolves there; it is no longer this repository's responsibility. What is still h
 - `tests/fixtures/RCAC-Docs` — a git submodule (`.gitmodules`), cloned only for these tests.
 - `pyyaml` and `jinja2` in `[project.dependencies]`, added for the indexer.
 
-Two of these are more than dead weight. The `SERVER_INSTRUCTIONS` block actively directs agents to a
+One of these is more than dead weight. The `SERVER_INSTRUCTIONS` block actively directs agents to a
 capability this server should not own, and after removal would name tools that do not exist — the
-server inducing its own hallucination. And `pyyaml` is *also* what the factory's FSM scripts import
-(`.agents/factory/bin/_fsm.py`), so a naive dependency cleanup breaks the harness.
+server inducing its own hallucination. (Until 2026-10-16 `pyyaml` was also what the in-repo factory's
+FSM scripts imported; the KB-hosted factory runs them with `uv run --with pyyaml`, so a dependency
+cleanup no longer touches the harness.)
 
 ## Why it was deferred
 
@@ -59,9 +60,9 @@ dependency cleanup because it was made explicit before the runtime one was dropp
   that cross-checks the two.
 - **R4** — `README.md` SHALL point a reader wanting RCAC documentation at the `rcac-docs-mcp` service,
   rather than silently omitting the capability.
-- **R5** — WHILE the docs runtime dependencies are removed, `uv run python
-  .agents/factory/bin/next_phase.py` SHALL still succeed — PyYAML remains resolvable in the dev
-  environment.
+- **R5** — *(Withdrawn 2026-10-16.)* It required the in-repo factory's FSM scripts to keep running
+  once the docs runtime dependencies were removed; those scripts now run from the operator's KB with
+  `uv run --with pyyaml`, so nothing here constrains removing `pyyaml`.
 - **R6** — The `tests/fixtures/RCAC-Docs` submodule and its `.gitmodules` entry SHALL be removed, and
   a fresh `git clone` SHALL require no `git submodule update`.
 
@@ -69,7 +70,7 @@ dependency cleanup because it was made explicit before the runtime one was dropp
 
 - Removing this takes the **entire** test suite with it (81 of 81 tests). That is not in scope to
   replace here — see [`restore-test-coverage.md`](restore-test-coverage.md), which this seed's
-  promotion should name as an explicit non-goal so `/cm-roadmap` can verify the obligation landed.
+  promotion should name as an explicit non-goal so the roadmap step can verify the obligation landed.
 - `INSTRUCTIONS.md` is a standalone system prompt, not generated from `SERVER_INSTRUCTIONS`; both
   need editing.
 - Related: [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) is cheaper after this lands.

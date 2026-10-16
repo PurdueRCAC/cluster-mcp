@@ -23,7 +23,7 @@ README and every user's MCP client config.
 
 **Environment variables** — the sharp edge. `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_DOCS_DB` (going
 away with the docs strip). `RCAC_SSH_HOST` in particular appears in every user's client config, and
-`.agents/factory/bin/sandbox.sh` unsets it **by name** to make the default stdio→`ssh` path fail
+`bin/sandbox.sh` unsets it **by name** to make the default stdio→`ssh` path fail
 closed. Rename it without updating the sandbox and every factory verify command silently loses its
 most important guarantee.
 
@@ -56,7 +56,7 @@ as site-specific rather than being renamed into false generality.
   version.
 - **R2** — WHERE a legacy `RCAC_*` environment variable is set and its `CLUSTER_*` counterpart is not,
   the server SHALL honour the legacy value and emit a deprecation warning naming the replacement.
-- **R3** — `.agents/factory/bin/sandbox.sh` SHALL unset both the legacy and the new SSH-host variable,
+- **R3** — `bin/sandbox.sh` SHALL unset both the legacy and the new SSH-host variable,
   and a bare `cluster-mcp` inside the sandbox SHALL still fail closed with a nonzero exit.
 - **R4** — Resource URIs SHALL move to the new scheme; the change SHALL be stated in `README.md` as a
   breaking change for any client that persisted a URI.
@@ -68,8 +68,9 @@ as site-specific rather than being renamed into false generality.
 ## Notes
 
 - The GitHub repository rename (`purduercac/rcac-mcp` → …) is a separate, human decision with its own
-  redirect behaviour; the promotion conversation should decide whether it is in scope. Several
-  `.agents/` files hardcode the repo URL (`cm-publish` permalinks, `cm-release`'s install probe).
+  redirect behaviour; the promotion conversation should decide whether it is in scope. `AGENTS.md`
+  § Factory → Release recipe hardcodes the repo URL (`post_verify`'s install probe, the
+  `no-ci-no-index` caveat).
 - `SPDX-FileCopyrightText: 2025 Purdue University` headers are on every source file. Whether a
   generalized project keeps that attribution is a licensing question for the maintainer, not a
   mechanical substitution.

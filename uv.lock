@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -1230,7 +1230,6 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1247,7 +1246,6 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

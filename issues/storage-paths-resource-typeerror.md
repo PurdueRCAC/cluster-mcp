@@ -41,8 +41,7 @@ scrutinized; the fact that the imported object was no longer a function was not.
 
 Not deferred — found while writing the invariant checklist and filed rather than fixed on the spot,
 because the harness port was not a cycle and should not have carried a product fix. The general lesson
-*was* recorded immediately, as an invariant in `AGENTS.md` § *Tools* and
-`.agents/factory/invariants.md` §7: a `@mcp_tool`-decorated function cannot be called from Python;
+*was* recorded immediately, as an invariant, now `AGENTS.md` § Invariants §7: a `@mcp_tool`-decorated function cannot be called from Python;
 factor shared logic into an undecorated helper and have both call it.
 
 **Pre-existing:** yes — on `main` as of `2def4a4`.
@@ -71,6 +70,6 @@ this cannot silently regress.
 - Fixing this creates the undecorated seam that
   [`generalize-storage-discovery.md`](generalize-storage-discovery.md) needs, so doing the small fix
   first makes the larger cycle cheaper.
-- Per `.agents/factory/ears.md`, these criteria are phrased as observable broken→fixed behavior. The
-  mechanism above is evidence, not contract — `/cm-plan` confirms the root cause.
+- Per the KB's `method/ears.md`, these criteria are phrased as observable broken→fixed behavior. The
+  mechanism above is evidence, not contract — the plan step confirms the root cause.
 - Found by: the harness port, 2026-08-26 (out of cycle).
