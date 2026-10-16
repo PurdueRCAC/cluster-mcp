@@ -78,3 +78,10 @@ connection is established eagerly, and it fails differently in `local` mode.
   decorator and survives any registration redesign — do not assume a new mechanism fixes it.
 - Related: [`lmod-tool-group.md`](lmod-tool-group.md), [`site-extras.md`](site-extras.md).
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: design question 1 answered. Each capability is its own distribution in a uv workspace
+  (`cluster-mcp`, `cluster-mcp-slurm`, …), all sharing a PEP 420 `cluster_mcp` namespace — no
+  distribution ships `cluster_mcp/__init__.py` — so an extra such as `slurm = ["cluster-mcp-slurm"]`
+  installs real code, and an entry-point group registers it. Verified with uv 0.13.1: a git
+  `#subdirectory=` install resolves sibling workspace members from the same commit, and `uv build`
+  drops the workspace sources, so the same tree publishes to PyPI unchanged.
+  [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) does the restructure.

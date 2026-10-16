@@ -73,3 +73,7 @@ plan should say plainly how they compose, because a contributor will ask.
   [`generalize-storage-discovery.md`](generalize-storage-discovery.md) (the site hook this establishes
   is where a discovery implementation lands).
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: absorbs [`generalize-storage-discovery.md`](generalize-storage-discovery.md). With
+  capabilities as separate distributions ([`capability-extras.md`](capability-extras.md), Notes),
+  the `rcac` alias lists distribution names (`cluster-mcp-slurm`, …) rather than the
+  self-referencing extras sketched in the Problem above.

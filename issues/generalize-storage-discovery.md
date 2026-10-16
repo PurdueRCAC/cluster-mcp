@@ -74,3 +74,5 @@ Two design questions worth naming now:
 - Related: [`site-extras.md`](site-extras.md) (strict prerequisite),
   [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) (starts the `SERVER_INSTRUCTIONS` split).
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: planned to be absorbed by [`site-extras.md`](site-extras.md), the cycle that
+  establishes the site hook this one needs.

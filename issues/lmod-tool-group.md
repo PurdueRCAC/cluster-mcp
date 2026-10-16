@@ -78,3 +78,8 @@ Two things the plan has to get right:
 - Related: [`capability-extras.md`](capability-extras.md) (strict prerequisite),
   [`site-extras.md`](site-extras.md) (a site extra pulls this one in).
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: module state does not persist between calls — each call is a fresh shell — so a
+  `module load` in one `run_command` is gone by the next. Consider a `modules=[…]` parameter on
+  `run_command` and on job submission ([`slurm-capability.md`](slurm-capability.md)) that loads the
+  listed modules in the same invocation, with `run_command`'s guard rails steering a bare
+  `module load` toward it ([`tool-surface.md`](tool-surface.md)).

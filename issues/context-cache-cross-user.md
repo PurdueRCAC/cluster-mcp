@@ -74,3 +74,6 @@ cache — the uncached path is a `find` plus one `cat` per file over SSH on ever
 - Related: `AGENTS.md` § Invariants §8 documents this as a known defect and forbids building new
   per-user state on the cache.
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: planned to be absorbed by [`agents-d-instructions.md`](agents-d-instructions.md),
+  which reads `/etc/agents.d` once at startup as the server and retires this cache rather than
+  patching it.

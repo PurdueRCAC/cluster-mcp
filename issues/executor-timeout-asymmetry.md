@@ -78,3 +78,5 @@ below `-1000`, or an explicit field, so "timed out" and "killed by SIGHUP" are d
   touching the protocol — so it is the only one of the four where all three backends must change
   together.
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: planned to be absorbed by [`safe-execution.md`](safe-execution.md), which reworks the
+  `Executor` protocol around argv and settles the timeout contract in the same move.

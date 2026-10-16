@@ -67,6 +67,12 @@ as site-specific rather than being renamed into false generality.
 
 ## Notes
 
+- 2026-10-16: the roadmap revision folds the uv-workspace restructure into this cycle (core as
+  `cluster_mcp.core` in a PEP 420 namespace shared by capability distributions; see
+  [`capability-extras.md`](capability-extras.md)). Until the project is on PyPI, the install line
+  becomes `uvx --from 'cluster-mcp[…] @ git+https://…#subdirectory=packages/cluster-mcp' cluster-mcp`,
+  so the README, `compose.yml` and the docs example move with it.
+
 - The GitHub repository rename (`purduercac/rcac-mcp` → …) is a separate, human decision with its own
   redirect behaviour; the promotion conversation should decide whether it is in scope. `AGENTS.md`
   § Factory → Release recipe hardcodes the repo URL (`post_verify`'s install probe, the

@@ -85,3 +85,5 @@ has to assert the *shape* of the resolved annotation, or it goes green on the un
   that the module-level import defeats. Harmless, but it is the same kind of unreviewed detail; the
   promotion may fold it in or leave it.
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: planned to be absorbed by [`stack-upgrade.md`](stack-upgrade.md): `auth.py` is
+  rewritten against the new FastMCP auth API anyway, and R1–R2 carry over as that cycle's criteria.

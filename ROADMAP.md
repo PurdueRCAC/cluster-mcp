@@ -5,11 +5,19 @@ seed holds the evidence and the draft criteria, this file holds the order and th
 order. Nothing here is a contract — the factory's feature step promotes a seed into a `spec/{slug}/GOAL.md`, and
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
-Three Parts, and they are sequenced for a reason. **Part I** is the arc this project is actually on:
-becoming a general `cluster-mcp` rather than a Purdue-specific `rcac-mcp`. **Part II** is correctness
-debt — four defects found while porting the software factory, each verified by execution, none of
-them shipped by a cycle that knew about them. **Part III** is the project infrastructure the factory
-assumes exists and which mostly does not yet.
+Three Parts, each ending in a release. **Part 0** makes the server safe and useful as it stands and
+ships as 0.1.1. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
+rather than a Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that
+comes after.
+
+The order was revised on 2026-10-16. Users install `main` directly, so fixes for today's users ship
+first, under the name they already have, before the rename. The dependency stack moves before any
+mechanism — registration, composed instructions, annotations — is built on it, so each is built
+once. And every cycle starts from and lands on `develop`; a release fast-forwards `main` to a
+released `develop` commit, so nothing reaches users between releases.
+
+A seed that another cycle **absorbs** keeps a short entry under that cycle, so every file in
+`issues/` stays indexed until the absorbing cycle retires it.
 
 Read `AGENTS.md` § *Direction* before starting anything in Part I; it states the destination that
 these entries are steps toward. `AGENTS.md` § Factory describes the lifecycle that consumes these
@@ -17,11 +25,11 @@ seeds; its method lives in the operator's KB.
 
 ---
 
-# Part I — Becoming cluster-mcp
+# Part 0 — Safe and useful as it stands
 
-Six cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with
-Purdue as one supported site*. They are ordered so each one shrinks or clarifies the tree the next
-one has to touch: remove what left, rename what stays, then make what stays optional.
+Seven cycles, ending in **release 0.1.1**. The first three give the factory a smaller tree, a real
+test suite and a gate that runs on push; the rest fix what today's users hit, each built on the one
+before.
 
 ## The documentation subsystem belongs to rcac-docs-mcp now
 
@@ -32,138 +40,11 @@ whole FTS5 indexing subsystem — `src/rcac_mcp/docs/` (945 lines), `tools/docs.
 git submodule, and prominent guidance in `SERVER_INSTRUCTIONS` telling every connecting agent to
 consult a tool this server should no longer own.
 
-This goes first. Everything else in Part I touches a smaller tree once it is gone, and the rename in
+This goes first. Every later cycle touches a smaller tree once it is gone, and the rename in
 particular is meaningfully cheaper.
 
 *Horizon: now · Depends on: — · Refs: forces `restore-test-coverage`*
 **Seed:** [`issues/strip-docs-subsystem.md`](issues/strip-docs-subsystem.md) · *status: unshaped*
-
-## Nothing here should assume Purdue
-
-The rename from `rcac-mcp` to `cluster-mcp` is mechanical in places (package, console script,
-`pyproject.toml`, the `rcac://` resource URIs, the `RCAC_*` environment variables) and a judgement
-call in others: `tools/rcac.py` genuinely *is* Purdue-specific and should keep a site-flavoured name,
-while `SERVER_INSTRUCTIONS` is currently a Purdue document that needs splitting into a generic core
-and a site overlay.
-
-The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in every user's MCP
-client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
-window, not a hard break.
-
-*Horizon: near-term · Depends on: the docs strip (smaller surface to rename) · Refs: —*
-**Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: unshaped*
-
-## Capabilities you don't have shouldn't be tools you see
-
-Today every tool registers unconditionally: a site without Slurm still advertises `sbatch`, `squeue`
-and `sacct` to every connecting model, which is an invitation to hallucinate a workflow that cannot
-run. The intended shape is packaging extras — `cluster-mcp[slurm]` — backed by a registration
-mechanism that can omit a tool group cleanly rather than importing it and hoping.
-
-This is the load-bearing cycle of Part I: it establishes the mechanism that `lmod`, the site extras,
-and every future capability plug into. It also collides directly with an existing invariant —
-registration is currently an import-time side effect driven by a hardcoded list at the bottom of
-`tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract, not work
-around it.
-
-*Horizon: near-term · Depends on: the rename (the extras are named `cluster-mcp[…]`) · Refs: prerequisite for both extras entries below*
-**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
-
-## Module systems are the other half of "can I run this"
-
-Every tool here is about jobs; none is about software. On an LMOD cluster an agent cannot discover
-what is installed, what versions exist, or what a module load would do to the environment — so it
-guesses, and `INSTRUCTIONS.md` has to compensate with prose. `module avail`, `module spider`,
-`module list` and `module show` are the missing capability group, and they are the second consumer
-of the extras mechanism, which is what proves the mechanism generalizes past one instance.
-
-*Horizon: near-term · Depends on: capability-extras (strictly) · Refs: —*
-**Seed:** [`issues/lmod-tool-group.md`](issues/lmod-tool-group.md) · *status: unshaped*
-
-## A site extra is shorthand plus a point of view
-
-`cluster-mcp[rcac]` should mean "the right capability extras for Purdue, plus Purdue's own tools and
-context" — one install target a user can name without knowing that Gautschi runs Slurm and LMOD. That
-makes it both a dependency alias and the home for `tools/rcac.py` and the Purdue half of
-`SERVER_INSTRUCTIONS`. Getting the boundary right here is what makes `cluster-mcp[alcf]`,
-`[ncsa]` and `[tacc]` a matter of contribution rather than redesign, so this cycle should produce a
-documented pattern, not just a Purdue special case.
-
-*Horizon: mid-term · Depends on: capability-extras (strictly) · Refs: sets the pattern other centers copy*
-**Seed:** [`issues/site-extras.md`](issues/site-extras.md) · *status: unshaped*
-
-## Not every cluster has a Lustre scratch and a myquota
-
-`storage_paths()` parses the output of `myquota`, and scratch discovery shells out to `findscratch` —
-both Purdue commands, and neither degrades on a cluster that lacks them. The `rcac://storage` resource
-is built on the same assumption. Generalizing means a discovery protocol with a site-provided
-implementation and an honest "unknown" rather than a parse failure.
-
-*Horizon: mid-term · Depends on: site-extras (the site hook is where a discovery impl lands) · Refs: also fixes the `rcac://storage` resource's second problem*
-**Seed:** [`issues/generalize-storage-discovery.md`](issues/generalize-storage-discovery.md) · *status: unshaped*
-
----
-
-# Part II — Correctness debt found while porting the factory
-
-Four defects, all found and **verified by execution** while writing `AGENTS.md` and
-the invariant checklist (now `AGENTS.md` § Invariants) on 2026-08-26 — the invariant-writing pass was itself the review that
-nobody had run. None was introduced by that pass; all four are pre-existing on `main`. They are small
-and independent, which makes them good first cycles for a factory that has never been driven here.
-
-## The rcac://storage resource cannot execute at all
-
-`resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
-`fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
-`TypeError: 'FunctionTool' object is not callable` on every read. Reproduced directly. The generic
-lesson is already recorded as an invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called
-from Python; factor shared logic into an undecorated helper), but the resource itself is still broken.
-
-*Horizon: now · Depends on: — · Refs: the same helper split that `generalize-storage-discovery` needs*
-**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
-
-## A type annotation that is accidentally a slice
-
-`auth.py:65` reads `Final[Dict[str, Callable[[], AuthProvider]]:]` — the trailing `:` inside the
-subscript makes it a slice expression. The interesting part is what does *not* happen: evaluating it
-raises nothing. `typing.get_type_hints` succeeds and silently returns
-`Final[slice(Dict[...], None, None)]`, and deferred annotations are not what saves it — the same
-expression evaluated eagerly on Python 3.14 yields the same nonsense without complaint. A silent
-wrong type in the module that decides whether a request is authenticated is worse than a loud one,
-and it means any check that merely asserts evaluation succeeds passes on the broken code.
-
-*Horizon: now · Depends on: — · Refs: —*
-**Seed:** [`issues/auth-modes-annotation-typo.md`](issues/auth-modes-annotation-typo.md) · *status: unshaped*
-
-## One user's cluster context is served to every other user
-
-`_cluster_context_cache` (`resources.py:23`) is a process-global dict keyed by `executor.hostname`.
-For `DelegatingExecutor` that key is `socket.gethostname()` — identical for every authenticated
-user — so in delegate mode the first reader's `/etc/agents.d` content is returned to everyone after,
-and the cache is never invalidated. Today the content is world-readable administrative markdown, so
-the impact is bounded; the *mechanism* is a cross-user cache in the one mode that exists to keep
-users apart, and it is the shape of the bug rather than today's payload that matters.
-
-*Horizon: now · Depends on: — · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one*
-**Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
-
-## run() has two different contracts depending on the backend
-
-`LocalShellExecutor` and `DelegatingExecutor` catch `subprocess.TimeoutExpired` and return a
-`CommandResult` with `exit_code=-1`; `SSHExecutor` passes `timeout` to Fabric and catches nothing, so
-Invoke's `CommandTimedOut` propagates to the caller. A tool that handles a timed-out command works in
-`local` mode and raises in `ssh` mode — the default mode. The `-1` sentinel is separately overloaded
-with a real SIGHUP death.
-
-*Horizon: near-term · Depends on: — · Refs: touches the `Executor` protocol contract, so all three backends move together*
-**Seed:** [`issues/executor-timeout-asymmetry.md`](issues/executor-timeout-asymmetry.md) · *status: unshaped*
-
----
-
-# Part III — The infrastructure the factory assumes
-
-Two gaps between what the factory expects and what this repository has. Neither is a product feature;
-both change how much a green gate is worth.
 
 ## Every test in the suite is a docs test
 
@@ -182,10 +63,245 @@ over an empty suite is theatre.
 There is no `.github/` at all: no test workflow, no publish workflow, no container build. The release
 recipe says so out loud and its local gate is currently the only thing between a bad build and a
 permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so
-`spec/` and `.security/` can never reach a published artifact — is the cheap half.
+`spec/` and `.security/` can never reach a published artifact — is the cheap half, and it makes
+every later gate real. `stack-upgrade` adds a dependency-audit step to it.
 
-*Horizon: near-term · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: the release recipe's `gate` duplicates it locally until this exists*
+*Horizon: now · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*
+
+## Move the stack before building on it
+
+`pyproject.toml` pins `fastmcp>=2.0.0,<3`; FastMCP is on 4.x, two majors ahead, and the MCP SDK is
+one major ahead of the lock. MCP revision 2026-07-28 is stateless — no `initialize`, and
+`server/discover` carries the `instructions` — and FastMCP 4 serves that revision and the older ones
+from one server. The next mechanisms on this roadmap (plugin registration, composed instructions,
+annotations and tool search) are built directly on the FastMCP API, so moving first means building
+each of them once instead of twice. The cycle also puts a dependency-audit step in CI, so
+advisories against the lock stay visible from now on.
+
+*Horizon: near-term · Depends on: restore-test-coverage, ci-workflow (the upgrade lands against a real gate) · Refs: absorbs `auth-modes-annotation-typo`; prerequisite for `agents-d-instructions`, `capability-extras`, `tool-surface`, `https-token-mode`*
+**Seed:** [`issues/stack-upgrade.md`](issues/stack-upgrade.md) · *status: unshaped*
+
+### Absorbed: a type annotation that is accidentally a slice
+
+`auth.py:65` reads `Final[Dict[str, Callable[[], AuthProvider]]:]` — the trailing `:` inside the
+subscript makes it a slice expression, and nothing complains: `typing.get_type_hints` silently
+returns `Final[slice(Dict[...], None, None)]`. A silent wrong type in the module that decides whether
+a request is authenticated is worse than a loud one. `auth.py` is rewritten in `stack-upgrade`
+anyway, so the fix and its test ride with it. Found by the harness port, 2026-08-26.
+
+*Horizon: with stack-upgrade · Depends on: — · Refs: absorbed by `stack-upgrade`*
+**Seed:** [`issues/auth-modes-annotation-typo.md`](issues/auth-modes-annotation-typo.md) · *status: unshaped*
+
+## The rcac://storage resource fails on every read
+
+`resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
+`fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
+`TypeError: 'FunctionTool' object is not callable` on every read. Reproduced directly. The generic
+lesson is already recorded as an invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called
+from Python; factor shared logic into an undecorated helper), but the resource itself is still broken.
+It follows `stack-upgrade`, so the fix is made against the `Tool` type that stays.
+
+*Horizon: near-term · Depends on: stack-upgrade · Refs: the same helper split that `generalize-storage-discovery` needs*
+**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
+
+## Every tool passes exactly what it was given
+
+Writes aren't byte-exact — `write_file` adds a trailing newline. Paths with spaces or special
+characters are mishandled. `sbatch` has no clean way to pass the script's own arguments.
+Commands mean different things under each user's login shell (zsh versus bash), and a wrong SSH
+host dies inside `initialize` with its reason on stderr only. The fix is one executor change: an
+argv-based API with quoting and `--` before caller-supplied paths, file content over SFTP or stdin,
+one pinned interpreter, one timeout contract, and `args` on `sbatch` so job arguments have a
+supported route. Every tool family in Part I is built on it.
+
+*Horizon: near-term · Depends on: restore-test-coverage · Refs: absorbs `executor-timeout-asymmetry`; prerequisite for `agents-d-instructions`, `tool-surface`, `slurm-capability`*
+**Seed:** [`issues/safe-execution.md`](issues/safe-execution.md) · *status: unshaped*
+
+### Absorbed: run() has two different contracts depending on the backend
+
+`LocalShellExecutor` and `DelegatingExecutor` catch `subprocess.TimeoutExpired` and return a
+`CommandResult` with `exit_code=-1`; `SSHExecutor` passes `timeout` to Fabric and catches nothing, so
+Invoke's `CommandTimedOut` propagates to the caller — in `ssh` mode, the default. The `-1` sentinel
+is separately overloaded with a real SIGHUP death. `safe-execution` reworks the `Executor` protocol
+anyway, so it settles the contract in the same move. Found by the harness port, 2026-08-26.
+
+*Horizon: with safe-execution · Depends on: — · Refs: absorbed by `safe-execution`; all three backends move together*
+**Seed:** [`issues/executor-timeout-asymmetry.md`](issues/executor-timeout-asymmetry.md) · *status: unshaped*
+
+## The site's own rules should reach the model unasked
+
+`/etc/agents.d/*.md` reaches agents only as the `rcac://context` resource, which most clients never
+read unprompted, and it loads the assembled `AGENTS.md` beside the topic files, so every rule
+arrives twice. The cycle composes the topic files into the served instructions at startup, read
+once through the executor, in a priority order so a client that cuts server instructions at a few
+thousand characters loses the least, within a configurable budget. A `cluster_context` tool returns
+the full text, the resource stays, and startup never hangs on the read.
+
+*Horizon: near-term · Depends on: stack-upgrade (both protocol eras carry instructions), safe-execution (the executor it reads through) · Refs: absorbs `context-cache-cross-user`*
+**Seed:** [`issues/agents-d-instructions.md`](issues/agents-d-instructions.md) · *status: unshaped*
+
+### Absorbed: one user's cluster context is served to every other user
+
+`_cluster_context_cache` (`resources.py:23`) is a process-global dict keyed by `executor.hostname`.
+For `DelegatingExecutor` that key is `socket.gethostname()` — identical for every authenticated
+user — so in delegate mode the first reader's `/etc/agents.d` content is returned to everyone after,
+and the cache is never invalidated. The content is world-readable administrative markdown, so the
+impact is bounded; the *mechanism* is the bug. Reading the files once at startup, as the server,
+retires the cache rather than patching it. Found by the harness port, 2026-08-26.
+
+*Horizon: with agents-d-instructions · Depends on: — · Refs: absorbed by `agents-d-instructions`; `AGENTS.md` § Invariants §8 documents the defect as a known one*
+**Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
+
+**Release 0.1.1.** `main` fast-forwards to the released `develop` commit, and everyone who installs
+`main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
+connection errors and the site's rules in the instructions — under the name they already use.
+
+---
+
+# Part I — Becoming cluster-mcp
+
+Seven cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
+with Purdue as one supported site*, ending in **release 0.2.0**. Rename and restructure what stays,
+make capabilities optional, then build each capability on that mechanism — Slurm first, then LMOD
+and xdu as the consumers that prove it generalizes — and finally the site extra that bundles them.
+
+## Nothing here should assume Purdue
+
+The rename from `rcac-mcp` to `cluster-mcp` is mechanical in places (package, console script,
+`pyproject.toml`, the `rcac://` resource URIs, the `RCAC_*` environment variables) and a judgement
+call in others: `tools/rcac.py` genuinely *is* Purdue-specific and should keep a site-flavoured name,
+while `SERVER_INSTRUCTIONS` is currently a Purdue document that needs splitting into a generic core
+and a site overlay.
+
+The same cycle restructures the tree into a uv workspace of namespace distributions — a core
+`cluster-mcp` providing `cluster_mcp.core`, and one member per capability and site sharing the
+`cluster_mcp` namespace — with no behaviour change, so every import moves once.
+
+The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in every user's MCP
+client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
+window, not a hard break; the old resource URIs are aliased through the same window.
+
+*Horizon: after 0.1.1 · Depends on: the docs strip (smaller surface to rename), release 0.1.1 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
+**Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: unshaped*
+
+## Capabilities you don't have shouldn't be tools you see
+
+Today every tool registers unconditionally: a site without Slurm still advertises `sbatch`, `squeue`
+and `sacct` to every connecting model, which is an invitation to hallucinate a workflow that cannot
+run. The shape is packaging extras — `cluster-mcp[slurm]` — where each extra installs a real
+distribution, registered through an entry-point group, with a runtime probe so an installed
+capability with nothing behind it advertises nothing, and instructions composed from what loaded.
+
+This is the load-bearing cycle of Part I: it establishes the mechanism that Slurm, LMOD, xdu and the
+site extras plug into. It also collides directly with an existing invariant — registration is
+currently an import-time side effect driven by a hardcoded list at the bottom of
+`tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract, not
+work around it.
+
+*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists), stack-upgrade (FastMCP 4's providers are a candidate carrier) · Refs: prerequisite for every capability entry below*
+**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
+
+## Bespoke tools first, the shell last
+
+The file tools are too thin — `list_directory` costs a round trip per entry, `read_file` has no
+offset, and there is no edit, stat, find or grep — so agents fall back to `run_command`, which no
+client can reason about from its name. The cycle builds the `file_*` family (`file_list`,
+`file_read`, `file_write`, `file_edit`, `file_stat`, a bounded `file_find`, `file_grep`, plus
+transfer), gives every tool honest MCP annotations and a response budget, and keeps `run_command`
+as the last resort with `shlex`-based guard rails that steer toward the right tool — documented
+as a net for mistakes, not a security boundary. A `--profile read-only` registers only the
+read-only tools. Aliases versus a clean break for the old names, and names a client can allow-list
+by pattern, are open shaping questions.
+
+*Horizon: mid-term · Depends on: capability-extras (the core distribution it lands in), safe-execution (the argv executor) · Refs: sets the naming, annotation and budget rules every capability follows*
+**Seed:** [`issues/tool-surface.md`](issues/tool-surface.md) · *status: unshaped*
+
+## A job_* family that accepts what a model naturally sends
+
+Found while submitting and watching test jobs through the server: `gpus` must be a string, a single
+job id must be wrapped in a list, a purged id is an error rather than an empty result, and five
+tools answer "tell me about this job". The `job_*` family — `job_submit` with `args`, `modules` and
+typed resources accepting an int or a string, `job_list` and `job_history` accepting a scalar or a
+list, a consolidated `job_info`, `job_output`, `job_cancel`, and a bounded `job_wait` considered —
+is the first capability distribution, with validation errors that say what to send.
+
+*Horizon: mid-term · Depends on: capability-extras, tool-surface, safe-execution · Refs: the first consumer of the extras mechanism*
+**Seed:** [`issues/slurm-capability.md`](issues/slurm-capability.md) · *status: unshaped*
+
+## Module systems are the other half of "can I run this"
+
+Every tool here is about jobs; none is about software. On an LMOD cluster an agent cannot discover
+what is installed, what versions exist, or what a module load would do to the environment — so it
+guesses, and `INSTRUCTIONS.md` has to compensate with prose. `module avail`, `module spider`,
+`module list` and `module show` are the missing capability group, and they are the second consumer
+of the extras mechanism, which is what proves the mechanism generalizes past one instance. Module
+state does not persist between calls, so a `modules=[…]` parameter on `run_command` and job
+submission is part of the idea.
+
+*Horizon: mid-term · Depends on: capability-extras (strictly), tool-surface (`run_command`'s parameters) · Refs: `slurm-capability` takes the same `modules=[…]`*
+**Seed:** [`issues/lmod-tool-group.md`](issues/lmod-tool-group.md) · *status: unshaped*
+
+## Answer storage questions from an index, not a walk
+
+"What's filling my scratch" and "find every `*.h5` here" end today in a recursive `find` or `du` on
+a parallel filesystem — the long metadata walk login-node rules forbid. The xdu capability detects
+[xdu](https://github.com/xdu-project/xdu), installs a pinned, checksum-verified release into a
+private prefix under `~/.local` only with explicit consent, keeps indexes in scratch rather than
+home, indexes large trees through the scheduler and small ones at low priority, and serves
+`storage_spaces`, `storage_index`, `file_find` routed to the index, and `storage_usage` — typed
+operations only, never caller-written SQL. Byte-sum rollups are an upstream request to xdu.
+
+*Horizon: mid-term · Depends on: capability-extras, tool-surface (`file_find`), slurm-capability (indexing jobs) · Refs: the third consumer of the extras mechanism*
+**Seed:** [`issues/xdu-storage.md`](issues/xdu-storage.md) · *status: unshaped*
+
+## A site extra is shorthand plus a point of view
+
+`cluster-mcp[rcac]` should mean "the right capability extras for Purdue, plus Purdue's own tools and
+context" — one install target a user can name without knowing that Gautschi runs Slurm and LMOD. That
+makes it both a dependency alias and the home for `tools/rcac.py` and the Purdue half of
+`SERVER_INSTRUCTIONS`. Getting the boundary right here is what makes `cluster-mcp[alcf]`,
+`[ncsa]` and `[tacc]` a matter of contribution rather than redesign, so this cycle should produce a
+documented pattern, not just a Purdue special case. It absorbs storage discovery, whose site
+implementation needs exactly the hook this cycle establishes.
+
+*Horizon: mid-term · Depends on: capability-extras (strictly); lmod-tool-group and xdu-storage (the extra pulls them in) · Refs: absorbs `generalize-storage-discovery`; sets the pattern other centers copy*
+**Seed:** [`issues/site-extras.md`](issues/site-extras.md) · *status: unshaped*
+
+### Absorbed: not every cluster has a Lustre scratch and a myquota
+
+`storage_paths()` parses the output of `myquota`, and scratch discovery shells out to `findscratch` —
+both Purdue commands, and neither degrades on a cluster that lacks them. The `rcac://storage` resource
+is built on the same assumption. Generalizing means a discovery protocol with a site-provided
+implementation and an honest "unknown" rather than a parse failure — and the site hook is what
+`site-extras` builds. Found by the harness port, 2026-08-26.
+
+*Horizon: with site-extras · Depends on: — · Refs: absorbed by `site-extras`; `storage-paths-resource-typeerror` leaves the helper seam it needs*
+**Seed:** [`issues/generalize-storage-discovery.md`](issues/generalize-storage-discovery.md) · *status: unshaped*
+
+**Release 0.2.0.** The new names, the capability extras and the new tool families reach `main`
+together. Legacy `RCAC_*` variables and `rcac://` URIs keep working through the deprecation window;
+the distribution names and the repository's home are settled before it ships.
+
+---
+
+# Part II — Hosted
+
+## Run your own server on the cluster, behind a token
+
+A single-user Streamable HTTP server, Jupyter-style: the user starts it on a login node or in a
+batch job, and it runs as them. A JWT (`aud` bound to the server URI, `sub` the Unix user, `exp`
+required) is printed at startup and written to a `0600` runtime file, or minted ahead with
+`token new --lifetime` and passed by environment variable or file — never in argv or a URL. The
+default listener is a `0600` unix socket for `ssh -L` forwarding; TCP is opt-in and always
+token-gated; `Origin` and `Host` are validated; an idle timeout ends it. Commands then run next to
+the data, with no SSH round trip per call.
+
+A shared multi-user endpoint — one server that many users authenticate to — is out of scope for
+now.
+
+*Horizon: after 0.2.0 · Depends on: release 0.2.0, stack-upgrade (the HTTP transport), safe-execution · Refs: adds a mode to the execution-mode ladder (`AGENTS.md` § Invariants §4)*
+**Seed:** [`issues/https-token-mode.md`](issues/https-token-mode.md) · *status: unshaped*
 
 ---
 
