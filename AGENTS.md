@@ -463,36 +463,20 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 
 ### 1. Per-request executor isolation (`context.py` + `middleware.py`) — highest blast radius [human gate]
 
-- **The current executor lives in a `ContextVar`, never a module-level global.** `executor_var` is
-  task-local; async tasks (one per HTTP request under FastMCP/Starlette) each get their own copy.
-  Replacing it with a plain module global is a **cross-user command-execution vulnerability** — user
-  A's request would run as user B. `SECURITY.md` § *Request Isolation in Delegate Mode* states the
-  contract and shows the unsafe form explicitly.
+- **The current executor lives in a `ContextVar` (`context.py`), never a module-level global.**
+  `executor_var` is task-local; async tasks (one per HTTP request under FastMCP/Starlette) each get
+  their own copy, so each request gets its own executor. Replacing it with a plain module global is a
+  **cross-user command-execution vulnerability** — user A's request would run as user B.
+  `SECURITY.md` § *Request Isolation in Delegate Mode* states the contract and shows the unsafe form
+  explicitly — read it before touching this. The three bullets below are its consequences that are
+  easy to get wrong.
 - **`set_executor()` is called per tool call, from middleware `on_call_tool`** — not at server
-  construction, not once per connection. `SharedExecutorMiddleware` re-sets the same instance every
+  construction, not once per connection. `SharedExecutorMiddleware` re-sets the *same* instance every
   call precisely because a ContextVar set in one task is invisible to the next.
 - **Tools never construct an executor.** They call `get_executor()`, which raises `RuntimeError` when
   unset. A tool that instantiates its own executor bypasses delegation entirely.
-- Any new middleware that runs *before* the executor middleware must not swallow the call chain
-  (`return await call_next(context)`), or the executor is never set for that request.
-
-From the operating manual (`Request isolation — the single highest-blast-radius contract`):
-
-**The current executor lives in a `ContextVar` (`context.py`), never a module-level global.**
-`ContextVar`s are task-local, and FastMCP/Starlette gives each HTTP request its own async task, so
-each request gets its own executor. Replace it with a plain global and user A's request runs as user
-B. `SECURITY.md` § *Request Isolation in Delegate Mode* states the contract and shows the unsafe form
-explicitly — read it before touching this.
-
-Three consequences that are easy to get wrong:
-
-- **`set_executor()` is called per tool call**, from middleware `on_call_tool` — not once at server
-  construction, not once per connection. `SharedExecutorMiddleware` re-sets the *same* instance on
-  every call precisely because a value set in one task is invisible to the next.
-- **Tools never construct an executor.** They call `get_executor()`, which raises `RuntimeError` when
-  unset. A tool that instantiates its own bypasses delegation entirely.
-- **Any new middleware must `return await call_next(context)`.** Swallowing the chain means the
-  executor is never set for that request.
+- **Any new middleware must not swallow the call chain** (`return await call_next(context)`), above
+  all one that runs *before* the executor middleware, or the executor is never set for that request.
 
 ### 2. Executor Protocol contract (`executor/base.py`) [human gate]
 
@@ -504,17 +488,6 @@ Three consequences that are easy to get wrong:
   only, never signatures**, so a mismatched signature fails at call time, not at registration.
 - `open()`/`close()` are **no-ops** for the local and delegating executors and real for SSH. Code
   that depends on `close()` releasing something must not assume it did.
-
-From the operating manual (`Executors`):
-
-`Executor` (`executor/base.py`) is a `@runtime_checkable` `Protocol` with eight members: `hostname`
-(property), `run`, `put`, `get`, `open`, `close`, `__enter__`, `__exit__`.
-
-- **Three implementations move together** — `SSHExecutor`, `LocalShellExecutor`, `DelegatingExecutor`.
-  There is no base class to inherit a default from, so adding a Protocol member means editing all
-  three in the same commit. `runtime_checkable` `isinstance` checks **method presence only, never
-  signatures** — a mismatched signature fails at call time, not at registration.
-- **`open()`/`close()` are no-ops** for local and delegate, real for SSH.
 
 ### 3. `CommandResult` and exit-code semantics [human gate]
 
@@ -529,23 +502,13 @@ From the operating manual (`Executors`):
   Invoke raises `CommandTimedOut`, which propagates to the caller. A change that assumes one shape
   breaks the other mode. Reproduce against both before relying on either.
 - `hostname` differs by mode: the SSH target for `SSHExecutor`, `socket.gethostname()` for the local
-  and delegating executors. It is **not** a user-distinguishing key (see §8).
-
-From the operating manual (`Executors`):
-
-- **`exit_code = -1` is overloaded.** Local and delegate return `-1` on `subprocess.TimeoutExpired`,
-  which collides with a real return code of `-1` (killed by SIGHUP). New "never ran" sentinels go
-  below `-1000`; never use the signal range `-1..-64`.
-- **Timeout behavior is asymmetric.** Local and delegate *catch* the timeout and return a
-  `CommandResult`; `SSHExecutor.run` passes `timeout` to Fabric and does **not** catch, so Invoke's
-  `CommandTimedOut` propagates. Code assuming one shape breaks the other mode — check both.
-- **`hostname` is not a user-distinguishing key.** It is the SSH target for `SSHExecutor` and
-  `socket.gethostname()` for the other two, so in delegate mode every user reports the same value.
+  and delegating executors. It is **not** a user-distinguishing key: in delegate mode every user
+  reports the same value (see §8).
 
 ### 4. Execution-mode resolution (`__init__.py`) — read before touching `__init__.py` or `middleware.py` [human gate]
 
-`MCPServerApp._resolve_exec_mode()` is a security posture ladder; changing its order changes who runs
-what, where. The current order is:
+`MCPServerApp._resolve_exec_mode()` is a **security posture ladder**; changing its order changes who
+runs what, where. The current order is:
 
 1. explicit `-e/--exec-mode` wins;
 2. `transport == 'stdio'` → `ssh`;
@@ -563,19 +526,13 @@ what, where. The current order is:
   `exec_mode == 'delegate'`; the other modes install `SharedExecutorMiddleware`. Never wire delegate
   behavior into the shared path.
 
-From the operating manual (`Execution modes`):
-
-`MCPServerApp._resolve_exec_mode()` is a **security posture ladder**. Changing its order changes who
-runs what, where: the five rungs above.
+What each mode means:
 
 | Mode | Runs as | Auth | Notes |
 |---|---|---|---|
 | `ssh` | the SSH user, on the cluster | none at the MCP layer | The recommended path. The security boundary *is* the SSH connection. |
 | `local` | the server process owner, on this box | none | **Development only.** Anyone who reaches the endpoint runs commands as you. |
 | `delegate` | the mapped local user, via `sudo` | jwt or oidc, **required** | Server runs privileged; OS controls (sudoers/PAM) are the real enforcement. |
-
-`delegate` installs `AuthExecutorMiddleware`; the other two install `SharedExecutorMiddleware`. Never
-wire delegate behavior into the shared path.
 
 ### 5. Delegate mode — sudo wrapping, user map, identity claims (`executor/delegate.py` + `middleware.py`) [human gate]
 
@@ -585,8 +542,8 @@ wire delegate behavior into the shared path.
 - **An identity absent from the user map is a `PermissionError`, never a default user.** The map is
   loaded once at middleware construction from `RCAC_USER_MAP`; `DelegatingExecutor.__init__` re-checks
   and raises `KeyError`. Keep both checks — the executor is constructible outside the middleware.
-- Commands run as `sudo -n -H -u <local_user> <shell> -c <command>`. `-n` (non-interactive) is
-  required — there is no TTY, so dropping it turns a missing sudoers rule into a hang instead of an
+- Commands run as `sudo -n -H -u <local_user> <shell> -c <command>`. **`-n` (non-interactive) is
+  required** — there is no TTY, so dropping it turns a missing sudoers rule into a hang instead of an
   error. `cwd` is `shlex.quote`d; `command` deliberately is not (it *is* a shell command).
 - `DelegatingExecutor._shell` is the **server process's** `$SHELL`, not the target user's. It is
   chosen at construction; do not read it per-command from an attacker-influenced environment.
@@ -594,24 +551,11 @@ wire delegate behavior into the shared path.
   whitespace splits. A malformed line raises `ValueError` naming the line number — a partial map is
   worse than no map.
 
-From the operating manual (`Auth & delegation`):
-
-- **Identity claim precedence is `sub` → `email` → `preferred_username`**, first non-empty wins.
-  Reordering silently re-maps users. No claim → hard `RuntimeError`, never a fallback identity.
-- **An identity absent from the user map is a `PermissionError`, never a default user.** The map is
-  loaded once at middleware construction from `RCAC_USER_MAP`, and `DelegatingExecutor.__init__`
-  re-checks — keep both, since the executor is constructible outside the middleware.
-- Commands run as `sudo -n -H -u <local_user> <shell> -c <command>`. **`-n` is required**: there is no
-  TTY, so dropping it turns a missing sudoers rule into a hang instead of an error. `cwd` is
-  `shlex.quote`d; `command` deliberately is not — it *is* a shell command.
-- `DelegatingExecutor._shell` is the **server's** `$SHELL`, chosen at construction, not the target
-  user's and not read per-command.
-
 ### 6. Auth providers and token claims (`auth.py` + `token.py`) [human gate]
 
 - **`JWT_SECRET` must be at least 32 characters.** Enforced in *two* places — `create_jwt_auth()` and
-  the `--generate-token` path in `MCPServerApp.run()`. Never weaken either; never weaken one and
-  leave the other.
+  the `--generate-token` path in `MCPServerApp.run()`. Never weaken either; never weaken or fix
+  one and leave the other.
 - **`ISSUER`, `AUDIENCE`, `ALGORITHM` are single-sourced in `token.py`** and consumed by
   `create_jwt_auth()`. Signer and verifier must agree; changing one alone silently rejects every
   token.
@@ -620,16 +564,6 @@ From the operating manual (`Auth & delegation`):
   `MCPServerApp` — they are not derived from each other.
 - OIDC requires all four of `OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `MCP_BASE_URL`;
   the all-or-nothing check exists so a half-configured proxy fails at startup, not at first request.
-
-From the operating manual (`Auth & delegation`):
-
-- **`JWT_SECRET` must be ≥ 32 characters**, enforced in *two* places — `create_jwt_auth()` and the
-  `--generate-token` path in `MCPServerApp.run()`. Never weaken either; never fix one and leave the
-  other.
-- **`ISSUER` / `AUDIENCE` / `ALGORITHM` are single-sourced in `token.py`** and consumed by
-  `create_jwt_auth()`. Signer and verifier must agree, or every token is silently rejected.
-- A new auth mode is an `AUTH_MODES` entry **plus** the `-a/--auth` `choices` list — they are not
-  derived from each other.
 
 ### 7. Tool registration is an import-time side effect (`tools/__init__.py`)
 
@@ -640,108 +574,70 @@ From the operating manual (`Auth & delegation`):
   callable.** Other Python code cannot invoke a decorated tool directly; `storage_paths()` from
   `resources.py` raises `TypeError: 'FunctionTool' object is not callable`. When logic must be shared
   between a tool and something else, factor it into an undecorated helper and have both call that.
+  (`resources.py` currently gets this wrong — see the `storage-paths-resource-typeerror` seed.)
 - Tool return values are serialized by FastMCP. Returning a `@dataclass` (`CommandResult`,
   `StoragePaths`) is supported and used; returning an arbitrary object is not.
 
-From the operating manual (`Tools`):
-
-- Registration is an **import-time side effect**. `tools/__init__.py` defines `TOOL_REGISTRY` and
-  `mcp_tool` *first*, then imports each tool module at the bottom; `@mcp_tool` appends at decoration
-  time. **A tool module missing from that import list registers nothing and fails silently** — no
-  error, just an absent tool.
-- **`@mcp_tool` replaces the function with a `FunctionTool`, which is not callable.** Other Python
-  code cannot invoke a decorated tool directly. When logic must be shared between a tool and
-  something else, factor it into an undecorated helper and have both call that. (`resources.py`
-  currently gets this wrong — see the `storage-paths-resource-typeerror` seed.)
-- Returning a `@dataclass` (`CommandResult`, `StoragePaths`) is supported and used; an arbitrary
-  object is not.
-
 ### 8. Resources and the `/etc/agents.d/*.md` convention (`resources.py`)
 
+- `RESOURCE_REGISTRY` (`resources.py`) exposes `rcac://context` and `rcac://storage`.
 - **`/etc/agents.d/*.md` is a deliberate, external, cross-site convention** — cluster administrators
-  drop markdown there and any conforming client picks it up. Files are concatenated in `sort` order
-  with a `<!-- Source: {filename} -->` header each. Do not change the path, the glob, the ordering, or
-  the header format without treating it as a compatibility break.
+  drop markdown there and any conforming client picks it up. Files are found with a `maxdepth 1`
+  glob and concatenated in `sort` order with a `<!-- Source: {filename} -->` header each. Do not
+  change the path, the glob, the ordering, or the header format without treating it as a
+  compatibility break; the intent is to get *other* centers to adopt it.
 - A missing directory or empty result is **not an error** — it caches and returns `''`.
 - **`_cluster_context_cache` is a process-global dict keyed by `executor.hostname`.** In delegate mode
   every user's executor reports the same `socket.gethostname()`, so the first user's context is served
   to all subsequent users. That is a known defect with a filed seed, not a design choice — do not
   build new per-user state on this cache, and do not key any new cache on `hostname` alone.
 
-From the operating manual (`Resources & the /etc/agents.d convention`):
-
-`RESOURCE_REGISTRY` (`resources.py`) exposes `rcac://context` and `rcac://storage`.
-
-**`/etc/agents.d/*.md` is a deliberate, external, cross-site convention** — cluster administrators
-drop markdown there, and any conforming client picks it up. Files are found with a `maxdepth 1` glob,
-concatenated in `sort` order, each prefixed `<!-- Source: {filename} -->`. Do not change the path,
-the glob, the ordering, or the header format without treating it as a compatibility break; the
-intent is to get *other* centers to adopt it. A missing directory or empty result is **not an
-error** — it caches and returns `''`.
-
-**`_cluster_context_cache` is a process-global dict keyed by `executor.hostname`.** Because every
-delegate-mode executor reports the same `socket.gethostname()`, the first user's context is served to
-everyone after. That is a known defect with a filed seed, not a design choice — do not build new
-per-user state on this cache, and do not key any new cache on `hostname` alone.
-
 ### 9. The agent-facing surface is part of the API (`server.py`) [human gate]
 
-- `SERVER_INSTRUCTIONS` is what every connecting model reads before choosing a tool. **Adding,
-  renaming, or removing a tool updates `SERVER_INSTRUCTIONS` in the same commit** — a tool the
-  instructions do not mention is a tool agents will not reach for, and an instruction naming a tool
-  that no longer exists is a hallucination the server itself induced.
-- The same commit also updates the tool inventory in `README.md`. Both are user-visible contracts.
-- Tool **docstrings** are the per-tool schema description sent over MCP; they are API surface, not
-  internal notes. Keep the `Args:` / `Returns:` / `Examples:` shape the existing tools use.
-- **A tool change updates the agent-facing surface in the same commit** — `SERVER_INSTRUCTIONS` in
-  `server.py` and the tool inventory in `README.md`. Both are contracts: the first is what every
-  connecting model reads before choosing a tool, the second is what a human reads before installing.
-- Tool **docstrings are API surface** — they become the MCP schema description every model reads.
-  Keep the `Args:` / `Returns:` / `Examples:` shape the existing tools use.
+- `SERVER_INSTRUCTIONS` (`server.py`) is what every connecting model reads before choosing a tool.
+  **Adding, renaming, or removing a tool — any tool change — updates `SERVER_INSTRUCTIONS` in the
+  same commit** — a tool the instructions do not mention is a tool agents will not reach for, and an
+  instruction naming a tool that no longer exists is a hallucination the server itself induced.
+- The same commit also updates the tool inventory in `README.md`, which is what a human reads before
+  installing. Both are user-visible contracts.
+- Tool **docstrings** are the per-tool schema description sent over MCP, which every model reads;
+  they are API surface, not internal notes. Keep the `Args:` / `Returns:` / `Examples:` shape the
+  existing tools use.
 
 ### Conventions (same-commit rules)
 
-- Version lives only at the release recipe's `version.source`; the release recipe's `gate` mirrors CI.
-- **Version is single-sourced from `pyproject.toml`** — `__version__` reads it via
-  `importlib.metadata.version('rcac-mcp')`. Never hardcode a version anywhere else.
-- **Version is single-sourced from `pyproject.toml`** (`rcac_mcp.__version__` reads it via
-  `importlib.metadata`). Never hardcode a version elsewhere.
+- **Version is single-sourced from `pyproject.toml`**, the release recipe's `version.source` —
+  `rcac_mcp.__version__` reads it via `importlib.metadata.version('rcac-mcp')`. Never hardcode a
+  version anywhere else. The release recipe's `gate` mirrors CI.
 - **Supported Python is 3.14+** (`requires-python = ">=3.14"`). Do not add compatibility shims for
   older interpreters.
 - A change to `[project.dependencies]` or `[dependency-groups]` and its `uv lock` land in the same
   commit, and a CLI flag name or default moves `compose.yml` with it: § Packaging.
-- **Reuse `cmdkit.app.exit_status` constants for return codes** — do not invent integer literals. A
-  new CLI flag is an `interface.add_argument` on `MCPServerApp` plus its entry in `APP_USAGE` /
-  `APP_HELP`, in the same commit.
 - **Put logic where it belongs:** command execution behind the `Executor` protocol; identity →
-  executor in middleware; per-request state in a `ContextVar`. Reuse `cmdkit.app.exit_status`
-  constants for return codes — don't invent integer literals. A new CLI flag is an
-  `interface.add_argument` on `MCPServerApp` plus its entry in `APP_USAGE`/`APP_HELP`.
+  executor in middleware; per-request state in a `ContextVar`. **Reuse `cmdkit.app.exit_status`
+  constants for return codes** — do not invent integer literals. A new CLI flag is an
+  `interface.add_argument` on `MCPServerApp` plus its entry in `APP_USAGE` / `APP_HELP`, in the same
+  commit.
 - **Tests: only `@mark.unit` and `@mark.integration` are real markers** under `--strict-markers`. Tag
   every new test. **No existing test carries a marker**, so `-m unit`/`-m integration` deselect
   everything today — do not write a `verify:` gate whose only assertion is a marker selection, or it
   passes green over zero tests. (Tracked: the `restore-test-coverage` seed.)
-- **A CLI drive never touches the developer's real home, config, or a real cluster.** Wrap it in
+- **A CLI drive — any verify or test drive — never touches the developer's real home, config, or a
+  real cluster.** Wrap it in
   `bin/sandbox.sh`, which unsets `RCAC_SSH_HOST` so the default stdio→ssh path fails
   closed instead of connecting to production. The sandbox `cd`s out of the repo, so a **pytest** drive
   must step back in — `sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest …'` — or pytest roots
   itself in the throwaway dir, never reads `pyproject.toml`, and silently loses `--strict-markers`.
-- **Never point a verify/test drive at a real cluster.** Use `bin/sandbox.sh`.
 - **Verify by driving the CLI, not just tests — in the sandbox.** After a change, exercise the real
   flow: `bin/sandbox.sh sh -c "uv run rcac-mcp -e local --help"`. **Exit 0 is not
   enough** — assert the post-condition you actually care about (the tool is in the registry, the
   error message and exit status are the intended ones, the file landed where you expected).
-- **Comments are declarative statements of the invariant or the *why*** — capitalized sentences, not
-  lowercase fragments, and **never** a feature-scoped spec id (`R#`, `P#`): those restart per feature
-  and collide across branches. Referencing stable things (a real symbol, a documented invariant, an
-  `/etc/agents.d` path) is fine.
-- **Comments are declarative statements, not spec pointers.** Write each comment/docstring as a
-  capitalized statement of the invariant or the *why* (`# Non-interactive: there is no TTY to prompt
-  on.`) — not a lowercase fragment. **Never embed feature-scoped spec ids** (`R#`, `P#`) in source:
-  they restart per feature, live in `spec/{slug}/`, and collide across branches. Requirement
-  provenance lives in the commit, the PR, and the retained `spec/{slug}/`. Referencing *stable* things
-  is fine — real symbols, documented invariants, the `/etc/agents.d` path.
-- No spec R#/P# ids in source code.
+- **Comments (and docstrings) are declarative statements of the invariant or the *why*** —
+  capitalized sentences (`# Non-interactive: there is no TTY to prompt on.`), not lowercase
+  fragments, and **never** a feature-scoped spec id (`R#`, `P#`): those restart per feature, live in
+  `spec/{slug}/`, and collide across branches. Requirement provenance lives in the commit, the PR,
+  and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
+  an `/etc/agents.d` path) is fine.
 - **No `Co-Authored-By` trailer** on any commit (repo convention). PR *bodies* end with the Claude
   Code generation line.
 - Point to a rule; don't restate it. A rule restated in N places is a same-commit obligation in all N.
