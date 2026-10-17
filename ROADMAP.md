@@ -27,11 +27,12 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Six cycles, ending in **release 0.1.1**. The first gives the factory a gate that runs the test suite
-on push; the rest fix what today's users hit, each built on the one before.
+Five cycles remain, ending in **release 0.1.1**; a sixth, `stack-upgrade`, landed on `develop` on
+2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)). The next gives the factory a gate that
+runs the test suite on push; the rest fix what today's users hit, each built on the one before.
 
-*Corrected 2026-10-17: `stack-upgrade` lands before `ci-workflow`, so the release recipe's `gate`
-gains the dependency audit first; `ci-workflow`, landing after it, mirrors that gate — audit
+*Corrected 2026-10-17: `stack-upgrade` landed before `ci-workflow`, so the release recipe's `gate`
+gained the dependency audit first; `ci-workflow`, landing next, mirrors that gate — audit
 included — through its "CI mirrors the gate" check.*
 
 ## Nothing runs on push
@@ -42,9 +43,9 @@ permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-h
 `spec/` and `.security/` can never reach a published artifact — is the cheap half, and it makes
 every later gate real. `stack-upgrade` adds a dependency-audit step to it.
 
-*Corrected 2026-10-17: `stack-upgrade` lands first and puts the dependency audit in the release
-recipe's `gate`; this cycle's workflow then runs it as part of mirroring that gate, rather than
-`stack-upgrade` adding a step to a workflow that does not exist yet.*
+*Corrected 2026-10-17: `stack-upgrade` landed first ([`spec/stack-upgrade/`](spec/stack-upgrade/))
+and put the dependency audit in the release recipe's `gate`; this cycle's workflow runs it as part
+of mirroring that gate, rather than `stack-upgrade` adding a step to a workflow that did not exist.*
 
 *Corrected 2026-10-16: the suite is no longer docs-only; the strip left `test_registry.py`,
 `test_instructions.py` and `test_cli.py`. `restore-test-coverage` has since pinned the coupled core
@@ -52,34 +53,6 @@ recipe's `gate`; this cycle's workflow then runs it as part of mirroring that ga
 
 *Horizon: now · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*
-
-## Move the stack before building on it
-
-`pyproject.toml` pins `fastmcp>=2.0.0,<3`; FastMCP is on 4.x, two majors ahead, and the MCP SDK is
-one major ahead of the lock. MCP revision 2026-07-28 is stateless — no `initialize`, and
-`server/discover` carries the `instructions` — and FastMCP 4 serves that revision and the older ones
-from one server. The next mechanisms on this roadmap (plugin registration, composed instructions,
-annotations and tool search) are built directly on the FastMCP API, so moving first means building
-each of them once instead of twice. The cycle also puts a dependency-audit step in CI, so
-advisories against the lock stay visible from now on.
-
-*Corrected 2026-10-17: the dependency audit (`bin/audit_lock.py`) lives in the release recipe's
-`gate`, not in CI: no workflow exists yet. This cycle lands first; `ci-workflow` lands after it and
-picks the audit step up through its "CI mirrors the gate" check.*
-
-*Horizon: near-term · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16), ci-workflow (the upgrade lands against a real gate) · Refs: absorbs `auth-modes-annotation-typo`; prerequisite for `agents-d-instructions`, `capability-extras`, `tool-surface`, `https-token-mode`*
-**Seed:** [`issues/stack-upgrade.md`](issues/stack-upgrade.md) · *status: adopted:stack-upgrade*
-
-### Absorbed: a type annotation that is accidentally a slice
-
-`auth.py:65` reads `Final[Dict[str, Callable[[], AuthProvider]]:]` — the trailing `:` inside the
-subscript makes it a slice expression, and nothing complains: `typing.get_type_hints` silently
-returns `Final[slice(Dict[...], None, None)]`. A silent wrong type in the module that decides whether
-a request is authenticated is worse than a loud one. `auth.py` is rewritten in `stack-upgrade`
-anyway, so the fix and its test ride with it. Found by the harness port, 2026-08-26.
-
-*Horizon: with stack-upgrade · Depends on: — · Refs: absorbed by `stack-upgrade`*
-**Seed:** [`issues/auth-modes-annotation-typo.md`](issues/auth-modes-annotation-typo.md) · *status: adopted:stack-upgrade*
 
 ## The rcac://storage resource fails on every read
 
@@ -90,7 +63,7 @@ lesson is already recorded as an invariant (`AGENTS.md` § Invariants §7: a dec
 from Python; factor shared logic into an undecorated helper), but the resource itself is still broken.
 It follows `stack-upgrade`, so the fix is made against the `Tool` type that stays.
 
-*Horizon: near-term · Depends on: stack-upgrade · Refs: the same helper split that `generalize-storage-discovery` needs*
+*Horizon: near-term · Depends on: stack-upgrade (cleared: landed on `develop` 2026-10-17) · Refs: the same helper split that `generalize-storage-discovery` needs*
 **Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
 
 ## Every tool passes exactly what it was given
@@ -126,7 +99,7 @@ once through the executor, in a priority order so a client that cuts server inst
 thousand characters loses the least, within a configurable budget. A `cluster_context` tool returns
 the full text, the resource stays, and startup never hangs on the read.
 
-*Horizon: near-term · Depends on: stack-upgrade (both protocol eras carry instructions), safe-execution (the executor it reads through) · Refs: absorbs `context-cache-cross-user`*
+*Horizon: near-term · Depends on: stack-upgrade (both protocol eras carry instructions; cleared: landed on `develop` 2026-10-17), safe-execution (the executor it reads through) · Refs: absorbs `context-cache-cross-user`*
 **Seed:** [`issues/agents-d-instructions.md`](issues/agents-d-instructions.md) · *status: unshaped*
 
 ### Absorbed: one user's cluster context is served to every other user
@@ -202,7 +175,7 @@ currently an import-time side effect driven by a hardcoded list at the bottom of
 `tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract, not
 work around it.
 
-*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists), stack-upgrade (FastMCP 4's providers are a candidate carrier) · Refs: prerequisite for every capability entry below*
+*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
 **Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
@@ -303,7 +276,7 @@ the data, with no SSH round trip per call.
 A shared multi-user endpoint — one server that many users authenticate to — is out of scope for
 now.
 
-*Horizon: after 0.2.0 · Depends on: release 0.2.0, stack-upgrade (the HTTP transport), safe-execution · Refs: adds a mode to the execution-mode ladder (`AGENTS.md` § Invariants §4)*
+*Horizon: after 0.2.0 · Depends on: release 0.2.0, stack-upgrade (the HTTP transport; cleared: landed on `develop` 2026-10-17), safe-execution · Refs: adds a mode to the execution-mode ladder (`AGENTS.md` § Invariants §4)*
 **Seed:** [`issues/https-token-mode.md`](issues/https-token-mode.md) · *status: unshaped*
 
 ---
@@ -333,6 +306,18 @@ retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 
 
 *Horizon: before the first cycle that changes the served surface · Depends on: — · Refs: `AGENTS.md` § Invariants §9 says the question is open; first needed by `safe-execution` (`args` on `sbatch`), `tool-surface` or `agents-d-instructions`, whichever lands first*
 **Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: unshaped*
+
+## Nothing would catch the next silently wrong annotation
+
+`auth.py`'s `AUTH_MODES` carried a slice inside its annotation's subscript for months:
+`typing.get_type_hints` and eager evaluation both accepted it, in a high-blast-radius module, and it
+was fixed only because `stack-upgrade` happened to rewrite the file (R7). Nothing in the suite or
+the gate checks any other annotation. A gate step or standing test that type-checks `src/`, or at
+least rejects an annotation in `src/rcac_mcp` that resolves to a non-type, closes it; the tool is
+the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement, 2026-10-17.
+
+*Horizon: later · Depends on: — · Refs: runs where the gate runs, so CI picks it up once `ci-workflow` mirrors the gate; [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
+**Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*
 
 ---
 

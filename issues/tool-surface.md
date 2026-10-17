@@ -108,7 +108,7 @@ Open questions for shaping:
 - Related: [`safe-execution.md`](safe-execution.md) (the executor this builds on),
   [`slurm-capability.md`](slurm-capability.md) (the `job_*` family follows the same rules),
   [`lmod-tool-group.md`](lmod-tool-group.md) (`modules=[…]`), [`xdu-storage.md`](xdu-storage.md)
-  (routes `file_find`), [`stack-upgrade.md`](stack-upgrade.md) (annotations and `_meta` on the
+  (routes `file_find`), [`spec/stack-upgrade/`](../spec/stack-upgrade/) (annotations and `_meta` on the
   current API).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
 - 2026-10-16: the docs strip removed `doc_search` and `doc_load`, so 23 tools remain. A JSON count of
