@@ -27,27 +27,8 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Seven cycles, ending in **release 0.1.1**. The first three give the factory a smaller tree, a real
-test suite and a gate that runs on push; the rest fix what today's users hit, each built on the one
-before.
-
-## The documentation subsystem belongs to rcac-docs-mcp now
-
-Agentic documentation retrieval was extracted into a separate `rcac-docs-mcp` service, hosted at
-`docs.rcac.purdue.edu/mcp`, with an AskRCAC tool arriving on `docs.rcac.purdue.edu` shortly. Knowledge
-work evolves there now and is no longer this repository's responsibility. What remains here is a
-whole FTS5 indexing subsystem — `src/rcac_mcp/docs/` (945 lines), `tools/docs.py`, three CLI flags, a
-git submodule, and prominent guidance in `SERVER_INSTRUCTIONS` telling every connecting agent to
-consult a tool this server should no longer own.
-
-This goes first. Every later cycle touches a smaller tree once it is gone, and the rename in
-particular is meaningfully cheaper.
-
-*Corrected 2026-10-16: the `strip-docs-subsystem` cycle removed all of this; the entry retires when
-that cycle lands on `develop`.*
-
-*Horizon: now · Depends on: — · Refs: forces `restore-test-coverage`*
-**Seed:** [`issues/strip-docs-subsystem.md`](issues/strip-docs-subsystem.md) · *status: adopted:strip-docs-subsystem*
+Six cycles, ending in **release 0.1.1**. The first two give the factory a real test suite and a gate
+that runs on push; the rest fix what today's users hit, each built on the one before.
 
 ## Every test in the suite is a docs test
 
@@ -63,7 +44,7 @@ over an empty suite is theatre.
 registry, served instructions, removed CLI flags) and a `conftest.py` that fails the run on an
 unmarked test. The coupled core named above still has no test.*
 
-*Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem · Refs: gates the credibility of every later cycle's verify command*
+*Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem (cleared: landed on `develop` 2026-10-16) · Refs: gates the credibility of every later cycle's verify command*
 **Seed:** [`issues/restore-test-coverage.md`](issues/restore-test-coverage.md) · *status: unshaped*
 
 ## Nothing runs on push
@@ -168,6 +149,9 @@ retires the cache rather than patching it. Found by the harness port, 2026-08-26
 **Release 0.1.1.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
 connection errors and the site's rules in the instructions — under the name they already use.
+Pages outside this repository that name its tools or install line — RCAC-Docs
+`docs/agentic-ai/mcp_servers.md` and `docs/agentic-ai/running_agents/local.md` — are updated when
+the release lands.
 
 ---
 
@@ -194,7 +178,7 @@ The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in
 client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
 window, not a hard break; the old resource URIs are aliased through the same window.
 
-*Horizon: after 0.1.1 · Depends on: the docs strip (smaller surface to rename), release 0.1.1 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
+*Horizon: after 0.1.1 · Depends on: the docs strip (cleared: landed on `develop` 2026-10-16), release 0.1.1 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
 **Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: unshaped*
 
 ## Capabilities you don't have shouldn't be tools you see

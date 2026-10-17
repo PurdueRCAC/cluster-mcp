@@ -18,9 +18,9 @@ Every test in this repository is a documentation-index test:
 | `tests/test_tools.py` | 19 | `doc_search` / `doc_load` |
 | `tests/test_cli.py` | 5 | `--index-docs` flows |
 
-81 of 81. `tests/conftest.py` provides only docs fixtures. So
-[`strip-docs-subsystem.md`](strip-docs-subsystem.md) removes the whole suite, and what it leaves
-behind has **never had a test at all** — including every path
+81 of 81. `tests/conftest.py` provides only docs fixtures. So the docs strip
+([`spec/strip-docs-subsystem/`](../spec/strip-docs-subsystem/)) removes the whole suite, and what it
+leaves behind has **never had a test at all** — including every path
 `AGENTS.md` § Invariants marks highest-blast-radius:
 
 - the `ContextVar` isolation contract (`context.py`, `middleware.py`) — the thing that keeps one

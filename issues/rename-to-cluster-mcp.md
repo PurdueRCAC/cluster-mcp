@@ -21,8 +21,8 @@ README and every user's MCP client config.
 **Protocol surface.** The resource URIs `rcac://context` and `rcac://storage` (`resources.py:130`,
 `:173`) are identifiers a client may have persisted. The FastMCP server `name='RCAC'`.
 
-**Environment variables** — the sharp edge. `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_DOCS_DB` (going
-away with the docs strip). `RCAC_SSH_HOST` in particular appears in every user's client config, and
+**Environment variables** — the sharp edge. `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_DOCS_DB`
+(removed by the docs strip). `RCAC_SSH_HOST` in particular appears in every user's client config, and
 `bin/sandbox.sh` unsets it **by name** to make the default stdio→`ssh` path fail
 closed. Rename it without updating the sandbox and every factory verify command silently loses its
 most important guarantee.
@@ -36,8 +36,9 @@ splitting into a generic core and a site overlay, which is really the beginning 
 
 ## Why it was deferred
 
-Not deferred — sequenced. It comes after [`strip-docs-subsystem.md`](strip-docs-subsystem.md) so
-there is less to rename, and before [`capability-extras.md`](capability-extras.md) because the extras
+Not deferred — sequenced. It comes after the docs strip
+([`spec/strip-docs-subsystem/`](../spec/strip-docs-subsystem/), landed 2026-10-16) so there is less
+to rename, and before [`capability-extras.md`](capability-extras.md) because the extras
 are named `cluster-mcp[slurm]` and doing it the other way means renaming them twice.
 
 **Pre-existing:** n/a — this is new work, not a defect.
