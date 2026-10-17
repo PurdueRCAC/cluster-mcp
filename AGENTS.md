@@ -361,7 +361,7 @@ import has no effect.
   `bin/sandbox.sh`, and closes the server when its client exits; `url_tools` reaches only a
   loopback host.
 - **The protocol era.** `CLUSTER_MCP_TEST_ERA` selects the era every harness client speaks:
-  `legacy` (the default, and what the profile's `verify` runs: the `initialize` handshake) or
+  `legacy` (the default: the `initialize` handshake) or
   `modern` (revision 2026-07-28 through `server/discover`, built with `mode='auto'`, never a
   version pin, which skips `server/discover`). Any other value stops the run at import, naming the
   variable. After every connect the harness checks the negotiated era and raises
@@ -370,9 +370,10 @@ import has no effect.
   `CLUSTER_MCP_ERA_LOG` set to a file, every in-process connect in the selected era appends
   `era=… version=… first=…` (the first request the server's `MethodLog` saw on that connection),
   which a gate reads to prove a pass ran in its era; a connect in an era chosen with `era=` is not
-  logged, since it does not exercise the selector. Run the suite in the
-  modern era with `CLUSTER_MCP_TEST_ERA=modern uv run pytest`; the mutation runner's children
-  inherit both variables.
+  logged, since it does not exercise the selector. The profile's `verify` and the release
+  recipe's `gate` run the suite in both eras (`uv run pytest -q`, then
+  `CLUSTER_MCP_TEST_ERA=modern uv run pytest -q`), so neither era's contracts go unchecked between
+  cycles; the mutation runner's children inherit both variables.
 - The harness keeps two rules:
   - **Build inside the loop.** Every server and middleware is constructed inside the coroutine
     handed to `drive`; the builders raise otherwise. Anything a construction sets in the context
@@ -507,7 +508,7 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | landing | `squash-local`: squash onto `origin/develop` in the cycle worktree as one `[category] What changed` commit, then push `develop` |
 | ci | none yet (the `ci-workflow` seed adds it) |
 | setup | `uv sync --locked`: dependency refresh, run before any verify |
-| verify | `uv lock --check && uv run pytest -q && bin/sandbox.sh uv run rcac-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in the handshake era; `CLUSTER_MCP_TEST_ERA=modern` runs it in the other (§ Testing) |
+| verify | `uv lock --check && uv run pytest -q && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q && bin/sandbox.sh uv run rcac-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in both protocol eras: the handshake era first, then revision 2026-07-28 (§ Testing) |
 | throwaway environment | `bin/sandbox.sh <cmd…>` (contract below) |
 | coupled core | `src/rcac_mcp/context.py`, `middleware.py`, `auth.py`, `token.py`, `executor/*`, `server.py` |
 | same-commit rules | see § Conventions |
@@ -536,6 +537,7 @@ release:
     - uv lock --check
     - uv run python bin/audit_lock.py
     - uv run pytest -q
+    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q
     - uv build -o dist/
     - uvx twine check --strict dist/*
     # Sdist hygiene: fails on any repository furniture in a built sdist, or when there is no sdist.
