@@ -1,0 +1,1222 @@
+{
+ "instructions": "RCAC MCP Server provides tools for interacting with Purdue's\nResearch Computing resources and HPC clusters.\n\nStorage Paths:\nWhen users reference \"scratch\", \"depot\", or \"home\" storage:\n- Home: /home/<user> or $HOME (25GB, private, for configs and small files)\n- Scratch: /scratch/<cluster>/<user> or $CLUSTER_SCRATCH (high-performance,\n  large but purged regularly - use for job I/O, not long-term storage).\n  Run `findscratch` to get the exact path.\n- Depot: /depot/<group> where <group> is the allocation name. Users may have\n  access to multiple depot spaces. Use the `myquota` tool to discover all\n  available depot paths - look for \"depot\" type entries in the output.\n- Use the `storage_paths` tool to resolve all storage locations at once.\n\nGeneral Tools:\n- run_command: Execute shell commands\n- list_directory: List directory contents\n- read_file: Read file contents\n- write_file: Write content to files\n- upload_file: Upload files to the remote system\n- download_file: Download files from the remote system\n\nRCAC-Specific Tools:\n- storage_paths: Get resolved paths for home, scratch, and depot spaces\n- myquota: Show storage spaces, usage, and quotas\n- jobinfo: Get detailed job information (RCAC)\n- jobcmd: Get the command submitted for a job\n- jobenv: Get environment variables for a job\n- jobscript: Get the full submission script for a job\n- showpartitions: Show available partitions and status\n- average_wait: Show queue wait time statistics\n\nSlurm Job Management:\n- sbatch: Submit a batch job (script path or content)\n- squeue: View the job queue (default: your jobs)\n- scancel: Cancel jobs by ID or filter\n- sacct: Query job accounting history\n\nSlurm Cluster Status:\n- sinfo: Show cluster and partition status\n- scontrol_show_job: Detailed job info from Slurm\n- scontrol_show_node: Detailed node info for diagnostics\n- slist: Show Slurm accounts and usage (RCAC)\n- sfeatures: Show node features/constraints (RCAC)\n\nResources:\n- rcac://context: Cluster-specific context loaded from /etc/agents.d/*.md\n- rcac://storage: User's resolved storage paths (home, scratch, depots)",
+ "resources": {
+  "rcac://context": {
+   "description": "Cluster-specific context and guidelines loaded from /etc/agents.d/*.md",
+   "mimeType": "text/plain",
+   "name": "cluster_context"
+  },
+  "rcac://storage": {
+   "description": "User's resolved storage paths for home, scratch, and depot spaces",
+   "mimeType": "text/plain",
+   "name": "storage_paths"
+  }
+ },
+ "tools": {
+  "average_wait": {
+   "description": "Show aggregate statistics of queue wait times.\n\nDisplays wait time statistics for jobs, optionally filtered by\npartition or account.\n\nArgs:\n    partition: Filter by partition name (e.g., 'cpu', 'gpu').\n    account: Filter by Slurm account.\n\nReturns:\n    Queue wait time statistics.\n\nExamples:\n    average_wait()\n    average_wait(partition='gpu')\n    average_wait(account='mylab')",
+   "inputSchema": {
+    "properties": {
+     "account": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "partition": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "download_file": {
+   "description": "Download a file from the remote system to the local machine.\n\nArgs:\n    remote_path: Path to the file on the remote system (supports ~ expansion).\n    local_path: Destination path on the local machine.\n\nReturns:\n    The absolute path of the downloaded file on the local machine.\n\nExamples:\n    download_file(\"~/results/output.csv\", \"/tmp/output.csv\")\n    download_file(\"/var/log/app.log\", \"./logs/app.log\")",
+   "inputSchema": {
+    "properties": {
+     "local_path": {
+      "type": "string"
+     },
+     "remote_path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "remote_path",
+     "local_path"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "jobcmd": {
+   "description": "Get the command that was submitted for a Slurm job.\n\nShows the actual command line or script invocation used when\nthe job was submitted.\n\nArgs:\n    job_id: The Slurm job ID to query.\n\nReturns:\n    The command that was submitted for the job.\n\nExamples:\n    jobcmd(19804935)",
+   "inputSchema": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "jobenv": {
+   "description": "Get the environment variables for a Slurm job.\n\nShows all environment variables that were set when the job\nwas submitted or that Slurm set for the job.\n\nArgs:\n    job_id: The Slurm job ID to query.\n\nReturns:\n    Environment variables for the job, one per line.\n\nExamples:\n    jobenv(19804935)",
+   "inputSchema": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "jobinfo": {
+   "description": "Get detailed information about a Slurm job.\n\nShows job parameters including name, user, account, partition, nodes,\ncores, GPUs, state, exit code, timestamps, and resource usage.\n\nArgs:\n    job_id: The Slurm job ID to query.\n\nReturns:\n    Detailed job information in key-value format.\n\nExamples:\n    jobinfo(19804935)",
+   "inputSchema": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "jobscript": {
+   "description": "Get the full submission script for a Slurm job.\n\nReturns the complete batch script that was submitted, including\nall SBATCH directives and commands.\n\nArgs:\n    job_id: The Slurm job ID to query.\n\nReturns:\n    The full job submission script content.\n\nExamples:\n    jobscript(19804935)",
+   "inputSchema": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "list_directory": {
+   "description": "List contents of a directory.\n\nArgs:\n    path: Directory path to list (supports ~ expansion). Defaults to current directory.\n    show_hidden: Whether to include hidden files (starting with .).\n\nReturns:\n    List of FileInfo objects with details about each entry.\n\nExamples:\n    list_directory()\n    list_directory(\"~/projects\")\n    list_directory(\"/tmp\", show_hidden=True)",
+   "inputSchema": {
+    "properties": {
+     "path": {
+      "default": ".",
+      "type": "string"
+     },
+     "show_hidden": {
+      "default": false,
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "FileInfo": {
+      "properties": {
+       "group": {
+        "type": "string"
+       },
+       "is_dir": {
+        "type": "boolean"
+       },
+       "modified": {
+        "type": "string"
+       },
+       "name": {
+        "type": "string"
+       },
+       "owner": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "permissions": {
+        "type": "string"
+       },
+       "size": {
+        "type": "integer"
+       }
+      },
+      "required": [
+       "name",
+       "path",
+       "is_dir",
+       "size",
+       "permissions",
+       "owner",
+       "group",
+       "modified"
+      ],
+      "type": "object"
+     }
+    },
+    "properties": {
+     "result": {
+      "items": {
+       "$ref": "#/$defs/FileInfo"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "myquota": {
+   "description": "Show storage spaces, usage, and quotas for the current user.\n\nDisplays all storage locations the user has access to (home, scratch,\ndepot, etc.) along with current usage and quota limits. This is the\nauthoritative way to discover what storage a user can access.\n\nThe output shows:\n- Type: 'home', 'scratch', or 'depot'\n- Location: username (for home/scratch) or group name (for depot)\n\nActual paths are:\n- home: /home/<location>\n- scratch: /scratch/<cluster>/<location> (or use $CLUSTER_SCRATCH)\n- depot: /depot/<location>\n\nReturns:\n    Storage quota information showing type, location, size, limit,\n    usage percentage, file counts, and file limits.\n\nExamples:\n    myquota()",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "read_file": {
+   "description": "Read contents of a file.\n\nArgs:\n    path: Path to the file (supports ~ expansion).\n    encoding: Character encoding (default: utf-8).\n    max_size: Maximum bytes to read. If None, reads entire file.\n\nReturns:\n    The file contents as a string.\n\nExamples:\n    read_file(\"~/.bashrc\")\n    read_file(\"/etc/hostname\")\n    read_file(\"large_file.log\", max_size=10000)",
+   "inputSchema": {
+    "properties": {
+     "encoding": {
+      "default": "utf-8",
+      "type": "string"
+     },
+     "max_size": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "run_command": {
+   "description": "Execute a shell command on the remote system.\n\nArgs:\n    command: The shell command to execute.\n    cwd: Working directory for command execution (supports ~ expansion).\n    timeout: Maximum time in seconds to wait for completion.\n\nReturns:\n    CommandResult containing stdout, stderr, exit_code, and hostname.\n\nExamples:\n    run_command(\"ls -la\")\n    run_command(\"pwd\", cwd=\"~/projects\")\n    run_command(\"sleep 5\", timeout=10)",
+   "inputSchema": {
+    "properties": {
+     "command": {
+      "type": "string"
+     },
+     "cwd": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "timeout": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "required": [
+     "command"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "exit_code": {
+      "type": "integer"
+     },
+     "hostname": {
+      "type": "string"
+     },
+     "stderr": {
+      "type": "string"
+     },
+     "stdout": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "stdout",
+     "stderr",
+     "exit_code",
+     "hostname"
+    ],
+    "type": "object"
+   }
+  },
+  "sacct": {
+   "description": "Query Slurm job accounting history.\n\nShows completed and running jobs from the accounting database.\nBy default shows only the current user's jobs with -X (no sub-steps).\n\nArgs:\n    user: Filter by username (-u/--user).\n    account: Filter by account (-A/--account).\n    job_ids: Specific job IDs to query (-j/--jobs).\n    name: Filter by job name (--name).\n    state: Filter by state (-s/--state), e.g., 'COMPLETED', 'FAILED'.\n    starttime: Start of time range (-S/--starttime), e.g., '2024-01-01'.\n    endtime: End of time range (-E/--endtime).\n    format: Output format (-o/--format), e.g., 'JobID,JobName,State,ExitCode'.\n    me: Show only current user's jobs (default: True).\n    extra_args: Additional sacct arguments.\n\nReturns:\n    Job accounting information.\n\nExamples:\n    sacct()\n    sacct(starttime='2024-01-01', state='FAILED')\n    sacct(job_ids=[19804935])\n    sacct(format='JobID,JobName,State,Elapsed,MaxRSS')",
+   "inputSchema": {
+    "properties": {
+     "account": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "endtime": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "extra_args": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "format": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "job_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "integer"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "me": {
+      "default": true,
+      "type": "boolean"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "starttime": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "user": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "sbatch": {
+   "description": "Submit a batch job to Slurm.\n\nEither script_path (existing file on cluster) or script_content\n(script text to write) must be provided. If script_content is given,\nthe script is written to ~/jobs/<job_name>_<timestamp>.sh before submission.\n\nArgs:\n    script_path: Path to existing job script on the cluster.\n    script_content: Job script content to write and submit.\n    job_name: Job name (-J/--job-name). Used in script filename if writing.\n    account: Slurm account to charge (-A/--account).\n    partition: Partition to submit to (-p/--partition).\n    qos: Quality of service (-q/--qos), e.g., 'standby'.\n    time: Wall time limit (-t/--time), e.g., '01:00:00'.\n    nodes: Number of nodes (-N/--nodes).\n    ntasks: Number of tasks (-n/--ntasks).\n    cpus_per_task: CPUs per task (-c/--cpus-per-task).\n    mem: Memory per node (--mem), e.g., '4G'.\n    gpus: GPU specification (--gpus), e.g., '1' or 'mi210:2'.\n    constraint: Node constraint (-C/--constraint).\n    output: Stdout file path (-o/--output).\n    error: Stderr file path (-e/--error).\n    extra_args: Additional sbatch arguments as a string.\n\nReturns:\n    The submitted job ID as a string.\n\nExamples:\n    sbatch(script_path='~/jobs/my_job.sh')\n    sbatch(\n        script_content='#!/bin/bash\\n#SBATCH -c 4\\npython train.py',\n        job_name='train',\n        account='mylab',\n        partition='gpu',\n        time='02:00:00',\n    )",
+   "inputSchema": {
+    "properties": {
+     "account": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "constraint": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "cpus_per_task": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "error": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "extra_args": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "gpus": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "job_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "mem": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "nodes": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "ntasks": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "output": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "partition": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "qos": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "script_content": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "script_path": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "time": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "scancel": {
+   "description": "Cancel Slurm jobs.\n\nProvide job_ids for specific jobs, or use filters to cancel matching jobs.\nUse me=True to cancel all your jobs (equivalent to scancel --me).\n\nArgs:\n    job_ids: Specific job IDs to cancel.\n    user: Cancel jobs for this user (-u/--user).\n    account: Cancel jobs under this account (-A/--account).\n    partition: Cancel jobs in this partition (-p/--partition).\n    state: Cancel jobs in this state (-t/--state).\n    name: Cancel jobs with this name (-n/--name).\n    me: Cancel all current user's jobs (--me).\n    extra_args: Additional scancel arguments.\n\nReturns:\n    Confirmation message or empty string on success.\n\nExamples:\n    scancel(job_ids=[19804935])\n    scancel(me=True)\n    scancel(state='PENDING', account='mylab')",
+   "inputSchema": {
+    "properties": {
+     "account": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "extra_args": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "job_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "integer"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "me": {
+      "default": false,
+      "type": "boolean"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "partition": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "user": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "scontrol_show_job": {
+   "description": "Show detailed Slurm job information.\n\nReturns comprehensive job details directly from Slurm's control\ndaemon, including all job parameters and current state.\n\nArgs:\n    job_id: The Slurm job ID to query.\n\nReturns:\n    Detailed job information from scontrol.\n\nExamples:\n    scontrol_show_job(19804935)",
+   "inputSchema": {
+    "properties": {
+     "job_id": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "job_id"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "scontrol_show_node": {
+   "description": "Show detailed node information for diagnostics.\n\nReturns comprehensive node details from Slurm including\nstate, resources, features, and current load.\n\nArgs:\n    node: Specific node name to query. If None, shows all nodes.\n\nReturns:\n    Detailed node information from scontrol.\n\nExamples:\n    scontrol_show_node('a000')\n    scontrol_show_node()  # All nodes (may be large output)",
+   "inputSchema": {
+    "properties": {
+     "node": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "sfeatures": {
+   "description": "Show available node features and constraints (RCAC-specific).\n\nDisplays node hardware features that can be used as constraints\nwhen submitting jobs, including CPU types, memory tiers, and\nGPU models.\n\nReturns:\n    Node features listing with CPUS, MEMORY, AVAIL_FEATURES, and GRES.\n\nExamples:\n    sfeatures()",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "showpartitions": {
+   "description": "Show available partitions and their current status.\n\nDisplays partition statistics including node counts, CPU cores,\npending jobs, node limits, max job time, cores per node, and\nmemory per node.\n\nReturns:\n    Partition statistics table showing availability and limits.\n\nExamples:\n    showpartitions()",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "sinfo": {
+   "description": "Show cluster and partition status.\n\nDisplays information about nodes and partitions including\navailability, state, and resources.\n\nArgs:\n    partition: Filter by partition (-p/--partition).\n    nodes: Filter by node list (-n/--nodes).\n    state: Filter by node state (-t/--states), e.g., 'idle', 'alloc'.\n    format: Output format (-o/--format).\n    extra_args: Additional sinfo arguments.\n\nReturns:\n    Cluster/partition status information.\n\nExamples:\n    sinfo()\n    sinfo(partition='gpu')\n    sinfo(state='idle')",
+   "inputSchema": {
+    "properties": {
+     "extra_args": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "format": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "nodes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "partition": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "slist": {
+   "description": "Show Slurm accounts and current usage (RCAC-specific).\n\nDisplays accounts the user has access to submit jobs with,\nalong with current usage relative to allocation limits.\nShows CPU partition usage and AI/GPU partition balance.\n\nReturns:\n    Account listing with usage statistics.\n\nExamples:\n    slist()",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "squeue": {
+   "description": "View the Slurm job queue.\n\nBy default shows only the current user's jobs (--me). Set me=False\nand provide user/account to see other jobs.\n\nArgs:\n    user: Filter by username (-u/--user).\n    account: Filter by account (-A/--account).\n    partition: Filter by partition (-p/--partition).\n    state: Filter by job state (-t/--states), e.g., 'PENDING', 'RUNNING'.\n    job_ids: Specific job IDs to query (-j/--jobs).\n    me: Show only current user's jobs (default: True).\n    extra_args: Additional squeue arguments.\n\nReturns:\n    Job queue listing.\n\nExamples:\n    squeue()\n    squeue(state='PENDING')\n    squeue(me=False, account='mylab')\n    squeue(job_ids=[19804935, 19804936])",
+   "inputSchema": {
+    "properties": {
+     "account": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "extra_args": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "job_ids": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "integer"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "me": {
+      "default": true,
+      "type": "boolean"
+     },
+     "partition": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "state": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "user": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "storage_paths": {
+   "description": "Get resolved storage paths for the current user.\n\nReturns the actual filesystem paths for all storage spaces the user\nhas access to, including home, scratch, and all depot allocations.\nThis is the recommended way to discover storage locations when a user\nmentions \"scratch\", \"depot\", or \"home\".\n\nReturns:\n    StoragePaths object with:\n    - home: User's home directory (/home/<user>)\n    - scratch: User's scratch space (/scratch/<cluster>/<user>)\n    - depots: List of depot spaces (/depot/<group>) the user can access\n\nExamples:\n    storage_paths()",
+   "inputSchema": {
+    "properties": {},
+    "type": "object"
+   },
+   "outputSchema": {
+    "$defs": {
+     "StorageSpace": {
+      "properties": {
+       "limit": {
+        "type": "string"
+       },
+       "name": {
+        "type": "string"
+       },
+       "path": {
+        "type": "string"
+       },
+       "size": {
+        "type": "string"
+       },
+       "type": {
+        "type": "string"
+       },
+       "usage_percent": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "type",
+       "name",
+       "path",
+       "size",
+       "limit",
+       "usage_percent"
+      ],
+      "type": "object"
+     }
+    },
+    "properties": {
+     "depots": {
+      "items": {
+       "$ref": "#/$defs/StorageSpace"
+      },
+      "type": "array"
+     },
+     "home": {
+      "$ref": "#/$defs/StorageSpace"
+     },
+     "scratch": {
+      "$ref": "#/$defs/StorageSpace"
+     }
+    },
+    "required": [
+     "home",
+     "scratch",
+     "depots"
+    ],
+    "type": "object"
+   }
+  },
+  "upload_file": {
+   "description": "Upload a file from the local machine to the remote system.\n\nArgs:\n    local_path: Path to the local file.\n    remote_path: Destination path on the remote system (supports ~ expansion).\n\nReturns:\n    The absolute path of the uploaded file on the remote system.\n\nExamples:\n    upload_file(\"/tmp/data.csv\", \"~/data/input.csv\")\n    upload_file(\"./script.py\", \"/home/user/scripts/run.py\")",
+   "inputSchema": {
+    "properties": {
+     "local_path": {
+      "type": "string"
+     },
+     "remote_path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "local_path",
+     "remote_path"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  },
+  "write_file": {
+   "description": "Write content to a file.\n\nArgs:\n    path: Path to the file (supports ~ expansion).\n    content: Content to write.\n    append: If True, append to file instead of overwriting.\n    create_dirs: If True, create parent directories if they don't exist.\n\nExamples:\n    write_file(\"~/output.txt\", \"Hello, World!\")\n    write_file(\"~/log.txt\", \"New entry\\n\", append=True)\n    write_file(\"~/new/path/file.txt\", \"content\", create_dirs=True)",
+   "inputSchema": {
+    "properties": {
+     "append": {
+      "default": false,
+      "type": "boolean"
+     },
+     "content": {
+      "type": "string"
+     },
+     "create_dirs": {
+      "default": false,
+      "type": "boolean"
+     },
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ],
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "type": "null"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "x-fastmcp-wrap-result": true
+   }
+  }
+ }
+}

@@ -1,0 +1,25 @@
+# P1: the stack moves (R1) and the regression net holds (R8, R9). New ids only; every id collected at
+# 3d010ec is required by ids_check.py from the live baseline collection, in both eras.
+test_protocol.py::test_middleware_refusal_is_a_tool_error_result[permission-memory]
+test_protocol.py::test_middleware_refusal_is_a_tool_error_result[permission-http]
+test_protocol.py::test_middleware_refusal_is_a_tool_error_result[runtime-memory]
+test_protocol.py::test_middleware_refusal_is_a_tool_error_result[mcp-error-memory]
+test_protocol.py::test_boundary_lets_cancellation_through
+test_protocol.py::test_harness_clients_speak_the_selected_era
+test_protocol.py::test_harness_refuses_an_unknown_era
+test_protocol.py::test_http_rejection_is_the_last_answer[401-last]
+test_protocol.py::test_http_rejection_is_the_last_answer[401-then-200]
+test_protocol.py::test_http_rejection_is_the_last_answer[no-401]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[from-httpx2]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[import-httpcore2]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[import-mcp-types]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[importorskip]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[importorskip-modname]
+test_hygiene.py::test_stack_import_check_catches_new_stack_names[importorskip-alias]
+test_ssh_smoke.py::test_ssh_executor_runs_over_a_loopback_server
+test_protocol.py::test_delegate_state_is_request_scoped[legacy]
+test_protocol.py::test_delegate_state_is_request_scoped[modern]
+test_protocol.py::test_state_scope_check_catches_drift[leaked]
+test_protocol.py::test_state_scope_check_catches_drift[never-set]
+test_protocol.py::test_state_scope_check_catches_drift[no-later-request]
+test_protocol.py::test_state_scope_check_catches_drift[no-call]

@@ -19,6 +19,7 @@ from starlette.responses import Response, FileResponse
 
 # Internal libs
 from rcac_mcp.auth import AUTH_MODES
+from rcac_mcp.middleware import ToolErrorMiddleware
 from rcac_mcp.tools import TOOL_REGISTRY
 from rcac_mcp.resources import RESOURCE_REGISTRY
 
@@ -152,6 +153,10 @@ def create_mcp_server(
             name=resource['name'],
             description=resource['description'],
         )(resource['handler'])
+
+    # The error boundary goes before the caller's middleware: FastMCP runs later middleware inside
+    # earlier middleware, so the boundary sees whatever the executor middleware raises.
+    server.add_middleware(ToolErrorMiddleware())
 
     # Add any provided middleware
     if middlewares:

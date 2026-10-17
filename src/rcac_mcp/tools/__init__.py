@@ -7,6 +7,9 @@
 from __future__ import annotations
 from typing import List, Callable, Any
 
+# Standard libs
+import inspect
+
 # External libs
 from fastmcp.tools import Tool
 
@@ -19,8 +22,13 @@ TOOL_REGISTRY: List[Tool] = []
 
 
 def mcp_tool(func: Callable[..., Any]) -> Tool:
-    """Decorator to register MCP tool functions."""
-    tool = Tool.from_function(func)
+    """Decorator to register MCP tool functions.
+
+    The served description is the full docstring (`Args:`, `Returns:` and `Examples:` included):
+    FastMCP 4 otherwise serves only its summary paragraph, and every model reads the description to
+    choose a tool. FastMCP still copies each `Args:` line into its property's description.
+    """
+    tool = Tool.from_function(func, description=inspect.getdoc(func))
     TOOL_REGISTRY.append(tool)
     return tool
 

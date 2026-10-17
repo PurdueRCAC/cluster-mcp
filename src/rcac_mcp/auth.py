@@ -40,9 +40,6 @@ def create_jwt_auth() -> JWTVerifier:
 def create_auth_oidc() -> OIDCProxy:
     """Create authentication provider based on mode."""
 
-    # Lazy import for optional dependency
-    from fastmcp.server.auth.oidc_proxy import OIDCProxy
-
     config_url = os.environ.get('OIDC_CONFIG_URL')
     client_id = os.environ.get('OIDC_CLIENT_ID')
     client_secret = os.environ.get('OIDC_CLIENT_SECRET')
@@ -59,12 +56,16 @@ def create_auth_oidc() -> OIDCProxy:
         client_id=client_id,
         client_secret=client_secret,
         base_url=base_url,
+        # Held at the FastMCP 2.x posture pending a deliberate decision: FastMCP 4 turns both on by
+        # default (fetching client-supplied metadata documents, CIMD, and forwarding the `resource`
+        # parameter upstream).
+        enable_cimd=False,
+        forward_resource=False,
     )
 
 
-AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider]]:] = {
+AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider | None]]] = {
     'none': lambda: None,
     'jwt': create_jwt_auth,
     'oidc': create_auth_oidc,
 }
-

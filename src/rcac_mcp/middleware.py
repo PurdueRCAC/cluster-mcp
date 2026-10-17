@@ -11,6 +11,7 @@ from typing import Dict, Optional
 import os
 
 # External libs
+from fastmcp.exceptions import FastMCPError, ToolError
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.dependencies import get_access_token
 
@@ -20,7 +21,34 @@ from rcac_mcp.executor import Executor
 from rcac_mcp.executor.delegate import DelegatingExecutor, load_user_map
 
 # Public interface
-__all__ = ['AuthExecutorMiddleware', 'SharedExecutorMiddleware']
+__all__ = ['AuthExecutorMiddleware', 'SharedExecutorMiddleware', 'ToolErrorMiddleware']
+
+
+class ToolErrorMiddleware(Middleware):
+    """
+    Turn an exception raised around a tool call into a tool error result carrying its reason.
+
+    FastMCP 4 converts only exceptions raised in a tool's body into an error result; one raised by
+    middleware (an unmapped identity's PermissionError, a token without an identity claim's
+    RuntimeError, an MCPError) reaches the client as a masked protocol error, its reason erased.
+    This middleware restores what the client saw before: an error result whose text is exactly
+    `str(exc)`, with no type name and no traceback. A FastMCPError passes through untouched, since
+    FastMCP already returns it as an error result. Only `Exception` is caught, so cancellation and
+    other `BaseException`s propagate.
+
+    `create_mcp_server` adds it before any middleware the caller passes, and FastMCP runs middleware
+    added later inside middleware added earlier, so it wraps the executor middleware and anything
+    after it and sees whatever they raise. It sets nothing and always returns the rest of the chain.
+    """
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next):
+        """Run the rest of the chain; re-raise a failure in it as a ToolError with the same text."""
+        try:
+            return await call_next(context)
+        except FastMCPError:
+            raise
+        except Exception as exc:
+            raise ToolError(str(exc)) from exc
 
 
 class SharedExecutorMiddleware(Middleware):
@@ -149,8 +177,9 @@ class AuthExecutorMiddleware(Middleware):
         executor = DelegatingExecutor(identity, self._user_map)
         set_executor(executor)
 
-        # Store identity in context state for logging/debugging
-        context.fastmcp_context.set_state('rcac_user', identity)
-        context.fastmcp_context.set_state('rcac_local_user', executor.local_user)
+        # Store identity in request-scoped context state for logging/debugging. The setter is
+        # async; request scope (serializable=False) keeps a per-user value out of the session store.
+        await context.fastmcp_context.set_state('rcac_user', identity, serializable=False)
+        await context.fastmcp_context.set_state('rcac_local_user', executor.local_user, serializable=False)
 
         return await call_next(context)

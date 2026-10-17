@@ -93,6 +93,13 @@ SUDO_PREFIX = "sudo_cmd = ['sudo', '-n', '-H', '-u', self._local_user]"
 
 EXPLICIT_MODE = '        if self.exec_mode:\n'
 
+BOUNDARY_ROWS = tuple(f'test_protocol.py::test_middleware_refusal_is_a_tool_error_result[{row}]'
+                      for row in ('permission-memory', 'permission-http', 'runtime-memory', 'mcp-error-memory'))
+
+OIDC_ROWS = tuple(f'test_auth_modes.py::test_oidc_requires_all_four[{variable}-{how}]'
+                  for variable in ('OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
+                  for how in ('unset', 'empty'))
+
 CASES: tuple[Case, ...] = (
     # Per-request isolation: the executor lives in a ContextVar and is built per call.
     Case('isolation-module-global', 'context.py',
@@ -417,6 +424,92 @@ CASES: tuple[Case, ...] = (
          (('        issuer=ISSUER,\n', '        issuer=None,\n'),),
          ('test_tokens.py::test_mismatched_token_is_rejected[issuer]',),
          'expected 401'),
+    # The error boundary: an exception an executor middleware raises around a tool call reaches the
+    # client as a tool error result whose text is exactly str(exc); cancellation passes through.
+    Case('tool-error-boundary-dropped', 'server.py',
+         (('    server.add_middleware(ToolErrorMiddleware())\n', ''),),
+         BOUNDARY_ROWS,
+         'protocol error instead of a tool error result'),
+    Case('boundary-leaks-traceback', 'middleware.py',
+         (('raise ToolError(str(exc)) from exc', "raise ToolError(str(exc) + __import__('traceback').format_exc()) from exc"),),
+         BOUNDARY_ROWS,
+         'error text differs'),
+    Case('boundary-catches-base-exception', 'middleware.py',
+         (('        except Exception as exc:\n            raise ToolError(', '        except BaseException as exc:\n            raise ToolError('),),
+         ('test_protocol.py::test_boundary_lets_cancellation_through',),
+         'swallowed cancellation'),
+    Case('boundary-reraises-mcp-error', 'middleware.py',
+         (('        except FastMCPError:\n            raise\n',
+           "        except (FastMCPError, __import__('mcp').MCPError):\n            raise\n"),),
+         ('test_protocol.py::test_middleware_refusal_is_a_tool_error_result[mcp-error-memory]',),
+         'protocol error instead of a tool error result'),
+    # The identity the delegate middleware stores in the context state is request-scoped: it never
+    # reaches the session store, where a later request on the same session would read it. Only the
+    # handshake era has a session to leak into: under revision 2026-07-28 FastMCP keys each request's
+    # state afresh, so the modern row holds whatever the scope and cannot catch this plant.
+    Case('delegate-state-session-scoped', 'middleware.py',
+         (("set_state('rcac_user', identity, serializable=False)", "set_state('rcac_user', identity)"),
+          ("set_state('rcac_local_user', executor.local_user, serializable=False)",
+           "set_state('rcac_local_user', executor.local_user)")),
+         ('test_protocol.py::test_delegate_state_is_request_scoped[legacy]',),
+         'state outlived its request'),
+    # The server's instructions reach a client in both protocol eras: in the InitializeResult of a
+    # handshake and in the DiscoverResult of revision 2026-07-28.
+    Case('instructions-dropped', 'server.py',
+         (('        instructions=SERVER_INSTRUCTIONS,\n', '        instructions=None,\n'),),
+         ('test_protocol.py::test_client_era_is_served[legacy-memory]',
+          'test_protocol.py::test_client_era_is_served[modern-memory]'),
+         'instructions differ'),
+    # Every tool's served description is its full docstring, as FastMCP 2.x served it; FastMCP 4
+    # alone serves only the summary paragraph.
+    Case('tool-description-summary-only', 'tools/__init__.py',
+         (('    tool = Tool.from_function(func, description=inspect.getdoc(func))\n',
+           '    tool = Tool.from_function(func)\n'),),
+         ('test_surface.py::test_served_surface_matches_baseline',),
+         'description differs'),
+    # The ssh executor maps the remote exit status into its CommandResult.
+    Case('ssh-exit-status-dropped', 'executor/ssh.py',
+         (('            exit_code=result.exited,\n', '            exit_code=0,\n'),),
+         ('test_ssh_smoke.py::test_ssh_executor_runs_over_a_loopback_server',),
+         'exit status differs'),
+    # `-t sse` serves: the CLI dispatches it to FastMCP's SSE transport and the server listens. The
+    # target runs the installed console script, which imports this copy through PYTHONPATH.
+    Case('sse-transport-unserved', '__init__.py',
+         (("                mcp.run(transport='sse', host=self.host, port=self.port)\n",
+           '                pass\n'),),
+         ('test_transports.py::test_transport_lists_expected_tools[sse-legacy]',),
+         'did not start'),
+    # OIDC is all-or-nothing: a configuration missing any of the four variables is refused, naming
+    # all four, before a provider is built. The proxy keeps the FastMCP 2.x posture.
+    Case('oidc-check-dropped', 'auth.py',
+         (('    if not all([config_url, client_id, client_secret, base_url]):\n', '    if False:\n'),),
+         OIDC_ROWS,
+         'raised no ValueError'),
+    Case('oidc-secret-not-required', 'auth.py',
+         (('    if not all([config_url, client_id, client_secret, base_url]):\n',
+           '    if not all([config_url, client_id, base_url]):\n'),),
+         tuple(row for row in OIDC_ROWS if '[OIDC_CLIENT_SECRET-' in row),
+         'raised no ValueError'),
+    Case('oidc-message-incomplete', 'auth.py',
+         (("            'OIDC_CLIENT_SECRET, MCP_BASE_URL'\n", "            'OIDC_CLIENT_SECRET'\n"),),
+         tuple(row for row in OIDC_ROWS if '[MCP_BASE_URL-' in row),
+         'does not name MCP_BASE_URL'),
+    Case('oidc-cimd-enabled', 'auth.py',
+         (('        enable_cimd=False,\n', ''),),
+         ('test_auth_modes.py::test_oidc_proxy_keeps_the_2x_posture',),
+         'enable_cimd=True'),
+    # `none` installs no provider.
+    Case('none-mode-installs-provider', 'auth.py',
+         (("    'none': lambda: None,\n",
+           "    'none': lambda: JWTVerifier(public_key='x' * 32, issuer=ISSUER, audience=AUDIENCE, algorithm=ALGORITHM),\n"),),
+         ('test_auth_modes.py::test_none_mode_installs_no_provider',),
+         'none mode installed a provider'),
+    # The registry's annotation resolves to a provider-factory map; the stray `:` made it a slice.
+    Case('auth-modes-annotation-slice', 'auth.py',
+         (('AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider | None]]] = {',
+           'AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider | None]]:] = {'),),
+         ('test_auth_modes.py::test_auth_modes_annotation_is_a_provider_factory_map',),
+         'slice'),
 )
 
 # The runner's own controls (--self-check). A docstring edit changes no behaviour, so its target

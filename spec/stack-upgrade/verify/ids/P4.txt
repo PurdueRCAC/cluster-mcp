@@ -1,0 +1,15 @@
+# P4: every supported transport starts under bin/sandbox.sh and lists EXPECTED_TOOLS (R4).
+test_transports.py::test_transport_lists_expected_tools[stdio-legacy]
+test_transports.py::test_transport_lists_expected_tools[stdio-modern]
+test_transports.py::test_transport_lists_expected_tools[http-legacy]
+test_transports.py::test_transport_lists_expected_tools[http-modern]
+test_transports.py::test_transport_lists_expected_tools[sse-legacy]
+test_transports.py::test_harness_refuses_unsandboxed_stdio
+test_transports.py::test_harness_refuses_a_remote_url[remote-host]
+test_transports.py::test_harness_refuses_a_remote_url[wildcard]
+test_transports.py::test_transport_check_accepts_a_clean_listing
+test_transports.py::test_transport_check_catches[tool-missing]
+test_transports.py::test_transport_check_catches[tool-unexpected]
+test_transports.py::test_transport_check_catches[tool-twice]
+test_transports.py::test_transport_check_catches[legacy-as-modern]
+test_transports.py::test_transport_check_catches[modern-as-legacy]

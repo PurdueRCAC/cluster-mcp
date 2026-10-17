@@ -111,6 +111,23 @@ bob@purdue.edu      bob
 service-account-1   svc_batch
 ```
 
+### OIDC Configuration
+
+`-a oidc` puts FastMCP's OIDC proxy in front of the server. It needs all four of
+`OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` and `MCP_BASE_URL`; with any one unset or
+empty the server refuses to start, naming all four, before a provider is built or a request is
+made. FastMCP 4 treats the client secret as optional; this server requires it.
+
+The proxy is held at the posture it had on FastMCP 2.x, pending a deliberate decision: it does
+**not** fetch client-supplied metadata documents (CIMD) and does **not** forward the `resource`
+parameter to the upstream provider. FastMCP 4 turns both on by default; `rcac-mcp` passes both off.
+
+Upgrading from a release on FastMCP 2 drops the proxy's client registrations. FastMCP 2 kept them in
+an encrypted `DiskStore` at `<home>/oauth-proxy/cache.db`; FastMCP 4 keeps them in an encrypted
+`FileTreeStore` under `<home>/oauth-proxy/<key-fingerprint>/` (`<home>` is FastMCP's home
+directory) and does not read the old store. Every client registered before the upgrade must register
+again.
+
 ### Request Isolation in Delegate Mode
 
 A critical security property of delegate mode is that concurrent requests from

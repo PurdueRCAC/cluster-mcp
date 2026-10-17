@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import importlib.util
 import sys
@@ -16,6 +15,7 @@ from typing import Sequence
 
 import pytest
 
+from harness import served_tools
 from rcac_mcp.server import create_mcp_server
 from rcac_mcp.tools import TOOL_REGISTRY
 
@@ -121,8 +121,7 @@ def test_registry_matches_expected_tools() -> None:
 
 @pytest.mark.unit
 def test_served_tools_match_registry() -> None:
-    served = asyncio.run(create_mcp_server('none').get_tools())
-    names = sorted(served)
+    names = sorted(served_tools(create_mcp_server('none')))
     assert names, 'the server serves no tools'
     assert registry_violations(names) == []
     assert set(names) == {tool.name for tool in TOOL_REGISTRY}

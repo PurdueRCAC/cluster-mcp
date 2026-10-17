@@ -20,8 +20,27 @@ agent can actually work on a cluster instead of guessing about one. The package 
 console entry point (`pyproject.toml [project.scripts]`) is **`rcac-mcp`** → `rcac_mcp:main`, and
 `python -m rcac_mcp` works via `__main__.py`.
 
-The server is built on **FastMCP 2.x** with a **cmdkit** CLI, and speaks three transports (`stdio`,
-`sse`, `http`) against three execution backends (`ssh`, `local`, `delegate`).
+The server is built on **FastMCP 4.x** and the **MCP SDK 2.x** with a **cmdkit** CLI, and speaks
+three transports (`stdio`, `sse`, `http`) against three execution backends (`ssh`, `local`,
+`delegate`). `stdio` and `http` serve both protocol eras (below); `sse` serves only the handshake
+era: revision 2026-07-28 deprecates HTTP+SSE, and a 2026-07-28 client that reaches an `sse` server
+falls back to the handshake. It is still served, so `-t sse` stays.
+
+It serves **both MCP protocol eras** with no configuration: a client on a handshake revision
+(2024-11-05 through 2025-11-25) completes `initialize` and gets `SERVER_INSTRUCTIONS` in its
+`InitializeResult`; a client on revision **2026-07-28** is answered on `server/discover`, gets the
+same instructions in its `DiscoverResult`, and never sends `initialize`. Both list the same tools.
+
+**Accepted behaviour changes from the FastMCP 4 / MCP SDK 2 move:**
+
+- A stateful streamable-HTTP session (`-t http`) now closes after 30 minutes idle, the SDK's
+  default; on the previous stack it never closed. A client idle that long reconnects. The default is
+  kept deliberately.
+- An `-a oidc` deployment's client registrations do not survive the upgrade. FastMCP 2's OIDC proxy
+  kept them in an encrypted `DiskStore` at `<home>/oauth-proxy/cache.db`; FastMCP 4's keeps them in
+  an encrypted `FileTreeStore` under `<home>/oauth-proxy/<key-fingerprint>/` and does not read the
+  old store (`<home>` is FastMCP's home directory). Every client registered before the upgrade must
+  register again (§6, `SECURITY.md`).
 
 **The primary supported deployment is local + ephemeral over SSH keys:** the user runs the server on
 their own machine in `stdio` mode, and it executes on the cluster over their existing
@@ -106,8 +125,8 @@ Top-level package `src/rcac_mcp/`:
 | `__main__.py` | `python -m rcac_mcp` shim. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance, attaches auth, registers tools/resources/middleware/custom routes. Home of **`SERVER_INSTRUCTIONS`**, the agent-facing contract. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
-| `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — both set the per-request executor in `on_call_tool`. |
-| `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum. |
+| `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — both set the per-request executor in `on_call_tool` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result carrying `str(exc)`. |
+| `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
 | `token.py` | `ISSUER`/`AUDIENCE`/`ALGORITHM` constants + `generate_token()` (the `--generate-token` path). Signer side of the JWT contract. |
 | `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (loads `/etc/agents.d/*.md` from the cluster) and `rcac://storage`. |
 | `executor/base.py` | `Executor` `Protocol` + the `CommandResult` dataclass. The contract all backends satisfy. |
@@ -119,8 +138,9 @@ Top-level package `src/rcac_mcp/`:
 | `tools/slurm.py` | Slurm tools: `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`, plus RCAC's `slist`/`sfeatures`. |
 | `tools/rcac.py` | Purdue-specific: `myquota`, `storage_paths`, `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`. |
 
-Two repo-level paths sit outside the package: **`bin/sandbox.sh`** — the throwaway-environment
-helper every CLI drive runs under (§ Factory → Throwaway environment); and **`spec/{slug}/`** — the
+Three repo-level paths sit outside the package: **`bin/sandbox.sh`** — the throwaway-environment
+helper every CLI drive runs under (§ Factory → Throwaway environment); **`bin/audit_lock.py`** — the
+release gate's dependency audit (§ Factory → Release recipe); and **`spec/{slug}/`** — the
 committed, dated per-feature design records (`GOAL.md`/`PLAN.md`/`TECH.md`/`REVIEW.md`) the
 factory produces and **retains on merge**. `AGENTS.md` remains ground truth; `spec/{slug}/` is a
 point-in-time record of intent. The factory's method and skills live in the operator's KB; see
@@ -185,14 +205,16 @@ import has no effect.
   names and the parametrised test ids are a contract: renaming one breaks a gate loudly. Each check
   has standing negative controls, planted shapes it must reject.
   - `tests/test_registry.py` (`unit`): `EXPECTED_TOOLS`, `registry_violations`, `module_absent`,
-    `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves match
+    `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves (listed by a
+    harness client, `served_tools`) match
     `EXPECTED_TOOLS` exactly, and the removed documentation modules stay unimportable; when one
     does import, `absence_violations` says where from and reads what is there: bytecode alone is
     the stale checkout below, with its remedy; any other file means the module was re-added, and
     the message says so instead of offering a remedy. `EXPECTED_TOOLS` is hard-coded, so a tool
     change edits it in the same commit as `SERVER_INSTRUCTIONS` and the README (§ Invariants §9).
   - `tests/test_instructions.py` (`unit`): `instruction_violations`, `guidance_violations`,
-    `NON_TOOL_TERMS`. `SERVER_INSTRUCTIONS`, both as the constant and as served, lists exactly the
+    `NON_TOOL_TERMS`. `SERVER_INSTRUCTIONS`, both as the constant and as served (what a harness
+    client receives on connecting, `served_instructions`), lists exactly the
     registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
     search — that is the separate `rcac-docs-mcp` service, which only the README points to. This
     is §9 made executable; it reads list entries and backticked or snake_case names, so a tool
@@ -232,14 +254,76 @@ import has no effect.
     floors, `create_jwt_auth()` and the sandboxed `--generate-token`, each pinned on its own; tokens
     from either signer accepted by the verifier, and a wrong issuer, audience, secret or algorithm,
     or an expired token, refused with a 401 and nothing launched (§6).
+  - `tests/test_auth_modes.py` (`unit`): `oidc_violations`, `proxy_violations`,
+    `posture_violations`, `annotation_violations`. OIDC with any one of its four variables unset or
+    empty is refused with a `ValueError` naming all four, with nothing built and nothing reached
+    (`rcac_mcp.auth.OIDCProxy` is replaced by a recorder; the unit guard records any network reach).
+    With all four set the recorder is reached, its arguments bind to the real `OIDCProxy`
+    signature, and `enable_cimd` and `forward_resource` arrive `False` (§6). `none` installs no
+    provider and answers a tokenless HTTP call. `typing.get_type_hints(rcac_mcp.auth)['AUTH_MODES']`
+    resolves to `Final` of a mapping from `str` to `Callable[[], AuthProvider | None]`; a `slice`,
+    `Callable[..., X]` and a factory taking an argument are rejected. A live OIDC flow is untested.
   - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
     `stack_import_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
     through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
-    checked statically); no module but `tests/harness.py` imports FastMCP, mcp or httpx
+    checked statically); no module but `tests/harness.py` imports the stack, by any of its import
+    names `fastmcp`, `mcp`, `mcp_types`, `httpx2`, `httpcore2` (and the old `httpx`)
     (`test_only_the_harness_imports_the_stack`, also static: `import`, `from … import`, and
-    `import_module` / `__import__` called with a literal name; a computed name is not read, and
-    the check's docstring lists what else it cannot see); self-tests prove the guard, the PATH
-    shim, the harness fence and the build-inside-the-loop rule are active.
+    `import_module` / `__import__` / `pytest.importorskip` called with a literal name, including
+    through a `from pytest import importorskip as …` alias; a computed name is not read, and the
+    check's docstring lists what else it cannot see); self-tests prove the guard, the PATH shim,
+    the harness fence and the build-inside-the-loop rule are active.
+  - `tests/test_protocol.py` (`unit`): `boundary_violations`, `cancellation_violations`,
+    `era_violations`. A `PermissionError` (in memory and over HTTP), a `RuntimeError` and an
+    `MCPError` raised by middleware around a tool call each arrive as a tool error result whose
+    text is exactly `str(exc)`, and nothing runs; cancellation passes through `ToolErrorMiddleware`
+    (§1). Both protocol eras, each pinned on its own rows whatever era the run selected
+    (`test_client_era_is_served[<era>-<memory|http>]`): a handshake-era client gets an
+    `InitializeResult` and the server sees `initialize` and no `server/discover`; a 2026-07-28 client
+    gets no `InitializeResult` and the server sees `server/discover` and no `initialize`; each
+    receives `SERVER_INSTRUCTIONS` and lists exactly `EXPECTED_TOOLS` (§9). The delegate contracts
+    (isolation, the tokenless refusal, a foreign token's 401) also run in the modern era on every
+    run (§1, §5, §6). The identity the delegate middleware stores in the context state is visible
+    to its own tool call and to no later request on the same session, in either era
+    (`state_scope_violations`, §1; only the handshake era has a session for it to leak into). It
+    also pins the harness's era selection (`select_era`, the post-connect
+    check) and `call_http`'s last-answer 401 rule (`rejection_status`).
+  - `tests/test_surface.py` (`unit`): `surface_violations`, `TOLERATED`, `tolerated_differences`.
+    What a harness client in the selected era is served (`served_surface`) matches
+    `tests/fixtures/served_surface.json`: the tool set, each description, each argument's name,
+    type and default, each `required` list, each output schema, every resource's URI, name,
+    description and MIME type, and the instructions (§9). The fixture was written by
+    `spec/stack-upgrade/verify/snapshot.py` run in an archive of `3d010ec` in that commit's own
+    locked FastMCP 2 environment, never on the current stack, and
+    `test_surface_fixture_is_the_baseline_shape` rejects one that carries FastMCP 4's metadata.
+    `TOLERATED` names the four differences FastMCP 4 introduces, each with its cause and accepted
+    only in its own shape: an argument `description` where there was none, `additionalProperties`
+    added as exactly `false`, output `$defs` inlined, and a `description` on an inlined output node
+    only where the snapshot had a `$ref`. `tolerated_differences` lists them per tool.
+  - `tests/test_ssh_smoke.py` (`integration`): `smoke_violations`. `SSHExecutor` runs a command
+    over the locked Fabric and Paramiko against an in-process Paramiko server on `127.0.0.1` with
+    generated keys: stdout, exit status and hostname come back, and the server received the exact
+    command. No process is launched and no real host is reached: `HOME` is under `tmp_path`, the
+    agent socket is unset, no key files or agent are consulted, and Fabric gets an empty SSH config.
+  - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
+    installed `rcac-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
+    exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the
+    handshake era only (`test_transport_lists_expected_tools[<transport>-<era>]`). HTTP and SSE
+    servers bind `127.0.0.1` on a free port, started with `start_new_session=True` and stopped with
+    `os.killpg`: `bin/sandbox.sh` does not forward SIGTERM to its child, so stopping its shell alone
+    leaves the server listening. After every row the process group is gone, the port refuses
+    connections and the sandbox directory (made under the test's own `TMPDIR`) has been removed. A
+    server that never listens fails as `<transport>: the server did not start listening`.
+  - `tests/test_audit.py` (`unit`, `integration`): `audit_violations` and `child_env` (both in
+    `bin/audit_lock.py`, loaded from its file), `offline_violations`. Planted `uv audit` outputs
+    (a finding, under exit 1 or exit 0; offline; an unreachable service; an audit that cannot run;
+    a short count; no summary) are each red for their own reason, and only a no-findings summary
+    covering every registry package in `uv.lock` is green. The command names this checkout with
+    `--project` and `--frozen`/`--no-config`, and the child environment drops `UV_PROJECT` and every
+    `UV_*` but `UV_CACHE_DIR`, `UV_OFFLINE`, `UV_NATIVE_TLS`, `UV_SYSTEM_CERTS`. The integration row
+    runs the real script under `bin/sandbox.sh` offline by construction (`UV_OFFLINE=1`, every proxy
+    at a dead loopback port) and requires exit 2, "advisory source unreachable" and uv's own offline
+    refusal, so no lookup was attempted. The networked proofs belong to the release gate, not the suite.
   - `tests/test_mutations.py` (`unit`): the fast half of the mutation runner (below).
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
@@ -257,26 +341,51 @@ import has no effect.
   - **`launches`** (`unit` and `integration`) replaces `subprocess.Popen` with a recorder: nothing
     runs, and the recorded argv is what the test asserts.
   - **The main-context check:** after every test the main context must hold no executor.
-- **`tests/harness.py` is the only test module that imports FastMCP, mcp or httpx**
-  (`test_only_the_harness_imports_the_stack` fails on any other). The contract-test modules speak
-  only its verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `mint`,
-  `user_map`, `RecordingExecutor`, `Rendezvous`, `delegate_server`, `shared_server`,
-  `bare_server`; the builders take extra middleware, such as a `Rendezvous`, added inside the
-  executor middleware) and the `JWTVerifier` type it re-exports. Two older modules still call the
-  FastMCP server API on a server they build (internals-bound item 6). Delegate mode runs over an
-  in-process ASGI route: a real JWT through the real `JWTVerifier` and `AuthExecutorMiddleware`,
-  with no socket and no port. Two rules:
+- **`tests/harness.py` is the only test module that imports FastMCP, mcp or the HTTP client
+  (`httpx2`)** (`test_only_the_harness_imports_the_stack` fails on any other). Its docstring lists
+  the FastMCP 4 / MCP SDK 2 touchpoints it relies on. The contract-test modules speak only its
+  verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `negotiate`, `mint`,
+  `user_map`, `served_tools`, `served_instructions`, `served_surface`, `installed_auth`, `protocol_error`,
+  `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `delegate_server`,
+  `shared_server`, `bare_server`, `stdio_tools`, `url_tools`; the builders take extra middleware, such as a `Rendezvous`, added inside the
+  executor middleware, and add a `MethodLog` last) and the `JWTVerifier` type it re-exports. `negotiate` connects in a given
+  era without the post-connect check and returns what both ends saw (`Negotiated`: version,
+  whether an `InitializeResult` exists, instructions, tool names, and the methods the server's
+  `MethodLog` saw), so a test decides the era itself. Delegate mode runs over an in-process ASGI route: a real JWT through the real
+  `JWTVerifier` and `AuthExecutorMiddleware`, with no socket and no port; in FastMCP 4 the
+  verifier's 401 arrives as an error from connect-time negotiation, so `call_http` reads it from a
+  response recorder and reports a rejection only when the last answer was a 401. `stdio_tools`
+  and `url_tools` list the tools of a server in another process and report the era it negotiated
+  (`Listed`): `stdio_tools` launches the server itself, inside FastMCP where the static launch
+  check cannot see it, so it refuses an argv whose first element is not this repo's
+  `bin/sandbox.sh`, and closes the server when its client exits; `url_tools` reaches only a
+  loopback host.
+- **The protocol era.** `CLUSTER_MCP_TEST_ERA` selects the era every harness client speaks:
+  `legacy` (the default, and what the profile's `verify` runs: the `initialize` handshake) or
+  `modern` (revision 2026-07-28 through `server/discover`, built with `mode='auto'`, never a
+  version pin, which skips `server/discover`). Any other value stops the run at import, naming the
+  variable. After every connect the harness checks the negotiated era and raises
+  `harness era: …` on a mismatch. `in_memory`, `http_client` and `call_http` take `era=` for a
+  contract that must hold in one era on every run; those clients are checked the same way. With
+  `CLUSTER_MCP_ERA_LOG` set to a file, every in-process connect in the selected era appends
+  `era=… version=… first=…` (the first request the server's `MethodLog` saw on that connection),
+  which a gate reads to prove a pass ran in its era; a connect in an era chosen with `era=` is not
+  logged, since it does not exercise the selector. Run the suite in the
+  modern era with `CLUSTER_MCP_TEST_ERA=modern uv run pytest`; the mutation runner's children
+  inherit both variables.
+- The harness keeps two rules:
   - **Build inside the loop.** Every server and middleware is constructed inside the coroutine
     handed to `drive`; the builders raise otherwise. Anything a construction sets in the context
     then reaches the request tasks as it would in production, so a set-at-construction bug shows.
   - **The fence.** An in-process server call raises unless `Popen` is the guard's refuser or the
     `launches` recorder, so an `integration` test that calls a server in-process requests
-    `launches`.
+    `launches`. `stdio_tools` and `url_tools` are not fenced: they make no in-process call, and
+    the server they reach is its own process, contained by the sandbox.
 - **The mutation runner, `tests/mutants.py`, is not collected.** Each of its cases copies the
   imported package (never `src/`), applies exact source edits that break one contract, and runs the
   named target tests against the copy in a child pytest under `bin/sandbox.sh`. A case is
   **killed** only when every target fails (a JUnit `<failure>`) with the case's `why`, the fragment
-  of the violation message that names the contract. A child takes about 1.5 s, all cases 60–90 s,
+  of the violation message that names the contract. A child takes about 2 s, all cases about 2½ minutes,
   which is why `uv run pytest` does not run it. Run it after changing a contract or its test, from
   the repo root:
 
@@ -296,22 +405,22 @@ import has no effect.
   AUDIENCE` (both `rcac-mcp` in `token.py`): no token can tell a verifier that swapped the two from
   a correct one, so no test pins it. If the constants ever differ, add the case. File I/O is not
   guarded (above).
-- **Internals-bound tests**, the rewrite points for `stack-upgrade` and `safe-execution`; items 1–5
-  say so in their docstrings:
-  1. `tests/harness.py`, all of it: the FastMCP/mcp client, the ASGI route, the middleware API and
-     result decoding (`stack-upgrade`).
+- **Internals-bound tests**, the rewrite points for a stack move and for `safe-execution`; items
+  1–5 say so in their docstrings:
+  1. `tests/harness.py`, all of it: the FastMCP/mcp client, the `httpx2` ASGI route, the
+     middleware API, the era selector and result decoding (rewritten for FastMCP 4 / MCP SDK 2).
   2. `tests/test_exec_mode.py`: the `rcac_mcp.create_mcp_server` stub and the
      `rcac_mcp.executor.ssh.Connection` fake.
   3. `tests/test_executors.py`: the `Connection` fake (the `ssh` row) and the argv rows, which are
      `safe-execution`'s deliberate rewrite.
   4. `tests/test_tokens.py`: `create_jwt_auth()` returning a `JWTVerifier` (imported through the
-     harness), and acceptance and rejection observed through the harness's HTTP route
-     (`stack-upgrade`).
+     harness), and acceptance and rejection observed through the harness's HTTP route (the
+     FastMCP 4 move left the module unchanged: the route's changes stayed in the harness).
   5. `tests/mutants.py` and its anchors in `tests/test_mutations.py`: tied to today's source text,
      so any cycle that edits an anchored line re-plants.
-  6. `tests/test_registry.py` and `tests/test_instructions.py`, which predate the harness: they
-     read `get_tools()` and `instructions` off a `create_mcp_server(...)` FastMCP server
-     (`stack-upgrade`).
+
+  `tests/test_registry.py` and `tests/test_instructions.py`, which once read the FastMCP server
+  API directly, now read the served tools and instructions through harness verbs and left the list.
 
   Everything else speaks harness verbs or fakes at the stdlib boundary, and is expected to pass
   through both cycles unchanged.
@@ -337,6 +446,10 @@ import has no effect.
   or `[dependency-groups]` runs `uv lock` and commits the result **in the same commit**; the release
   recipe's `bump.files` stages it alongside the version bump. `uv lock --check` exits nonzero when
   the two have drifted.
+- **The release gate audits the lock.** `bin/audit_lock.py` (stdlib; `uv audit` over the tree
+  `uv.lock` resolves) fails the release recipe's `gate` when any locked package carries a known
+  advisory, and when the advisory source cannot be reached (§ Factory → Release recipe, its `audit`
+  caveat). It needs the network, so the profile's `verify` does not run it.
 - **The sdist must not ship `bin/`, `spec/`, `issues/`, `.security/`, or `tests/fixtures/`.**
   `[tool.hatch.build.targets.sdist]` excludes them and the release recipe's `gate` re-checks the
   tarball — a `.security/` path in a published artifact would publish an inventory of unremediated
@@ -394,7 +507,7 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | landing | `squash-local`: squash onto `origin/develop` in the cycle worktree as one `[category] What changed` commit, then push `develop` |
 | ci | none yet (the `ci-workflow` seed adds it) |
 | setup | `uv sync --locked`: dependency refresh, run before any verify |
-| verify | `uv lock --check && uv run pytest -q && bin/sandbox.sh uv run rcac-mcp --help`: the full gate. Phases narrow it; publish and release run all of it |
+| verify | `uv lock --check && uv run pytest -q && bin/sandbox.sh uv run rcac-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in the handshake era; `CLUSTER_MCP_TEST_ERA=modern` runs it in the other (§ Testing) |
 | throwaway environment | `bin/sandbox.sh <cmd…>` (contract below) |
 | coupled core | `src/rcac_mcp/context.py`, `middleware.py`, `auth.py`, `token.py`, `executor/*`, `server.py` |
 | same-commit rules | see § Conventions |
@@ -421,6 +534,7 @@ release:
     subject: "[release] Version {v}"
   gate:
     - uv lock --check
+    - uv run python bin/audit_lock.py
     - uv run pytest -q
     - uv build -o dist/
     - uvx twine check --strict dist/*
@@ -474,6 +588,14 @@ release:
     security-in-sdist: >-
       A .security/ path in the sdist is a hard stop. Tell Geoffrey plainly: it would publish an
       inventory of unremediated weaknesses. The hygiene check lists what the sdist does contain.
+    audit: >-
+      bin/audit_lock.py runs uv audit over the tree uv.lock resolves (frozen, --no-config, --project
+      naming this checkout, every UV_* outside a short allowlist dropped) and exits non-zero naming
+      package, version and advisory when any locked package carries a known advisory. It needs the
+      network and fails closed without it: an unreachable advisory source, an audit that cannot run,
+      or a summary covering fewer packages than the lock pins is red. There is no waiver: an
+      advisory with no fixed release holds the release until a seed takes it up. The profile's
+      verify never runs it: phase gates stay offline-capable and deterministic.
     lock: >-
       uv.lock is tracked and pins the transitive tree a git+https install receives; a bump that
       leaves it stale ships a version the lock disagrees with. If anything besides pyproject.toml
@@ -589,8 +711,9 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 - **`executor/delegate.py`** — the `sudo` argv, `-n`, `shlex.quote` on `cwd` only, the server's
   `$SHELL`.
 - **`auth.py` / `token.py`** — the 32-char minimum in two places; the issuer/audience/algorithm
-  triple that must match across signer and verifier. Note `auth.py`'s `AUTH_MODES` annotation carries
-  a stray `:` that only parses because of PEP 563 — see the `auth-modes-annotation-typo` seed.
+  triple that must match across signer and verifier; OIDC's all-four check and the proxy's held
+  posture (§6). `AUTH_MODES`' annotation is checked in its resolved shape: a stray `:` once made its
+  `Final` argument a `slice`, which evaluated without error, PEP 563 or not.
 - **`executor/ssh.py`** — reconnect backoff; the *uncaught* Fabric timeout that makes `run()`'s
   contract differ from the other two backends.
 - **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder.
@@ -601,8 +724,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 ### 1. Per-request executor isolation (`context.py` + `middleware.py`) — highest blast radius [human gate]
 
 - **The current executor lives in a `ContextVar` (`context.py`), never a module-level global.**
-  `executor_var` is task-local; async tasks (one per HTTP request under FastMCP/Starlette) each get
-  their own copy, so each request gets its own executor. Replacing it with a plain module global is a
+  `executor_var` is task-local; async tasks (one per request under FastMCP/Starlette) each get their
+  own copy, so each request gets its own executor. A sync tool runs on a worker thread that receives
+  a copy of the request's context, so it reads the executor its call's middleware set; a
+  `set_executor()` inside a tool would land only in that thread's copy. Replacing it with a plain module global is a
   **cross-user command-execution vulnerability** — user A's request would run as user B.
   `SECURITY.md` § *Request Isolation in Delegate Mode* states the contract and shows the unsafe form
   explicitly — read it before touching this. The three bullets below are its consequences that are
@@ -614,6 +739,20 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   unset. A tool that instantiates its own executor bypasses delegation entirely.
 - **Any new middleware must not swallow the call chain** (`return await call_next(context)`), above
   all one that runs *before* the executor middleware, or the executor is never set for that request.
+- **`ToolErrorMiddleware` is the error boundary and wraps the executor middleware.**
+  `create_mcp_server` adds it before the middleware it is given, and FastMCP runs middleware added
+  later inside middleware added earlier. FastMCP 4 turns only exceptions from a tool's *body* into
+  an error result; one raised by middleware (§5's `PermissionError` and `RuntimeError`, an
+  `MCPError`) would reach the client as a masked `Internal server error`. The boundary re-raises any
+  `Exception` but a `FastMCPError` as `ToolError(str(exc))`, so the client sees the reason as a
+  tool error result, exactly as on 2.x. It catches `Exception`, never `BaseException`
+  (cancellation propagates), sets nothing, and returns `await call_next(context)`. It would also
+  turn the error FastMCP 4 raises for a tool that needs a capability the client lacks into a tool
+  error result rather than a protocol error; no tool here needs one, and the first that does
+  revisits the boundary. Middleware state
+  (`Context.set_state`) is async in 4.x and is set request-scoped (`serializable=False`), so a
+  per-user value never reaches the session store, where a later request on the same session would
+  read it; `test_protocol.py::test_delegate_state_is_request_scoped` pins it.
 
 ### 2. Executor Protocol contract (`executor/base.py`) [human gate]
 
@@ -696,22 +835,46 @@ What each mode means:
 - **`ISSUER`, `AUDIENCE`, `ALGORITHM` are single-sourced in `token.py`** and consumed by
   `create_jwt_auth()`. Signer and verifier must agree; changing one alone silently rejects every
   token.
-- `AUTH_MODES` maps `'none' | 'jwt' | 'oidc'` to provider factories, where `'none'` returns `None`
-  (FastMCP's "no auth"). A new auth mode is a new entry **plus** the `-a/--auth` `choices` list in
-  `MCPServerApp` — they are not derived from each other.
+- `AUTH_MODES` maps `'none' | 'jwt' | 'oidc'` to zero-argument provider factories, annotated
+  `Final[Dict[str, Callable[[], AuthProvider | None]]]`: `'none'` returns `None` (FastMCP's "no
+  auth": the server installs no provider), `'jwt'` a `JWTVerifier`
+  (`fastmcp.server.auth.providers.jwt`), `'oidc'` an `OIDCProxy` (imported, with `AuthProvider`,
+  from `fastmcp.server.auth`, which re-exports `fastmcp.server.auth.oidc_proxy`). A new auth mode
+  is a new entry **plus** the `-a/--auth` `choices` list in `MCPServerApp` — they are not derived
+  from each other.
 - OIDC requires all four of `OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `MCP_BASE_URL`;
-  the all-or-nothing check exists so a half-configured proxy fails at startup, not at first request.
+  the all-or-nothing check exists so a half-configured proxy fails at startup, before any provider
+  is built or any request is made, with an error naming all four. FastMCP 4's `OIDCProxy` makes
+  `client_secret` optional; it is required here. `create_auth_oidc()` builds the module-level
+  `OIDCProxy` (no local import), which is what lets a test replace it and see nothing built.
+- **The OIDC proxy is held at the posture it had on FastMCP 2, pending a deliberate decision.**
+  FastMCP 4's `OIDCProxy` fetches client-supplied metadata documents (CIMD, `enable_cimd`) and
+  forwards the `resource` parameter upstream (`forward_resource`), both on by default; FastMCP 2
+  did neither.
+  `create_auth_oidc()` passes both `False`. Turning either on is a posture change, not a cleanup:
+  decide it, then change this line, `SECURITY.md` and the posture test together.
+- **Upgrading an `-a oidc` deployment from FastMCP 2 drops its client registrations** (an accepted
+  change, § Project). The proxy's store moved from an encrypted `DiskStore` at
+  `<home>/oauth-proxy/cache.db` to an encrypted `FileTreeStore` under
+  `<home>/oauth-proxy/<key-fingerprint>/` (`<home>` is FastMCP's home directory), and the new store
+  does not read the old one, so every client registered before the upgrade must register again.
 
 ### 7. Tool registration is an import-time side effect (`tools/__init__.py`)
 
 - `TOOL_REGISTRY` and `mcp_tool` are defined **first**, then each tool module is imported at the
   bottom of the file. `@mcp_tool` appends at decoration time, so **a tool module missing from that
   import list registers nothing and fails silently** — no error, just an absent tool.
-- **`@mcp_tool` replaces the function with a `fastmcp.tools.tool.FunctionTool`, which is not
-  callable.** Other Python code cannot invoke a decorated tool directly; `storage_paths()` from
+- **`@mcp_tool` replaces the function with a `fastmcp.tools.function_tool.FunctionTool`, which is
+  not callable** (the function itself is its `.fn`). Other Python code cannot invoke a decorated
+  tool directly; `storage_paths()` from
   `resources.py` raises `TypeError: 'FunctionTool' object is not callable`. When logic must be shared
   between a tool and something else, factor it into an undecorated helper and have both call that.
   (`resources.py` currently gets this wrong — see the `storage-paths-resource-typeerror` seed.)
+- **`@mcp_tool` serves the full docstring as the description**
+  (`Tool.from_function(func, description=inspect.getdoc(func))`). FastMCP 4 on its own serves only
+  the summary paragraph; dropping the keyword silently cuts `Args:`, `Returns:` and `Examples:` from
+  what every model reads (§9). FastMCP 4 also copies each `Args:` line into that argument's
+  `description` in the input schema, whatever the keyword says.
 - Tool return values are serialized by FastMCP. Returning a `@dataclass` (`CommandResult`,
   `StoragePaths`) is supported and used; returning an arbitrary object is not.
 
@@ -728,6 +891,13 @@ What each mode means:
   every user's executor reports the same `socket.gethostname()`, so the first user's context is served
   to all subsequent users. That is a known defect with a filed seed, not a design choice — do not
   build new per-user state on this cache, and do not key any new cache on `hostname` alone.
+- **A resource read gets no executor.** Both executor middlewares set it in `on_call_tool` only, so
+  reading `rcac://context` fails with `No executor configured` in every mode and both protocol
+  eras (it did on FastMCP 2 too). It fails closed. That is a known defect with a filed seed
+  (`issues/resource-reads-without-executor.md`), not a design choice; a fix that sets an executor
+  for reads makes the cache above reachable across users in delegate mode, so it lands with or
+  after that cache's retirement. Never satisfy a read with an executor that is not the request's
+  own (§1).
 
 ### 9. The agent-facing surface is part of the API (`server.py`) [human gate]
 
@@ -738,14 +908,23 @@ What each mode means:
 - The same commit also updates the tool inventory in `README.md`, which is what a human reads before
   installing. Both are user-visible contracts.
 - Tool **docstrings** are the per-tool schema description sent over MCP, which every model reads;
-  they are API surface, not internal notes. Keep the `Args:` / `Returns:` / `Examples:` shape the
-  existing tools use.
+  they are API surface, not internal notes. The whole docstring is served as the description (§7),
+  and each `Args:` line is served a second time as its argument's `description` in the input
+  schema. Keep the `Args:` / `Returns:` / `Examples:` shape the existing tools use.
+- **The served surface is pinned** against `tests/fixtures/served_surface.json`, the snapshot of
+  what the server served before the FastMCP 4 move (`tests/test_surface.py`, § Testing): tool names,
+  descriptions, argument names, required lists, types and defaults, resources and instructions.
+  Any change to them, a reworded docstring line included, fails `test_served_surface_matches_baseline`.
+  The fixture is 2.x-shaped by design (re-taken on the current stack it carries FastMCP 4's
+  metadata, which the fixture's shape test rejects), so how it follows a deliberate surface change
+  is not settled yet: raise it before making one (`issues/surface-fixture-after-a-surface-change.md`).
 
 ### Conventions (same-commit rules)
 
 - **Version is single-sourced from `pyproject.toml`**, the release recipe's `version.source` —
   `rcac_mcp.__version__` reads it via `importlib.metadata.version('rcac-mcp')`. Never hardcode a
-  version anywhere else. The release recipe's `gate` mirrors CI.
+  version anywhere else. There is no CI yet; the workflow the `ci-workflow` seed adds is to
+  mirror the release recipe's `gate`.
 - **Supported Python is 3.14+** (`requires-python = ">=3.14"`). Do not add compatibility shims for
   older interpreters.
 - A change to `[project.dependencies]` or `[dependency-groups]` and its `uv lock` land in the same

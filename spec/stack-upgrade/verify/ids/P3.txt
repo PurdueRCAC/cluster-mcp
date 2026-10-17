@@ -1,0 +1,19 @@
+# P3: the served surface matches the 3d010ec snapshot (R3).
+test_surface.py::test_served_surface_matches_baseline
+test_surface.py::test_surface_fixture_is_the_baseline_shape
+test_surface.py::test_surface_check_catches_drift[renamed-tool]
+test_surface.py::test_surface_check_catches_drift[dropped-argument]
+test_surface.py::test_surface_check_catches_drift[required-changed]
+test_surface.py::test_surface_check_catches_drift[type-changed]
+test_surface.py::test_surface_check_catches_drift[default-changed]
+test_surface.py::test_surface_check_catches_drift[description-changed]
+test_surface.py::test_surface_check_catches_drift[resource-dropped]
+test_surface.py::test_surface_check_catches_drift[instructions-changed]
+test_surface.py::test_surface_check_catches_drift[output-changed]
+test_surface.py::test_surface_check_catches_drift[untolerated-key]
+test_surface.py::test_surface_check_catches_drift[additional-properties-true]
+test_surface.py::test_surface_check_catches_drift[output-description-on-a-plain-node]
+test_surface.py::test_surface_check_tolerates_listed_differences[argument-description]
+test_surface.py::test_surface_check_tolerates_listed_differences[additional-properties]
+test_surface.py::test_surface_check_tolerates_listed_differences[output-defs-inlined]
+test_surface.py::test_surface_check_tolerates_listed_differences[output-model-description]

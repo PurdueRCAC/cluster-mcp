@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:stack-upgrade
 kind: refactor
 appetite: big
 lane: public

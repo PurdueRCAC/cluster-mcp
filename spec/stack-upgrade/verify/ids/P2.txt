@@ -1,0 +1,14 @@
+# P2: both protocol eras, each pinned by its own test (R2).
+test_protocol.py::test_client_era_is_served[legacy-memory]
+test_protocol.py::test_client_era_is_served[legacy-http]
+test_protocol.py::test_client_era_is_served[modern-memory]
+test_protocol.py::test_client_era_is_served[modern-http]
+test_protocol.py::test_era_check_catches_drift[legacy-discovered]
+test_protocol.py::test_era_check_catches_drift[modern-initialized]
+test_protocol.py::test_era_check_catches_drift[modern-fell-back]
+test_protocol.py::test_era_check_catches_drift[modern-pinned]
+test_protocol.py::test_era_check_catches_drift[instructions-missing]
+test_protocol.py::test_era_check_catches_drift[tools-missing]
+test_protocol.py::test_modern_era_delegate_calls_stay_isolated
+test_protocol.py::test_modern_era_tokenless_delegate_call_is_refused
+test_protocol.py::test_modern_era_rejects_a_foreign_token

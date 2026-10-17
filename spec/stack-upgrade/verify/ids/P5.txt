@@ -1,0 +1,26 @@
+# P5: auth (R5 through the existing test_tokens.py ids, which the baseline already requires; R6; R7).
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CONFIG_URL-unset]
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CONFIG_URL-empty]
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CLIENT_ID-unset]
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CLIENT_ID-empty]
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CLIENT_SECRET-unset]
+test_auth_modes.py::test_oidc_requires_all_four[OIDC_CLIENT_SECRET-empty]
+test_auth_modes.py::test_oidc_requires_all_four[MCP_BASE_URL-unset]
+test_auth_modes.py::test_oidc_requires_all_four[MCP_BASE_URL-empty]
+test_auth_modes.py::test_oidc_with_all_four_builds_the_proxy
+test_auth_modes.py::test_oidc_proxy_keeps_the_2x_posture
+test_auth_modes.py::test_oidc_check_catches_drift[provider-built]
+test_auth_modes.py::test_oidc_check_catches_drift[accepted]
+test_auth_modes.py::test_oidc_check_catches_drift[name-missing]
+test_auth_modes.py::test_oidc_check_catches_drift[network]
+test_auth_modes.py::test_oidc_check_catches_drift[unknown-keyword]
+test_auth_modes.py::test_oidc_check_catches_drift[cimd-enabled]
+test_auth_modes.py::test_oidc_check_catches_drift[resource-forwarded]
+test_auth_modes.py::test_none_mode_installs_no_provider
+test_auth_modes.py::test_auth_modes_annotation_is_a_provider_factory_map
+test_auth_modes.py::test_annotation_check_catches_drift[slice]
+test_auth_modes.py::test_annotation_check_catches_drift[not-final]
+test_auth_modes.py::test_annotation_check_catches_drift[wrong-key]
+test_auth_modes.py::test_annotation_check_catches_drift[takes-an-argument]
+test_auth_modes.py::test_annotation_check_catches_drift[any-arguments]
+test_auth_modes.py::test_annotation_check_catches_drift[not-a-mapping]

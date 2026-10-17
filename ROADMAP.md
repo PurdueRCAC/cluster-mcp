@@ -27,8 +27,12 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Five cycles, ending in **release 0.1.1**. The first gives the factory a gate that runs the test suite
+Six cycles, ending in **release 0.1.1**. The first gives the factory a gate that runs the test suite
 on push; the rest fix what today's users hit, each built on the one before.
+
+*Corrected 2026-10-17: `stack-upgrade` lands before `ci-workflow`, so the release recipe's `gate`
+gains the dependency audit first; `ci-workflow`, landing after it, mirrors that gate — audit
+included — through its "CI mirrors the gate" check.*
 
 ## Nothing runs on push
 
@@ -37,6 +41,10 @@ recipe says so out loud and its local gate is currently the only thing between a
 permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so
 `spec/` and `.security/` can never reach a published artifact — is the cheap half, and it makes
 every later gate real. `stack-upgrade` adds a dependency-audit step to it.
+
+*Corrected 2026-10-17: `stack-upgrade` lands first and puts the dependency audit in the release
+recipe's `gate`; this cycle's workflow then runs it as part of mirroring that gate, rather than
+`stack-upgrade` adding a step to a workflow that does not exist yet.*
 
 *Corrected 2026-10-16: the suite is no longer docs-only; the strip left `test_registry.py`,
 `test_instructions.py` and `test_cli.py`. `restore-test-coverage` has since pinned the coupled core
@@ -55,8 +63,12 @@ annotations and tool search) are built directly on the FastMCP API, so moving fi
 each of them once instead of twice. The cycle also puts a dependency-audit step in CI, so
 advisories against the lock stay visible from now on.
 
+*Corrected 2026-10-17: the dependency audit (`bin/audit_lock.py`) lives in the release recipe's
+`gate`, not in CI: no workflow exists yet. This cycle lands first; `ci-workflow` lands after it and
+picks the audit step up through its "CI mirrors the gate" check.*
+
 *Horizon: near-term · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16), ci-workflow (the upgrade lands against a real gate) · Refs: absorbs `auth-modes-annotation-typo`; prerequisite for `agents-d-instructions`, `capability-extras`, `tool-surface`, `https-token-mode`*
-**Seed:** [`issues/stack-upgrade.md`](issues/stack-upgrade.md) · *status: unshaped*
+**Seed:** [`issues/stack-upgrade.md`](issues/stack-upgrade.md) · *status: adopted:stack-upgrade*
 
 ### Absorbed: a type annotation that is accidentally a slice
 
@@ -67,7 +79,7 @@ a request is authenticated is worse than a loud one. `auth.py` is rewritten in `
 anyway, so the fix and its test ride with it. Found by the harness port, 2026-08-26.
 
 *Horizon: with stack-upgrade · Depends on: — · Refs: absorbed by `stack-upgrade`*
-**Seed:** [`issues/auth-modes-annotation-typo.md`](issues/auth-modes-annotation-typo.md) · *status: unshaped*
+**Seed:** [`issues/auth-modes-annotation-typo.md`](issues/auth-modes-annotation-typo.md) · *status: adopted:stack-upgrade*
 
 ## The rcac://storage resource fails on every read
 
@@ -128,6 +140,18 @@ retires the cache rather than patching it. Found by the harness port, 2026-08-26
 
 *Horizon: with agents-d-instructions · Depends on: — · Refs: absorbed by `agents-d-instructions`; `AGENTS.md` § Invariants §8 documents the defect as a known one*
 **Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
+
+## Reading rcac://context always fails
+
+Both executor middlewares set the request's executor in `on_call_tool` only, so a resource read
+carries none, and `rcac://context` fails with `No executor configured` in every mode and both
+protocol eras, on FastMCP 2 and 4 alike. It fails closed: nothing runs. The fix gives a read the
+executor of the request that made it, the mapped user's in `delegate` mode, which is also what makes
+the process-global context cache above reachable across users through the resource, so it lands
+with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026-10-17.
+
+*Horizon: near-term · Depends on: agents-d-instructions (it retires the cache, and may settle this outright) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; `storage-paths-resource-typeerror` is the other resource's failure*
+**Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: unshaped*
 
 **Release 0.1.1.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
@@ -297,6 +321,18 @@ untracked versus tracked) fixes the message. Found by the `strip-docs-subsystem`
 
 *Horizon: later · Depends on: — · Refs: split out of `restore-test-coverage`*
 **Seed:** [`issues/absence-check-leftover-classification.md`](issues/absence-check-leftover-classification.md) · *status: unshaped*
+
+## The surface pin cannot follow a deliberate surface change
+
+`tests/fixtures/served_surface.json` is the surface `3d010ec` served, taken on FastMCP 2, and
+`tests/test_surface.py` rejects a fixture re-taken on FastMCP 4 because it carries the new stack's
+schema metadata. After a deliberate change to a tool, an argument or the instructions there is no
+FastMCP 2 build of the new surface to snapshot, so the only way to update the pin is to hand-edit
+it, unchecked. A maintained snapshot command on the current stack, with a one-time re-baseline that
+retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 2026-10-17.
+
+*Horizon: before the first cycle that changes the served surface · Depends on: — · Refs: `AGENTS.md` § Invariants §9 says the question is open; first needed by `safe-execution` (`args` on `sbatch`), `tool-surface` or `agents-d-instructions`, whichever lands first*
+**Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: unshaped*
 
 ---
 

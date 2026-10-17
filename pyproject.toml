@@ -5,7 +5,7 @@ description = "Purdue RCAC MCP Server: Enables agentic development with HPC clus
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastmcp>=2.0.0,<3",
+    "fastmcp>=4,<5",
     "cmdkit>=2.7.7",
     "pyjwt>=2.0",
     "fabric>=3.0",

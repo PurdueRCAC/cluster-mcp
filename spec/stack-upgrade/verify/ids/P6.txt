@@ -1,0 +1,12 @@
+# P6: the dependency audit's verdict function and its offline fail-closed path (R10).
+test_audit.py::test_audit_check_accepts_a_clean_audit
+test_audit.py::test_audit_check_catches[finding]
+test_audit.py::test_audit_check_catches[offline]
+test_audit.py::test_audit_check_catches[unreachable]
+test_audit.py::test_audit_check_catches[cannot-run]
+test_audit.py::test_audit_check_catches[short-count]
+test_audit.py::test_audit_check_catches[no-summary]
+test_audit.py::test_audit_check_catches[finding-with-exit-zero]
+test_audit.py::test_audit_names_this_checkout_whatever_uv_project_says
+test_audit.py::test_audit_env_drops_uv_selectors
+test_audit.py::test_audit_fails_closed_offline

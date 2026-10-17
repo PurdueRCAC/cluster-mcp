@@ -7,8 +7,10 @@ No test may read or write the developer's real HOME, reach a real host or run a 
 tests are held to that at runtime by the guard in `conftest.py`; integration tests launch processes
 on purpose, so `sandbox_violations` holds every launch in every test module to `bin/sandbox.sh`
 statically. The tests below prove each rail is in place, so a broken one fails loudly instead of
-letting every other test pass unguarded. One more rail keeps the stack upgrade's blast radius
-known: no test module but `harness.py` imports FastMCP, mcp or httpx (`stack_import_violations`).
+letting every other test pass unguarded. One more rail keeps a stack move's blast radius known: no
+test module but `harness.py` imports the stack, FastMCP, mcp (and its `mcp_types`) or the HTTP
+client (`httpx2`, `httpcore2`, and the older `httpx`), by any route the check can read
+(`stack_import_violations`).
 """
 
 from __future__ import annotations
@@ -190,15 +192,18 @@ def test_sandbox_check_catches_unsandboxed(source: str, fragment: str) -> None:
     assert any(fragment in v for v in violations), violations
 
 
-# The stack the `stack-upgrade` seed moves. Only the harness may import it, so that move rewrites the
+# The stack, by every top-level import name it ships under: FastMCP, the MCP SDK and its protocol
+# types, and the HTTP client (`httpx2`/`httpcore2` today; `httpx` stays listed so a stray import of
+# the old client is caught too). Only the harness may import it, so a stack move rewrites the
 # harness and the internals-bound modules AGENTS.md lists (which reach the stack through objects the
 # harness or `rcac_mcp` hands them), and nothing else.
-STACK = ('fastmcp', 'mcp', 'httpx')
+STACK = ('fastmcp', 'mcp', 'mcp_types', 'httpx', 'httpx2', 'httpcore2')
 STACK_HOME = 'harness.py'
 
 
-# The functions that import a module named by a string, whatever they are reached through.
-IMPORTERS = ('import_module', '__import__')
+# The functions that import a module named by a string, whatever they are reached through:
+# `pytest.importorskip` imports its module as surely as `import_module` does.
+IMPORTERS = ('import_module', '__import__', 'importorskip')
 
 
 def _literal(node: ast.expr | None) -> str | None:
@@ -211,7 +216,7 @@ def _imported_name(call: ast.Call, importers: set[str]) -> str | None:
     if callee is None or (callee.rsplit('.', 1)[-1] not in IMPORTERS and callee not in importers):
         return None
     keywords = {k.arg: k.value for k in call.keywords if k.arg}
-    name = _literal(call.args[0] if call.args else keywords.get('name'))
+    name = _literal(call.args[0] if call.args else keywords.get('name', keywords.get('modname')))
     if name and name.startswith('.'):
         # `import_module('.client', 'fastmcp')` resolves against its package argument.
         return _literal(call.args[1] if len(call.args) > 1 else keywords.get('package'))
@@ -219,13 +224,15 @@ def _imported_name(call: ast.Call, importers: set[str]) -> str | None:
 
 
 def stack_import_violations(source: str, filename: str) -> list[str]:
-    """Return every import of FastMCP, mcp or httpx in `source`; empty for the harness or a clean module.
+    """Return every import of a `STACK` name in `source`; empty for the harness or a clean module.
 
     Reads, at any depth (so an import tucked inside a function is found too): `import` and
-    `from … import`; and a call to `importlib.import_module` or `__import__` whose module name is
-    a string literal, positional or `name=`, reached by any dotted path ending in the importer's
-    name (`importlib.import_module`, `builtins.__import__`, a bare `import_module`) or by the alias
-    a `from importlib import import_module as …` binds. A relative name reads its literal package.
+    `from … import`; and a call to `importlib.import_module`, `__import__` or
+    `pytest.importorskip` whose module name is a string literal, positional, `name=` or
+    `modname=`, reached by any dotted path ending in the importer's name
+    (`importlib.import_module`, `builtins.__import__`, `pytest.importorskip`, a bare
+    `import_module` or `importorskip`) or by the alias a `from importlib import import_module as …`
+    or `from pytest import importorskip as …` binds. A relative name reads its literal package.
 
     What it cannot read: a module name that is not a literal (a variable, an f-string, a
     concatenation); an importer rebound by assignment or reached through `getattr`, a container or
@@ -236,7 +243,7 @@ def stack_import_violations(source: str, filename: str) -> list[str]:
         return []
     tree = ast.parse(source, filename)
     importers = {alias.asname for node in ast.walk(tree)
-                 if isinstance(node, ast.ImportFrom) and node.module in ('importlib', 'builtins')
+                 if isinstance(node, ast.ImportFrom) and node.module in ('importlib', 'builtins', 'pytest')
                  for alias in node.names if alias.name in IMPORTERS and alias.asname}
     found: list[tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -285,6 +292,28 @@ def test_stack_import_check_catches_imports(source: str, fragment: str) -> None:
     for clean in ('from harness import JWTVerifier, call\nimport mcpx\nfrom rcac_mcp.server import create_mcp_server\n',
                   'from . import mcp\n',
                   'from importlib import import_module\nimport_module("rcac_mcp.docs")\nimport_module(name)\n'):
+        assert stack_import_violations(clean, 'f.py') == [], clean
+    assert stack_import_violations(source, STACK_HOME) == []
+    violations = stack_import_violations(source, 'f.py')
+    assert any(fragment in v for v in violations), violations
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('source', 'fragment'), [
+    pytest.param('from httpx2 import AsyncClient\n', 'f.py:1: imports httpx2', id='from-httpx2'),
+    pytest.param('import json\nimport httpcore2\n', 'f.py:2: imports httpcore2', id='import-httpcore2'),
+    pytest.param('import mcp_types\n', 'f.py:1: imports mcp_types', id='import-mcp-types'),
+    pytest.param('import pytest\nfastmcp = pytest.importorskip("fastmcp")\n', 'f.py:2: imports fastmcp',
+                 id='importorskip'),
+    pytest.param('import pytest\npytest.importorskip(modname="httpx2")\n', 'f.py:2: imports httpx2',
+                 id='importorskip-modname'),
+    pytest.param('from pytest import importorskip as need\nneed("mcp_types")\n', 'f.py:2: imports mcp_types',
+                 id='importorskip-alias'),
+])
+def test_stack_import_check_catches_new_stack_names(source: str, fragment: str) -> None:
+    # The new stack's import names, and pytest.importorskip, are read like any other import.
+    for clean in ('import httpx2x\nimport mcp_typesafe\n', 'import pytest\npytest.importorskip("yaml")\n',
+                  'from pytest import importorskip as need\nneed(name)\n'):
         assert stack_import_violations(clean, 'f.py') == [], clean
     assert stack_import_violations(source, STACK_HOME) == []
     violations = stack_import_violations(source, 'f.py')
