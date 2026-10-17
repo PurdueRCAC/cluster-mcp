@@ -70,3 +70,6 @@ absorbs it and reads the files once at startup, which may settle this seed too).
 - FastMCP 4's `Middleware` has a read-resource hook beside `on_call_tool`; whether the executor
   middlewares should take it, or the handlers get their executor another way, is the plan's call.
 - Found by: `stack-upgrade` research (2026-10-17), filed at P7.
+- 2026-10-17: absorbs [`storage-paths-resource-typeerror.md`](storage-paths-resource-typeerror.md)
+  in `ROADMAP.md`: that handler needs a read's executor too, so R4's read of each served resource
+  covers both fixes.

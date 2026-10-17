@@ -76,3 +76,7 @@ this cannot silently regress.
 - 2026-10-16: the suite is no longer documentation tests. The docs strip left
   `tests/test_registry.py`, `tests/test_instructions.py` and `tests/test_cli.py`, and none of them
   reads `rcac://storage`, so the resource is still untested.
+- 2026-10-17: absorbed by [`resource-reads-without-executor.md`](resource-reads-without-executor.md)
+  in `ROADMAP.md`. `storage_paths` runs `findscratch` and `myquota` through `get_executor()`, and a
+  resource read gets no executor yet, so fixing the import alone would only swap this `TypeError`
+  for `No executor configured`. Both resources are fixed in that one cycle.

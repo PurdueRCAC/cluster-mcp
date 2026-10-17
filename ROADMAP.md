@@ -27,13 +27,17 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Five cycles remain, ending in **release 0.1.1**; a sixth, `stack-upgrade`, landed on `develop` on
+Four cycles remain, ending in **release 0.1.1**; `stack-upgrade` landed on `develop` on
 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)). The next gives the factory a gate that
 runs the test suite on push; the rest fix what today's users hit, each built on the one before.
 
 *Corrected 2026-10-17: `stack-upgrade` landed before `ci-workflow`, so the release recipe's `gate`
 gained the dependency audit first; `ci-workflow`, landing next, mirrors that gate — audit
 included — through its "CI mirrors the gate" check.*
+
+*Corrected 2026-10-17: the `rcac://storage` fix moved under the resource-read entry below. Its
+handler runs `findscratch` and `myquota` through the request's executor, which a read does not get
+yet, so fixing the `TypeError` alone would only change the error a client sees.*
 
 ## Nothing runs on push
 
@@ -53,18 +57,6 @@ of mirroring that gate, rather than `stack-upgrade` adding a step to a workflow 
 
 *Horizon: now · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*
-
-## The rcac://storage resource fails on every read
-
-`resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
-`fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
-`TypeError: 'FunctionTool' object is not callable` on every read. Reproduced directly. The generic
-lesson is already recorded as an invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called
-from Python; factor shared logic into an undecorated helper), but the resource itself is still broken.
-It follows `stack-upgrade`, so the fix is made against the `Tool` type that stays.
-
-*Horizon: near-term · Depends on: stack-upgrade (cleared: landed on `develop` 2026-10-17) · Refs: the same helper split that `generalize-storage-discovery` needs*
-**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
 
 ## Every tool passes exactly what it was given
 
@@ -114,7 +106,7 @@ retires the cache rather than patching it. Found by the harness port, 2026-08-26
 *Horizon: with agents-d-instructions · Depends on: — · Refs: absorbed by `agents-d-instructions`; `AGENTS.md` § Invariants §8 documents the defect as a known one*
 **Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
 
-## Reading rcac://context always fails
+## Neither advertised resource can be read
 
 Both executor middlewares set the request's executor in `on_call_tool` only, so a resource read
 carries none, and `rcac://context` fails with `No executor configured` in every mode and both
@@ -123,8 +115,20 @@ executor of the request that made it, the mapped user's in `delegate` mode, whic
 the process-global context cache above reachable across users through the resource, so it lands
 with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026-10-17.
 
-*Horizon: near-term · Depends on: agents-d-instructions (it retires the cache, and may settle this outright) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; `storage-paths-resource-typeerror` is the other resource's failure*
+*Horizon: near-term · Depends on: agents-d-instructions (it retires the cache, and may settle this outright) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
 **Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: unshaped*
+
+### Absorbed: the rcac://storage resource fails on every read
+
+`resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
+`fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
+`TypeError: 'FunctionTool' object is not callable` on every read. The generic lesson is already an
+invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called from Python; factor shared
+logic into an undecorated helper). The tool it calls runs `findscratch` and `myquota` through the
+request's executor, so the summary comes back only once a read has one: the two fixes land together.
+
+*Horizon: with resource-reads-without-executor · Depends on: — · Refs: absorbed by `resource-reads-without-executor`; the same helper split that `generalize-storage-discovery` needs*
+**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
 
 **Release 0.1.1.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
