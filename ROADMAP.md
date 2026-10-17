@@ -43,8 +43,11 @@ consult a tool this server should no longer own.
 This goes first. Every later cycle touches a smaller tree once it is gone, and the rename in
 particular is meaningfully cheaper.
 
+*Corrected 2026-10-16: the `strip-docs-subsystem` cycle removed all of this; the entry retires when
+that cycle lands on `develop`.*
+
 *Horizon: now · Depends on: — · Refs: forces `restore-test-coverage`*
-**Seed:** [`issues/strip-docs-subsystem.md`](issues/strip-docs-subsystem.md) · *status: unshaped*
+**Seed:** [`issues/strip-docs-subsystem.md`](issues/strip-docs-subsystem.md) · *status: adopted:strip-docs-subsystem*
 
 ## Every test in the suite is a docs test
 
@@ -54,6 +57,11 @@ it, and the coupled core it leaves behind — the `ContextVar` isolation contrac
 precedence, the user-map enforcement, the `sudo` argv, the exec-mode ladder — has **never had a
 test**. Those are exactly the paths `AGENTS.md` § Invariants marks highest-blast-radius, and a `verify:` gate
 over an empty suite is theatre.
+
+*Corrected 2026-10-16: the strip replaced the suite rather than emptying it. `tests/` now holds
+`test_registry.py`, `test_instructions.py` and `test_cli.py` (30 tests, none a docs test: tool
+registry, served instructions, removed CLI flags) and a `conftest.py` that fails the run on an
+unmarked test. The coupled core named above still has no test.*
 
 *Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem · Refs: gates the credibility of every later cycle's verify command*
 **Seed:** [`issues/restore-test-coverage.md`](issues/restore-test-coverage.md) · *status: unshaped*
@@ -65,6 +73,10 @@ recipe says so out loud and its local gate is currently the only thing between a
 permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so
 `spec/` and `.security/` can never reach a published artifact — is the cheap half, and it makes
 every later gate real. `stack-upgrade` adds a dependency-audit step to it.
+
+*Corrected 2026-10-16: the suite is no longer docs-only; the strip left `test_registry.py`,
+`test_instructions.py` and `test_cli.py`. The coupled core is still untested, so the dependency on
+`restore-test-coverage` stands.*
 
 *Horizon: now · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*

@@ -55,7 +55,6 @@ APP_USAGE = f"""\
 Usage:
   {APP_NAME} [-h] [-v] [-t TRANSPORT] [-H HOST] [-p PORT] [-a AUTH] [-e EXEC_MODE] [--ssh-host HOST]
              [--generate-token] [--lifetime SECONDS]
-             [--index-docs --docs-path PATH] [--docs-output PATH]
 
   {__description__}\
 """
@@ -104,20 +103,11 @@ Environment Variables:
   RCAC_SSH_HOST       Default SSH host (can be overridden with --ssh-host).
   RCAC_USER_MAP       Path to user mapping file for delegate mode.
 
-Documentation Indexing:
-      --index-docs              Build/update the documentation search index and exit.
-      --docs-path   PATH        Path to the RCAC-Docs repo root (contains main.py, mkdocs.yml, docs/).
-      --docs-output PATH        Output path for docs database (default: ~/.config/rcac-mcp/docs.db).
-
-  When --index-docs is set, the server builds the FTS5 search index from the
-  RCAC-Docs repository and exits. Use --docs-path to point at the repo root.
-
 Examples:
   {APP_NAME} --ssh-host cluster.rcac.purdue.edu   # SSH to cluster (stdio)
   {APP_NAME} -t http --ssh-host cluster.edu       # HTTP server with SSH execution
   {APP_NAME} -t http -e local                     # Local execution over HTTP
-  {APP_NAME} -t http -a jwt -e delegate           # Delegate to auth user
-  {APP_NAME} --index-docs --docs-path ../RCAC-Docs # Build docs search index\
+  {APP_NAME} -t http -a jwt -e delegate           # Delegate to auth user\
 """
 
 
@@ -158,15 +148,6 @@ class MCPServerApp(Application):
     lifetime: int = DEFAULT_LIFETIME
     interface.add_argument('--lifetime', type=int, default=lifetime)
 
-    index_docs_flag: bool = False
-    interface.add_argument('--index-docs', action='store_true', dest='index_docs_flag')
-
-    docs_path: str | None = None
-    interface.add_argument('--docs-path', default=docs_path)
-
-    docs_output: str | None = None
-    interface.add_argument('--docs-output', default=docs_output)
-
     log_critical = log.critical
     log_exception = log.exception
     exceptions = {
@@ -176,11 +157,7 @@ class MCPServerApp(Application):
     }
 
     def run(self) -> None:
-        """Run the MCP server, generate token, or build docs index."""
-        if self.index_docs_flag:
-            self._run_index_docs()
-            return
-
+        """Run the MCP server or generate token."""
         if self.generate_token_flag:
             secret = os.environ.get('JWT_SECRET')
             if not secret:
@@ -224,33 +201,6 @@ class MCPServerApp(Application):
             # Clean up executor (if any)
             if executor:
                 executor.close()
-
-    def _run_index_docs(self) -> None:
-        """Build or update the documentation search index."""
-        from rcac_mcp.docs import DocsIndexer, DEFAULT_DB_PATH
-
-        if not self.docs_path:
-            raise ValueError(
-                '--docs-path is required when using --index-docs'
-            )
-
-        db_path = self.docs_output or DEFAULT_DB_PATH
-
-        # Create output directory if it doesn't exist
-        db_dir = os.path.dirname(db_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
-
-        log.info('Building docs index from %s', self.docs_path)
-        log.info('Output: %s', db_path)
-
-        indexer = DocsIndexer(self.docs_path)
-        stats = indexer.build(db_path)
-
-        print(f'Documentation index built successfully:')
-        print(f'  Indexed:   {stats["indexed"]} documents ({stats["chunks"]} chunks)')
-        print(f'  Skipped:   {stats["skipped"]} unchanged')
-        print(f'  Removed:   {stats["removed"]} stale')
 
     def _resolve_exec_mode(self) -> str:
         """Determine execution mode from args or defaults."""

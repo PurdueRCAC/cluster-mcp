@@ -1,97 +1,123 @@
 # SPDX-FileCopyrightText: 2025 Purdue University
 # SPDX-License-Identifier: MIT
 
-"""Tests for CLI --index-docs integration."""
+"""The CLI rejects the removed documentation-indexing flags before anything runs."""
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Sequence
 
 import pytest
-
-from conftest import requires_submodule, RCAC_DOCS_DIR
-
-
-# ---------------------------------------------------------------------------
-# Help output
-# ---------------------------------------------------------------------------
-
-class TestHelpOutput:
-
-    def test_help_contains_index_docs(self) -> None:
-        result = subprocess.run(
-            [sys.executable, '-m', 'rcac_mcp', '--help'],
-            capture_output=True, text=True,
-        )
-        assert '--index-docs' in result.stdout
-        assert '--docs-path' in result.stdout
-        assert '--docs-output' in result.stdout
+from cmdkit.app import exit_status
 
 
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SANDBOX = REPO_ROOT / 'bin' / 'sandbox.sh'
 
-class TestCLIErrors:
+# The installed console script, which the editable install points at this tree.
+CLI = Path(sys.executable).with_name('rcac-mcp')
 
-    def test_index_docs_without_docs_path(self) -> None:
-        result = subprocess.run(
-            [sys.executable, '-m', 'rcac_mcp', '--index-docs'],
-            capture_output=True, text=True,
-        )
-        assert result.returncode != 0
-        assert '--docs-path' in result.stderr or '--docs-path' in result.stdout
-
-    def test_index_docs_invalid_path(self, tmp_path: Path) -> None:
-        result = subprocess.run(
-            [
-                sys.executable, '-m', 'rcac_mcp',
-                '--index-docs',
-                '--docs-path', str(tmp_path / 'nonexistent'),
-            ],
-            capture_output=True, text=True,
-        )
-        assert result.returncode != 0
+# Runs the CLI with no stdin, then reports every database file left under the sandbox HOME
+# on stderr, and exits with the CLI's own status.
+DRIVE_SCRIPT = """\
+"$@" < /dev/null
+status=$?
+find "$HOME" -type f -name '*.db' | while IFS= read -r path; do
+    printf 'DBFILE: %s\\n' "$path" >&2
+done
+exit "$status"
+"""
 
 
-# ---------------------------------------------------------------------------
-# Successful build
-# ---------------------------------------------------------------------------
+def flag_violations(returncode: int, stdout: str, stderr: str, flags: Sequence[str]) -> list[str]:
+    """Return every way a CLI result differs from a clean rejection of `flags`; empty means clean.
 
-@requires_submodule
-class TestCLIBuild:
+    A clean rejection exits with `exit_status.bad_argument`, names each flag after
+    `unrecognized arguments:`, never reaches the server (no `Execution mode` log line), prints
+    nothing to stdout, and leaves no database file behind.
+    """
+    violations: list[str] = []
+    if returncode != exit_status.bad_argument:
+        violations.append(f'exit status {returncode}, expected {exit_status.bad_argument}')
+    for flag in flags:
+        pattern = r'unrecognized arguments:.*' + re.escape(flag) + r'(?![\w-])'
+        if not re.search(pattern, stderr):
+            violations.append(f'stderr does not report {flag!r} as unrecognized')
+    if 'Execution mode' in stderr:
+        violations.append('the server started (stderr logs an execution mode)')
+    if stdout:
+        violations.append(f'stdout is not empty: {stdout[:80]!r}')
+    for line in stderr.splitlines():
+        if line.startswith('DBFILE:'):
+            violations.append(f'a database file was written: {line}')
+    return violations
 
-    def test_index_docs_builds_database(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'docs.db'
-        result = subprocess.run(
-            [
-                sys.executable, '-m', 'rcac_mcp',
-                '--index-docs',
-                '--docs-path', str(RCAC_DOCS_DIR),
-                '--docs-output', str(db_path),
-            ],
-            capture_output=True, text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0
-        assert 'Documentation index built successfully' in result.stdout
-        assert 'Indexed:' in result.stdout
-        assert db_path.exists()
 
-    def test_index_docs_incremental(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'docs.db'
-        args = [
-            sys.executable, '-m', 'rcac_mcp',
-            '--index-docs',
-            '--docs-path', str(RCAC_DOCS_DIR),
-            '--docs-output', str(db_path),
-        ]
-        # First build
-        subprocess.run(args, capture_output=True, text=True, timeout=120)
-        # Second build — should skip all
-        result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-        assert result.returncode == 0
-        assert 'Indexed:   0 documents' in result.stdout
-        assert 'Skipped:' in result.stdout
+def drive(argv: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run the installed CLI with `argv` inside a fresh bin/sandbox.sh environment."""
+    assert CLI.is_file(), f'installed CLI not found at {CLI}'
+    assert os.access(SANDBOX, os.X_OK), f'{SANDBOX} is not executable'
+    return subprocess.run(
+        [str(SANDBOX), 'sh', '-c', DRIVE_SCRIPT, 'sh', str(CLI), *argv],
+        capture_output=True, text=True, timeout=60, cwd=cwd,
+    )
+
+
+REMOVED_FLAG_CASES = [
+    pytest.param(lambda tmp: ['--index-docs'],
+                 ['--index-docs'], id='index-docs'),
+    pytest.param(lambda tmp: ['--docs-path', str(tmp)],
+                 ['--docs-path'], id='docs-path'),
+    pytest.param(lambda tmp: ['--docs-output', str(tmp / 'docs.db')],
+                 ['--docs-output'], id='docs-output'),
+    pytest.param(lambda tmp: ['--index-docs', '--docs-path', str(tmp),
+                              '--docs-output', str(tmp / 'docs.db')],
+                 ['--index-docs', '--docs-path', '--docs-output'], id='all-three'),
+    pytest.param(lambda tmp: ['-e', 'local', '--index-docs'],
+                 ['--index-docs'], id='local-index-docs'),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(('make_argv', 'flags'), REMOVED_FLAG_CASES)
+def test_removed_flag_is_rejected(make_argv, flags: list[str], tmp_path: Path) -> None:
+    result = drive(make_argv(tmp_path), cwd=tmp_path)
+    assert flag_violations(result.returncode, result.stdout, result.stderr, flags) == []
+    assert not (tmp_path / 'docs.db').exists()
+
+
+@pytest.mark.integration
+def test_flag_check_rejects_a_known_flag(tmp_path: Path) -> None:
+    # A known flag that still exits bad_argument must not pass as a rejection.
+    result = drive(['--generate-token'], cwd=tmp_path)
+    assert result.returncode == exit_status.bad_argument
+    assert 'JWT_SECRET' in result.stderr
+    assert flag_violations(result.returncode, result.stdout, result.stderr, ['--generate-token'])
+
+
+REJECTED = 'CRITICAL [rcac_mcp] unrecognized arguments: --index-docs'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('returncode', 'stdout', 'stderr'), [
+    pytest.param(0, '', 'INFO [rcac_mcp] Execution mode: local',
+                 id='started'),
+    pytest.param(exit_status.bad_argument, '',
+                 'INFO [rcac_mcp] Execution mode: ssh\n'
+                 'CRITICAL [rcac_mcp] SSH host required: use --ssh-host or set RCAC_SSH_HOST',
+                 id='ssh-host'),
+    pytest.param(exit_status.bad_argument, '',
+                 REJECTED + '\nDBFILE: /tmp/sandbox/.config/rcac-mcp/docs.db',
+                 id='db-written'),
+    pytest.param(exit_status.bad_argument, 'Documentation index built successfully:\n',
+                 REJECTED,
+                 id='stdout'),
+])
+def test_flag_check_catches_silent_accept(returncode: int, stdout: str, stderr: str) -> None:
+    assert flag_violations(exit_status.bad_argument, '', REJECTED, ['--index-docs']) == []
+    assert flag_violations(returncode, stdout, stderr, ['--index-docs'])

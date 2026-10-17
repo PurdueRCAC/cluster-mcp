@@ -76,21 +76,10 @@ docker compose up
 
 The server will be available at `https://mcp.rcac.dev:8443`.
 
-## Documentation Search Index
+## RCAC Documentation
 
-The server includes an FTS5-powered search index over RCAC documentation (user guides,
-software catalog, datasets, blog posts, workshops). Agents use `doc_search` and `doc_load`
-to consult authoritative docs before advising users.
-
-Build the index from a local clone of the [RCAC-Docs](https://github.com/purduercac/RCAC-Docs) repo:
-
-```bash
-rcac-mcp --index-docs --docs-path /path/to/RCAC-Docs
-```
-
-The database is stored at `~/.config/rcac-mcp/docs.db` by default (override with
-`--docs-output` or the `RCAC_DOCS_DB` environment variable). Re-running the command
-performs an incremental update — only changed files are reprocessed.
+This server does not search RCAC documentation. The separate `rcac-docs-mcp` service at
+`https://docs.rcac.purdue.edu/mcp` does: add it to your MCP client alongside this server.
 
 ## Available Tools
 
@@ -125,11 +114,6 @@ performs an incremental update — only changed files are reprocessed.
 - `scontrol_show_node(node)` — Detailed node info
 - `slist()` — Slurm accounts and usage (RCAC-specific)
 - `sfeatures()` — Node hardware features and constraints (RCAC-specific)
-
-### Documentation
-
-- `doc_search(query, category)` — Full-text search over RCAC documentation
-- `doc_load(path)` — Load the full content of a documentation page
 
 ## Development
 

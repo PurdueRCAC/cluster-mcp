@@ -9,5 +9,3 @@ Software & Modules: Load software using module load <name> (e.g., module load co
 Storage: Use $HOME (25GB, private, snapshots) for configs and small files. Use /depot/<group> for shared group data (persistent, moderate performance). Use $SCRATCH or $RCAC_SCRATCH for high-performance job I/O—it's large but regularly purged and not for long-term storage. Archive critical data to Fortress (tape) using hsi/htar. Check quotas with myquota. Avoid heavy I/O against /home or /depot; use /scratch for data-intensive jobs.
 
 Good Citizenship: Don't request excessive resources unnecessarily. Use /scratch for heavy I/O instead of /depot. Avoid submitting many tiny jobs—use workflow tools for task parallelism. Don't reserve resources (especially GPUs) and leave them idle.
-
-Documentation: Before advising on storage policies, job submission, software usage, or any RCAC-specific topic, use the `doc_search` tool to check official RCAC documentation. After finding a relevant result, use `doc_load` to read the full page. This ensures advice is grounded in current, authoritative information rather than general knowledge.

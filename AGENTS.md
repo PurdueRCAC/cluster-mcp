@@ -73,9 +73,8 @@ uv run rcac-mcp -e local                 # run locally (development only)
 uv run pytest -v                         # full suite
 uv run pytest -v -k "pattern"            # by name
 uv run pytest -v -m unit                 # marker: unit | integration (--strict-markers)
-                                         #   NOTE: selects NOTHING today — the markers are
-                                         #   registered but no test carries one yet. See the
-                                         #   restore-test-coverage seed in ROADMAP.md.
+                                         #   every test carries one; the conftest fails the
+                                         #   run on an unmarked test (§ Testing)
 
 # Drive the CLI safely: throwaway HOME, blank auth env, unreachable cluster.
 bin/sandbox.sh uv run rcac-mcp --help
@@ -119,7 +118,6 @@ Top-level package `src/rcac_mcp/`:
 | `tools/{shell,filesystem,transfer}.py` | Generic backend-agnostic tools: `run_command`, directory/file read+write, `upload_file`/`download_file`. |
 | `tools/slurm.py` | Slurm tools: `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`, plus RCAC's `slist`/`sfeatures`. |
 | `tools/rcac.py` | Purdue-specific: `myquota`, `storage_paths`, `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`. |
-| `docs/` + `tools/docs.py` | **Being removed.** The documentation search index moved to the separate `rcac-docs-mcp` service (live at `docs.rcac.purdue.edu/mcp`). See the `strip-docs-subsystem` seed in `ROADMAP.md`; do not build on it. |
 
 Two repo-level paths sit outside the package: **`bin/sandbox.sh`** — the throwaway-environment
 helper every CLI drive runs under (§ Factory → Throwaway environment); and **`spec/{slug}/`** — the
@@ -178,19 +176,43 @@ import has no effect.
 ## Testing
 
 - `uv run pytest`. Only **`@mark.unit`** and **`@mark.integration`** are real markers under
-  `--strict-markers` — tag every new test. **No existing test carries one**, so `-m unit` and
-  `-m integration` currently deselect all 81 and report "no tests ran"; the rule is forward-looking
-  until the `restore-test-coverage` cycle lands.
-- Integration tests drive the installed CLI and must run under `bin/sandbox.sh`,
-  stepping back into the repo first (`cd "$CLUSTER_MCP_REPO"`) so pytest finds `pyproject.toml`.
-- `tests/conftest.py` currently provides only docs-index fixtures, and **every test in the suite
-  today is a docs test** — removing the docs subsystem removes the whole suite. Rebuilding coverage
-  for the executor/middleware/tool core is a tracked seed, not an optional nicety.
-- The `tests/fixtures/RCAC-Docs` git submodule exists only for the docs index and goes with it.
-- **PyYAML is not a dev pin.** The factory FSM scripts live in the operator's KB, which runs them
-  with `uv run --with pyyaml`; nothing in this repository needs YAML outside the runtime docs
-  indexer, so dropping the runtime `pyyaml` dependency with the docs subsystem needs no harness
-  accommodation.
+  `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
+  hook that fails the run with a `pytest.UsageError` listing any collected test that carries
+  neither. So `-m unit` and `-m integration` each select a real subset.
+- The suite is three files, each built around **pure check functions** that `verify:` gates import
+  directly (`sys.path.insert(0, 'tests')`). Their names and the parametrised test ids are a
+  contract: renaming one breaks a gate loudly. Each check has standing negative controls, mutations
+  it must reject.
+  - `tests/test_registry.py` (`unit`): `EXPECTED_TOOLS`, `registry_violations`, `module_absent`,
+    `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves match
+    `EXPECTED_TOOLS` exactly, and the removed documentation modules stay unimportable; when one
+    does import, `absence_violations` says where from and reads what is there: bytecode alone is
+    the stale checkout below, with its remedy; any other file means the module was re-added, and
+    the message says so instead of offering a remedy. `EXPECTED_TOOLS` is hard-coded, so a tool
+    change edits it in the same commit as `SERVER_INSTRUCTIONS` and the README (§ Invariants §9).
+  - `tests/test_instructions.py` (`unit`): `instruction_violations`, `guidance_violations`,
+    `NON_TOOL_TERMS`. `SERVER_INSTRUCTIONS`, both as the constant and as served, lists exactly the
+    registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
+    search — that is the separate `rcac-docs-mcp` service, which only the README points to. This
+    is §9 made executable; it reads list entries and backticked or snake_case names, so a tool
+    whose name is a plain word, mentioned in bare prose, escapes it.
+  - `tests/test_cli.py`: `flag_violations`. The `integration` cases drive the installed CLI with
+    flags it no longer accepts and assert a clean `exit_status.bad_argument` rejection before the
+    server starts; the `unit` cases feed `flag_violations` synthetic results it must reject.
+- **A stale checkout fails the absence check, and the check is right.** Git leaves ignored files
+  behind, so a checkout that ran the code from before the documentation package was removed can
+  keep `src/rcac_mcp/docs/__pycache__/`. That directory imports as an empty namespace package, and
+  `test_docs_modules_absent[rcac_mcp.docs]` fails with a message naming the path. Delete the
+  leftover with `del src/rcac_mcp/docs` (§ Environment & working rules) and re-run; a fresh clone,
+  the wheel and the sdist never carry it.
+- Integration tests drive the installed CLI, and **each one wraps its own drives in
+  `bin/sandbox.sh`**. A whole-suite run under the sandbox still steps back into the repo first
+  (`cd "$CLUSTER_MCP_REPO"`) so pytest finds `pyproject.toml` (§ Commands).
+- That is the whole suite: the executor, middleware, auth and tool core have **no tests yet**.
+  Rebuilding coverage there is the `restore-test-coverage` seed, not an optional nicety.
+- **PyYAML is not a dependency of this repository**, runtime or dev; it reaches `uv.lock` only
+  transitively (through `fastmcp`), and nothing in `src/` imports it. The factory FSM scripts live
+  in the operator's KB, which runs them with `uv run --with pyyaml`.
 
 ## Packaging
 
@@ -619,9 +641,9 @@ What each mode means:
   `interface.add_argument` on `MCPServerApp` plus its entry in `APP_USAGE` / `APP_HELP`, in the same
   commit.
 - **Tests: only `@mark.unit` and `@mark.integration` are real markers** under `--strict-markers`. Tag
-  every new test. **No existing test carries a marker**, so `-m unit`/`-m integration` deselect
-  everything today — do not write a `verify:` gate whose only assertion is a marker selection, or it
-  passes green over zero tests. (Tracked: the `restore-test-coverage` seed.)
+  every new test; `tests/conftest.py` fails the run on one that carries neither (§ Testing). Still,
+  do not write a `verify:` gate whose only assertion is a marker selection: a selection can match
+  nothing, or not the tests you meant, and pass green. Name the test ids the gate depends on.
 - **A CLI drive — any verify or test drive — never touches the developer's real home, config, or a
   real cluster.** Wrap it in
   `bin/sandbox.sh`, which unsets `RCAC_SSH_HOST` so the default stdio→ssh path fails

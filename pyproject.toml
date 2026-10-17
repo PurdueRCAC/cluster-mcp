@@ -9,8 +9,6 @@ dependencies = [
     "cmdkit>=2.7.7",
     "pyjwt>=2.0",
     "fabric>=3.0",
-    "pyyaml>=6.0",
-    "jinja2>=3.1",
 ]
 
 [project.scripts]

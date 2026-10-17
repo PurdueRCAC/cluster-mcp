@@ -66,3 +66,7 @@ explicitly, not inherit from a workflow that grew.
   because a release can be cut from a machine before CI has run on that commit.
 - Related: [`restore-test-coverage.md`](restore-test-coverage.md) (strict prerequisite).
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: the suite is no longer docs-only. The docs strip left `tests/test_registry.py`,
+  `tests/test_instructions.py` and `tests/test_cli.py` (tool registry, served instructions, removed
+  CLI flags); the coupled core is still untested, so the sequencing after `restore-test-coverage`
+  stands.

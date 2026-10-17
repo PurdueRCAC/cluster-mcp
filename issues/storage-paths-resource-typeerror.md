@@ -73,3 +73,6 @@ this cannot silently regress.
 - Per the KB's `method/ears.md`, these criteria are phrased as observable broken→fixed behavior. The
   mechanism above is evidence, not contract — the plan step confirms the root cause.
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: the suite is no longer documentation tests. The docs strip left
+  `tests/test_registry.py`, `tests/test_instructions.py` and `tests/test_cli.py`, and none of them
+  reads `rcac://storage`, so the resource is still untested.

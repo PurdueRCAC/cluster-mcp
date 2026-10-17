@@ -1,3 +1,0 @@
-[submodule "tests/fixtures/RCAC-Docs"]
-	path = tests/fixtures/RCAC-Docs
-	url = git@github.com:PurdueRCAC/RCAC-Docs.git

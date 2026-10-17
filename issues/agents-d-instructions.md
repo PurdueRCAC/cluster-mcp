@@ -106,3 +106,9 @@ covers every Purdue cluster today).
   [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) (moves the resource URI and the budget's
   environment variable to the new prefix).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
+- 2026-10-16: `tests/test_instructions.py` cross-checks the served instructions against
+  `TOOL_REGISTRY`; once site context is composed in, rescope it to the server-authored core. Known
+  limitation (recorded, not fixed): it cannot see a plain-word tool name, or search guidance free of
+  doc-words, written in bare prose.
+- 2026-10-16: removing the documentation guidance shrank `SERVER_INSTRUCTIONS` from about 3.0K to
+  about 2.1K characters (2,988 to 2,085).

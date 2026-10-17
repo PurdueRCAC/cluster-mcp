@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:strip-docs-subsystem
 kind: refactor
 appetite: big
 lane: public

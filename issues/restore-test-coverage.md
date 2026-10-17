@@ -82,3 +82,14 @@ stand-ins — this cycle is where they become real tests instead of a reviewer's
 - Related: [`ci-workflow.md`](ci-workflow.md) depends on this — CI over a docs-only suite tests the
   wrong thing.
 - Found by: the harness port, 2026-08-26 (out of cycle).
+- 2026-10-16: the strip did not leave an empty suite or an empty conftest. It left
+  `tests/test_registry.py`, `tests/test_instructions.py` and `tests/test_cli.py` (tool registry,
+  served instructions, removed CLI flags) and a `tests/conftest.py` that fails the run on any test
+  without `unit` or `integration`, so R7's marker rule already holds; extend that conftest rather
+  than replace it. The coupled core above is still untested.
+- 2026-10-16: the strip-docs-subsystem review (cycle 3) observed that `absence_violations`
+  (`tests/test_registry.py`) classifies an importable leftover by file suffix, so an untracked
+  leftover that is neither bytecode nor source (`.DS_Store`, an interrupted `*.pyc.<n>` temp file)
+  is reported as a re-added module, with no remedy. The verdict is right; only the explanation is
+  off. When this suite is rebuilt, classify by git status (ignored or untracked versus tracked)
+  rather than by suffix.

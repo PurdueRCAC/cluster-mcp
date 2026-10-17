@@ -111,3 +111,7 @@ Open questions for shaping:
   (routes `file_find`), [`stack-upgrade.md`](stack-upgrade.md) (annotations and `_meta` on the
   current API).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
+- 2026-10-16: the docs strip removed `doc_search` and `doc_load`, so 23 tools remain. A JSON count of
+  each served tool's MCP definition gives 26.5K characters for the 25 tools before and 23.5K for the
+  23 after (the two were about 3.0K), so the 25.6K-character, 6.4K-token baseline above is about 11%
+  high: re-measure it before R8 reports against it.
