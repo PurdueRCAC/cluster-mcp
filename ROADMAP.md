@@ -27,25 +27,8 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Six cycles, ending in **release 0.1.1**. The first two give the factory a real test suite and a gate
-that runs on push; the rest fix what today's users hit, each built on the one before.
-
-## Every test in the suite is a docs test
-
-All 81 tests cover the documentation index — `test_database.py` (22), `test_indexer.py` (35),
-`test_tools.py` (19), `test_cli.py` (5). `strip-docs-subsystem` therefore takes the entire suite with
-it, and the coupled core it leaves behind — the `ContextVar` isolation contract, the identity-claim
-precedence, the user-map enforcement, the `sudo` argv, the exec-mode ladder — has **never had a
-test**. Those are exactly the paths `AGENTS.md` § Invariants marks highest-blast-radius, and a `verify:` gate
-over an empty suite is theatre.
-
-*Corrected 2026-10-16: the strip replaced the suite rather than emptying it. `tests/` now holds
-`test_registry.py`, `test_instructions.py` and `test_cli.py` (30 tests, none a docs test: tool
-registry, served instructions, removed CLI flags) and a `conftest.py` that fails the run on an
-unmarked test. The coupled core named above still has no test.*
-
-*Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem (cleared: landed on `develop` 2026-10-16) · Refs: gates the credibility of every later cycle's verify command*
-**Seed:** [`issues/restore-test-coverage.md`](issues/restore-test-coverage.md) · *status: adopted:restore-test-coverage*
+Five cycles, ending in **release 0.1.1**. The first gives the factory a gate that runs the test suite
+on push; the rest fix what today's users hit, each built on the one before.
 
 ## Nothing runs on push
 
@@ -56,10 +39,10 @@ permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-h
 every later gate real. `stack-upgrade` adds a dependency-audit step to it.
 
 *Corrected 2026-10-16: the suite is no longer docs-only; the strip left `test_registry.py`,
-`test_instructions.py` and `test_cli.py`. The coupled core is still untested, so the dependency on
-`restore-test-coverage` stands.*
+`test_instructions.py` and `test_cli.py`. `restore-test-coverage` has since pinned the coupled core
+([`spec/restore-test-coverage/`](spec/restore-test-coverage/)), so the suite is the real gate.*
 
-*Horizon: now · Depends on: restore-test-coverage (CI over a docs-only suite tests the wrong thing) · Refs: the release recipe's `gate` duplicates it locally until this exists*
+*Horizon: now · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16) · Refs: the release recipe's `gate` duplicates it locally until this exists*
 **Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: unshaped*
 
 ## Move the stack before building on it
@@ -72,7 +55,7 @@ annotations and tool search) are built directly on the FastMCP API, so moving fi
 each of them once instead of twice. The cycle also puts a dependency-audit step in CI, so
 advisories against the lock stay visible from now on.
 
-*Horizon: near-term · Depends on: restore-test-coverage, ci-workflow (the upgrade lands against a real gate) · Refs: absorbs `auth-modes-annotation-typo`; prerequisite for `agents-d-instructions`, `capability-extras`, `tool-surface`, `https-token-mode`*
+*Horizon: near-term · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16), ci-workflow (the upgrade lands against a real gate) · Refs: absorbs `auth-modes-annotation-typo`; prerequisite for `agents-d-instructions`, `capability-extras`, `tool-surface`, `https-token-mode`*
 **Seed:** [`issues/stack-upgrade.md`](issues/stack-upgrade.md) · *status: unshaped*
 
 ### Absorbed: a type annotation that is accidentally a slice
@@ -108,7 +91,7 @@ argv-based API with quoting and `--` before caller-supplied paths, file content 
 one pinned interpreter, one timeout contract, and `args` on `sbatch` so job arguments have a
 supported route. Every tool family in Part I is built on it.
 
-*Horizon: near-term · Depends on: restore-test-coverage · Refs: absorbs `executor-timeout-asymmetry`; prerequisite for `agents-d-instructions`, `tool-surface`, `slurm-capability`*
+*Horizon: near-term · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16) · Refs: absorbs `executor-timeout-asymmetry`; prerequisite for `agents-d-instructions`, `tool-surface`, `slurm-capability`*
 **Seed:** [`issues/safe-execution.md`](issues/safe-execution.md) · *status: unshaped*
 
 ### Absorbed: run() has two different contracts depending on the backend

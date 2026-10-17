@@ -80,8 +80,9 @@ Questions the plan has to answer rather than assume:
 
 ## Notes
 
-- Depends on [`restore-test-coverage.md`](restore-test-coverage.md) (the snapshot and auth tests
-  need a suite) and [`ci-workflow.md`](ci-workflow.md) (the audit step lands in its workflow).
+- Depends on [`spec/restore-test-coverage/`](../spec/restore-test-coverage/) (the snapshot and auth
+  tests need a suite; cleared: landed on `develop` 2026-10-16) and [`ci-workflow.md`](ci-workflow.md)
+  (the audit step lands in its workflow).
 - Related: [`auth-modes-annotation-typo.md`](auth-modes-annotation-typo.md) (absorbed),
   [`capability-extras.md`](capability-extras.md), [`agents-d-instructions.md`](agents-d-instructions.md),
   [`tool-surface.md`](tool-surface.md), [`https-token-mode.md`](https-token-mode.md) (built on the

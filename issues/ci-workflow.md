@@ -10,9 +10,9 @@ lane: public
 ## Problem
 
 There is no `.github/` directory at all — no test workflow, no publish workflow, no container build,
-no dependency review. The test suite runs only when someone remembers to run it locally, and until
-[`restore-test-coverage.md`](restore-test-coverage.md) lands it would test nothing that matters
-anyway.
+no dependency review. The test suite runs only when someone remembers to run it locally. Until
+`restore-test-coverage` landed ([`spec/restore-test-coverage/`](../spec/restore-test-coverage/),
+2026-10-16) it would have tested nothing that matters.
 
 This costs more now than it did before the factory arrived, in two specific ways:
 
@@ -29,7 +29,8 @@ This costs more now than it did before the factory arrived, in two specific ways
 ## Why it was deferred
 
 Not deferred — filed as the gap it is. Sequenced after `restore-test-coverage` because CI over a
-docs-only suite tests the wrong thing and would have to be rewritten immediately.
+docs-only suite tests the wrong thing and would have to be rewritten immediately (cleared: landed on
+`develop` 2026-10-16).
 
 **Pre-existing:** yes.
 
@@ -64,7 +65,8 @@ explicitly, not inherit from a workflow that grew.
   a matrix. A single-version job is fine and honest for now.
 - R2 duplicates the release recipe's sdist-hygiene gate by design: the recipe keeps its local copy
   because a release can be cut from a machine before CI has run on that commit.
-- Related: [`restore-test-coverage.md`](restore-test-coverage.md) (strict prerequisite).
+- Related: [`spec/restore-test-coverage/`](../spec/restore-test-coverage/) (strict prerequisite;
+  cleared: landed on `develop` 2026-10-16).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: the suite is no longer docs-only. The docs strip left `tests/test_registry.py`,
   `tests/test_instructions.py` and `tests/test_cli.py` (tool registry, served instructions, removed

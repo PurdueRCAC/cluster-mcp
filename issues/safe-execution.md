@@ -101,7 +101,8 @@ pinned interpreter like everything else.
   [`slurm-capability.md`](slurm-capability.md) are built on this API; doing this first means they
   are built once.
 - Related: [`executor-timeout-asymmetry.md`](executor-timeout-asymmetry.md) (absorbed),
-  [`restore-test-coverage.md`](restore-test-coverage.md) (the executor tests land on its suite),
+  [`spec/restore-test-coverage/`](../spec/restore-test-coverage/) (the executor tests land on its
+  suite; landed on `develop` 2026-10-16),
   [`agents-d-instructions.md`](agents-d-instructions.md) (reads through this executor at startup).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
 - 2026-10-16: in `delegate` mode, `DelegatingExecutor.run` expands `cwd` with the server process's
