@@ -179,10 +179,11 @@ import has no effect.
   `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
   hook that fails the run with a `pytest.UsageError` listing any collected test that carries
   neither. So `-m unit` and `-m integration` each select a real subset.
-- The suite is three files, each built around **pure check functions** that `verify:` gates import
-  directly (`sys.path.insert(0, 'tests')`). Their names and the parametrised test ids are a
-  contract: renaming one breaks a gate loudly. Each check has standing negative controls, mutations
-  it must reject.
+- The suite pins the coupled core's contracts (§ Invariants §1–§7) and the agent-facing surface
+  (§9). Every module is built around **pure check functions** (`*_violations`) that its tests feed
+  observed behaviour, and that gates may import directly (`sys.path.insert(0, 'tests')`). Their
+  names and the parametrised test ids are a contract: renaming one breaks a gate loudly. Each check
+  has standing negative controls, planted shapes it must reject.
   - `tests/test_registry.py` (`unit`): `EXPECTED_TOOLS`, `registry_violations`, `module_absent`,
     `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves match
     `EXPECTED_TOOLS` exactly, and the removed documentation modules stay unimportable; when one
@@ -199,6 +200,121 @@ import has no effect.
   - `tests/test_cli.py`: `flag_violations`. The `integration` cases drive the installed CLI with
     flags it no longer accepts and assert a clean `exit_status.bad_argument` rejection before the
     server starts; the `unit` cases feed `flag_violations` synthetic results it must reject.
+  - `tests/test_isolation.py` (`unit`): `isolation_violations`. Two concurrent calls, each under
+    its own delegate identity over HTTP (and, in shared mode, on two servers in one process), each
+    run as their own user and get back only their own result. A `Rendezvous` holds both inside the
+    executor middleware until both are in flight, so a module global crosses them every time.
+    Sequential calls on one server, shared and delegate, show that each executor middleware sets
+    the executor on every call, not only the first (§1).
+  - `tests/test_no_executor.py` (`unit`): `refusal_violations`. A call with no executor for its
+    request (a bare server, every tool; a tokenless delegate call), including right after and while
+    another request did set one, fails where the client sees it with `No executor configured`, and
+    nothing runs. Any error is not enough: the stated reason is required (§1).
+  - `tests/test_tools.py` (`unit`): `TOOL_CASES`, `tool_violations`. Every `EXPECTED_TOOLS` tool,
+    on a `SharedExecutorMiddleware` server, reaches only the installed executor, carries its own
+    argument there and returns the executor's answer (§1, §7). A tool change adds its `TOOL_CASES`
+    row in the same commit; `test_tool_cases_cover_expected_tools` fails otherwise.
+  - `tests/test_identity.py` (`unit`): `delegation_violations`. Claim precedence (`sub`, `email`,
+    `preferred_username`) over real tokens; no claim or an unmapped identity is refused with no
+    fall-through; `DelegatingExecutor` raises `KeyError`; the user-map loader, which names a
+    malformed line by its line in the file, comments and blanks counted (§5).
+  - `tests/test_executors.py` (`unit`): `sudo_argv_violations`. The exact `sudo -n -H -u <user>
+    <$SHELL> -c <command>` argv recorded at `Popen`, `$SHELL` captured at construction, `cwd`
+    quoted and the command not; all three backends satisfy `Executor` (§2, §5).
+  - `tests/test_exec_mode.py` (`unit`): `LADDER_CASES`, `ladder_violations`. The posture ladder
+    through `MCPServerApp.main` with server construction stubbed, and the middleware class each
+    mode installs (§4). An explicit `-e` is decided at rung 1 whatever the later rungs read: a row
+    for each `-e` value (`local`, `ssh`, `delegate`) against each later-rung input (`stdio`,
+    `--ssh-host`, `RCAC_SSH_HOST`, auth `none`, `jwt`, `oidc`), and
+    `test_explicit_mode_decides_alone` over every combination of those inputs' values. A new input
+    to `_resolve_exec_mode` joins both in the same commit.
+  - `tests/test_tokens.py` (`unit`, `integration`): `token_cli_violations`. Both `JWT_SECRET`
+    floors, `create_jwt_auth()` and the sandboxed `--generate-token`, each pinned on its own; tokens
+    from either signer accepted by the verifier, and a wrong issuer, audience, secret or algorithm,
+    or an expired token, refused with a 401 and nothing launched (§6).
+  - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
+    `stack_import_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
+    through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
+    checked statically); no module but `tests/harness.py` imports FastMCP, mcp or httpx
+    (`test_only_the_harness_imports_the_stack`, also static: `import`, `from … import`, and
+    `import_module` / `__import__` called with a literal name; a computed name is not read, and
+    the check's docstring lists what else it cannot see); self-tests prove the guard, the PATH
+    shim, the harness fence and the build-inside-the-loop rule are active.
+  - `tests/test_mutations.py` (`unit`): the fast half of the mutation runner (below).
+- **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
+  fixture adds a marker):
+  - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point
+    under `tmp_path`, the auth and SSH environment is blanked as `bin/sandbox.sh` blanks it, and
+    every process launch (`subprocess.Popen`, `os.system`/`popen`/`exec*`/`spawn*`/`fork`,
+    `posix_spawn`, `pty`, `multiprocessing`) and network connect or lookup is refused and recorded.
+    A refusal fails the test at teardown; contract tests also assert `guard.refused == []` in the
+    body, because a refusal inside a tool comes back as a tool error. **File I/O is not guarded:** a
+    tool that falls back to local file operations is caught by `refusal_violations`' stated reason
+    and the `transfer-local-fallback` planted case, not by the guard.
+  - **The PATH shim**, for every test: `sudo` and `ssh` stand-ins come first on `PATH`; each
+    prints `refused by the test PATH shim` and exits 126. `bin/sandbox.sh` keeps `PATH`, so
+    sandboxed children inherit it.
+  - **`launches`** (`unit` and `integration`) replaces `subprocess.Popen` with a recorder: nothing
+    runs, and the recorded argv is what the test asserts.
+  - **The main-context check:** after every test the main context must hold no executor.
+- **`tests/harness.py` is the only test module that imports FastMCP, mcp or httpx**
+  (`test_only_the_harness_imports_the_stack` fails on any other). The contract-test modules speak
+  only its verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `mint`,
+  `user_map`, `RecordingExecutor`, `Rendezvous`, `delegate_server`, `shared_server`,
+  `bare_server`; the builders take extra middleware, such as a `Rendezvous`, added inside the
+  executor middleware) and the `JWTVerifier` type it re-exports. Two older modules still call the
+  FastMCP server API on a server they build (internals-bound item 6). Delegate mode runs over an
+  in-process ASGI route: a real JWT through the real `JWTVerifier` and `AuthExecutorMiddleware`,
+  with no socket and no port. Two rules:
+  - **Build inside the loop.** Every server and middleware is constructed inside the coroutine
+    handed to `drive`; the builders raise otherwise. Anything a construction sets in the context
+    then reaches the request tasks as it would in production, so a set-at-construction bug shows.
+  - **The fence.** An in-process server call raises unless `Popen` is the guard's refuser or the
+    `launches` recorder, so an `integration` test that calls a server in-process requests
+    `launches`.
+- **The mutation runner, `tests/mutants.py`, is not collected.** Each of its cases copies the
+  imported package (never `src/`), applies exact source edits that break one contract, and runs the
+  named target tests against the copy in a child pytest under `bin/sandbox.sh`. A case is
+  **killed** only when every target fails (a JUnit `<failure>`) with the case's `why`, the fragment
+  of the violation message that names the contract. A child takes about 1.5 s, all cases 60–90 s,
+  which is why `uv run pytest` does not run it. Run it after changing a contract or its test, from
+  the repo root:
+
+  ```bash
+  uv run python tests/mutants.py --self-check CASE_ID…     # named cases, plus the runner's controls
+  uv run python tests/mutants.py --self-check $(uv run python -c \
+      "import sys; sys.path.insert(0, 'tests'); import mutants; print(*(c.id for c in mutants.CASES))")
+  ```
+
+  A `FAILED` line means a case survived (the test does not pin its contract) or was killed for the
+  wrong reason (the test failed on something else, an import error say): fix the test, never the
+  targets. A reworded violation message also reads as a wrong reason until the case's `why` follows
+  it. A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
+  case edits: re-plant the case against the new code in the same commit and re-run it. A retarget
+  or removal records its reason in the commit body.
+- **Recorded limitations.** The **issuer/audience swap** is undetectable while `ISSUER ==
+  AUDIENCE` (both `rcac-mcp` in `token.py`): no token can tell a verifier that swapped the two from
+  a correct one, so no test pins it. If the constants ever differ, add the case. File I/O is not
+  guarded (above).
+- **Internals-bound tests**, the rewrite points for `stack-upgrade` and `safe-execution`; items 1–5
+  say so in their docstrings:
+  1. `tests/harness.py`, all of it: the FastMCP/mcp client, the ASGI route, the middleware API and
+     result decoding (`stack-upgrade`).
+  2. `tests/test_exec_mode.py`: the `rcac_mcp.create_mcp_server` stub and the
+     `rcac_mcp.executor.ssh.Connection` fake.
+  3. `tests/test_executors.py`: the `Connection` fake (the `ssh` row) and the argv rows, which are
+     `safe-execution`'s deliberate rewrite.
+  4. `tests/test_tokens.py`: `create_jwt_auth()` returning a `JWTVerifier` (imported through the
+     harness), and acceptance and rejection observed through the harness's HTTP route
+     (`stack-upgrade`).
+  5. `tests/mutants.py` and its anchors in `tests/test_mutations.py`: tied to today's source text,
+     so any cycle that edits an anchored line re-plants.
+  6. `tests/test_registry.py` and `tests/test_instructions.py`, which predate the harness: they
+     read `get_tools()` and `instructions` off a `create_mcp_server(...)` FastMCP server
+     (`stack-upgrade`).
+
+  Everything else speaks harness verbs or fakes at the stdlib boundary, and is expected to pass
+  through both cycles unchanged.
 - **A stale checkout fails the absence check, and the check is right.** Git leaves ignored files
   behind, so a checkout that ran the code from before the documentation package was removed can
   keep `src/rcac_mcp/docs/__pycache__/`. That directory imports as an empty namespace package, and
@@ -206,10 +322,9 @@ import has no effect.
   leftover with `del src/rcac_mcp/docs` (§ Environment & working rules) and re-run; a fresh clone,
   the wheel and the sdist never carry it.
 - Integration tests drive the installed CLI, and **each one wraps its own drives in
-  `bin/sandbox.sh`**. A whole-suite run under the sandbox still steps back into the repo first
-  (`cd "$CLUSTER_MCP_REPO"`) so pytest finds `pyproject.toml` (§ Commands).
-- That is the whole suite: the executor, middleware, auth and tool core have **no tests yet**.
-  Rebuilding coverage there is the `restore-test-coverage` seed, not an optional nicety.
+  `bin/sandbox.sh`** (checked statically, above). A whole-suite run under the sandbox still steps
+  back into the repo first (`cd "$CLUSTER_MCP_REPO"`) so pytest finds `pyproject.toml`
+  (§ Commands).
 - **PyYAML is not a dependency of this repository**, runtime or dev; it reaches `uv.lock` only
   transitively (through `fastmcp`), and nothing in `src/` imports it. The factory FSM scripts live
   in the operator's KB, which runs them with `uv run --with pyyaml`.

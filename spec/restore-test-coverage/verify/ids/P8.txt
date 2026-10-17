@@ -1,0 +1,14 @@
+# P8: suite-wide close-out; every earlier file is re-checked. Its own ids: only the harness imports the stack.
+test_hygiene.py::test_only_the_harness_imports_the_stack
+test_hygiene.py::test_stack_import_check_catches_imports[from-fastmcp]
+test_hygiene.py::test_stack_import_check_catches_imports[import-mcp]
+test_hygiene.py::test_stack_import_check_catches_imports[aliased-httpx]
+test_hygiene.py::test_stack_import_check_catches_imports[nested]
+test_hygiene.py::test_stack_import_check_catches_imports[import-module]
+test_hygiene.py::test_stack_import_check_catches_imports[dunder-import]
+test_hygiene.py::test_stack_import_check_catches_imports[from-import-module]
+test_hygiene.py::test_stack_import_check_catches_imports[aliased-import-module]
+test_hygiene.py::test_stack_import_check_catches_imports[aliased-importlib]
+test_hygiene.py::test_stack_import_check_catches_imports[name-keyword]
+test_hygiene.py::test_stack_import_check_catches_imports[relative-with-package]
+test_hygiene.py::test_stack_import_check_catches_imports[builtins-dunder-import]

@@ -1,0 +1,455 @@
+# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-License-Identifier: MIT
+
+"""The suite's own safety rails: sandboxed CLI drives, the unit guard, the PATH shim, the harness fence.
+
+No test may read or write the developer's real HOME, reach a real host or run a real `sudo`. Unit
+tests are held to that at runtime by the guard in `conftest.py`; integration tests launch processes
+on purpose, so `sandbox_violations` holds every launch in every test module to `bin/sandbox.sh`
+statically. The tests below prove each rail is in place, so a broken one fails loudly instead of
+letting every other test pass unguarded. One more rail keeps the stack upgrade's blast radius
+known: no test module but `harness.py` imports FastMCP, mcp or httpx (`stack_import_violations`).
+"""
+
+from __future__ import annotations
+
+import ast
+import asyncio
+import multiprocessing
+import os
+import pty
+import pwd
+import shutil
+import socket
+import subprocess
+from contextvars import ContextVar
+from pathlib import Path
+
+import _posixsubprocess
+import pytest
+
+import harness
+
+TESTS = Path(__file__).resolve().parent
+SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
+
+# Calls that start a process, by module; `os.exec*` and `os.spawn*` are matched by prefix.
+LAUNCHERS = {
+    'subprocess': {'run', 'Popen', 'call', 'check_call', 'check_output', 'getoutput', 'getstatusoutput'},
+    'os': {'system', 'popen', 'posix_spawn', 'posix_spawnp'},
+    'asyncio': {'create_subprocess_exec', 'create_subprocess_shell'},
+    'asyncio.subprocess': {'create_subprocess_exec', 'create_subprocess_shell'},
+}
+FORBIDDEN_PROGRAMS = ('sudo', 'ssh')
+
+
+def _is_launcher(module: str, name: str) -> bool:
+    return name in LAUNCHERS.get(module, ()) or (module == 'os' and name.startswith(('exec', 'spawn')))
+
+
+def _dotted(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted(node.value)
+        return None if base is None else f'{base}.{node.attr}'
+    return None
+
+
+def _is_unit_mark(decorator: ast.expr) -> bool:
+    name = _dotted(decorator)
+    return name is not None and (name == 'mark.unit' or name.endswith('.mark.unit'))
+
+
+def _starts_with_sandbox(argv: ast.expr) -> bool:
+    if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
+        return False
+    first = argv.elts[0]
+    if isinstance(first, ast.Name) and first.id == 'SANDBOX':
+        return True
+    return (isinstance(first, ast.Call) and isinstance(first.func, ast.Name) and first.func.id == 'str'
+            and len(first.args) == 1 and isinstance(first.args[0], ast.Name) and first.args[0].id == 'SANDBOX')
+
+
+def _forbidden_programs(argv: ast.expr) -> list[str]:
+    if not isinstance(argv, (ast.List, ast.Tuple)):
+        return []
+    return [elt.value for elt in argv.elts
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            and (elt.value in FORBIDDEN_PROGRAMS or elt.value.endswith(tuple(f'/{p}' for p in FORBIDDEN_PROGRAMS)))]
+
+
+def sandbox_violations(source: str, filename: str) -> list[str]:
+    """Return every process launch in `source` that does not go through `bin/sandbox.sh`.
+
+    A launch is a `subprocess`, `os.system`/`os.popen`/`os.exec*`/`os.spawn*`/`os.posix_spawn*` or
+    `asyncio.create_subprocess_*` call, whatever name the module was imported under. It passes only
+    when its argv is a list or tuple literal starting with `SANDBOX` or `str(SANDBOX)` and names
+    neither `sudo` nor `ssh`. A call through a bare name imported from one of those modules is
+    always flagged. Calls lexically inside a function marked `unit` are exempt: the unit guard
+    refuses them at runtime.
+    """
+    tree = ast.parse(source, filename)
+    modules: dict[str, str] = {}
+    bare: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    modules[alias.asname] = alias.name
+                else:
+                    root = alias.name.split('.')[0]
+                    modules[root] = root
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if node.module in LAUNCHERS and (_is_launcher(node.module, alias.name)
+                                                 or node.module == 'subprocess'):
+                    bare[alias.asname or alias.name] = f'{node.module}.{alias.name}'
+                elif node.module == 'asyncio' and alias.name == 'subprocess':
+                    modules[alias.asname or alias.name] = 'asyncio.subprocess'
+
+    violations: list[str] = []
+
+    def check(node: ast.AST, exempt: bool) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            exempt = exempt or any(_is_unit_mark(d) for d in node.decorator_list)
+        if isinstance(node, ast.Call) and not exempt:
+            where = f'{filename}:{node.lineno}'
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in bare:
+                violations.append(f'{where}: {func.id}() is {bare[func.id]} called through a bare name')
+            elif isinstance(func, ast.Attribute):
+                owner = _dotted(func.value)
+                module = None
+                if owner is not None:
+                    head, _, tail = owner.partition('.')
+                    module = modules.get(head, None)
+                    module = f'{module}.{tail}' if module and tail else module
+                if module is not None and _is_launcher(module, func.attr):
+                    argv = node.args[0] if node.args else next(
+                        (k.value for k in node.keywords if k.arg == 'args'), None)
+                    if argv is None or not _starts_with_sandbox(argv):
+                        violations.append(f'{where}: {module}.{func.attr} does not run through bin/sandbox.sh')
+                    for program in _forbidden_programs(argv) if argv is not None else []:
+                        violations.append(f'{where}: {module}.{func.attr} launches {program!r}')
+        for child in ast.iter_child_nodes(node):
+            check(child, exempt)
+
+    check(tree, False)
+    return violations
+
+
+@pytest.mark.unit
+def test_cli_drives_are_sandboxed() -> None:
+    files = sorted(TESTS.glob('*.py'))
+    assert {'conftest.py', 'harness.py', 'mutants.py', 'test_cli.py'} <= {f.name for f in files}
+    violations = [v for f in files for v in sandbox_violations(f.read_text(), f.name)]
+    assert violations == [], '\n'.join(violations)
+
+
+SANDBOXED = [
+    pytest.param('import subprocess\nsubprocess.run([str(SANDBOX), "sh", "-c", "true"])\n', id='list-literal'),
+    pytest.param('import subprocess\nsubprocess.run((SANDBOX, "sh"))\n', id='tuple-literal'),
+    pytest.param('import subprocess as sp\nsp.Popen(args=[str(SANDBOX), "env"])\n', id='args-keyword'),
+    pytest.param('import pytest, subprocess\n@pytest.mark.unit\ndef test_x():\n    subprocess.run(["true"])\n',
+                 id='unit-exempt'),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('source', SANDBOXED)
+def test_sandbox_check_accepts_sandboxed_drives(source: str) -> None:
+    assert sandbox_violations(source, 'f.py') == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('source', 'fragment'), [
+    pytest.param('import subprocess\nsubprocess.run(["rcac-mcp", "--help"])\n',
+                 'subprocess.run does not run through', id='bare-cli'),
+    pytest.param('import subprocess\nsubprocess.run(argv)\n',
+                 'subprocess.run does not run through', id='computed-argv'),
+    pytest.param('from subprocess import run\nrun([str(SANDBOX)])\n',
+                 'subprocess.run called through a bare name', id='imported-run'),
+    pytest.param('import subprocess as sp\nsp.check_output(["rcac-mcp"])\n',
+                 'subprocess.check_output does not run through', id='aliased-module'),
+    pytest.param('import os\nos.system("rcac-mcp --help")\n',
+                 'os.system does not run through', id='os-system'),
+    pytest.param('import os\nos.execvp("rcac-mcp", ["rcac-mcp"])\n',
+                 'os.execvp does not run through', id='exec-family'),
+    pytest.param('import asyncio\nasyncio.create_subprocess_exec("rcac-mcp")\n',
+                 'asyncio.create_subprocess_exec does not run through', id='asyncio-subprocess'),
+    pytest.param('import subprocess\nsubprocess.run([str(SANDBOX), "sudo", "-n", "true"])\n',
+                 "launches 'sudo'", id='sudo-argv'),
+    pytest.param('import subprocess\nsubprocess.run([str(SANDBOX), "/usr/bin/ssh", "host"])\n',
+                 "launches '/usr/bin/ssh'", id='ssh-argv'),
+    pytest.param('import pytest, subprocess\n@pytest.mark.integration\ndef test_x():\n    subprocess.run(["true"])\n',
+                 'f.py:4: subprocess.run does not run through', id='integration-call'),
+])
+def test_sandbox_check_catches_unsandboxed(source: str, fragment: str) -> None:
+    violations = sandbox_violations(source, 'f.py')
+    assert any(fragment in v for v in violations), violations
+
+
+# The stack the `stack-upgrade` seed moves. Only the harness may import it, so that move rewrites the
+# harness and the internals-bound modules AGENTS.md lists (which reach the stack through objects the
+# harness or `rcac_mcp` hands them), and nothing else.
+STACK = ('fastmcp', 'mcp', 'httpx')
+STACK_HOME = 'harness.py'
+
+
+# The functions that import a module named by a string, whatever they are reached through.
+IMPORTERS = ('import_module', '__import__')
+
+
+def _literal(node: ast.expr | None) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _imported_name(call: ast.Call, importers: set[str]) -> str | None:
+    """The module a call to an importer names by a string literal, or None for any other call."""
+    callee = _dotted(call.func)
+    if callee is None or (callee.rsplit('.', 1)[-1] not in IMPORTERS and callee not in importers):
+        return None
+    keywords = {k.arg: k.value for k in call.keywords if k.arg}
+    name = _literal(call.args[0] if call.args else keywords.get('name'))
+    if name and name.startswith('.'):
+        # `import_module('.client', 'fastmcp')` resolves against its package argument.
+        return _literal(call.args[1] if len(call.args) > 1 else keywords.get('package'))
+    return name
+
+
+def stack_import_violations(source: str, filename: str) -> list[str]:
+    """Return every import of FastMCP, mcp or httpx in `source`; empty for the harness or a clean module.
+
+    Reads, at any depth (so an import tucked inside a function is found too): `import` and
+    `from … import`; and a call to `importlib.import_module` or `__import__` whose module name is
+    a string literal, positional or `name=`, reached by any dotted path ending in the importer's
+    name (`importlib.import_module`, `builtins.__import__`, a bare `import_module`) or by the alias
+    a `from importlib import import_module as …` binds. A relative name reads its literal package.
+
+    What it cannot read: a module name that is not a literal (a variable, an f-string, a
+    concatenation); an importer rebound by assignment or reached through `getattr`, a container or
+    `sys.modules`; other loaders (`importlib.util`, `runpy`, `pkgutil`); and source run through
+    `exec` or `eval`. Those stay with review.
+    """
+    if filename == STACK_HOME:
+        return []
+    tree = ast.parse(source, filename)
+    importers = {alias.asname for node in ast.walk(tree)
+                 if isinstance(node, ast.ImportFrom) and node.module in ('importlib', 'builtins')
+                 for alias in node.names if alias.name in IMPORTERS and alias.asname}
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [(node.lineno, alias.name) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            found.append((node.lineno, node.module))
+        elif isinstance(node, ast.Call) and (name := _imported_name(node, importers)):
+            found.append((node.lineno, name))
+    return [f'{filename}:{line}: imports {name}; only {STACK_HOME} may, so re-export it there'
+            for line, name in found if name.split('.')[0] in STACK]
+
+
+@pytest.mark.unit
+def test_only_the_harness_imports_the_stack() -> None:
+    files = sorted(TESTS.glob('*.py'))
+    assert STACK_HOME in {f.name for f in files}
+    assert stack_import_violations((TESTS / STACK_HOME).read_text(), 'elsewhere.py'), 'the check sees no imports'
+    violations = [v for f in files for v in stack_import_violations(f.read_text(), f.name)]
+    assert violations == [], '\n'.join(violations)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('source', 'fragment'), [
+    pytest.param('from fastmcp.server.auth.providers.jwt import JWTVerifier\n', 'f.py:1: imports fastmcp.',
+                 id='from-fastmcp'),
+    pytest.param('import mcp.types\n', 'imports mcp.types', id='import-mcp'),
+    pytest.param('import json\nimport httpx as h\n', 'f.py:2: imports httpx', id='aliased-httpx'),
+    pytest.param('def f():\n    from fastmcp import Client\n', 'f.py:2: imports fastmcp', id='nested'),
+    pytest.param('import importlib\nimportlib.import_module("fastmcp.client")\n', 'imports fastmcp.client',
+                 id='import-module'),
+    pytest.param('__import__("httpx")\n', 'imports httpx', id='dunder-import'),
+    pytest.param('from importlib import import_module\nimport_module("fastmcp")\n', 'f.py:2: imports fastmcp',
+                 id='from-import-module'),
+    pytest.param('from importlib import import_module as load\nload("mcp.types")\n', 'f.py:2: imports mcp.types',
+                 id='aliased-import-module'),
+    pytest.param('import importlib as il\nil.import_module("httpx")\n', 'f.py:2: imports httpx',
+                 id='aliased-importlib'),
+    pytest.param('import importlib\nimportlib.import_module(name="fastmcp.client")\n', 'imports fastmcp.client',
+                 id='name-keyword'),
+    pytest.param('import importlib\nimportlib.import_module(".client", "fastmcp")\n', 'imports fastmcp',
+                 id='relative-with-package'),
+    pytest.param('import builtins\nbuiltins.__import__("httpx")\n', 'imports httpx', id='builtins-dunder-import'),
+])
+def test_stack_import_check_catches_imports(source: str, fragment: str) -> None:
+    for clean in ('from harness import JWTVerifier, call\nimport mcpx\nfrom rcac_mcp.server import create_mcp_server\n',
+                  'from . import mcp\n',
+                  'from importlib import import_module\nimport_module("rcac_mcp.docs")\nimport_module(name)\n'):
+        assert stack_import_violations(clean, 'f.py') == [], clean
+    assert stack_import_violations(source, STACK_HOME) == []
+    violations = stack_import_violations(source, 'f.py')
+    assert any(fragment in v for v in violations), violations
+
+
+def _guarded(entry_points: list[tuple[object, str]]) -> None:
+    # Check every entry point is the guard's refuser before calling any: a broken guard must fail
+    # here, not fork or exec the test process.
+    unguarded = [name for owner, name in entry_points if not getattr(getattr(owner, name), 'unit_guard', False)]
+    assert unguarded == [], f'not replaced by the unit guard: {unguarded}'
+
+
+@pytest.mark.unit
+def test_unit_guard_refuses_process_launch(guard) -> None:
+    _guarded([(subprocess, 'Popen'), (os, 'system'), (os, 'popen')])
+    with pytest.raises(OSError, match='unit guard'):
+        subprocess.run(['true'], check=True)
+    with pytest.raises(OSError, match='unit guard'):
+        os.system('true')
+    with pytest.raises(OSError, match='unit guard'):
+        os.popen('true')
+    assert [name for name, _ in guard.refused] == ['subprocess.Popen', 'os.system', 'os.popen']
+    guard.refused.clear()
+
+
+@pytest.mark.unit
+def test_unit_guard_refuses_exec_family(guard) -> None:
+    entry_points = [(os, 'execv'), (os, 'execvpe'), (os, 'spawnv'), (os, 'spawnlp'), (os, 'posix_spawn'),
+                    (os, 'posix_spawnp'), (os, 'fork'), (os, 'forkpty'), (pty, 'fork'), (pty, 'spawn'),
+                    (_posixsubprocess, 'fork_exec'), (multiprocessing.Process, 'start')]
+    _guarded(entry_points)
+    attempts = [
+        lambda: os.execv('/usr/bin/true', ['true']),
+        lambda: os.execvpe('true', ['true'], {}),
+        lambda: os.spawnv(os.P_WAIT, '/usr/bin/true', ['true']),
+        lambda: os.spawnlp(os.P_WAIT, 'true', 'true'),
+        lambda: os.posix_spawn('/usr/bin/true', ['true'], {}),
+        lambda: os.posix_spawnp('true', ['true'], {}),
+        lambda: os.fork(),
+        lambda: os.forkpty(),
+        lambda: pty.fork(),
+        lambda: pty.spawn(['true']),
+        lambda: _posixsubprocess.fork_exec(),
+        lambda: multiprocessing.Process(target=print).start(),
+    ]
+    for attempt in attempts:
+        with pytest.raises(OSError, match='unit guard'):
+            attempt()
+    assert len(guard.refused) == len(attempts), guard.refused
+    guard.refused.clear()
+
+
+@pytest.mark.unit
+def test_unit_guard_refuses_network(guard) -> None:
+    _guarded([(socket.socket, 'connect'), (socket.socket, 'connect_ex'), (socket, 'create_connection'),
+              (socket, 'getaddrinfo')])
+    with pytest.raises(OSError, match='unit guard'):
+        socket.create_connection(('example.org', 80))
+    with pytest.raises(OSError, match='unit guard'):
+        socket.getaddrinfo('example.org', 80)
+    with socket.socket() as sock:
+        with pytest.raises(OSError, match='unit guard'):
+            sock.connect(('192.0.2.1', 80))
+        with pytest.raises(OSError, match='unit guard'):
+            sock.connect_ex(('192.0.2.1', 80))
+    assert [name for name, _ in guard.refused] == ['socket.create_connection', 'socket.getaddrinfo',
+                                                   'socket.connect', 'socket.connect_ex']
+    guard.refused.clear()
+
+
+@pytest.mark.unit
+def test_unit_guard_redirects_home(tmp_path: Path) -> None:
+    home = tmp_path / 'home'
+    assert os.path.expanduser('~') == str(home)
+    assert Path.home() == home
+    assert os.path.expanduser('~') != pwd.getpwuid(os.getuid()).pw_dir
+    for var in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME'):
+        assert Path(os.environ[var]).is_relative_to(home), var
+    for var in ('RCAC_SSH_HOST', 'RCAC_USER_MAP', 'JWT_SECRET', 'OIDC_CONFIG_URL', 'OIDC_CLIENT_ID',
+                'OIDC_CLIENT_SECRET', 'MCP_BASE_URL'):
+        assert var not in os.environ, var
+
+
+@pytest.mark.unit
+def test_path_shim_shadows_sudo_and_ssh(path_shim: Path) -> None:
+    assert os.environ['PATH'].split(os.pathsep)[0] == str(path_shim)
+    for program in ('sudo', 'ssh'):
+        assert shutil.which(program) == str(path_shim / program), program
+
+
+# Resolves each name inside the sandbox and runs it only when it resolves into the shim ($1).
+SHIM_PROBE = """\
+shim=$1
+for name in sudo ssh; do
+    path=$(command -v "$name") || { echo "$name: not found" >&2; exit 3; }
+    case $path in
+        "$shim"/*) ;;
+        *) echo "$name resolves to $path, outside the shim" >&2; exit 4 ;;
+    esac
+    out=$("$path" -n true 2>&1)
+    echo "$name|$path|$?|$out"
+done
+"""
+
+
+@pytest.mark.integration
+def test_path_shim_reaches_sandboxed_children(path_shim: Path) -> None:
+    result = subprocess.run([str(SANDBOX), 'sh', '-c', SHIM_PROBE, 'sh', str(path_shim)],
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        f'{name}|{path_shim / name}|126|refused by the test PATH shim' for name in ('sudo', 'ssh')], result.stdout
+
+
+@pytest.mark.unit
+def test_harness_refuses_unfenced_server_calls(monkeypatch: pytest.MonkeyPatch, guard) -> None:
+    def unfenced_popen(*args: object, **kwargs: object) -> None:
+        raise AssertionError('the fence let a server call reach an unfenced Popen')
+
+    monkeypatch.setattr(subprocess, 'Popen', unfenced_popen)
+
+    async def scenario() -> list[str]:
+        server = harness.bare_server()
+        refusals = []
+        for attempt in (lambda: harness.in_memory(server), lambda: harness.serving(server),
+                        lambda: harness.http_client(object(), 'token')):
+            try:
+                attempt()
+            except RuntimeError as exc:
+                refusals.append(str(exc))
+        try:
+            await harness.call_http(object(), 'token', 'run_command', {'command': 'true'})
+        except RuntimeError as exc:
+            refusals.append(str(exc))
+        return refusals
+
+    refusals = harness.drive(scenario())
+    assert len(refusals) == 4 and all('harness fence' in r for r in refusals), refusals
+    assert guard.refused == []
+
+
+@pytest.mark.unit
+def test_harness_builds_servers_inside_the_running_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv('JWT_SECRET', 'k' * 32)
+    map_path = harness.user_map(tmp_path, 'alice ualice\n')
+    builders = [lambda: harness.delegate_server(map_path), lambda: harness.shared_server(harness.RecordingExecutor('x')),
+                harness.bare_server]
+    for build in builders:
+        with pytest.raises(RuntimeError, match='inside the coroutine handed to harness.drive'):
+            build()
+
+    async def scenario() -> list[str]:
+        return [type(build()).__name__ for build in builders]
+
+    assert harness.drive(scenario()) == ['FastMCP'] * 3
+
+    # The loop copies the main context, as production's run() does, so whatever construction
+    # sets in it reaches the request tasks there too.
+    probe: ContextVar[str] = ContextVar('probe', default='unset')
+    token = probe.set('main')
+    try:
+        async def read() -> str:
+            await asyncio.sleep(0)
+            return probe.get()
+        assert harness.drive(read()) == 'main'
+    finally:
+        probe.reset(token)

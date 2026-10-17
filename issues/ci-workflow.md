@@ -70,3 +70,10 @@ explicitly, not inherit from a workflow that grew.
   `tests/test_instructions.py` and `tests/test_cli.py` (tool registry, served instructions, removed
   CLI flags); the coupled core is still untested, so the sequencing after `restore-test-coverage`
   stands.
+- 2026-10-16: `restore-test-coverage` landed tests for the coupled core, so the suite is the real
+  gate this seed waits for. It needs `uv` and `bin/sandbox.sh` (integration tests drive the CLI
+  under it) and still runs in seconds. The mutation runner, `tests/mutants.py`, is not collected:
+  `uv run python tests/mutants.py --self-check <every case id>` (`AGENTS.md` § Testing has the
+  one-liner) runs every planted violation of the core's contracts in about 60–90 s and exits non-zero
+  if any survives or is killed for the wrong reason. It is offered as an opt-in CI job, separate
+  from R1's test job; whether it gates, and on which paths, is a shaping call.

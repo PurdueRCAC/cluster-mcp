@@ -104,3 +104,17 @@ pinned interpreter like everything else.
   [`restore-test-coverage.md`](restore-test-coverage.md) (the executor tests land on its suite),
   [`agents-d-instructions.md`](agents-d-instructions.md) (reads through this executor at startup).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
+- 2026-10-16: in `delegate` mode, `DelegatingExecutor.run` expands `cwd` with the server process's
+  `HOME` before `sudo`, so `~` names the server user's home rather than the mapped user's. The
+  command still runs as the mapped user (no escalation); it is a correctness defect in how an
+  executor resolves `cwd`. The redesign resolves `~` as the user the command runs as, or rejects it,
+  and pins that in a test. Found while shaping `restore-test-coverage`, which leaves it unpinned.
+- 2026-10-16: `restore-test-coverage` pins today's launch in `tests/test_executors.py`: the exact
+  `sudo -n -H -u <user> <$SHELL> -c <command>` argv rows, which this cycle rewrites on purpose, and
+  the `Executor` protocol rows for all three backends (the `ssh` row fakes
+  `rcac_mcp.executor.ssh.Connection`, as `tests/test_exec_mode.py` does). The planted violations in
+  `tests/mutants.py` anchor on today's text in `executor/delegate.py`, `executor/shell.py`,
+  `executor/ssh.py` and `tools/transfer.py` (and `tools/slurm.py`, `tools/rcac.py`): an edited
+  anchor fails `test_mutation_anchor_applies[<case>]`, and the case is re-planted against the new
+  code and re-run in the same cycle (`AGENTS.md` § Testing). The timeout path and `cwd` expansion
+  are left unpinned there; they are this seed's to pin.

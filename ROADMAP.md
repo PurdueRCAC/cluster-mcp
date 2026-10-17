@@ -5,10 +5,10 @@ seed holds the evidence and the draft criteria, this file holds the order and th
 order. Nothing here is a contract — the factory's feature step promotes a seed into a `spec/{slug}/GOAL.md`, and
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
-Three Parts, each ending in a release. **Part 0** makes the server safe and useful as it stands and
+The first three Parts each end in a release. **Part 0** makes the server safe and useful as it stands and
 ships as 0.1.1. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
 rather than a Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that
-comes after.
+comes after. **Part III** holds infrastructure work that no release waits on.
 
 The order was revised on 2026-10-16. Users install `main` directly, so fixes for today's users ship
 first, under the name they already have, before the rename. The dependency stack moves before any
@@ -45,7 +45,7 @@ registry, served instructions, removed CLI flags) and a `conftest.py` that fails
 unmarked test. The coupled core named above still has no test.*
 
 *Horizon: now, immediately after the docs strip · Depends on: strip-docs-subsystem (cleared: landed on `develop` 2026-10-16) · Refs: gates the credibility of every later cycle's verify command*
-**Seed:** [`issues/restore-test-coverage.md`](issues/restore-test-coverage.md) · *status: unshaped*
+**Seed:** [`issues/restore-test-coverage.md`](issues/restore-test-coverage.md) · *status: adopted:restore-test-coverage*
 
 ## Nothing runs on push
 
@@ -298,6 +298,22 @@ now.
 
 *Horizon: after 0.2.0 · Depends on: release 0.2.0, stack-upgrade (the HTTP transport), safe-execution · Refs: adds a mode to the execution-mode ladder (`AGENTS.md` § Invariants §4)*
 **Seed:** [`issues/https-token-mode.md`](issues/https-token-mode.md) · *status: unshaped*
+
+---
+
+# Part III — Infrastructure
+
+## The absence check blames a stale checkout on a re-added module
+
+`absence_violations` (`tests/test_registry.py`) explains an importable leftover of the removed
+documentation modules by file suffix, so an untracked leftover that is neither bytecode nor source
+(`.DS_Store`, an interrupted `*.pyc.<n>` temp file) is reported as a re-added module, with no remedy.
+The test's verdict is right; only its explanation is wrong. Classifying by git status (ignored or
+untracked versus tracked) fixes the message. Found by the `strip-docs-subsystem` review, cycle 3,
+2026-10-16.
+
+*Horizon: later · Depends on: — · Refs: split out of `restore-test-coverage`*
+**Seed:** [`issues/absence-check-leftover-classification.md`](issues/absence-check-leftover-classification.md) · *status: unshaped*
 
 ---
 

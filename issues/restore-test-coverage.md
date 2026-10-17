@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:restore-test-coverage
 kind: test
 appetite: big
 lane: public
@@ -93,3 +93,6 @@ stand-ins — this cycle is where they become real tests instead of a reviewer's
   is reported as a re-added module, with no remedy. The verdict is right; only the explanation is
   off. When this suite is rebuilt, classify by git status (ignored or untracked versus tracked)
   rather than by suffix.
+- 2026-10-16: that note now has its own seed,
+  [`absence-check-leftover-classification.md`](absence-check-leftover-classification.md); this
+  cycle leaves it out of scope.

@@ -87,3 +87,24 @@ Questions the plan has to answer rather than assume:
   [`tool-surface.md`](tool-surface.md), [`https-token-mode.md`](https-token-mode.md) (built on the
   upgraded HTTP transport).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
+- 2026-10-16: `restore-test-coverage` confines the suite's FastMCP, mcp and httpx imports to
+  `tests/harness.py` (`test_hygiene.py` fails on one anywhere else), which is the rewrite point:
+  the in-memory client, `http_app()` and its router lifespan,
+  `StreamableHttpTransport(httpx_client_factory=…)` over `httpx.ASGITransport`, the
+  `Middleware.on_call_tool` hook its `Rendezvous` implements, and the `JWTVerifier` import path it
+  re-exports. Three more internals-bound spots: `tests/test_exec_mode.py`'s stub of
+  `rcac_mcp.create_mcp_server` (moves only if server construction moves),
+  `tests/test_tokens.py`'s verifier route (`create_jwt_auth()` returning a `JWTVerifier`;
+  acceptance and 401s observed through the harness's HTTP route), and the older
+  `tests/test_registry.py` and `tests/test_instructions.py`, which read `get_tools()` and
+  `instructions` off a FastMCP server directly. The other contract tests speak harness verbs and
+  should pass unchanged. The planted violations in `tests/mutants.py`
+  anchor on today's `auth.py`, `token.py` and `middleware.py` text; an edited anchor fails
+  `test_mutation_anchor_applies[<case>]`, and the case is re-planted and re-run in the same cycle.
+  If FastMCP 4 drops the `httpx_client_factory` hook, the fallback is uvicorn on a random localhost
+  port, as an `integration` test. `AGENTS.md` § Testing holds the internals-bound list.
+- 2026-10-16: the restore-test-coverage review (cycle 3) observed that the stack-import hygiene
+  check (`tests/test_hygiene.py`, `stack_import_violations`) does not read
+  `pytest.importorskip("fastmcp")`, and its docstring's list of unread loaders doesn't name that
+  form either. Nothing in the suite uses it today. When this cycle moves the harness, either read
+  `pytest.importorskip` with a literal name or list it among the documented limits.
