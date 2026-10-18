@@ -108,6 +108,11 @@ bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
 **Supported Python is 3.14+** (`requires-python = ">=3.14"`). Do not reintroduce compatibility shims
 for older interpreters.
 
+**Supported uv is 0.12.17+**; the floor is `[tool.uv] required-version` in `pyproject.toml`. uv
+0.5.14 and later read that field: a release from 0.5.14 up to 0.12.16 refuses to sync, lock or run
+the project, naming 0.12.17. uv 0.5.13 and earlier predate the field: they warn about an unknown
+field and run, and no uv-native mechanism reaches them.
+
 **`bin/sandbox.sh` is the only safe way to drive this CLI in a check.** It gives the
 run a throwaway `HOME` (so `~` expansion inside a tool call cannot touch yours), blanks
 `JWT_SECRET` / `OIDC_*` / `RCAC_USER_MAP`, and unsets `RCAC_SSH_HOST` — which makes a bare
@@ -314,16 +319,42 @@ import has no effect.
     leaves the server listening. After every row the process group is gone, the port refuses
     connections and the sandbox directory (made under the test's own `TMPDIR`) has been removed. A
     server that never listens fails as `<transport>: the server did not start listening`.
-  - `tests/test_audit.py` (`unit`, `integration`): `audit_violations` and `child_env` (both in
-    `bin/audit_lock.py`, loaded from its file), `offline_violations`. Planted `uv audit` outputs
-    (a finding, under exit 1 or exit 0; offline; an unreachable service; an audit that cannot run;
-    a short count; no summary) are each red for their own reason, and only a no-findings summary
-    covering every registry package in `uv.lock` is green. The command names this checkout with
-    `--project` and `--frozen`/`--no-config`, and the child environment drops `UV_PROJECT` and every
-    `UV_*` but `UV_CACHE_DIR`, `UV_OFFLINE`, `UV_NATIVE_TLS`, `UV_SYSTEM_CERTS`. The integration row
-    runs the real script under `bin/sandbox.sh` offline by construction (`UV_OFFLINE=1`, every proxy
-    at a dead loopback port) and requires exit 2, "advisory source unreachable" and uv's own offline
-    refusal, so no lookup was attempted. The networked proofs belong to the release gate, not the suite.
+  - `tests/test_audit.py` (`unit`, `integration`): `audit_violations`, `offline_requested`,
+    `command` and `child_env` (all in `bin/audit_lock.py`, loaded from its file),
+    `offline_violations`, `unreachable_violations`. Planted `uv audit` outputs (one finding or two,
+    under exit 1 or exit 0; an unparsed report under exit 1; each unreachable marker; an audit that
+    cannot run or was killed; a short or long count; an empty or different lock; no summary, or one
+    not on a line of its own) are each red with exactly their own reasons and documented exit
+    status, and only a no-findings summary covering every registry package in `uv.lock` is green.
+    The wrapper decides offline itself: `main()` reads `UV_OFFLINE` once, by uv's boolean rules
+    (unset or false-ish is online; anything else, empty and unparseable included, is offline), and
+    that one decision both puts `--offline` on uv's argv and marks the verdict offline; `command`
+    takes the decision, never the environment, so nothing reads the variable twice. uv's
+    vocabulary, as uv 0.12.17 and 0.13.1 read it, is `1 t true y yes on` and `0 f false n no off`
+    in any case form, and uv refuses every other value; a unit row pins the
+    wrapper's reading of every case form and of refused values, and an integration row hands each
+    value to the running uv on the wrapper's argv and requires uv to make a request through the
+    canary exactly when the wrapper reads it as online. An offline audit exits 2 as "advisory source
+    unreachable" whatever uv printed or exited, findings included. The tests pin the wrapper's exit
+    status and its own `audit_lock:` messages, never uv's wording, which differs between supported
+    uv releases. The command runs the launching uv (`UV`, else `uv` on `PATH`), names this checkout
+    with `--project` and `--frozen`/`--no-config`, and the child environment drops `UV_PROJECT`,
+    `UV_OFFLINE` and every `UV_*` but `UV_CACHE_DIR`, `UV_HTTP_RETRIES`, `UV_NATIVE_TLS`,
+    `UV_SYSTEM_CERTS`; both are pinned exactly. `main()` is pinned on its own exit status and
+    output: with `subprocess.run` a fake uv that answers only a launch of exactly `command` with
+    exactly `child_env` from the checkout root, its output captured as text, each planted run
+    (clean, short count, a finding, findings on both streams, unreachable, cannot run, three
+    offline, and a clean run under every case form of the vocabulary and every refused value, where
+    the argv's `--offline` must agree with the verdict and both with the vocabulary) must give
+    exactly the expected status, uv's output passed through on its own stream and the wrapper's
+    `audit_lock:` lines on stderr, so a wiring fault anywhere in `main()` fails under any uv. Two
+    integration rows run the real script under `bin/sandbox.sh` with every proxy at a
+    canary, a loopback listener that counts connections and answers none (`UV_HTTP_RETRIES=0`):
+    offline (`UV_OFFLINE=1`) requires exit 2, the wrapper's "advisory source unreachable: the audit
+    ran offline" and **zero** connections, so no lookup was attempted; online requires exit 2, the
+    wrapper's online "advisory source unreachable (uv audit exited N)" and **at least one**
+    connection, the positive control that shows the canary sees this uv's requests. The networked
+    proofs belong to the release gate, not the suite.
   - `tests/test_mutations.py` (`unit`): the fast half of the mutation runner (below).
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):

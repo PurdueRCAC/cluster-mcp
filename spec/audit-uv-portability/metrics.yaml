@@ -1,0 +1,41 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: audit-uv-portability
+escaped_from: stack-upgrade
+planned: {date: '2026-10-17', phases: 3}
+landed: {date: '2026-10-18', phases: 3, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-10-17T06:46:27-04:00', stop: '2026-10-17T06:49:27-04:00', seconds: 180, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-10-17T06:50:05-04:00', stop: '2026-10-17T07:13:37-04:00', seconds: 1412, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-17T07:14:19-04:00', stop: '2026-10-17T07:18:23-04:00', seconds: 244, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-10-17T07:18:54-04:00', stop: '2026-10-17T07:20:15-04:00', seconds: 81, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-10-17T07:20:34-04:00', stop: '2026-10-17T07:26:11-04:00', seconds: 337, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-17T07:27:31-04:00', stop: '2026-10-17T07:36:55-04:00', seconds: 564, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-17T07:37:40-04:00', stop: '2026-10-17T07:45:33-04:00', seconds: 473, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-17T07:47:09-04:00', stop: '2026-10-17T07:58:53-04:00', seconds: 704, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-17T07:58:57-04:00', stop: '2026-10-17T08:17:52-04:00', seconds: 1135, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-17T08:19:30-04:00', stop: '2026-10-17T08:39:30-04:00', seconds: 1200, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-18T19:33:52-04:00', stop: '2026-10-18T19:42:08-04:00', seconds: 496, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-18T19:43:53-04:00', stop: '2026-10-18T19:51:31-04:00', seconds: 458, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-10-18T19:52:04-04:00', stop: '2026-10-18T19:52:04-04:00', seconds: 0, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-10-17'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 2
+  date: '2026-10-17'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 3
+  date: '2026-10-17'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 2, low: 0}
+  plausible: 0
+- cycle: 4
+  date: '2026-10-18'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

@@ -43,6 +43,12 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 
+[tool.uv]
+# The oldest uv this project supports. uv 0.5.14 and later read this field, so 0.5.14 up to 0.12.16
+# refuse to sync, lock or run the project, naming 0.12.17; uv 0.5.13 and earlier predate it, warn
+# about an unknown field and run.
+required-version = ">=0.12.17"
+
 [tool.pytest.ini_options]
 addopts = "--strict-markers"
 markers = [
