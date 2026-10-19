@@ -6,7 +6,7 @@ order. Nothing here is a contract — the factory's feature step promotes a seed
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
 The first three Parts each end in a release. **Part 0** makes the server safe and useful as it stands and
-ships as 0.1.1. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
+ships as 0.1.2. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
 rather than a Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that
 comes after. **Part III** holds infrastructure work that no release waits on.
 
@@ -27,10 +27,14 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Three cycles remain, ending in **release 0.1.1**; `stack-upgrade` landed on `develop` on
+Three cycles remain, ending in **release 0.1.2**; `stack-upgrade` landed on `develop` on
 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on 2026-10-18
 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push. The three
 fix what today's users hit, each built on the one before.
+
+*Corrected 2026-10-18: release 0.1.1 was cut early, on 2026-10-18 from `develop` `c68adaa`, before
+any of Part 0's fixes landed. It carried the dependency-stack upgrade, the docs strip, the test
+suite and the both-era gates, so the release that closes Part 0 is now 0.1.2.*
 
 *Corrected 2026-10-17: `stack-upgrade` landed before `ci-workflow`, so the release recipe's `gate`
 gained the dependency audit first; `ci-workflow`, landing next, mirrors that gate — audit
@@ -112,7 +116,7 @@ request's executor, so the summary comes back only once a read has one: the two 
 *Horizon: with resource-reads-without-executor · Depends on: — · Refs: absorbed by `resource-reads-without-executor`; the same helper split that `generalize-storage-discovery` needs*
 **Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
 
-**Release 0.1.1.** `main` fast-forwards to the released `develop` commit, and everyone who installs
+**Release 0.1.2.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
 connection errors and the site's rules in the instructions — under the name they already use.
 Pages outside this repository that name its tools or install line — RCAC-Docs
@@ -144,7 +148,7 @@ The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in
 client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
 window, not a hard break; the old resource URIs are aliased through the same window.
 
-*Horizon: after 0.1.1 · Depends on: the docs strip (cleared: landed on `develop` 2026-10-16), release 0.1.1 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
+*Horizon: after 0.1.2 · Depends on: the docs strip (cleared: landed on `develop` 2026-10-16), release 0.1.2 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
 **Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: unshaped*
 
 ## Capabilities you don't have shouldn't be tools you see
