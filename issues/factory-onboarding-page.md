@@ -71,7 +71,8 @@ this sits last in Part III rather than first.
 ## Notes
 
 - Whatever lands must be excluded from the sdist along with the rest of `.agents/` — see
-  [`ci-workflow.md`](ci-workflow.md) R2.
+  `bin/sdist_hygiene.py`, which the release gate and CI both run
+  ([`spec/ci-workflow/`](../spec/ci-workflow/)).
 - Related: `.agents/factory/harness-log.md` bootstrap entry (the divergence this seed closes),
   `.agents/factory/methodology.md` (which currently points at this seed by name).
 - Found by: the harness port, 2026-08-26 (out of cycle).

@@ -27,9 +27,10 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Four cycles remain, ending in **release 0.1.1**; `stack-upgrade` landed on `develop` on
-2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)). The next gives the factory a gate that
-runs the test suite on push; the rest fix what today's users hit, each built on the one before.
+Three cycles remain, ending in **release 0.1.1**; `stack-upgrade` landed on `develop` on
+2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on 2026-10-18
+([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push. The three
+fix what today's users hit, each built on the one before.
 
 *Corrected 2026-10-17: `stack-upgrade` landed before `ci-workflow`, so the release recipe's `gate`
 gained the dependency audit first; `ci-workflow`, landing next, mirrors that gate — audit
@@ -38,25 +39,6 @@ included — through its "CI mirrors the gate" check.*
 *Corrected 2026-10-17: the `rcac://storage` fix moved under the resource-read entry below. Its
 handler runs `findscratch` and `myquota` through the request's executor, which a read does not get
 yet, so fixing the `TypeError` alone would only change the error a client sees.*
-
-## Nothing runs on push
-
-There is no `.github/` at all: no test workflow, no publish workflow, no container build. The release
-recipe says so out loud and its local gate is currently the only thing between a bad build and a
-permanent tag. A minimal CI — pytest on the supported Python, plus the sdist-hygiene assertion so
-`spec/` and `.security/` can never reach a published artifact — is the cheap half, and it makes
-every later gate real. `stack-upgrade` adds a dependency-audit step to it.
-
-*Corrected 2026-10-17: `stack-upgrade` landed first ([`spec/stack-upgrade/`](spec/stack-upgrade/))
-and put the dependency audit in the release recipe's `gate`; this cycle's workflow runs it as part
-of mirroring that gate, rather than `stack-upgrade` adding a step to a workflow that did not exist.*
-
-*Corrected 2026-10-16: the suite is no longer docs-only; the strip left `test_registry.py`,
-`test_instructions.py` and `test_cli.py`. `restore-test-coverage` has since pinned the coupled core
-([`spec/restore-test-coverage/`](spec/restore-test-coverage/)), so the suite is the real gate.*
-
-*Horizon: now · Depends on: restore-test-coverage (cleared: landed on `develop` 2026-10-16) · Refs: the release recipe's `gate` duplicates it locally until this exists*
-**Seed:** [`issues/ci-workflow.md`](issues/ci-workflow.md) · *status: adopted:ci-workflow*
 
 ## Every tool passes exactly what it was given
 
@@ -320,7 +302,7 @@ the gate checks any other annotation. A gate step or standing test that type-che
 least rejects an annotation in `src/rcac_mcp` that resolves to a non-type, closes it; the tool is
 the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement, 2026-10-17.
 
-*Horizon: later · Depends on: — · Refs: runs where the gate runs, so CI picks it up once `ci-workflow` mirrors the gate; [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
+*Horizon: later · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
 **Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*
 
 ## A truncated sdist crashes the hygiene check instead of naming it
@@ -330,7 +312,7 @@ short raises `EOFError` outside the errors it catches, so the check exits 1 with
 still fails closed in the release gate and in CI; only the message breaks its contract. Found by
 the `ci-workflow` review, 2026-10-18.
 
-*Horizon: later · Depends on: — · Refs: the shared check `ci-workflow` introduced*
+*Horizon: later · Depends on: — · Refs: the shared check `ci-workflow` introduced ([`spec/ci-workflow/`](spec/ci-workflow/))*
 **Seed:** [`issues/sdist-hygiene-truncated-gzip.md`](issues/sdist-hygiene-truncated-gzip.md) · *status: unshaped*
 
 ---

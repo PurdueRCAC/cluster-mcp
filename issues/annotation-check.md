@@ -35,8 +35,8 @@ so it is carried here at the retirement of `stack-upgrade`'s seeds.
 
 A gate step, or a standing test, that type-checks `src/`, or at least evaluates every annotation in
 `src/rcac_mcp` and rejects any that resolves to a non-type object such as a slice. Which tool
-(pyright, mypy, or a `get_type_hints` sweep) is the plan's call. It runs where the gate runs; once
-`ci-workflow` lands, CI mirrors the gate, so it runs there too.
+(pyright, mypy, or a `get_type_hints` sweep) is the plan's call. It runs where the gate runs; CI
+has mirrored the gate since `ci-workflow` landed on `develop` (2026-10-18), so it runs there too.
 
 ## Sketch of the acceptance criteria
 
@@ -53,5 +53,5 @@ A gate step, or a standing test, that type-checks `src/`, or at least evaluates 
 - A criterion that only asserts evaluation succeeds passes on the broken code; the check has to
   assert the shape of what resolves.
 - Related: [`spec/stack-upgrade/`](../spec/stack-upgrade/) (R7, R9: the one pinned annotation);
-  [`ci-workflow.md`](ci-workflow.md) (CI mirrors the gate).
+  [`spec/ci-workflow/`](../spec/ci-workflow/) (CI mirrors the gate).
 - Found by: `stack-upgrade`'s GOAL non-goals, carried at retirement, 2026-10-17.
