@@ -653,7 +653,8 @@ release:
       PEP 440, no v prefix, and no hyphen in a prerelease (0.2.0a1, not 0.2.0-a1). The version must
       be strictly greater than the latest tag and not already a tag.
     first-release: >-
-      No tag exists yet; the first release's notes draw from the beginning of history.
+      The first tag, 0.1.1 (2026-10-18), drew its notes from the beginning of history; every later
+      release's notes start at the tag before it.
     install-probe: >-
       post_verify runs under bin/sandbox.sh so the probe cannot pick up the working tree or reach a
       real cluster.
