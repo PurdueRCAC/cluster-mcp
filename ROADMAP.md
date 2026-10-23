@@ -324,18 +324,6 @@ now.
 
 # Part III — Infrastructure
 
-## The absence check blames a stale checkout on a re-added module
-
-`absence_violations` (`tests/test_registry.py`) explains an importable leftover of the removed
-documentation modules by file suffix, so an untracked leftover that is neither bytecode nor source
-(`.DS_Store`, an interrupted `*.pyc.<n>` temp file) is reported as a re-added module, with no remedy.
-The test's verdict is right; only its explanation is wrong. Classifying by git status (ignored or
-untracked versus tracked) fixes the message. Found by the `strip-docs-subsystem` review, cycle 3,
-2026-10-16.
-
-*Horizon: later · Depends on: — · Refs: split out of `restore-test-coverage`*
-**Seed:** [`issues/absence-check-leftover-classification.md`](issues/absence-check-leftover-classification.md) · *status: adopted:absence-check-leftover-classification*
-
 ## The surface pin cannot follow a deliberate surface change
 
 `tests/fixtures/served_surface.json` is the surface `3d010ec` served, taken on FastMCP 2, and
@@ -392,6 +380,17 @@ the `absence-check-leftover-classification` plan, 2026-10-19.
 
 *Horizon: later · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
 **Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: unshaped*
+
+## The static skip check admits a skip it should catch
+
+`test_only_need_shell_skips` keeps a test from skipping on CI unseen, but it admits a skip inside an
+allowed helper that is nested or redefined in conftest, inside any module whose name ends in
+`conftest.py`, and a skip called as `pytest.skip.__call__`. None exists today; any would let a row
+vanish from CI without failing. Found by the landing-merge check of
+`absence-check-leftover-classification`, 2026-10-23.
+
+*Horizon: later · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
+**Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: unshaped*
 
 ---
 
