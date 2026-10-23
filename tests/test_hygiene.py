@@ -583,19 +583,21 @@ def test_spec_id_check_catches_planted_ids(text: str, found: bool) -> None:
     assert bool(spec_id_violations('planted', text)) == found
 
 
-# A row that needs a login shell runs it or, off CI, skips: `conftest.need_shell` is the one place
-# that decides, and on CI (where the workflow installs every shell) it fails the row instead. Any
-# other skip in the suite would let a row vanish from CI without failing.
+# A row that needs a login shell, or a git that runs, runs it or, off CI, skips: `conftest.need_shell`
+# and `conftest.need_git` are the only places that decide, and on CI (where the workflow installs
+# every shell and the runner image carries git) they fail the row instead. Any other skip in the
+# suite would let a row vanish from CI without failing.
 SKIPPERS = {'skip', 'skipif', 'importorskip', 'xfail'}
+SKIP_HELPERS = {'need_shell', 'need_git'}
 
 
 def skip_violations(name: str, text: str) -> list[str]:
-    """Every skip, conditional skip or expected failure in `text` outside `need_shell`."""
+    """Every skip, conditional skip or expected failure in `text` outside the `SKIP_HELPERS`."""
     found = []
     tree = ast.parse(text, name)
     allowed: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == 'need_shell' and name.endswith('conftest.py'):
+        if isinstance(node, ast.FunctionDef) and node.name in SKIP_HELPERS and name.endswith('conftest.py'):
             allowed |= {n.lineno for n in ast.walk(node) if hasattr(n, 'lineno')}
     # `pytest.skip.Exception` names the outcome without skipping anything.
     named = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
@@ -622,6 +624,9 @@ def test_only_need_shell_skips() -> None:
     pytest.param('t.py', 'from pytest import importorskip\nimportorskip("yaml")\n', True, id='importorskip'),
     pytest.param('t.py', 'def need_shell(s):\n    pytest.skip(s)\n', True, id='need-shell-elsewhere'),
     pytest.param('conftest.py', 'def need_shell(s):\n    pytest.skip(s)\n', False, id='need-shell'),
+    pytest.param('t.py', 'def need_git():\n    pytest.skip("git")\n', True, id='need-git-elsewhere'),
+    pytest.param('conftest.py', 'def need_git():\n    pytest.skip("git")\n', False, id='need-git'),
+    pytest.param('conftest.py', 'def need_other():\n    pytest.skip("x")\n', True, id='other-helper'),
     pytest.param('t.py', 'import pytest\nraised = pytest.skip.Exception\n', False, id='outcome-type'),
 ])
 def test_skip_check_catches_planted_skips(name: str, text: str, found: bool) -> None:

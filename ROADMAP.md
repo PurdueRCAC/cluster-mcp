@@ -334,7 +334,7 @@ untracked versus tracked) fixes the message. Found by the `strip-docs-subsystem`
 2026-10-16.
 
 *Horizon: later · Depends on: — · Refs: split out of `restore-test-coverage`*
-**Seed:** [`issues/absence-check-leftover-classification.md`](issues/absence-check-leftover-classification.md) · *status: unshaped*
+**Seed:** [`issues/absence-check-leftover-classification.md`](issues/absence-check-leftover-classification.md) · *status: adopted:absence-check-leftover-classification*
 
 ## The surface pin cannot follow a deliberate surface change
 
@@ -380,6 +380,18 @@ session the server owns), larger than a small cycle.
 
 *Horizon: later · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5*
 **Seed:** [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md) · *status: unshaped*
+
+## The `integration` marker says it drives the CLI, and not every integration test does
+
+`pyproject.toml` describes `integration` as "drives the installed CLI", but `test_docs_modules_absent`
+and the git-backed absence-message controls in `tests/test_registry.py` are `integration` only
+because they start git, which the unit guard forbids in a `unit` test. In practice the marker means
+"not `unit`"; its description states a narrower rule, and `AGENTS.md` § Testing notes the mismatch
+instead of fixing it. Rewording both markers to the line the unit guard draws settles it. Found by
+the `absence-check-leftover-classification` plan, 2026-10-19.
+
+*Horizon: later · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
+**Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: unshaped*
 
 ---
 

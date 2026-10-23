@@ -216,14 +216,46 @@ import has no effect.
   observed behaviour, and that gates may import directly (`sys.path.insert(0, 'tests')`). Their
   names and the parametrised test ids are a contract: renaming one breaks a gate loudly. Each check
   has standing negative controls, planted shapes it must reject.
-  - `tests/test_registry.py` (`unit`): `EXPECTED_TOOLS`, `registry_violations`, `module_absent`,
-    `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves (listed by a
-    harness client, `served_tools`) match
-    `EXPECTED_TOOLS` exactly, and the removed documentation modules stay unimportable; when one
-    does import, `absence_violations` says where from and reads what is there: bytecode alone is
-    the stale checkout below, with its remedy; any other file means the module was re-added, and
-    the message says so instead of offering a remedy. `EXPECTED_TOOLS` is hard-coded, so a tool
-    change edits it in the same commit as `SERVER_INSTRUCTIONS` and the README (§ Invariants §9).
+  - `tests/test_registry.py` (`unit`, `integration`): `EXPECTED_TOOLS`, `registry_violations`,
+    `module_absent`, `absence_violations`. `TOOL_REGISTRY` and the tools the server actually serves
+    (listed by a harness client, `served_tools`) match `EXPECTED_TOOLS` exactly, and the removed
+    documentation modules stay unimportable; when one does import, `absence_violations` says where
+    from and asks the developer's own git, through `bin/sandbox.sh`, what each file there is. A
+    tracked file means the module was re-added, and the message says so with no `del`; an untracked
+    file and an ignored one (the stale checkout below) each get their own line and a `del` that
+    reaches only that class. The classes are the developer's own `git status --ignored`: every file
+    is keyed by its path as git prints it (a symlink, the location itself included, is the link git
+    records, never its target; on macOS names are compared composed, whatever
+    `core.precomposeUnicode` says), and a repository nested there is the one entry git lists it as,
+    in git's class for it, with a line saying git does not look into it. A submodule git tracks
+    but has not checked out (an empty directory, as a deinitialised submodule or a checkout that
+    fetches no submodules leaves it) is tracked, and a FIFO, socket or device, which git records
+    nowhere, gets its own line as unknown to git. Git runs with the
+    developer's HOME and XDG directories handed back inside the sandbox and the rest of the
+    environment as it is, so it reads exactly the configuration their `git status` reads (global and
+    system config, `[include]` and `includeIf`, `~` in any value, `GIT_CONFIG_*`, every excludes
+    file); only what points it at another repository is dropped (`GIT_DIR`, `GIT_WORK_TREE`,
+    `GIT_INDEX_FILE` and the rest of what a hook exports, as `git rev-parse --local-env-vars` lists
+    them, and the pathspec-mode variables), and `GIT_CEILING_DIRECTORIES` is kept. Running the
+    developer's git is safe because it only reads: the calls are `rev-parse`, `ls-files` and
+    `check-ignore`, which write nothing; `GIT_OPTIONAL_LOCKS=0` keeps git from refreshing the index;
+    and `core.fsmonitor=false` and `core.hooksPath=/dev/null` on the command line, which outrank
+    every config file, keep anything a config names from running. Where git cannot answer, the
+    message is the old suffix rule's: bytecode alone is a stale checkout, anything else a re-added
+    module. That is the case without git on PATH, without `bin/sandbox.sh` (an sdist), outside a
+    work tree (one above `GIT_CEILING_DIRECTORIES` included), in a `unit` test, which may start no
+    process, when a call fails or lists a file in no class (a FIFO, socket or device aside) or in
+    two, and when a directory there cannot be read. So `test_docs_modules_absent` is `integration` although it drives no CLI, and
+    `-m unit` no longer runs it. It is the one test that asks the developer's own git, and only
+    when it fails. Every other test that runs git, each git-backed control and
+    `test_git_env_drops_what_points_git_elsewhere`, uses a scratch HOME and system config, so the
+    developer's configuration is never read; the controls build their own repository under
+    `tmp_path` and check each class against `git status --ignored`, run outside any hook
+    environment. They go through `conftest.need_git`, which skips them off CI and fails them on CI
+    unless the git on PATH runs (`git --version` exits 0), and never skips on CI (its own test
+    catches every outcome, so it cannot skip itself).
+    `EXPECTED_TOOLS` is hard-coded, so a tool change edits it in the same
+    commit as `SERVER_INSTRUCTIONS` and the README (§ Invariants §9).
   - `tests/test_instructions.py` (`unit`): `instruction_violations`, `guidance_violations`,
     `NON_TOOL_TERMS`. `SERVER_INSTRUCTIONS`, both as the constant and as served (what a harness
     client receives on connecting, `served_instructions`), lists exactly the
@@ -400,13 +432,13 @@ import has no effect.
     `test_path_shim_survives_a_login_bash`), the harness fence and the build-inside-the-loop rule
     are active. No feature-scoped spec id (`R#`, `P#`) appears in the package or the suite
     (`test_no_spec_ids_in_the_package_or_the_suite`, which reads the imported package, so a planted
-    id in a mutated copy fails it). A row that needs a login shell calls `conftest.need_shell`, the
-    suite's only skip: off CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming
-    the shell (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`), and no other skip, `skipif`,
-    `importorskip` or `xfail` exists in `tests/*.py` (`test_only_need_shell_skips`, static). A row
-    that drives OpenSSH's own `sftp-server` calls `conftest.need_sftp_server`, which never skips:
-    macOS ships it, the GitHub runner's `ssh` package installs it, and a host without it fails the
-    row, naming it.
+    id in a mutated copy fails it). A row that needs a login shell calls `conftest.need_shell`: off
+    CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
+    (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
+    the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
+    `tests/*.py` (`test_only_need_shell_skips`, static). A row that drives OpenSSH's own
+    `sftp-server` calls `conftest.need_sftp_server`, which never skips: macOS ships it, the GitHub
+    runner's `ssh` package installs it, and a host without it fails the row, naming it.
   - `tests/test_protocol.py` (`unit`): `boundary_violations`, `cancellation_violations`,
     `era_violations`. A `PermissionError` (in memory and over HTTP), a `RuntimeError` and an
     `MCPError` raised by middleware around a tool call each arrive as a tool error result whose

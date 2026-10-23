@@ -18,6 +18,7 @@ import multiprocessing
 import os
 import pty
 import shlex
+import shutil
 import socket
 import stat
 import subprocess
@@ -90,6 +91,32 @@ def need_sftp_server() -> str:
     if not found:
         pytest.fail("OpenSSH's sftp-server is not installed here, and the suite drives it", pytrace=False)
     return found
+
+
+def need_git() -> None:
+    """Return if the git on PATH runs; otherwise skip the test, or fail it on CI.
+
+    Every test that builds a git repository goes through here. Git runs when `git --version` exits
+    0 through bin/sandbox.sh; a git on PATH that cannot run (macOS's /usr/bin/git without the
+    Command Line Tools) counts as missing. On CI (`CI=true`, as GitHub Actions sets it) git is
+    always installed, so a missing one fails the test, naming it: a skipped test there would be
+    coverage silently lost. Elsewhere it skips.
+    """
+    program = shutil.which('git')
+    if program is None:
+        reason = 'git is not on PATH here'
+    else:
+        try:
+            ran = subprocess.run([str(SANDBOX), program, '--version'], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as error:
+            reason = f'git on PATH ({program}) does not run here: {error}'
+        else:
+            if ran.returncode == 0:
+                return
+            reason = f'git on PATH ({program}) does not run here: `git --version` exited {ran.returncode}'
+    if os.environ.get('CI', '').lower() == 'true':
+        pytest.fail(f'{reason}, and on CI git must run', pytrace=False)
+    pytest.skip(reason)
 
 
 SHIM_MESSAGE = 'refused by the test PATH shim'
