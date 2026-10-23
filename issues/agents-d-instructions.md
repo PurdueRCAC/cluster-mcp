@@ -37,7 +37,7 @@ the model sees only the text before the cut. Some clients cut harder or drop ins
 Not deferred — a roadmap cycle. It lands in Part 0, after
 [`spec/stack-upgrade/`](../spec/stack-upgrade/) (instructions travel in `InitializeResult` on older protocol
 revisions and in `DiscoverResult.instructions` on 2026-07-28, so the mechanism is built once on the
-current API) and [`safe-execution.md`](safe-execution.md) (it reads through the argv executor, and
+current API) and [`spec/safe-execution/`](../spec/safe-execution/) (it reads through the argv executor, and
 startup has to fail clearly).
 
 **Pre-existing:** the resource-only delivery and the double load are on `main` today; the cache
@@ -102,7 +102,7 @@ covers every Purdue cluster today).
   and the site context; [`site-extras.md`](site-extras.md) documents how packaged site context
   composes with this runtime context.
 - Related: [`context-cache-cross-user.md`](context-cache-cross-user.md) (absorbed),
-  [`spec/stack-upgrade/`](../spec/stack-upgrade/), [`safe-execution.md`](safe-execution.md),
+  [`spec/stack-upgrade/`](../spec/stack-upgrade/), [`spec/safe-execution/`](../spec/safe-execution/),
   [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) (moves the resource URI and the budget's
   environment variable to the new prefix).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
