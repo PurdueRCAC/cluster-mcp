@@ -27,13 +27,13 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Three cycles remain, ending in **release 0.1.3**: `ssh-reconnect-loop`, then
-`sbatch-script-name-collision`, then `agents-d-instructions`; the resource reads follow it,
+Two cycles remain, ending in **release 0.1.3**: `ssh-reconnect-loop` and `agents-d-instructions`
+(`sbatch-script-name-collision` landed on 2026-10-26); the resource reads follow the latter,
 since it retires the cache a read would expose and may settle them outright. `stack-upgrade` landed
 on `develop` on 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on
 2026-10-18 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push.
 `safe-execution` landed on 2026-10-23 ([`spec/safe-execution/`](spec/safe-execution/)): every
-tool passes exactly what it was given, under one bash, and the three build on it to fix what
+tool passes exactly what it was given, under one bash, and these cycles build on it to fix what
 today's users still hit.
 
 *Corrected 2026-10-23: release 0.1.2 was cut on 2026-10-22 from `develop` `90b0938`, before
@@ -72,21 +72,6 @@ bounds the reconnect the same way, so it ships in 0.1.3.
 
 *Horizon: near-term · Depends on: safe-execution (its connect timeouts, P3; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 02 §4*
 **Seed:** [`issues/ssh-reconnect-loop.md`](issues/ssh-reconnect-loop.md) · *status: unshaped*
-
-## `sbatch` job scripts written in the same second share a name
-
-`sbatch` writes `script_content` to `~/jobs/<job_name>_<timestamp>.sh` with a one-second
-timestamp, so two submissions with the same name in the same second write one file: the first
-job's script on disk is replaced, and two overlapping calls can submit the same content twice. An
-exclusive create, or a unique part in the name, fixes it.
-Pre-existing. Found by `safe-execution`'s planning research, 2026-10-17.
-
-It sits in Part 0, not with the `job_*` family, because today's users submit concurrently (two
-clients of one server, an agent submitting a sweep in a loop) and can clobber each other's script
-now; the fix is small, and waiting for Part I would leave it in place until 0.2.0.
-
-*Horizon: near-term · Depends on: safe-execution (the byte-exact script write; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 04 §7, PLAN risk 7; [`issues/slurm-capability.md`](issues/slurm-capability.md), whose `job_submit` inherits the fixed naming*
-**Seed:** [`issues/sbatch-script-name-collision.md`](issues/sbatch-script-name-collision.md) · *status: adopted:sbatch-script-name-collision*
 
 ## The site's own rules should reach the model unasked
 
