@@ -8,7 +8,8 @@ below it act on every test without adding or reading markers for any other purpo
 launder that hook: a session-wide PATH shim for `sudo` and `ssh` (re-pinned inside a login bash
 through `BASH_ENV`), the unit guard (no process, no network, no real HOME), the `launches` recorder,
 the `executes` launcher (real executions of the local and delegate backends, fenced and sandboxed),
-and a check that no executor leaks into the main context.
+the `open_tmp` directory every account can reach, and a check that no executor leaks into the main
+context.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import types
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -400,6 +402,34 @@ def executes(guard: UnitGuard, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     monkeypatch.setattr(launch, 'subprocess', proxy)
     monkeypatch.setattr(subprocess, 'Popen', SandboxOnlyPopen)
     return executions
+
+
+# Where `open_tmp` makes its directories: the system's shared temporary directory, which every
+# account can reach (mode 1777 under directories open to all, on Linux and on macOS alike).
+SHARED_TMP = '/tmp'
+
+
+@pytest.fixture
+def open_tmp() -> Iterator[Path]:
+    """A new directory, mode 755, that every account can reach: a read for every account
+    (`site.read_local(for_others=True)`) can serve what is planted in it.
+
+    `tmp_path` cannot: pytest keeps it under a per-user directory of mode 700. Every mode below it
+    is opened again, and its ACL entries go with the files, before it is removed.
+    """
+    from rcac_mcp import site
+    root = Path(tempfile.mkdtemp(prefix='cluster-mcp-open-', dir=SHARED_TMP))
+    root.chmod(0o755)
+    try:
+        if not site._open_to_everyone(str(root)):
+            pytest.fail(f'{SHARED_TMP} is not open to every account here, so {root} cannot be', pytrace=False)
+        yield root
+    finally:
+        root.chmod(0o755)
+        for parent, dirs, _ in os.walk(root):
+            for name in dirs:
+                Path(parent, name).chmod(0o755)
+        shutil.rmtree(root)
 
 
 @pytest.fixture(autouse=True)

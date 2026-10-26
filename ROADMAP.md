@@ -83,7 +83,7 @@ thousand characters loses the least, within a configurable budget. A `cluster_co
 the full text, the resource stays, and startup never hangs on the read.
 
 *Horizon: near-term · Depends on: stack-upgrade (both protocol eras carry instructions; cleared: landed on `develop` 2026-10-17), safe-execution (the executor it reads through; cleared: landed on `develop` 2026-10-23) · Refs: absorbs `context-cache-cross-user`*
-**Seed:** [`issues/agents-d-instructions.md`](issues/agents-d-instructions.md) · *status: unshaped*
+**Seed:** [`issues/agents-d-instructions.md`](issues/agents-d-instructions.md) · *status: adopted:agents-d-instructions*
 
 ### Absorbed: one user's cluster context is served to every other user
 
@@ -95,7 +95,7 @@ impact is bounded; the *mechanism* is the bug. Reading the files once at startup
 retires the cache rather than patching it. Found by the harness port, 2026-08-26.
 
 *Horizon: with agents-d-instructions · Depends on: — · Refs: absorbed by `agents-d-instructions`; `AGENTS.md` § Invariants §8 documents the defect as a known one*
-**Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: unshaped*
+**Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: adopted:agents-d-instructions*
 
 ## Neither advertised resource can be read
 
@@ -353,6 +353,32 @@ session the server owns), larger than a small cycle.
 
 *Horizon: later · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5*
 **Seed:** [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md) · *status: unshaped*
+
+## One very large site file can cost every site rule
+
+The startup read takes each `/etc/agents.d/*.md` file whole, with no size limit, inside one 10 s
+bound. A file of tens of megabytes can push the `ssh` read past it, and then no site rule is served
+at all; when the read finishes, `cluster_context` returns the whole file. A per-file limit that
+leaves an oversize file out and names it, as the budget does, fixes it. Found by
+`agents-d-instructions`' planning, 2026-10-19.
+
+It stays here because the convention's files are a few kilobytes, so it takes a mistake in the
+directory to show.
+
+*Horizon: later · Depends on: agents-d-instructions (the startup read it bounds) · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5; `AGENTS.md` § Invariants §8*
+**Seed:** [`issues/site-file-size-cap.md`](issues/site-file-size-cap.md) · *status: unshaped*
+
+## Every start asks the package index for FastMCP's latest version
+
+FastMCP's banner, on by default, checks PyPI for a newer FastMCP at every start (cached for 12
+hours) unless `FASTMCP_CHECK_FOR_UPDATES=off`, so the server makes an outbound request nobody asked
+for and can advise upgrading a dependency `uv.lock` pins. Turning the check off (or the banner) at
+startup fixes it. Pre-existing. Noted by `agents-d-instructions`' planning, 2026-10-19.
+
+It stays here because no release waits on it: the request is bounded at 2 s and fails silently.
+
+*Horizon: later · Depends on: — · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5*
+**Seed:** [`issues/fastmcp-update-check.md`](issues/fastmcp-update-check.md) · *status: unshaped*
 
 ## The `integration` marker says it drives the CLI, and not every integration test does
 

@@ -134,7 +134,8 @@ Top-level package `src/rcac_mcp/`:
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — both set the per-request executor in `on_call_tool` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
 | `token.py` | `ISSUER`/`AUDIENCE`/`ALGORITHM` constants + `generate_token()` (the `--generate-token` path). Signer side of the JWT contract. |
-| `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (loads `/etc/agents.d/*.md` from the cluster) and `rcac://storage`. |
+| `site.py` | The site context: `/etc/agents.d/*.md` read once at startup (`read_local`, or `READ_SITE` through the shared executor in `ssh` mode, either under `read_bounded`'s `READ_TIMEOUT`), `compose()` of the served instructions within the budget, and `register`/`site_of`, the per-server holder the tool and the resource read. |
+| `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (the site context read at startup, from `site_of`; runs nothing) and `rcac://storage`. |
 | `executor/base.py` | `Executor` `Protocol` + the `CommandResult` dataclass. The contract all backends satisfy. Also `UserPath` and the reserved exit codes `TIMEOUT_EXIT_CODE` (−1001) and `NOT_STARTED_EXIT_CODE` (−1002). |
 | `executor/launch.py` | The launcher every backend runs commands through: renders an argv or a script into one bash program for the pinned login bash (`program`), the local/delegate stage (`bash_argv`) and the SSH bootstrap (`ssh_command`), `separate` (drops login-initialisation output), and `run_process` (local/delegate processes and their timeouts). |
 | `executor/ssh.py` | `SSHExecutor` — Fabric `Connection` (`~/.ssh/config`-aware, each connect step bounded by `CONNECT_TIMEOUT` unless the SSH config sets it, reconnect with exponential backoff) for the connection; each command on a raw Paramiko channel, transfers over Paramiko's SFTP client. |
@@ -143,6 +144,7 @@ Top-level package `src/rcac_mcp/`:
 | `scripts.py` | `FIXED_SCRIPTS`, `fixed()` and `script_argv()`: the constant bash scripts a tool or resource runs when one call needs a redirection or two steps, every caller value only a positional parameter. The tool tests refuse any other shell text. |
 | `tools/__init__.py` | `TOOL_REGISTRY`, the `@mcp_tool` decorator, and the **import list that makes registration happen**. |
 | `tools/{shell,filesystem,transfer}.py` | Generic backend-agnostic tools: `run_command`, directory/file read+write (`write_file` byte-exact, its content through the executor's `write`, `encoding` `utf-8` or `base64`), `upload_file`/`download_file` (returning the path the executor wrote). |
+| `tools/context.py` | `cluster_context`: the site context read at startup, in full; runs nothing and needs no executor. |
 | `tools/slurm.py` | Slurm tools: `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`, plus RCAC's `slist`/`sfeatures`. |
 | `tools/rcac.py` | Purdue-specific: `myquota`, `storage_paths`, `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`. |
 
@@ -186,6 +188,11 @@ Every tool follows the same three-line shape: `get_executor()`, run something, r
 point of the `Executor` protocol, and it is why `run_command` works identically over SSH, locally,
 and under `sudo`.
 
+One read happens before any request: at startup, `run()` reads `/etc/agents.d` once, as the server
+(over the shared executor in `ssh` mode, in this process otherwise), bounded by `site.READ_TIMEOUT`,
+and hands the result to `create_mcp_server`, which composes it into the served instructions and
+holds it for `cluster_context` and `rcac://context` (§8). No request reads the site again.
+
 The contracts each piece keeps — request isolation, the executor protocol, the execution-mode
 ladder, delegation and auth, tool registration, resources, and the agent-facing surface — are
 § Invariants §1–§9.
@@ -201,6 +208,7 @@ There is no config file and no config singleton — everything is CLI flags plus
 | `JWT_SECRET` | HS256 shared secret (≥ 32 chars) |
 | `OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `MCP_BASE_URL` | OIDC proxy (all four required together) |
 | `MCP_BASE_URL` | also used to build the absolute icon URL in `server.py` |
+| `RCAC_INSTRUCTIONS_BUDGET` | the most characters (UTF-16 code units, as JavaScript clients count) the served instructions may take; default 4096, Claude Code's cut; `--instructions-budget` overrides |
 
 `MCP_BASE_URL` is read **at import time** in `server.py` to compute `ICON_URL`; setting it after
 import has no effect.
@@ -262,7 +270,80 @@ import has no effect.
     registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
     search — that is the separate `rcac-docs-mcp` service, which only the README points to. This
     is §9 made executable; it reads list entries and backticked or snake_case names, so a tool
-    whose name is a plain word, mentioned in bare prose, escapes it.
+    whose name is a plain word, mentioned in bare prose, escapes it. `test_base_leaves_room_for_the_site`
+    holds `SERVER_INSTRUCTIONS` to 1,500 UTF-16 code units, so the default budget has room for site
+    rules (§8, §9).
+  - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
+    read on a planted directory: every regular `*.md` file directly in it but `AGENTS.md` (dotfiles,
+    `.md`, a space, `-n.md` and `end 0.md` included; `Upper.MD`, a `.txt`, a whitespace-only file, a
+    symlink, a directory and a FIFO named `*.md` left out), in the byte order of the names (`Z.md` and
+    `10-first.md` before lower case), each under its header
+    (`test_local_read_takes_the_eligible_files_in_byte_order`); the missing, empty, only-`AGENTS.md`,
+    not-a-directory, unreadable-directory and unreadable-file states (`test_local_read_states`); every
+    shape of the remote answer, short, malformed or failed (`test_remote_answers`); `READ_SITE` run for real under
+    `bin/sandbox.sh` against the same planted directories, equal to `read_local`
+    (`test_remote_script_matches_local_read`, `integration`); `read_bounded` abandoning a read at its
+    bound and containing its exception, on a daemon thread that never holds the process open
+    (`test_an_abandoned_read_does_not_hold_the_process`); `compose` at every budget from 0 to 1,200 on several
+    layouts (the base never cut, files whole and in order, the note naming exactly the files
+    left out, a later file that fits still served, a budget under the minimum refused naming it),
+    and a budget that serves a good read serves each failed one. A name that is not UTF-8 reads as
+    U+FFFD; where the file system refuses such a name (macOS), the row asserts the refusal, since
+    the suite allows no skip. Astral names and reasons, read both ways, keep every budget from 0
+    past the minimum, and a failed read's line fits a good read's minimum
+    (`test_astral_names_and_reasons_keep_the_budget`, `test_every_reason_fits_the_room_kept_for_it`);
+    names with C0, DEL, C1, U+2028 and U+2029 characters, read both ways, break no header, reason
+    or note line (`test_a_name_cannot_break_a_served_line`); a shown name reads back as itself, the
+    backslash escaped too, so no two decoded names are shown alike (`test_a_shown_name_reads_back_as_itself`);
+    two names that differ only in an invalid UTF-8 byte stay two files, in the byte order of their
+    names in either listing order, each served or named at every budget, on the remote parse and,
+    where the file system holds such names (Linux, so CI), on `read_local`; macOS's refusal is the
+    row there (`test_two_names_that_decode_alike_are_two_files`); a read for others keeps only what
+    every account can read, a read for this process the file system's answer, on rows planted under
+    `conftest.open_tmp`, a directory every account can reach: a file, the directory or a directory
+    above it, `/` included, directly or through a symlink (absolute or relative, the relative one
+    looked up from the directory holding it), or a directory a `..` step leaves, lacking a bit for
+    the owner, the group or others, or carrying an ACL entry (through the probe, stubbed), while an
+    ancestor every class may search and none may list (`0311`) is passed
+    (`test_a_read_for_others_keeps_only_what_every_account_can_read`); a file or the symlink on the
+    route swapped for one into a private directory after the route's check, after the file's
+    check, or between the listing and the open, with no race, serves nothing from there
+    (`test_a_swap_after_a_check_changes_nothing_read_for_others`); an acl(3) failure other than "no
+    ACL", or no acl(3) at all, counts as an entry (`test_an_acl_the_system_cannot_answer_counts_as_one`,
+    libSystem stubbed, so every platform runs it); a real ACL entry, set the
+    platform's way (`chmod +a` on macOS, the `system.posix_acl_access` attribute on Linux), on a
+    file, the directory or an ancestor, is seen by the probe and makes the read for others
+    unreadable (`test_an_acl_entry_makes_a_path_unreadable_for_others`, `integration`); with the
+    attribute listing stubbed, so every platform runs the Linux probe, a POSIX, NFSv4 or rich ACL
+    on a file, the directory or an ancestor makes it unreadable, an attribute of another kind or a
+    file system without them does not, and a listing that fails fails closed
+    (`test_a_listed_acl_makes_a_path_unreadable_for_others`); every
+    command `READ_SITE` runs that a function could replace is unset in front of it
+    (`test_every_command_the_remote_read_runs_is_reset`), and a login profile exporting a function
+    over each of them changes nothing it finds, under the in-process and the loopback login bash
+    (`test_a_profile_cannot_change_the_remote_read[local|ssh]`, `integration`); and `READ_SITE`
+    finds what `read_local` finds under every glob option, set before it in its bash
+    (`test_remote_read_ignores_the_login_shells_glob_state`) or exported to it as `BASHOPTS` and
+    `GLOBIGNORE` (`test_remote_read_ignores_exported_shell_options`: bash 4.1 or later reads
+    those, so it goes through `need_shell`, and macOS's bash 3.2 skips it while CI runs it).
+  - `tests/test_site_startup.py` (`unit`, `integration`): `MCPServerApp.main` with the server
+    stubbed reads the site once, through the `SSHExecutor` in `ssh` mode and in this process in
+    `local` and `delegate` modes, a read for others in `delegate` mode only; a hung read (`local`,
+    `ssh`, and `local` at the smallest budget a good read accepts) still starts within 0.5 s of the
+    bound with the timeout line; the budget's default, flag, variable, precedence and refusals; and
+    the sandboxed CLI exits 2 on a budget too small, naming the minimum (`integration`).
+  - `tests/test_context.py` (`unit`): `context_violations`. `cluster_context` and `rcac://context`
+    return the startup text for every site state (files, missing, empty, unreadable, timed out) on
+    bare and shared servers in both eras, and no executor runs; two delegate users over HTTP, whose
+    stub `DelegatingExecutor`s report one hostname, get identical text and instructions and launch
+    no `sudo`; the served instructions are `compose(SERVER_INSTRUCTIONS, site)`; nothing reads the
+    site after construction, and a directory rewritten and grown mid-session changes nothing served;
+    in `delegate` mode an identity absent from the user map is refused the tool and still gets the
+    instructions and the resource (§8); two servers built in one process each serve their own site
+    (`test_each_server_keeps_its_own_site`); and in `delegate` mode, in both eras, a file, the
+    directory or a directory above it (directly or through a symlink) that not every account can
+    read, group class included, serves its one line and no site text, while `local` mode's read of
+    the same directory serves the files (`test_delegate_serves_only_what_every_account_can_read`).
   - `tests/test_cli.py`: `flag_violations`. The `integration` cases drive the installed CLI with
     flags it no longer accepts and assert a clean `exit_status.bad_argument` rejection before the
     server starts; the `unit` cases feed `flag_violations` synthetic results it must reject.
@@ -290,19 +371,19 @@ import has no effect.
     Sequential calls on one server, shared and delegate, show that each executor middleware sets
     the executor on every call, not only the first (§1).
   - `tests/test_no_executor.py` (`unit`): `refusal_violations`. A call with no executor for its
-    request (a bare server, every tool; a tokenless delegate call), including right after and while
+    request (a bare server, every tool but `EXECUTORLESS`; a tokenless delegate call), including right after and while
     another request did set one, fails where the client sees it with `No executor configured`, and
     nothing runs. Any error is not enough: the stated reason is required (§1).
   - `tests/test_tools.py` (`unit`): `TOOL_CASES`, `tool_violations`, `argv_violations`. Every
-    `EXPECTED_TOOLS` tool, on a `SharedExecutorMiddleware` server, reaches only the installed
+    `EXPECTED_TOOLS` tool but `EXECUTORLESS` (`cluster_context`, which runs nothing and answers
+    from the startup read), on a `SharedExecutorMiddleware` server, reaches only the installed
     executor, carries its own argument there and returns the executor's answer (§1, §7). A tool
     hands the executor an argv: a command string is `passed a command string` (only `run_command`
     is `PASSES_A_SCRIPT`), and a shell argv
     whose `-c` text is not in `rcac_mcp.scripts.FIXED_SCRIPTS` is an `unregistered script`, so a
     value formatted into shell text fails like a command string. `write_file` hands its content to
-    the executor's `write`, never to an argv. The filesystem tools, the transfers, the Slurm and site tools and the
-    `rcac://context` loader are pinned to their exact argvs (`test_filesystem_argvs`,
-    `test_slurm_and_site_argvs`, `test_context_resource_lists_with_a_fixed_script`), each path a
+    the executor's `write`, never to an argv. The filesystem tools, the transfers, and the Slurm and site tools
+    are pinned to their exact argvs (`test_filesystem_argvs`, `test_slurm_and_site_argvs`), each path a
     `UserPath`: each option value is its own element after its option, and a positional value
     (`sbatch`'s script, `scontrol show node`'s name, `scancel`'s job ids) follows `--`. An empty
     optional scalar (an option's value, an optional positional such as `scontrol show node`'s name,
@@ -482,7 +563,11 @@ import has no effect.
     listed in its commit body and here. Deltas so far (`safe-execution`): `run_command.description`,
     `write_file.description`, `write_file.properties.encoding`, `sbatch.properties.args`, and
     `description` and `properties.extra_args` on each of `sbatch`, `squeue`, `scancel`, `sacct`
-    and `sinfo`; `sbatch-script-name-collision` changed `sbatch.description`.
+    and `sinfo`; (`agents-d-instructions`) `instructions`, the base composed with the harness's
+    site context (`harness.SITE`); `tools.cluster_context`, the new tool in `myquota`'s schema
+    shape (no argument, a `str` result) with its docstring as the description; and
+    `resources.rcac://context.description`, the resource's new description;
+    `sbatch-script-name-collision` changed `sbatch.description`.
     `TOLERATED` names the four differences FastMCP 4 introduces, each with its cause and accepted
     only in its own shape: an argument `description` where there was none, `additionalProperties`
     added as exactly `false`, output `$defs` inlined, and a `description` on an inlined output node
@@ -708,15 +793,21 @@ import has no effect.
     any argv not starting with `bin/sandbox.sh` (the loopback SSH server's launches do), so the
     harness fence lets an in-process server call through under `executes`. `test_hygiene` proves
     the refusals, that every launch starts with the sandbox, and that the fence opens only so.
+  - **`open_tmp`** (`unit` and `integration`) is a new directory, mode 755, under `/tmp`, which every
+    account can reach on Linux and macOS alike: a read for every account (`delegate` mode) can
+    serve what is planted there, which `tmp_path`, under a per-user directory of mode 700, cannot.
+    It fails the test, never skips it, where `/tmp` is not open to every account, and opens every
+    directory below it again before removing it.
   - **The main-context check:** after every test the main context must hold no executor.
 - **`tests/harness.py` is the only test module that imports FastMCP, mcp or the HTTP client
   (`httpx2`)** (`test_only_the_harness_imports_the_stack` fails on any other). Its docstring lists
   the FastMCP 4 / MCP SDK 2 touchpoints it relies on. The contract-test modules speak only its
   verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `negotiate`, `mint`,
   `user_map`, `served_tools`, `served_instructions`, `served_surface`, `installed_auth`, `protocol_error`,
-  `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `launched_script`, `delegate_server`,
+  `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `launched_script`, `read_resource`, `delegate_server`,
   `shared_server`, `bare_server`, `stdio_tools`, `stdio_refusal`, `url_tools`; the builders take extra middleware, such as a `Rendezvous`, added inside the
-  executor middleware, and add a `MethodLog` last) and the `JWTVerifier` type it re-exports. `negotiate` connects in a given
+  executor middleware, and add a `MethodLog` last; each serves the site context `site=` names, by
+  default `SITE`, a host without `/etc/agents.d`) and the `JWTVerifier` type it re-exports. `negotiate` connects in a given
   era without the post-connect check and returns what both ends saw (`Negotiated`: version,
   whether an `InitializeResult` exists, instructions, tool names, and the methods the server's
   `MethodLog` saw), so a test decides the era itself. `stdio_refusal` connects in a given era to a
@@ -726,7 +817,7 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   verifier's 401 arrives as an error from connect-time negotiation, so `call_http` reads it from a
   response recorder and reports a rejection only when the last answer was a 401. `stdio_tools`
   and `url_tools` list the tools of a server in another process and report the era it negotiated
-  (`Listed`): `stdio_tools` (like `stdio_refusal`) launches the server itself, inside FastMCP where
+  and the instructions it served (`Listed`): `stdio_tools` (like `stdio_refusal`) launches the server itself, inside FastMCP where
   the static launch check cannot see it, so it refuses an argv whose first element is not this
   repo's `bin/sandbox.sh`, and closes the server when its client exits; `url_tools` reaches only a
   loopback host.
@@ -1130,7 +1221,20 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 - **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder.
 - **`server.py`** — `SERVER_INSTRUCTIONS` (what every model reads) and import-time `MCP_BASE_URL`.
 - **`tools/__init__.py`** — the bottom-of-file import list; a missing entry silently drops a tool.
-- **`resources.py`** — the process-global context cache keyed by a non-unique hostname.
+- **`site.py`** — the per-server holder (`register`/`site_of`, a `WeakKeyDictionary` keyed by the
+  server object): the site context is set once at construction and read by that server's tool and
+  resource, never per user and never keyed by hostname, never one module value (two servers in one
+  process each serve their own); `read_bounded`, the bound that holds
+  the startup read in every mode (in `ssh` mode opening a session can wait past the executor's own
+  timeout), so a hung read never holds startup; `units`, the one measure of every length the
+  budget sees (never `len`); `shown`, the escape every served name goes through, injective because
+  the backslash is escaped too; `SiteFile.raw`, the name's bytes, by which a file is identified and
+  ordered (never its decoded or shown name, which two files can share);
+  `read_local(for_others=True)`, the `delegate` read that keeps only what every account can read
+  (`_read_for_everyone` on the descriptors `_reach` holds, `_everyone_may`, and the ACL probe
+  `_extended`), which reads only the objects it checked and never resolves a checked name again; and
+  `READ_SITE`'s function
+  and glob resets (§8).
 
 ### 1. Per-request executor isolation (`context.py` + `middleware.py`) — highest blast radius [human gate]
 
@@ -1464,29 +1568,96 @@ What each mode means:
 - Tool return values are serialized by FastMCP. Returning a `@dataclass` (`CommandResult`,
   `StoragePaths`) is supported and used; returning an arbitrary object is not.
 
-### 8. Resources and the `/etc/agents.d/*.md` convention (`resources.py`)
+### 8. Resources and the `/etc/agents.d/*.md` convention (`resources.py`, `site.py`)
 
 - `RESOURCE_REGISTRY` (`resources.py`) exposes `rcac://context` and `rcac://storage`.
 - **`/etc/agents.d/*.md` is a deliberate, external, cross-site convention** — cluster administrators
   drop markdown there and any conforming client picks it up. Files are found with a `maxdepth 1`
-  glob and concatenated in `sort` order with a `<!-- Source: {filename} -->` header each. Do not
-  change the path, the glob, the ordering, or the header format without treating it as a
-  compatibility break; the intent is to get *other* centers to adopt it.
-- A missing directory or empty result is **not an error** — it caches and returns `''`.
-- **`_cluster_context_cache` is a process-global dict keyed by `executor.hostname`.** In delegate mode
-  every user's executor reports the same `socket.gethostname()`, so the first user's context is served
-  to all subsequent users. That is a known defect with a filed seed, not a design choice — do not
-  build new per-user state on this cache, and do not key any new cache on `hostname` alone.
-- **A resource read gets no executor.** Both executor middlewares set it in `on_call_tool` only, so
-  reading `rcac://context` fails with `No executor configured` in every mode and both protocol
-  eras (it did on FastMCP 2 too). It fails closed. That is a known defect with a filed seed
-  (`issues/resource-reads-without-executor.md`), not a design choice; a fix that sets an executor
-  for reads makes the cache above reachable across users in delegate mode, so it lands with or
-  after that cache's retirement. Never satisfy a read with an executor that is not the request's
-  own (§1).
+  glob (regular files only; a symlink is not read) and concatenated in `sort` order, the byte order
+  of the names (`LC_ALL=C sort`), with a `<!-- Source: {filename} -->` header each. Do not change
+  the path, the glob, the ordering, or the header format without treating it as a compatibility
+  break; the intent is to get *other* centers to adopt it.
+- **The server skips the assembled `AGENTS.md`**, a deliberate, documented narrowing: where a site
+  assembles one, it is a preamble plus the same topic files, so reading it would serve every rule
+  twice.
+  Only `AGENTS.md` exactly is skipped. A file whose content is only whitespace is not served; a
+  served file loses its trailing whitespace and keeps everything else. A name is its bytes as
+  UTF-8, an invalid byte read as U+FFFD; a file is identified and ordered by its name's bytes
+  (`SiteFile.raw`), so two names that decode alike are two files in a fixed order, each served or
+  named. A name is **shown** with each control character (C0, DEL, C1, U+2028, U+2029) and the
+  backslash as a `\xNN` or `\uNNNN` escape (`site.shown`) wherever it is served, in its header, a
+  reason and the note, so no name can break a served line and no two decoded names are shown
+  alike; the order stays that of the names themselves, and both reads show a name alike.
+- **The site context is read once, at startup, as the server** (`site.py`), before the server is
+  built: over the shared executor in `ssh` mode, in this process on the server's host in `local`
+  and `delegate` modes, never as a user. No request reads it again; an edit to `/etc/agents.d`
+  takes effect at the next start. The read is bounded by `site.READ_TIMEOUT` (10 s): a read that
+  has not finished is abandoned on its daemon thread and the server starts without site rules.
+- **In `delegate` mode the server serves only what every account can read.** It reads as itself
+  for accounts other than its own, so each class (owner, group, other) must hold search on every
+  directory a lookup of the path passes, symlinks followed, read and search on the directory, and
+  read on each file, and none of them may carry an extended ACL entry; anything else is unreadable
+  (`read_local(for_others=True)`): its one line, and no site text, whatever the server process
+  itself may read. Any ACL the system reports, or one it cannot list, makes the path unreadable in
+  `delegate` mode: on Linux any extended attribute in the `system.` namespace naming an ACL (POSIX,
+  NFSv4, rich), on macOS whatever acl(3) returns (Python has no `os.listxattr` there); where
+  neither can be asked, every path counts as carrying one.
+  **What that read checks is what it reads** (`site._read_for_everyone`): it walks the path from
+  `/` by descriptor, each component opened relative to the descriptor of the directory holding it
+  without following a link (a symlinked directory is read there and its target walked from that
+  descriptor, or from `/`), lists the directory reached from its descriptor, and opens each file
+  relative to it with `O_NOFOLLOW | O_NONBLOCK`, checking the mode bits and ACL on the descriptor it
+  then reads, which `fstat` shows is a regular file. No name is resolved again once the directory
+  holding it was checked, so swapping a file or a route component after its check changes nothing
+  served (`test_a_swap_after_a_check_changes_nothing_read_for_others`); an entry that is a symlink
+  or no regular file when opened is not read. A directory on the way is opened for search only
+  (`O_PATH` on Linux, its ACL listed through `/proc/self/fd` where the descriptor cannot list it;
+  `O_SEARCH` on macOS), so one every
+  account may search but not list is passed as a lookup passes it.
+  `delegate` mode needs `sudo`, so in practice it runs on a Linux host. `local` and `ssh` read as
+  the user they serve and keep the file system's own answer.
+- **`READ_SITE` resets the glob state a login profile can export to it** (`BASHOPTS`,
+  `SHELLOPTS`, `GLOBIGNORE`: `dotglob`, `nullglob`, `failglob`, `nocaseglob`, `globstar`,
+  `extglob`, `noglob`) **and the functions over the commands it runs** within the script itself
+  (`base64`, `shopt`, `tr`, `test`; `launch.FIXED_RESET` covers `cd` and `printf`), so the remote
+  match never depends on them; `launch.FIXED_RESET` (human-gated) is not widened for it. The rest
+  are POSIX special builtins, which no function replaces in the POSIX-mode bash a fixed script runs
+  in, and the script spells `test`, never `[`, which `unset -f` cannot take there. A command added
+  to the script joins its reset in the same commit (`test_every_command_the_remote_read_runs_is_reset`).
+- **The served instructions are the base instructions, then `## Site context (/etc/agents.d)`**
+  with the files, in that order, whole, within the instructions budget (§ Configuration). A file
+  that does not fit is left out and named, with a pointer to `cluster_context`; a later file that
+  fits still goes in. The base is never cut: a budget too small for it and that note refuses to
+  start, naming the minimum. With no files, the section is one line saying why. Every length the
+  composer reserves, cuts or checks is in UTF-16 code units, the budget's own unit: the files and
+  their headers, the note, and a reason, whose detail is cut to `site.DETAIL_LIMIT` (80) units. So
+  every path (files, none, a failure line) serves at most the budget, and a budget a good read
+  accepts holds any failed read's line.
+- **`cluster_context` and `rcac://context` return the full text read at startup**, whatever the
+  budget, in every mode and both eras, and run nothing. A missing directory or no eligible file is
+  **not an error**: they return `''`. An unreadable directory or file, or a read past its bound,
+  is: they return the same one line the instructions carry.
+- **The text is held per server object** (`site.register`, read through FastMCP's current server),
+  never per host or per user; two servers built in one process each serve their own
+  (`test_each_server_keeps_its_own_site`, killing the `site-holder-global` mutant). Nothing is held
+  per host; do not key any new cache on `hostname` alone (§3).
+- **Reading `rcac://context` needs no executor**: its handler returns the held text and calls
+  neither `get_executor()` nor `set_executor()` (§1), so it answers in every mode and both eras.
+  `rcac://storage` is unchanged: its handler still needs the request's executor, which a resource
+  read does not get (`issues/resource-reads-without-executor.md`). Never satisfy a read with an
+  executor that is not the request's own (§1).
+- **In `delegate` mode the tool reaches only a mapped user.** The middleware refuses every tool call
+  from an identity absent from the user map before the body runs (§5), `cluster_context` included,
+  while the instructions and `rcac://context` reach any client that can connect. That is
+  intended: what is served there is text every account can read (above) and identical for every
+  user, so the difference discloses nothing. Exempting the tool from the map check is a §5 change.
 
 ### 9. The agent-facing surface is part of the API (`server.py`) [human gate]
 
+- **The served instructions are `SERVER_INSTRUCTIONS` followed by the site context** (§8), composed
+  once by `create_mcp_server(…, site=…, budget=…)` within the instructions budget (§ Configuration;
+  default 4096, Claude Code's cut). `SERVER_INSTRUCTIONS` is the base: it is never cut, and §9's
+  rules below govern it alone, not the site's text after it.
 - `SERVER_INSTRUCTIONS` (`server.py`) is what every connecting model reads before choosing a tool.
   **Adding, renaming, or removing a tool — any tool change — updates `SERVER_INSTRUCTIONS` in the
   same commit** — a tool the instructions do not mention is a tool agents will not reach for, and an
@@ -1508,7 +1679,9 @@ What each mode means:
   (`tests/test_surface.py`); `safe-execution` changed `run_command.description`,
   `write_file.description`, `write_file.properties.encoding`, `sbatch.properties.args`, and the
   `description` and `properties.extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo`
-  this way, and `sbatch-script-name-collision` changed `sbatch.description`.
+  this way, `agents-d-instructions` changed `instructions`, `tools.cluster_context` and
+  `resources.rcac://context.description`, and `sbatch-script-name-collision` changed
+  `sbatch.description`.
 
 ### Conventions (same-commit rules)
 

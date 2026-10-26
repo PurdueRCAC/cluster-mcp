@@ -715,10 +715,221 @@ CASES: tuple[Case, ...] = (
     # The server's instructions reach a client in both protocol eras: in the InitializeResult of a
     # handshake and in the DiscoverResult of revision 2026-07-28.
     Case('instructions-dropped', 'server.py',
-         (('        instructions=SERVER_INSTRUCTIONS,\n', '        instructions=None,\n'),),
+         (('        instructions=compose(SERVER_INSTRUCTIONS, site, budget),\n', '        instructions=None,\n'),),
          ('test_protocol.py::test_client_era_is_served[legacy-memory]',
           'test_protocol.py::test_client_era_is_served[modern-memory]'),
          'instructions differ'),
+    # The site read skips the assembled AGENTS.md, which repeats the topic files.
+    Case('site-agents-md-included', 'site.py',
+         (("    return fnmatch.fnmatchcase(name, '*.md') and name != EXCLUDED\n",
+           "    return fnmatch.fnmatchcase(name, '*.md')\n"),),
+         ('test_site.py::test_local_read_takes_the_eligible_files_in_byte_order',),
+         'files:'),
+    # The files are ordered by the bytes of their names, whatever the locale.
+    Case('site-byte-order', 'site.py',
+         (("key=lambda f: f.raw)", "key=lambda f: f.name.lower())"),),
+         ('test_site.py::test_local_read_takes_the_eligible_files_in_byte_order',),
+         'files:'),
+    # The composed instructions never exceed the budget.
+    Case('site-budget-overflow', 'site.py',
+         (("        if units(_render(base, trial, rest)) <= budget:\n",
+           "        if units(_render(base, trial, rest)) <= budget + 40:\n"),),
+         ('test_site.py::test_compose_keeps_its_contract_at_every_budget[sizes0]',),
+         'over the budget'),
+    # A read that has not finished is abandoned at its bound, not at twice it.
+    Case('site-read-unbounded', 'site.py',
+         (("        return box.get(timeout=timeout)\n", "        return box.get(timeout=timeout * 2)\n"),),
+         ('test_site.py::test_bounded_read_times_out_and_contains_errors',),
+         'past its 0.3 s bound'),
+    # In ssh mode the startup read is bounded too, not only the local one.
+    Case('startup-ssh-unbounded', '__init__.py',
+         (("            return site_context.read_bounded(lambda: site_context.read_remote(executor), 'the cluster')\n",
+           "            return site_context.read_remote(executor)\n"),),
+         ('test_site_startup.py::test_a_hung_read_does_not_hold_startup[ssh]',),
+         'a hung read held startup'),
+    # What a server serves is the text read at startup, whatever the directory holds later.
+    Case('context-rereads', 'site.py',
+         (("    return _SITES[server]\n", "    return read_local() if _SITES[server].files else _SITES[server]\n"),),
+         ('test_context.py::test_a_changed_directory_changes_nothing_served',),
+         'what is served changed after startup'),
+    # The tool answers from the startup text and runs nothing through the request's executor.
+    Case('context-through-executor', 'tools/context.py',
+         (("    return site_of(get_server()).text\n",
+           "    from rcac_mcp.context import get_executor\n"
+           "    get_executor().run(['cat', '--', '/etc/agents.d/a.md'])\n"
+           "    return site_of(get_server()).text\n"),),
+         ('test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-legacy]',
+          'test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-modern]'),
+         'an executor ran'),
+    # Each server serves the site it was built with: the holder is keyed by the server, never one
+    # module value that the last server built overwrites.
+    Case('site-holder-global', 'site.py',
+         (("    _SITES[server] = site\n", "    global _ONE\n    _ONE = site\n"),
+          ("    return _SITES[server]\n", "    return _ONE\n")),
+         ('test_context.py::test_each_server_keeps_its_own_site[legacy]',
+          'test_context.py::test_each_server_keeps_its_own_site[modern]'),
+         "another server's site"),
+    # A reason's detail is cut in UTF-16 code units, the budget's unit, not in code points.
+    Case('site-detail-code-points', 'site.py',
+         (("    if units(text) <= limit:\n        return text\n", "    if len(text) <= limit:\n        return text\n"),
+          ("        room -= units(char)\n", "        room -= 1\n")),
+         ('test_site.py::test_astral_names_and_reasons_keep_the_budget[unreadable-local]',
+          'test_site.py::test_astral_names_and_reasons_keep_the_budget[unreadable-remote]'),
+         "needs more than a good read's minimum"),
+    # With no files, the minimum holds the site's own reason, so that path never serves past the budget.
+    Case('site-reason-unchecked', 'site.py',
+         (("        return max(floor, units(_head(base) + site.reason))\n", "        return floor\n"),),
+         ('test_site.py::test_every_reason_fits_the_room_kept_for_it',),
+         'over the budget'),
+    # A name's control characters are shown escaped, so no name breaks a served line.
+    Case('site-name-unescaped', 'site.py',
+         (("    return ''.join(_escape(c) if _escaped(c) else c for c in text)\n", "    return text\n"),),
+         ('test_site.py::test_a_name_cannot_break_a_served_line[files-local]',
+          'test_site.py::test_a_name_cannot_break_a_served_line[unreadable-remote]'),
+         'is not one line'),
+    # A read for others keeps only the files every account can read.
+    Case('site-others-unchecked', 'site.py',
+         (("                    if not _everyone_may(fd, READ):\n", "                    if False:\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[private-file-for-others]',),
+         'files:'),
+    # Every account means every class: the owner's and the group's bits count, not only others'.
+    Case('site-group-unchecked', 'site.py',
+         (("SEARCH: Final = 0o111\nLIST: Final = 0o555\nREAD: Final = 0o444\n",
+           "SEARCH: Final = 0o001\nLIST: Final = 0o005\nREAD: Final = 0o004\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[groupless-file-for-others]',
+          'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[groupless-dir-for-others]',
+          'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[groupless-ancestor-for-others]'),
+         'files:'),
+    # Every directory a lookup of the path passes must be searchable by every account, a symlink's
+    # way included, not only the directory reached.
+    Case('site-ancestors-unchecked', 'site.py',
+         (("            everyone = everyone and _everyone_may(directory, SEARCH)\n", "            pass\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[private-ancestor-for-others]',
+          'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
+          '[private-ancestor-through-link-for-others]',
+          'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[link-in-private-dir-for-others]'),
+         'files:'),
+    # A path carrying an ACL entry is not every account's to read, whatever its mode bits.
+    Case('site-acl-unchecked', 'site.py',
+         (("    return os.stat(target).st_mode & need == need and not _extended(target)\n",
+           "    return os.stat(target).st_mode & need == need\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[acl-file-for-others]',
+          'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[acl-ancestor-for-others]',
+          'test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[file]',
+          'test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[ancestor]'),
+         'files:'),
+    # The probe sees a real ACL entry, the way this platform stores one.
+    Case('site-acl-probe-blind', 'site.py',
+         (("        return _darwin_acl(target)\n", "        return False\n"),
+          ("        return any(_acl_attribute(name) for name in _attributes(target))\n", "        return False\n")),
+         ('test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[file]',
+          'test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[directory]'),
+         'the probe missed it'),
+    # The route is checked from `/`: the root is a directory every lookup searches.
+    Case('site-root-unsearched', 'site.py',
+         (("    searched: set[int] = set()\n", "    searched: set[int] = {root}\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[acl-root-for-others]',),
+         'files:'),
+    # A relative symlink's target is looked up from the directory holding the link, not from `/`.
+    Case('site-link-from-root', 'site.py',
+         (("                route = walk([root] if target.startswith('/') else route, target)\n",
+           "                route = walk([root], target)\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
+          '[open-through-relative-link-for-others]',),
+         'files:'),
+    # A `..` step is a lookup in the directory it leaves, which every account must be able to search.
+    Case('site-dotdot-unsearched', 'site.py',
+         (("            search(route[-1])\n            if part == '..':\n                route = route[:-1] or route\n"
+           "                continue\n",
+           "            if part == '..':\n                route = route[:-1] or route\n                continue\n"
+           "            search(route[-1])\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
+          '[dotdot-out-of-private-dir-for-others]',),
+         'files:'),
+    # An abandoned read never holds the process open at exit.
+    Case('site-read-thread-kept', 'site.py',
+         (("name='cluster-mcp-site-read', daemon=True", "name='cluster-mcp-site-read', daemon=False"),),
+         ('test_site.py::test_an_abandoned_read_does_not_hold_the_process',),
+         'would hold the process open'),
+    # An acl(3) failure other than "no ACL" counts as an entry: the probe fails closed on macOS.
+    Case('site-acl-error-open', 'site.py',
+         (("        return ctypes.get_errno() != errno.ENOENT\n", "        return False\n"),),
+         ('test_site.py::test_an_acl_the_system_cannot_answer_counts_as_one[eacces]',
+          'test_site.py::test_an_acl_the_system_cannot_answer_counts_as_one[eio]'),
+         'must count as an ACL entry'),
+    # What the read for every account checks is what it reads: no file is read again by its path, so a
+    # swap of the file or of the route after the check changes nothing served.
+    Case('site-file-reread-by-path', 'site.py',
+         (("                    data = stream.read()\n",
+           "                    data = open(os.path.join(directory, entry.name), 'rb').read()\n"),),
+         ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[route]',
+          'test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[file]'),
+         'served text no ordinary account could read'),
+    Case('site-listed-by-path', 'site.py',
+         (("            listing = os.open('.', _LISTING, dir_fd=reached)\n",
+           "            listing = os.open(directory, _LISTING)\n"),),
+         ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[route]',),
+         'served text no ordinary account could read'),
+    # A directory on the route is opened for search only, so one every account may search but the
+    # server may not list is passed, as a lookup passes it.
+    Case('site-route-opened-for-read', 'site.py',
+         (("_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY", "_STEP: Final = os.O_RDONLY | os.O_DIRECTORY"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[search-only-ancestor-for-others]',),
+         'files:'),
+    # A symlink is never followed where a file is expected, nor on the route without its check.
+    Case('site-file-follows-links', 'site.py',
+         (("_FILE: Final = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC\n",
+           "_FILE: Final = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC\n"),),
+         ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[listed-then-linked]',),
+         'served text no ordinary account could read'),
+    Case('site-route-follows-links', 'site.py',
+         (("_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC\n",
+           "_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY | os.O_CLOEXEC\n"),),
+         ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
+          '[private-ancestor-through-link-for-others]',),
+         'files:'),
+    # In delegate mode the startup read is a read for others.
+    Case('delegate-reads-for-itself', '__init__.py',
+         (("        for_others = exec_mode == 'delegate'\n", "        for_others = False\n"),),
+         ('test_site_startup.py::test_startup_reads_once_where_the_mode_says[delegate]',),
+         'the read for others was False'),
+    # On Linux every ACL the system lists counts, not only a POSIX one.
+    Case('site-acl-posix-only', 'site.py',
+         (("    return name.startswith(ACL_NAMESPACE) and 'acl' in name[len(ACL_NAMESPACE):]\n",
+           "    return name in ('system.posix_acl_access', 'system.posix_acl_default')\n"),),
+         ('test_site.py::test_a_listed_acl_makes_a_path_unreadable_for_others[nfs4_acl-file]',
+          'test_site.py::test_a_listed_acl_makes_a_path_unreadable_for_others[richacl-ancestor]'),
+         'files:'),
+    # The remote read undoes the functions a login profile exports over the commands it runs.
+    Case('site-reset-dropped', 'site.py',
+         (("    'unset -f base64 shopt tr test\\n'\n", ""),),
+         ('test_site.py::test_a_profile_cannot_change_the_remote_read[local]',
+          'test_site.py::test_a_profile_cannot_change_the_remote_read[ssh]'),
+         'a profile function changed what the remote read found'),
+    # A file is its name's bytes: two names that decode alike stay two files, in the order of their
+    # bytes, and each is served or named; a shown name reads back as itself.
+    Case('site-names-by-text', 'site.py',
+         (("key=lambda f: f.raw)", "key=lambda f: f.name.encode('utf-8'))"),),
+         ('test_site.py::test_two_names_that_decode_alike_are_two_files[remote]',),
+         'not as two files in byte order'),
+    Case('site-omitted-by-name', 'site.py',
+         (("    omitted = [f.name for i, f in enumerate(files) if i not in taken]\n",
+           "    omitted = [f.name for f in files if f.name not in {g.name for g in included}]\n"),),
+         ('test_site.py::test_two_names_that_decode_alike_are_two_files[remote]',),
+         'served and 0 named'),
+    Case('site-backslash-unescaped', 'site.py',
+         (("    return _breaks(char) or char == '\\\\'\n", "    return _breaks(char)\n"),),
+         ('test_site.py::test_a_shown_name_reads_back_as_itself',),
+         'does not read back as itself'),
+    # The remote read resets the glob state a login profile can leave its bash.
+    Case('site-glob-state-inherited', 'site.py',
+         (("    'unset GLOBIGNORE\\n'\n    'set +f\\n'\n", ""),
+          ("    'for o in dotglob nullglob failglob nocaseglob globstar extglob; do shopt -u \"$o\" 2>/dev/null; done\\n'\n",
+           "")),
+         ('test_site.py::test_remote_read_ignores_the_login_shells_glob_state[globignore-files-layout]',
+          'test_site.py::test_remote_read_ignores_the_login_shells_glob_state[dotglob-layout]',
+          'test_site.py::test_remote_read_ignores_the_login_shells_glob_state[failglob-lower-agents]'),
+         'the glob state changed what the remote read found'),
     # Every tool's served description is its full docstring, as FastMCP 2.x served it; FastMCP 4
     # alone serves only the summary paragraph.
     Case('tool-description-summary-only', 'tools/__init__.py',

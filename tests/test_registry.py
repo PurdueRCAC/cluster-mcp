@@ -24,7 +24,7 @@ from typing import Sequence
 import pytest
 
 from conftest import need_git
-from harness import served_tools
+from harness import SITE, served_tools
 from rcac_mcp.server import create_mcp_server
 from rcac_mcp.tools import TOOL_REGISTRY
 
@@ -32,6 +32,7 @@ from rcac_mcp.tools import TOOL_REGISTRY
 # Every tool change edits this set in the same commit as SERVER_INSTRUCTIONS and the README.
 EXPECTED_TOOLS: frozenset[str] = frozenset({
     'average_wait',
+    'cluster_context',
     'download_file',
     'jobcmd',
     'jobenv',
@@ -337,7 +338,7 @@ def test_registry_matches_expected_tools() -> None:
 
 @pytest.mark.unit
 def test_served_tools_match_registry() -> None:
-    names = sorted(served_tools(create_mcp_server('none')))
+    names = sorted(served_tools(create_mcp_server('none', site=SITE)))
     assert names, 'the server serves no tools'
     assert registry_violations(names) == []
     assert set(names) == {tool.name for tool in TOOL_REGISTRY}
