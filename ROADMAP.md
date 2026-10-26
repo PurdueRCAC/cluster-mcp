@@ -27,9 +27,9 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Two cycles remain, ending in **release 0.1.3**: `ssh-reconnect-loop` and `agents-d-instructions`
-(`sbatch-script-name-collision` landed on 2026-10-26); the resource reads follow the latter,
-since it retires the cache a read would expose and may settle them outright. `stack-upgrade` landed
+One cycle remains, ending in **release 0.1.3**: `ssh-reconnect-loop` (`sbatch-script-name-collision`
+and `agents-d-instructions` landed on 2026-10-26); the resource read that remains,
+`rcac://storage`, follows it. `stack-upgrade` landed
 on `develop` on 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on
 2026-10-18 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push.
 `safe-execution` landed on 2026-10-23 ([`spec/safe-execution/`](spec/safe-execution/)): every
@@ -73,30 +73,6 @@ bounds the reconnect the same way, so it ships in 0.1.3.
 *Horizon: near-term · Depends on: safe-execution (its connect timeouts, P3; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 02 §4*
 **Seed:** [`issues/ssh-reconnect-loop.md`](issues/ssh-reconnect-loop.md) · *status: unshaped*
 
-## The site's own rules should reach the model unasked
-
-`/etc/agents.d/*.md` reaches agents only as the `rcac://context` resource, which most clients never
-read unprompted, and it loads the assembled `AGENTS.md` beside the topic files, so every rule
-arrives twice. The cycle composes the topic files into the served instructions at startup, read
-once through the executor, in a priority order so a client that cuts server instructions at a few
-thousand characters loses the least, within a configurable budget. A `cluster_context` tool returns
-the full text, the resource stays, and startup never hangs on the read.
-
-*Horizon: near-term · Depends on: stack-upgrade (both protocol eras carry instructions; cleared: landed on `develop` 2026-10-17), safe-execution (the executor it reads through; cleared: landed on `develop` 2026-10-23) · Refs: absorbs `context-cache-cross-user`*
-**Seed:** [`issues/agents-d-instructions.md`](issues/agents-d-instructions.md) · *status: adopted:agents-d-instructions*
-
-### Absorbed: one user's cluster context is served to every other user
-
-`_cluster_context_cache` (`resources.py:23`) is a process-global dict keyed by `executor.hostname`.
-For `DelegatingExecutor` that key is `socket.gethostname()` — identical for every authenticated
-user — so in delegate mode the first reader's `/etc/agents.d` content is returned to everyone after,
-and the cache is never invalidated. The content is world-readable administrative markdown, so the
-impact is bounded; the *mechanism* is the bug. Reading the files once at startup, as the server,
-retires the cache rather than patching it. Found by the harness port, 2026-08-26.
-
-*Horizon: with agents-d-instructions · Depends on: — · Refs: absorbed by `agents-d-instructions`; `AGENTS.md` § Invariants §8 documents the defect as a known one*
-**Seed:** [`issues/context-cache-cross-user.md`](issues/context-cache-cross-user.md) · *status: adopted:agents-d-instructions*
-
 ## Neither advertised resource can be read
 
 Both executor middlewares set the request's executor in `on_call_tool` only, so a resource read
@@ -105,6 +81,10 @@ protocol eras, on FastMCP 2 and 4 alike. It fails closed: nothing runs. The fix 
 executor of the request that made it, the mapped user's in `delegate` mode, which is also what makes
 the process-global context cache above reachable across users through the resource, so it lands
 with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026-10-17.
+
+- 2026-10-26: `agents-d-instructions` settled `rcac://context`: it now returns the text read once at
+  startup, with no executor, and the cross-user cache is gone. What remains is `rcac://storage`,
+  absorbed below.
 
 *Horizon: near-term · Depends on: agents-d-instructions (it retires the cache, and may settle this outright) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
 **Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: unshaped*

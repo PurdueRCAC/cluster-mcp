@@ -73,3 +73,6 @@ absorbs it and reads the files once at startup, which may settle this seed too).
 - 2026-10-17: absorbs [`storage-paths-resource-typeerror.md`](storage-paths-resource-typeerror.md)
   in `ROADMAP.md`: that handler needs a read's executor too, so R4's read of each served resource
   covers both fixes.
+- 2026-10-26: `agents-d-instructions` settled `rcac://context` (served from the startup read, no
+  executor; the cache retired). The remainder is `rcac://storage`, which still calls a tool object
+  and needs an executor (`storage-paths-resource-typeerror`, absorbed).
