@@ -1,0 +1,26 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: sbatch-script-name-collision
+escaped_from: pre-factory
+planned: {date: '2026-10-23', phases: 2}
+landed: {date: '2026-10-26', phases: 2, failed_verifies: 0}
+open: null
+runs:
+- {step: feature, start: '2026-10-23T14:36:45-04:00', stop: '2026-10-23T14:40:48-04:00', seconds: 243, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-10-23T14:40:55-04:00', stop: '2026-10-23T14:56:40-04:00', seconds: 945, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-23T15:21:58-04:00', stop: '2026-10-23T15:36:55-04:00', seconds: 897, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-10-23T15:37:35-04:00', stop: '2026-10-23T15:49:39-04:00', seconds: 724, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-23T15:59:27-04:00', stop: '2026-10-23T16:10:17-04:00', seconds: 650, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-10-26T10:53:08-04:00', stop: '2026-10-26T11:05:06-04:00', seconds: 718, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-26T11:13:53-04:00', stop: '2026-10-26T11:25:54-04:00', seconds: 721, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-10-26T11:26:02-04:00', stop: '2026-10-26T11:26:02-04:00', seconds: 0, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-10-23'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 1}
+  plausible: 0
+- cycle: 2
+  date: '2026-10-26'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

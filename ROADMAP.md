@@ -86,7 +86,7 @@ clients of one server, an agent submitting a sweep in a loop) and can clobber ea
 now; the fix is small, and waiting for Part I would leave it in place until 0.2.0.
 
 *Horizon: near-term · Depends on: safe-execution (the byte-exact script write; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 04 §7, PLAN risk 7; [`issues/slurm-capability.md`](issues/slurm-capability.md), whose `job_submit` inherits the fixed naming*
-**Seed:** [`issues/sbatch-script-name-collision.md`](issues/sbatch-script-name-collision.md) · *status: unshaped*
+**Seed:** [`issues/sbatch-script-name-collision.md`](issues/sbatch-script-name-collision.md) · *status: adopted:sbatch-script-name-collision*
 
 ## The site's own rules should reach the model unasked
 
@@ -404,6 +404,10 @@ here: `spec/{slug}/` holds that account and the code itself refutes a re-filing.
 - **The factory has no front door** — *declined 2026-10-16.* The factory's front door is the
   operator's KB, where its method and skills now live; this repository carries only its profile
   (`AGENTS.md` § Factory). Record: [`issues/factory-onboarding-page.md`](issues/factory-onboarding-page.md).
+- **A job name of 220–236 characters no longer fits the script's file name** — *accepted-behaviour
+  2026-10-26.* The per-call token that keeps same-second scripts apart costs 17 characters of the
+  255-byte name; such a call fails loudly before submitting, and truncating would break the name
+  rule. Record: [`issues/sbatch-long-job-name.md`](issues/sbatch-long-job-name.md).
 
 ---
 
