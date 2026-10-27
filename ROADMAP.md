@@ -6,7 +6,7 @@ order. Nothing here is a contract — the factory's feature step promotes a seed
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
 The first three Parts each end in a release. **Part 0** makes the server safe and useful as it stands and
-ships as 0.1.3. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
+ships as 0.1.3, with its last fix, the resource read `rcac://storage`, following in 0.1.4. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
 rather than a Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that
 comes after. **Part III** holds infrastructure work that no release waits on.
 
@@ -27,9 +27,10 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Of Part 0's work toward **release 0.1.3**, only the resource read `rcac://storage` remains:
-`ssh-reconnect-loop` landed on 2026-10-27 ([`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/)),
-after `sbatch-script-name-collision` and `agents-d-instructions` on 2026-10-26. `stack-upgrade` landed
+Every cycle Part 0 holds for **release 0.1.3** has landed, the last being
+`ssh-reconnect-loop` on 2026-10-27 ([`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/)),
+after `sbatch-script-name-collision` and `agents-d-instructions` on 2026-10-26. The resource read
+`rcac://storage`, the one entry left, follows in 0.1.4 (Geoffrey, 2026-10-27). `stack-upgrade` landed
 on `develop` on 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on
 2026-10-18 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push.
 `safe-execution` landed on 2026-10-23 ([`spec/safe-execution/`](spec/safe-execution/)): every
@@ -71,7 +72,7 @@ with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026
   startup, with no executor, and the cross-user cache is gone. What remains is `rcac://storage`,
   absorbed below.
 
-*Horizon: near-term · Depends on: agents-d-instructions (it retires the cache, and may settle this outright) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
+*Horizon: near-term, release 0.1.4 · Depends on: agents-d-instructions (cleared: landed on `develop` 2026-10-26; it retired the cache and settled `rcac://context`) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
 **Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: unshaped*
 
 ### Absorbed: the rcac://storage resource fails on every read
