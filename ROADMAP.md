@@ -27,9 +27,9 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-One cycle remains, ending in **release 0.1.3**: `ssh-reconnect-loop` (`sbatch-script-name-collision`
-and `agents-d-instructions` landed on 2026-10-26); the resource read that remains,
-`rcac://storage`, follows it. `stack-upgrade` landed
+Of Part 0's work toward **release 0.1.3**, only the resource read `rcac://storage` remains:
+`ssh-reconnect-loop` landed on 2026-10-27 ([`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/)),
+after `sbatch-script-name-collision` and `agents-d-instructions` on 2026-10-26. `stack-upgrade` landed
 on `develop` on 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on
 2026-10-18 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push.
 `safe-execution` landed on 2026-10-23 ([`spec/safe-execution/`](spec/safe-execution/)): every
@@ -57,21 +57,6 @@ in the release that closes Part 0 (now 0.1.3) rather than wait for Part I.*
 *Corrected 2026-10-17: the `rcac://storage` fix moved under the resource-read entry below. Its
 handler runs `findscratch` and `myquota` through the request's executor, which a read does not get
 yet, so fixing the `TypeError` alone would only change the error a client sees.*
-
-## A lost SSH connection makes every later call wait forever
-
-`SSHExecutor._ensure_connected` reconnects with a backoff whose loop condition stays true once the
-delay reaches its 10 s cap, so after the cluster drops out from under a running server, the next
-tool call retries every 10 s for as long as the server runs instead of failing with the host's
-name. A bounded retry that ends in an error fixes it. Pre-existing. Found by `safe-execution`'s
-planning research, 2026-10-17.
-
-It comes first now that `safe-execution` has landed, because it is a hang a user sees in `ssh`
-mode, the default, and a small fix: `safe-execution` already bounds the first connect, and this
-bounds the reconnect the same way, so it ships in 0.1.3.
-
-*Horizon: near-term · Depends on: safe-execution (its connect timeouts, P3; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 02 §4*
-**Seed:** [`issues/ssh-reconnect-loop.md`](issues/ssh-reconnect-loop.md) · *status: adopted:ssh-reconnect-loop*
 
 ## Neither advertised resource can be read
 
@@ -113,12 +98,12 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Eight cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
+Twelve cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
 with Purdue as one supported site*, ending in **release 0.2.0**. Rename and restructure what stays,
 make capabilities optional, then build each capability on that mechanism — Slurm first, then LMOD
 and xdu as the consumers that prove it generalizes — and finally the site extra that bundles them.
-Ahead of the tool families sits one executor fix, stopping a timed-out command, once its
-measurement is approved.
+Ahead of the tool families sit the executor fixes: stopping a timed-out command, once its
+measurement is approved, and the four that `ssh-reconnect-loop` deferred on the SSH connection.
 
 ## Nothing here should assume Purdue
 
@@ -188,7 +173,7 @@ that cycle's scope.
 It sits with the timeout entry above because both are about a call that a client sees hang on a
 dead or stuck remote end.
 
-*Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
+*Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
 **Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: unshaped*
 
 ## A write whose host is lost after staging leaves its staging directory behind
@@ -200,7 +185,7 @@ untouched, or, if the host is back at once, succeeds and leaves the checksum fil
 found by `ssh-reconnect-loop`'s review, 2026-10-26, which corrected the texts and deferred the
 cleanup.
 
-*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
+*Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md) · *status: unshaped*
 
 ## A reconnect stuck in DNS or the SSH agent blocks fresh reconnects until it returns
@@ -215,7 +200,7 @@ its one-attempt rule.
 - 2026-10-26: corrected. As first filed, the SSH-agent query was listed among the steps with nothing
   to close; the abort closes its transport, and the worker's late outcome is discarded.
 
-*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) PLAN §5*
+*Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) PLAN §5*
 **Seed:** [`issues/ssh-reconnect-stuck-step.md`](issues/ssh-reconnect-stuck-step.md) · *status: unshaped*
 
 ## Nothing pins that a reconnect's abort and release reach every ProxyJump hop
@@ -225,7 +210,7 @@ never builds a chain: its fake connection has no gateway, so a change that stops
 passes. The bound still holds; a hop could be left running unnoticed. Found by
 `ssh-reconnect-loop`'s final review, 2026-10-27, as a missing pin.
 
-*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
+*Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
 **Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
