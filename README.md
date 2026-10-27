@@ -25,7 +25,8 @@ Alternatively, set `RCAC_SSH_HOST` in your environment and omit `--ssh-host` fro
 
 If the server cannot connect, your client shows the reason as the error to its first request:
 `cannot connect to <host>: <cause>` (unknown host or SSH alias, connection refused, authentication
-failed, or timed out after 15 seconds per step unless your SSH config sets `ConnectTimeout`). Check
+failed, connection closed during authentication, or timed out after 15 seconds per step unless your
+SSH config sets `ConnectTimeout`). Check
 that `--ssh-host` names the SSH host or `~/.ssh/config` alias you use with `ssh`, not the MCP
 server's name.
 

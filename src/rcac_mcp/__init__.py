@@ -24,7 +24,8 @@ from cmdkit.logging import Logger, level_by_name, logging_styles
 from rcac_mcp.server import create_mcp_server
 from rcac_mcp import site as site_context
 from rcac_mcp.site import DEFAULT_BUDGET
-from rcac_mcp.startup import StartupFailure, answer_until_eof, connect_failure_message
+from rcac_mcp.executor.ssh import connect_failure_message
+from rcac_mcp.startup import StartupFailure, answer_until_eof
 from rcac_mcp.token import generate_token
 
 # Public interface

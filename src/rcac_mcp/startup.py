@@ -10,19 +10,20 @@ first, because a client of protocol revision 2026-07-28 swallows the error to it
 probe and retries with `initialize`; an answer to that retry is the one it shows.
 
 This module needs no MCP stack: it speaks newline-delimited JSON-RPC directly, the stdio framing
-both protocol eras share, so it behaves the same whichever era the client speaks.
+both protocol eras share, so it behaves the same whichever era the client speaks. The message itself,
+`cannot connect to <host>: <cause>`, is the SSH backend's (`executor.ssh.connect_failure_message`),
+which a call that cannot reconnect reports too.
 """
 
 # Type annotations
 from __future__ import annotations
-from typing import Any, Final, Iterator, TextIO
+from typing import Any, Final, TextIO
 
 # Standard libs
 import json
-import socket
 
-# External libs
-from paramiko.ssh_exception import AuthenticationException, NoValidConnectionsError, SSHException
+# Internal libs
+from rcac_mcp.executor.ssh import connect_failure_message
 
 # Public interface
 __all__ = ['StartupFailure', 'answer_until_eof', 'connect_failure_message', 'refusal', 'INTERNAL_ERROR']
@@ -31,9 +32,6 @@ __all__ = ['StartupFailure', 'answer_until_eof', 'connect_failure_message', 'ref
 # JSON-RPC's internal-error code: standard, accurate, and read by no client as protocol-version
 # evidence or as a transport failure of its own.
 INTERNAL_ERROR: Final = -32603
-
-# How far down an exception's cause and context chain the failure class is looked for.
-CHAIN_DEPTH: Final = 8
 
 
 class StartupFailure(RuntimeError):
@@ -79,61 +77,3 @@ def answer_until_eof(stdin: TextIO, stdout: TextIO, message: str) -> None:
             stdout.flush()
         except (BrokenPipeError, ValueError):
             return
-
-
-def _chain(exc: BaseException) -> Iterator[BaseException]:
-    """`exc`, then the exceptions it was raised from or while handling, nearest first."""
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen and len(seen) < CHAIN_DEPTH:
-        seen.add(id(current))
-        yield current
-        current = current.__cause__ or current.__context__
-
-
-def _refused(exc: BaseException) -> bool:
-    if isinstance(exc, ConnectionRefusedError):
-        return True
-    if isinstance(exc, NoValidConnectionsError):
-        return bool(exc.errors) and all(isinstance(e, ConnectionRefusedError) for e in exc.errors.values())
-    return False
-
-
-def _cause_class(exc: BaseException) -> str | None:
-    """The class of a connect failure, or None when it is none of the known ones."""
-    for link in _chain(exc):
-        if isinstance(link, AuthenticationException):
-            return 'authentication failed'
-        if isinstance(link, socket.gaierror):
-            return 'unknown host or SSH alias'
-        if _refused(link):
-            return 'connection refused'
-        if isinstance(link, TimeoutError):
-            return 'timed out'
-        # Paramiko's report when the key exchange has not finished by the connect timeout: the
-        # negotiation stopped waiting while the transport was still alive.
-        if type(link) is SSHException and str(link) == 'No existing session':
-            return 'timed out'
-    return None
-
-
-def _detail(exc: BaseException) -> str:
-    if isinstance(exc, OSError) and exc.strerror:
-        return str(exc.strerror)
-    return str(exc)
-
-
-def connect_failure_message(host: str, exc: BaseException) -> str:
-    """`cannot connect to <host>: <cause>`, naming the host as given and the class of failure.
-
-    The class is one of `unknown host or SSH alias`, `connection refused`, `authentication failed`
-    or `timed out`, followed by the exception's own text in parentheses when it says more; a failure
-    of no known class is described by that text, or by the exception's type when it has none.
-    """
-    cause = _cause_class(exc)
-    detail = _detail(exc).strip()
-    if cause is None:
-        return f'cannot connect to {host}: {detail or type(exc).__name__}'
-    if detail and detail.lower().rstrip('.') != cause:
-        return f'cannot connect to {host}: {cause} ({detail})'
-    return f'cannot connect to {host}: {cause}'

@@ -21,7 +21,7 @@ from datetime import datetime
 # Internal libs
 from rcac_mcp.tools import mcp_tool
 from rcac_mcp.context import get_executor
-from rcac_mcp.executor import CONNECTION_LOST_EXIT_CODE, UserPath
+from rcac_mcp.executor import CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, UserPath
 
 
 # Default directory for job scripts
@@ -169,6 +169,9 @@ def sbatch(
             written = executor.write(path, data, parent=DEFAULT_JOBS_DIR, executable=True)
         except OSError as exc:
             raise RuntimeError(f'Failed to write job script: {exc}') from None
+        # A write that never started (no connection to the host) wrote no script and submitted nothing.
+        if written.exit_code == NOT_STARTED_EXIT_CODE:
+            raise RuntimeError(f'The job was not submitted: {written.stderr}'.rstrip())
         if written.exit_code != 0:
             raise RuntimeError(f'Failed to write job script (exit {written.exit_code}): {written.stderr}')
     else:
@@ -195,6 +198,9 @@ def sbatch(
     if result.exit_code == CONNECTION_LOST_EXIT_CODE:
         raise RuntimeError('The connection was lost during the submission, so the job may have been submitted: '
                            f'check squeue before submitting it again. {result.stdout}{result.stderr}'.rstrip())
+    # A submission that never started (no connection to the host) submitted nothing.
+    if result.exit_code == NOT_STARTED_EXIT_CODE:
+        raise RuntimeError(f'The job was not submitted: {result.stderr}'.rstrip())
     if result.exit_code != 0:
         raise RuntimeError(f'Failed to submit job: {result.stderr}')
 
@@ -370,6 +376,10 @@ def sacct(
     if me and not user and not account:
         # Get current user
         user_result = executor.run(['whoami'])
+        # A failed lookup stops here: querying with an empty user would only fail again (or, with no
+        # connection to the host, wait out a second reconnect).
+        if user_result.exit_code != 0:
+            raise RuntimeError(f'Failed to get the current user: {user_result.stderr}'.rstrip())
         current_user = user_result.stdout.strip()
         argv += ['-u', current_user]
     argv += _options(('-u', user), ('-A', account))

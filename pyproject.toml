@@ -9,6 +9,9 @@ dependencies = [
     "cmdkit>=2.7.7",
     "pyjwt>=2.0",
     "fabric>=3.0",
+    # Direct for its floor: from 3.2 Paramiko names a link closed during authentication apart from a
+    # refused one, which `executor/ssh.py` (`PARAMIKO_FLOOR`) relies on; Fabric allows older.
+    "paramiko>=3.2",
 ]
 
 [project.scripts]

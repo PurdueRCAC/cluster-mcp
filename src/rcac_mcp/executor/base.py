@@ -20,7 +20,8 @@ __all__ = ['Executor', 'CommandResult', 'UserPath', 'TIMEOUT_EXIT_CODE', 'NOT_ST
 TIMEOUT_EXIT_CODE: Final = -1001
 
 # The exit code of a command that never began: the login initialisation ended (or the launch
-# failed) before the command's first line ran. Below -1000 for the same reason.
+# failed) before the command's first line ran, or, over `ssh`, a lost connection could not be
+# re-established within the reconnect bound, so nothing was sent. Below -1000 for the same reason.
 NOT_STARTED_EXIT_CODE: Final = -1002
 
 # The exit code of a command whose connection was lost before both of its end records arrived: the
@@ -105,8 +106,11 @@ class Executor(Protocol):
             (−1001); over `ssh`, a command whose exit status had arrived is named in a note on
             stderr. No backend raises on a timeout. A command that never began (the login
             initialisation ended first, or took a descriptor the command's streams were parked on,
-            so the program ran nothing) returns `NOT_STARTED_EXIT_CODE` (−1002); one whose start is
-            announced late, behind a chatty rc file on a slow link, has begun. Over `ssh`, a
+            so the program ran nothing) returns `NOT_STARTED_EXIT_CODE` (−1002); so does, over `ssh`, a
+            call whose lost connection could not be re-established within the bound `SSHExecutor`
+            states, with stderr `cluster-mcp: cannot connect to <host>: <cause>; the command was not
+            run`. One whose start is announced late, behind a chatty rc file on a slow link, has
+            begun. Over `ssh`, a
             connection lost before both end records arrived returns `CONNECTION_LOST_EXIT_CODE`
             (−1003), whatever arrived, with the note `cluster-mcp: the connection was lost; the
             command may have run` ending stderr: the command may have run, so it is never reported
@@ -146,7 +150,8 @@ class Executor(Protocol):
         leaves the target untouched. Over `ssh`, too, a write refuses what `cat >` refuses: an
         existing target the user may not write, and a symbolic link whose target's directory does
         not exist (the link stays). A symbolic link is followed to the file it names. The temporary
-        file is removed on every path.
+        file and its directory are removed afterwards, except when the host is lost after the
+        content is staged: removing them needs the connection, so they can then remain.
 
         Args:
             path: The file to write.
@@ -186,6 +191,11 @@ class Executor(Protocol):
         Returns:
             The absolute path the file was written to, as that side names it (symlinks unresolved);
             over SFTP, the server's canonical form of it, which OpenSSH resolves through symlinks.
+
+        Raises:
+            ConnectionError: Over `ssh`, a lost connection could not be re-established within the
+                bound `SSHExecutor` states (`cannot connect to <host>: <cause>; nothing was
+                transferred`).
         """
         ...
 
@@ -202,6 +212,11 @@ class Executor(Protocol):
 
         Returns:
             The absolute path the file was written to, as that side names it (symlinks unresolved).
+
+        Raises:
+            ConnectionError: Over `ssh`, a lost connection could not be re-established within the
+                bound `SSHExecutor` states (`cannot connect to <host>: <cause>; nothing was
+                transferred`).
         """
         ...
 

@@ -1065,6 +1065,7 @@ dependencies = [
     { name = "cmdkit" },
     { name = "fabric" },
     { name = "fastmcp" },
+    { name = "paramiko" },
     { name = "pyjwt" },
 ]
 
@@ -1079,6 +1080,7 @@ requires-dist = [
     { name = "cmdkit", specifier = ">=2.7.7" },
     { name = "fabric", specifier = ">=3.0" },
     { name = "fastmcp", specifier = ">=4,<5" },
+    { name = "paramiko", specifier = ">=3.2" },
     { name = "pyjwt", specifier = ">=2.0" },
 ]
 

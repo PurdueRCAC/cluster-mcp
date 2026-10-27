@@ -71,7 +71,7 @@ mode, the default, and a small fix: `safe-execution` already bounds the first co
 bounds the reconnect the same way, so it ships in 0.1.3.
 
 *Horizon: near-term · Depends on: safe-execution (its connect timeouts, P3; cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) research 02 §4*
-**Seed:** [`issues/ssh-reconnect-loop.md`](issues/ssh-reconnect-loop.md) · *status: unshaped*
+**Seed:** [`issues/ssh-reconnect-loop.md`](issues/ssh-reconnect-loop.md) · *status: adopted:ssh-reconnect-loop*
 
 ## Neither advertised resource can be read
 
@@ -171,6 +171,62 @@ on it.
 
 *Horizon: mid-term; the measurement needs Geoffrey's approval · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
 **Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: unshaped*
+
+## A dead SSH link that still reads as connected holds file transfers without limit
+
+When the link to the cluster goes silent without a reset, nothing marks it dead: keepalive is off
+and the transport stays active. No reconnect starts, so the bounded reconnect from
+`ssh-reconnect-loop` never runs. The cost depends on the tool:
+
+- the SFTP tools wait up to an hour to open a channel, and then without limit;
+- each command waits 30 s and fails with Paramiko's error rather than the host's name;
+- a command whose channel was already open waits without limit when it has no timeout.
+
+Pre-existing. Found by `ssh-reconnect-loop`'s planning research, 2026-10-23, and ruled out of
+that cycle's scope.
+
+It sits with the timeout entry above because both are about a call that a client sees hang on a
+dead or stuck remote end.
+
+*Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
+**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: unshaped*
+
+## A write whose host is lost after staging leaves its staging directory behind
+
+Over `ssh` a write stages its content in a fresh 0700 directory beside the target and removes it
+on the same SFTP session. When the host is lost after staging, that session is dead and the
+directory stays, holding the user's own content: the write returns `-1002` with the target
+untouched, or, if the host is back at once, succeeds and leaves the checksum file. Pre-existing;
+found by `ssh-reconnect-loop`'s review, 2026-10-26, which corrected the texts and deferred the
+cleanup.
+
+*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
+**Seed:** [`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md) · *status: unshaped*
+
+## A reconnect stuck in DNS or the SSH agent blocks fresh reconnects until it returns
+
+At most one connect attempt is in flight, so while one is stuck in a step the executor cannot end (a
+DNS lookup, a `Match exec` command, the TCP connect, which have no transport to close yet, or an
+SSH-agent query, whose transport the abort closes while the worker still waits on the agent), every
+new call fails at its own bound even if the host is back; once the step returns, the next call
+reconnects. Found by `ssh-reconnect-loop`'s plan, 2026-10-23 (PLAN §5 risk 3), the accepted cost of
+its one-attempt rule.
+
+- 2026-10-26: corrected. As first filed, the SSH-agent query was listed among the steps with nothing
+  to close; the abort closes its transport, and the worker's late outcome is discarded.
+
+*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) PLAN §5*
+**Seed:** [`issues/ssh-reconnect-stuck-step.md`](issues/ssh-reconnect-stuck-step.md) · *status: unshaped*
+
+## Nothing pins that a reconnect's abort and release reach every ProxyJump hop
+
+A reconnect attempt that is abandoned or fails closes every ProxyJump hop it made, but the suite
+never builds a chain: its fake connection has no gateway, so a change that stops at the first hop
+passes. The bound still holds; a hop could be left running unnoticed. Found by
+`ssh-reconnect-loop`'s final review, 2026-10-27, as a missing pin.
+
+*Horizon: later · Depends on: ssh-reconnect-loop · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
+**Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
 

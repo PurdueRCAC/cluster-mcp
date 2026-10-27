@@ -459,11 +459,11 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short]',),
          'was not refused for its staged file'),
     Case('staged-checksum-unchecked', 'executor/ssh.py',
-         (('                return self.run(launch.fixed_argv(VERIFY + script,', '                return self.run(launch.fixed_argv(script,'),),
+         (('                return self._run(launch.fixed_argv(VERIFY + script,', '                return self._run(launch.fixed_argv(script,'),),
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[changed]',),
          'was not refused for its staged file'),
     Case('transfer-cause-unnamed', 'executor/ssh.py',
-         (("                                f'{self._reason(staged) or exc}; the file is unchanged') from None\n",
+         (("                                f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None\n",
            "                                f'{exc}; the file is unchanged') from None\n"),),
          ('test_ssh_exec.py::test_a_write_that_runs_out_of_room_keeps_the_file[8k-free]',),
          'does not name its cause'),
@@ -512,6 +512,173 @@ CASES: tuple[Case, ...] = (
          (('    if result.exit_code == CONNECTION_LOST_EXIT_CODE:\n', '    if False:\n'),),
          ('test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[after-the-command]',),
          'never that it failed'),
+    # A call that cannot reconnect gives up within its bound and runs nothing: it stops waiting on an
+    # attempt at its deadline, starts none after its last chance, reads as not started (never as a
+    # lost connection), gives up at once on a refused authentication, publishes a success no call
+    # waits for, joins the one attempt in flight rather than start its own, and frees that attempt's
+    # slot when its worker cannot start.
+    Case('ssh-reconnect-unbounded-poll', 'executor/ssh.py',
+         (('            while not _await(pending.done, max(0.0, min(ATTEMPT_POLL, deadline - time.monotonic()))):\n'
+           '                if time.monotonic() >= deadline and self._leave(pending):\n'
+           '                    return connect_failure_message(self._host, cause)\n',
+           '            while not _await(pending.done, ATTEMPT_POLL):\n'
+           '                pass\n'),),
+         ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
+         'still reconnecting'),
+    Case('ssh-reconnect-unbounded-retry', 'executor/ssh.py',
+         (('            if now >= deadline - FINAL_ATTEMPT_LEAD:\n'
+           '                return connect_failure_message(self._host, cause)\n'
+           '            time.sleep(min(delay, deadline - FINAL_ATTEMPT_LEAD - now))\n',
+           '            time.sleep(delay)\n'),),
+         ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[refused]',),
+         'still reconnecting'),
+    Case('ssh-reconnect-reads-as-lost', 'executor/ssh.py',
+         (("', NOT_STARTED_EXIT_CODE,\n                             self._host)\n",
+           "', CONNECTION_LOST_EXIT_CODE,\n                             self._host)\n"),),
+         ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[refused]',),
+         'read as a lost connection'),
+    Case('ssh-reconnect-retries-refused-auth', 'executor/ssh.py',
+         (("            if _auth_ending(cause) == 'refused':\n", '            if False:\n'),),
+         ('test_ssh_exec.py::test_a_reconnect_refused_authentication_fails_at_once',),
+         'was retried'),
+    Case('ssh-reconnect-late-success-leaks', 'executor/ssh.py',
+         (('                pending.transport, dropped = self._publish(conn)\n',
+           '                pending.transport, dropped = self._publish(conn) if pending.waiters else (None, None)\n'),),
+         ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
+         'leaked'),
+    Case('ssh-reconnect-attempt-per-call', 'executor/ssh.py',
+         (('                pending = self._inflight\n', '                pending = None\n'),),
+         ('test_ssh_exec.py::test_concurrent_calls_during_a_stall_start_one_attempt[hang]',
+          'test_ssh_exec.py::test_concurrent_calls_during_a_stall_start_one_attempt[canonicalisation]'),
+         'not one'),
+    Case('ssh-reconnect-unstarted-worker-holds-slot', 'executor/ssh.py',
+         (('                        self._inflight = None\n                        pending.error = exc\n',
+           '                        pending.error = exc\n'),),
+         ('test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt',),
+         'stayed taken'),
+    # An authentication is a refusal only when the server answered: one cut short, by a closed link or
+    # its own timeout, is retried, and a call never takes on the failure of an attempt aborted at
+    # another call's deadline. An abort never closes a published connection, and an aborted attempt
+    # is never published; a call at its deadline takes an outcome that has just come; a connection
+    # published meanwhile stays published; a shorter connect timeout never lowers the bound; and each
+    # of a write's own commands shares the write's deadline.
+    Case('ssh-reconnect-auth-class-not-cause', 'executor/ssh.py',
+         (("            if _auth_ending(cause) == 'refused':\n",
+           '            if isinstance(cause, AuthenticationException):\n'),),
+         ('test_ssh_exec.py::test_an_authentication_cut_short_is_retried[closed]',
+          'test_ssh_exec.py::test_an_authentication_cut_short_is_retried[timed-out]'),
+         'taken for a refusal'),
+    Case('ssh-reconnect-joiner-inherits-abort', 'executor/ssh.py',
+         (('            if pending.aborted:\n                continue\n',
+           '            if False:\n                continue\n'),),
+         ('test_ssh_exec.py::test_a_call_never_inherits_an_aborted_attempt',),
+         'as its own'),
+    Case('ssh-reconnect-abort-unchecked', 'executor/ssh.py',
+         (('            if pending.done.is_set() or pending.waiters:\n', '            if pending.waiters:\n'),),
+         ('test_ssh_exec.py::test_an_abort_and_a_publish_never_cross[published-first]',),
+         'closed a published connection'),
+    Case('ssh-reconnect-publishes-aborted', 'executor/ssh.py',
+         (('            if pending.aborted:\n                pending.error = ConnectionAbortedError(',
+           '            if False:\n                pending.error = ConnectionAbortedError('),),
+         ('test_ssh_exec.py::test_an_abort_and_a_publish_never_cross[opened-first]',),
+         'published a connection the abort closed'),
+    Case('ssh-reconnect-leave-ignores-outcome', 'executor/ssh.py',
+         (('            if pending.done.is_set():\n                return False\n', ''),),
+         ('test_ssh_exec.py::test_a_call_at_its_deadline_takes_an_outcome_that_has_come',),
+         'reported a failure'),
+    Case('ssh-reconnect-publish-replaces-live', 'executor/ssh.py',
+         (('        if current is not None:\n            return current, conn\n', ''),),
+         ('test_ssh_exec.py::test_a_reconnect_keeps_a_connection_published_meanwhile',),
+         'closed or replaced'),
+    Case('ssh-reconnect-bound-unfloored', 'executor/ssh.py',
+         (("    return max(CONNECT_TIMEOUT, getattr(conn, 'connect_timeout', None) or 0, explicit or 0)\n",
+           "    return max(0, getattr(conn, 'connect_timeout', None) or 0, explicit or 0)\n"),),
+         tuple(f'test_ssh_exec.py::test_a_reconnect_bound_never_falls_below_the_default[{given}]'
+               for given in ('ssh-config', 'connect-kwargs', 'connect-timeout')),
+         'lowered'),
+    # Every refusal Paramiko raises gives up at once, and an `AuthFailure` is one only when every
+    # source was refused; the declared Paramiko floor is the classifier's. No attempt starts or is
+    # joined after a call's last start; an abort spares an attempt another call has joined since;
+    # and a failed attempt releases its connection.
+    Case('ssh-auth-strategy-read-as-refusal', 'executor/ssh.py',
+         (("        return 'refused' if cause is exc else _auth_ending(cause)\n", "        return 'refused'\n"),),
+         ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[auth-failure-closed]',
+          'test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[auth-failure-agent]'),
+         'never retried'),
+    Case('ssh-auth-subclass-not-refusal', 'executor/ssh.py',
+         (("    if isinstance(exc, REFUSALS):\n        return 'refused'\n",
+           "    if isinstance(exc, REFUSALS):\n        return None\n"),),
+         tuple(f'test_ssh_exec.py::test_every_refusal_ends_the_reconnect_at_once[{refusal}]'
+               for refusal in ('bad-type', 'partial', 'password-required', 'auth-failure')),
+         'was retried'),
+    Case('ssh-paramiko-floor-disagrees', 'executor/ssh.py',
+         (('PARAMIKO_FLOOR: Final = (3, 2)\n', 'PARAMIKO_FLOOR: Final = (3, 1)\n'),),
+         ('test_ssh_exec.py::test_the_declared_paramiko_floor_matches_the_classifier',),
+         'disagree'),
+    Case('ssh-reconnect-starts-past-last-start', 'executor/ssh.py',
+         (('                if not scheduled and time.monotonic() >= deadline - FINAL_ATTEMPT_LEAD:\n',
+           '                if False:\n'),),
+         ('test_ssh_exec.py::test_a_call_past_its_last_start_starts_no_attempt[none-in-flight]',
+          'test_ssh_exec.py::test_a_call_past_its_last_start_starts_no_attempt[one-in-flight]',
+          'test_ssh_exec.py::test_a_write_command_past_its_last_start_starts_no_attempt'),
+         'past its last start'),
+    Case('ssh-reconnect-abort-spares-no-joiner', 'executor/ssh.py',
+         (('            if pending.done.is_set() or pending.waiters:\n', '            if pending.done.is_set():\n'),),
+         ('test_ssh_exec.py::test_an_abort_spares_an_attempt_another_call_joined_since',),
+         'joined since'),
+    Case('ssh-reconnect-failed-attempt-unreleased', 'executor/ssh.py',
+         (('            if conn is not None:\n                _release(conn)\n            raise\n', '            raise\n'),),
+         ('test_ssh_exec.py::test_a_failed_attempt_releases_its_connection',),
+         'left its connection open'),
+    Case('ssh-write-parent-own-deadline', 'executor/ssh.py',
+         (("UserPath(parent)),\n                                 deadline=deadline)",
+           "UserPath(parent)),\n                                 deadline=time.monotonic() + self._window)"),),
+         ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[parent]',),
+         'took a deadline of its own'),
+    Case('ssh-write-place-own-deadline', 'executor/ssh.py',
+         (("UserPath(expected)),\n                                 deadline=deadline)",
+           "UserPath(expected)),\n                                 deadline=time.monotonic() + self._window)"),),
+         ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[place]',),
+         'took a deadline of its own'),
+    Case('ssh-write-probe-own-deadline', 'executor/ssh.py',
+         (("timeout=60,\n                              deadline=deadline)",
+           "timeout=60,\n                              deadline=time.monotonic() + self._window)"),),
+         ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[probe]',),
+         'took a deadline of its own'),
+    # A host that returns is used: a failed reconnect is never remembered, so the next call tries
+    # again. A reconnect that gives up reads as nothing run at every tool: sbatch says nothing was
+    # submitted, sacct stops at its failed whoami, and the cluster context is never cached from it.
+    Case('ssh-reconnect-gives-up-for-good', 'executor/ssh.py',
+         (('        transport = self._ensure_connected(deadline)\n'
+           '        if isinstance(transport, str):\n'
+           '            return self._not_run(transport)\n'
+           '        out, err, code, note',
+           "        transport = getattr(self, '_gave_up', None) or self._ensure_connected(deadline)\n"
+           '        if isinstance(transport, str):\n'
+           '            self._gave_up = transport\n'
+           '            return self._not_run(transport)\n'
+           '        out, err, code, note'),),
+         ('test_ssh_exec.py::test_a_failed_reconnect_leaves_the_server_serving',),
+         'after the host returned'),
+    Case('sbatch-not-started-reads-as-failed', 'tools/slurm.py',
+         (('        if written.exit_code == NOT_STARTED_EXIT_CODE:\n', '        if False:\n'),
+          ('    if result.exit_code == NOT_STARTED_EXIT_CODE:\n', '    if False:\n')),
+         ('test_ssh_exec.py::test_a_reconnect_failure_reaches_each_tool_as_not_run[sbatch-script-path]',
+          'test_ssh_exec.py::test_a_reconnect_failure_reaches_each_tool_as_not_run[sbatch-script-content]'),
+         'must say the job was not submitted'),
+    Case('sacct-whoami-unchecked', 'tools/slurm.py',
+         (('        if user_result.exit_code != 0:\n', '        if False:\n'),),
+         ('test_ssh_exec.py::test_sacct_spends_one_reconnect_window',),
+         'more than one reconnect window'),
+    # The cluster context is the startup read, so a reconnect that gives up never reaches it: served
+    # from a read through the executor instead, the failed read's line replaces the site text.
+    Case('context-served-from-a-failed-read', 'tools/context.py',
+         (("    return site_of(get_server()).text\n",
+           "    from rcac_mcp.context import get_executor\n"
+           "    from rcac_mcp.site import read_remote\n"
+           "    return read_remote(get_executor()).text\n"),),
+         ('test_ssh_exec.py::test_a_reconnect_failure_never_changes_the_cluster_context',),
+         'not the startup read'),
     # An end record split across reads is found, at its full stop, while something holds the streams.
     Case('ssh-record-scan-from-end', 'executor/ssh.py',
          (('                    scanned[i] = -1 if found else max(0, len(buf) - len(end) - 5)\n',
@@ -1246,7 +1413,7 @@ CASES: tuple[Case, ...] = (
           'test_startup.py::test_raw_wire_answers_every_request',
           'test_startup.py::test_startup_failure_is_answered[modern]'),
          'not answered'),
-    Case('startup-host-unnamed', 'startup.py',
+    Case('startup-host-unnamed', 'executor/ssh.py',
          (('    cause = _cause_class(exc)\n', "    cause = _cause_class(exc)\n    host = 'the SSH host'\n"),),
          ('test_startup.py::test_raw_wire_answers_every_request',
           'test_startup.py::test_connect_failure_names_host_and_cause[unknown-host]',
@@ -1265,8 +1432,8 @@ CASES: tuple[Case, ...] = (
           'test_startup.py::test_raw_wire_answers_every_request'),
          'is not an error response'),
     Case('startup-no-connect-timeout', 'executor/ssh.py',
-         (('        self._conn = Connection(self._host, **_bounded(self._connect_kwargs))\n',
-           '        self._conn = Connection(self._host, **self._connect_kwargs)\n'),),
+         (('        return Connection(self._host, **_bounded(self._connect_kwargs))\n',
+           '        return Connection(self._host, **self._connect_kwargs)\n'),),
          ('test_startup.py::test_connect_is_bounded[default]',
           'test_startup.py::test_silent_banner_is_answered_within_the_bound'),
          'the connect has no bound'),

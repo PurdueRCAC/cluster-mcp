@@ -8,11 +8,17 @@ directory beside the target, every write's reply and the close checked, and a pr
 its size and checksum against the bytes sent before it moves it into place. A connection lost
 before a command's end records arrived is reported as such (`CONNECTION_LOST_EXIT_CODE`), never as
 a command that did not start.
+
+A call that finds the connection lost reconnects within a deadline (`SSHExecutor` states the bound):
+every attempt runs on a worker thread the call stops waiting for at its deadline, at most one
+attempt is in flight at a time, and a call that cannot reconnect reports
+`cannot connect to <host>: <cause>` as a command that was not run (`NOT_STARTED_EXIT_CODE`), never
+as a lost connection.
 """
 
 # Type annotations
 from __future__ import annotations
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, Final, Optional, Type
 from types import TracebackType
 
@@ -22,30 +28,65 @@ import os
 import posixpath
 import secrets
 import select
+import socket
 import stat
+import threading
 import time
 import zlib
 
 # External libs
 from fabric import Config, Connection
-from paramiko import SFTPClient, Transport
+from paramiko import AuthFailure, SFTPClient, Transport
 from paramiko.common import cMSG_CHANNEL_REQUEST
 from paramiko.file import BufferedFile
 from paramiko.message import Message
 from paramiko.sftp import CMD_CLOSE
-from paramiko.ssh_exception import SSHException
+from paramiko.ssh_exception import (AuthenticationException, BadAuthenticationType, NoValidConnectionsError,
+                                    PartialAuthentication, PasswordRequiredException, SSHException)
 
 # Internal libs
 from rcac_mcp.executor import launch
-from rcac_mcp.executor.base import CONNECTION_LOST_EXIT_CODE, TIMEOUT_EXIT_CODE, CommandResult, UserPath
+from rcac_mcp.executor.base import (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE,
+                                    CommandResult, UserPath)
 
 # Public interface
-__all__ = ['SSHExecutor']
+__all__ = ['SSHExecutor', 'connect_failure_message']
 
 
-# Reconnection settings
-MAX_RECONNECT_DELAY: float = 10.0  # Maximum delay between reconnect attempts
-INITIAL_RECONNECT_DELAY: float = 0.5  # Initial delay for exponential backoff
+# The backoff between reconnect attempts: the first wait, doubled after each failure up to the most.
+MAX_RECONNECT_DELAY: float = 10.0
+INITIAL_RECONNECT_DELAY: float = 0.5
+
+# A call that has to reconnect gives up this many times the connect bound (`_bound`) after it began.
+RECONNECT_FACTOR: Final = 3
+
+# How often, in seconds, a call waiting on a connect attempt checks its own deadline.
+ATTEMPT_POLL: Final = 0.1
+
+# A call starts or joins a connect attempt only until this many seconds before its deadline, so a
+# host that is back by then is used, and never later: past that, it gives up at once.
+FINAL_ATTEMPT_LEAD: Final = 2.0
+
+# How far down an exception's cause and context chain the failure class is looked for.
+CHAIN_DEPTH: Final = 8
+
+# Paramiko's words for the two ways an authentication ends without the server's answer
+# (`AuthHandler.wait_for_response`): the link closed while it waited (a lost host, or an abort
+# closing the transport), or its auth timeout ran out. Every other `AuthenticationException` is a
+# refusal (`_auth_ending`).
+AUTH_CLOSED: Final = 'Authentication failed: transport shut down or saw EOF'
+AUTH_TIMED_OUT: Final = 'Authentication timeout.'
+
+# The oldest Paramiko whose authentication outcomes `_auth_ending` can tell apart: 3.2 gave a link
+# closed during authentication its own text (`AUTH_CLOSED`), where earlier releases raised the
+# refusal's `Authentication failed.`, and added `AuthFailure`. `pyproject.toml` declares this floor.
+PARAMIKO_FLOOR: Final = (3, 2)
+
+# The `AuthenticationException` subclasses that are refusals by their class: the server allows none
+# of the methods tried (`BadAuthenticationType`) or wants more than was offered
+# (`PartialAuthentication`), or a key needs a passphrase that was not given
+# (`PasswordRequiredException`).
+REFUSALS: Final = (BadAuthenticationType, PartialAuthentication, PasswordRequiredException)
 
 # Seconds to wait for the server to open a session channel.
 OPEN_TIMEOUT: Final = 30.0
@@ -252,6 +293,201 @@ def _bounded(connect_kwargs: dict) -> dict:
     return kwargs
 
 
+def _bound(conn: Any) -> float:
+    """The connect bound of `conn`, in seconds: `CONNECT_TIMEOUT`, or a longer one it was given.
+
+    Fabric has already resolved the connection's connect timeout from the caller's
+    `connect_timeout`, the ssh_config `ConnectTimeout` or `_bounded`'s default; an explicit `timeout`
+    among its connect arguments counts too. A shorter bound never lowers `CONNECT_TIMEOUT`.
+    """
+    explicit = (getattr(conn, 'connect_kwargs', None) or {}).get('timeout')
+    return max(CONNECT_TIMEOUT, getattr(conn, 'connect_timeout', None) or 0, explicit or 0)
+
+
+def _live(conn: Any) -> Transport | None:
+    """The transport of `conn` while it is open and connected, else None."""
+    if conn is None or not conn.is_connected:
+        return None
+    return getattr(conn, 'transport', None)
+
+
+def _links(conn: Any) -> Iterator[Any]:
+    """`conn`, then each gateway `Connection` it reaches its host through (a ProxyJump chain)."""
+    seen: set[int] = set()
+    while conn is not None and not isinstance(conn, str) and id(conn) not in seen:
+        seen.add(id(conn))
+        yield conn
+        conn = getattr(conn, 'gateway', None)
+
+
+def _release(conn: Any) -> None:
+    """Let `conn` go, best effort: close its client and every gateway's in its chain.
+
+    Fabric's own `close()` does nothing for a connection whose transport never opened or has died,
+    which would leave a half-made transport, or a ProxyJump hop's session, running.
+    """
+    for link in _links(conn):
+        try:
+            link.client.close()
+        except Exception:
+            pass
+
+
+def _transports(conn: Any) -> list[Transport]:
+    """The transports `conn`'s client and each gateway's in its chain have made so far.
+
+    A client makes its transport as its connect begins; Fabric's `conn.transport` stays None until
+    `open()` returns, so it is never one of them.
+    """
+    found = []
+    for link in _links(conn):
+        try:
+            transport = link.client.get_transport()
+        except Exception:
+            continue
+        if transport is not None:
+            found.append(transport)
+    return found
+
+
+def _await(event: threading.Event, seconds: float) -> bool:
+    """Wait up to `seconds` for `event`; return whether it is set."""
+    return event.wait(seconds)
+
+
+def _chain(exc: BaseException) -> Iterator[BaseException]:
+    """`exc`, then the exceptions it was raised from or while handling, nearest first."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(seen) < CHAIN_DEPTH:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _refused(exc: BaseException) -> bool:
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    if isinstance(exc, NoValidConnectionsError):
+        return bool(exc.errors) and all(isinstance(e, ConnectionRefusedError) for e in exc.errors.values())
+    return False
+
+
+def _auth_cause(exc: BaseException) -> BaseException:
+    """The failure that decides how the authentication that raised `exc` ended.
+
+    An `AuthFailure` (raised under an `AuthStrategy`, which Fabric's `authentication.strategy_class`
+    opts into) carries each source's result: the first source that failed for any reason but a
+    refusal decides it, else the last source's refusal (the `AuthFailure` itself when it tried
+    none). Any other exception is its own cause.
+    """
+    if not isinstance(exc, AuthFailure):
+        return exc
+    results = (getattr(source, 'result', None) for source in getattr(exc, 'result', None) or ())
+    failures = [result for result in results if isinstance(result, BaseException)]
+    for failure in failures:
+        if _auth_ending(failure) != 'refused':
+            return _auth_cause(failure)
+    return failures[-1] if failures else exc
+
+
+def _auth_ending(exc: BaseException) -> str | None:
+    """How the authentication that raised `exc` ended, by its cause; None for any other failure.
+
+    `closed` when the link closed before the server answered (the host lost, or the transport closed
+    under it); `timed out` when the auth timeout ran out first; `refused` for every other
+    `AuthenticationException`: the server rejected the credentials, allows none of the methods
+    tried or wants more than was offered, or a key could not be used. Only `refused` ends a
+    reconnect at once: a retry cannot change it, while the other two say nothing about the
+    credentials. An `AuthFailure` ends as its deciding source did (`_auth_cause`): `refused` only
+    when every source was refused.
+    """
+    if isinstance(exc, AuthFailure):
+        cause = _auth_cause(exc)
+        return 'refused' if cause is exc else _auth_ending(cause)
+    if not isinstance(exc, AuthenticationException):
+        return None
+    if isinstance(exc, REFUSALS):
+        return 'refused'
+    if str(exc) == AUTH_CLOSED:
+        return 'closed'
+    if str(exc) == AUTH_TIMED_OUT:
+        return 'timed out'
+    return 'refused'
+
+
+def _cause_class(exc: BaseException) -> str | None:
+    """The class of a connect failure, or None when it is none of the known ones."""
+    for link in _chain(exc):
+        link = _auth_cause(link)
+        ending = _auth_ending(link)
+        if ending == 'refused':
+            return 'authentication failed'
+        if ending == 'closed':
+            return 'connection closed during authentication'
+        if ending == 'timed out':
+            return 'timed out'
+        if isinstance(link, socket.gaierror):
+            return 'unknown host or SSH alias'
+        if _refused(link):
+            return 'connection refused'
+        if isinstance(link, TimeoutError):
+            return 'timed out'
+        # Paramiko's report when the key exchange has not finished by the connect timeout: the
+        # negotiation stopped waiting while the transport was still alive.
+        if type(link) is SSHException and str(link) == 'No existing session':
+            return 'timed out'
+    return None
+
+
+def _detail(exc: BaseException) -> str:
+    exc = _auth_cause(exc)
+    if isinstance(exc, OSError) and exc.strerror:
+        return str(exc.strerror)
+    if _auth_ending(exc) == 'closed':
+        # Paramiko's text calls it a failed authentication, which it was not.
+        return ''
+    return str(exc)
+
+
+def connect_failure_message(host: str, exc: BaseException) -> str:
+    """`cannot connect to <host>: <cause>`, naming the host as given and the class of failure.
+
+    The class is one of `unknown host or SSH alias`, `connection refused`, `authentication failed`
+    (a refusal: the server rejected the credentials or allows none of the methods tried, or a key
+    could not be used), `connection closed during authentication` or `timed out` (an
+    authentication's own timeout included), followed by the exception's own text in parentheses
+    when it says more; a failure of no known class is described by that text, or by the exception's
+    type when it has none. A server that cannot connect at startup reports it, and so does a call
+    that cannot reconnect.
+    """
+    cause = _cause_class(exc)
+    detail = _detail(exc).strip()
+    if cause is None:
+        return f'cannot connect to {host}: {detail or type(exc).__name__}'
+    if detail and detail.lower().rstrip('.') != cause:
+        return f'cannot connect to {host}: {cause} ({detail})'
+    return f'cannot connect to {host}: {cause}'
+
+
+class _Pending:
+    """One connect attempt in flight, shared by every call waiting on it.
+
+    The worker running the attempt sets `conn` once it has built the connection, records the
+    outcome (`transport` on success, else `error`) and then sets `done`. `waiters` counts the calls
+    still waiting, and `aborted` says the last of them closed the attempt's transports as it left;
+    both change only under the executor's lock.
+    """
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.transport: Transport | None = None
+        self.error: BaseException | None = None
+        self.conn: Any = None
+        self.waiters = 1
+        self.aborted = False
+
+
 def _is_dir(sftp: SFTPClient, path: str) -> bool:
     try:
         return stat.S_ISDIR(sftp.stat(path).st_mode or 0)
@@ -413,11 +649,32 @@ class SSHExecutor:
     identity files, and proxy commands. Maintains a persistent connection with
     automatic reconnection on failure. Each step of connecting is bounded (`CONNECT_TIMEOUT` unless
     the SSH config or the caller sets it), so an unreachable host fails within a bound a client waits for.
+
+    A call that finds the connection lost keeps trying to reconnect, with backoff, and gives up at
+    most three times the connect bound after the call began: 45 s with the default 15 s
+    (`CONNECT_TIMEOUT`). It starts or joins no attempt later than 2 s before that: one that finds the
+    connection lost after then, as a `write`'s later command can, gives up at once. An ssh_config
+    `ConnectTimeout` (or a caller's `connect_timeout`) longer than 15 s raises the bound to three times
+    that value; a shorter one never lowers it. A refused authentication, the server rejecting the
+    credentials or a key that cannot be used, gives up at once; one cut short by a lost link or its
+    own timeout is retried, and no call takes the failure of an attempt aborted at another call's
+    deadline as its own. The call then reports `cannot connect to <host>: <cause>` and runs nothing,
+    and the next call tries again.
+
+    The bound holds for each call to the executor (`run`, `write`, `put`, `get`). Every connect
+    attempt runs on a worker thread, so no step of it (name resolution, an SSH agent, several keys,
+    a ProxyJump hop) holds a call past its deadline; at most one attempt is in flight at a time,
+    and a call that arrives during one joins it. The last call to give up on an attempt aborts it,
+    unless its outcome has come or another call has joined it, so an abort never closes a
+    published connection.
     """
 
     _host: str
     _conn: Optional[Connection]
     _connect_kwargs: dict
+    _lock: threading.Lock
+    _window: float
+    _inflight: Optional[_Pending]
 
     def __init__(self, host: str, **connect_kwargs) -> None:
         """
@@ -431,6 +688,12 @@ class SSHExecutor:
         self._host = host
         self._conn = None
         self._connect_kwargs = connect_kwargs
+        # The published connection, the reconnect window and the one attempt in flight (and its
+        # waiters and abort) change only under this lock, and it is held only for that bookkeeping,
+        # never across a connect or a close.
+        self._lock = threading.Lock()
+        self._window = RECONNECT_FACTOR * CONNECT_TIMEOUT
+        self._inflight = None
         # Establish connection immediately
         self.open()
 
@@ -440,11 +703,23 @@ class SSHExecutor:
         return self._host
 
     def open(self) -> None:
-        """Establish SSH connection (single attempt, no retry)."""
+        """Establish SSH connection (single attempt, no retry).
+
+        The attempt runs on the calling thread; a failure releases what it made and raises its own
+        exception, which a server that cannot start reports.
+        """
         if self._conn is not None and self._conn.is_connected:
             return
-        self._conn = Connection(self._host, **_bounded(self._connect_kwargs))
-        self._conn.open()
+        conn = self._new()
+        try:
+            conn.open()
+        except BaseException:
+            _release(conn)
+            raise
+        with self._lock:
+            _, dropped = self._publish(conn)
+        if dropped is not None:
+            _release(dropped)
 
     def close(self) -> None:
         """Close the SSH connection."""
@@ -452,34 +727,199 @@ class SSHExecutor:
             self._conn.close()
             self._conn = None
 
-    def _ensure_connected(self) -> Connection:
+    def _new(self) -> Connection:
+        """A new, unopened connection to the host, every step of connecting bounded.
+
+        Building one is not free: Fabric's ssh_config lookup runs any `Match exec` command and, with
+        `CanonicalizeHostname`, resolves names. A reconnect builds one only inside an attempt.
         """
-        Ensure connection is open, connecting with exponential backoff if necessary.
+        return Connection(self._host, **_bounded(self._connect_kwargs))
 
-        This method lazily establishes the SSH connection on first use and
-        automatically reconnects with retry logic if the connection is lost.
+    def _publish(self, conn: Connection) -> tuple[Transport, Connection | None]:
+        """Make `conn`, just opened, the executor's connection; called with the lock held.
+
+        Returns the transport calls use and the connection to release once the lock is let go:
+        `conn` itself when another live connection is already published (whose transport is then
+        the one returned), else the dead one `conn` replaces. The reconnect window is taken from the
+        connection published.
         """
-        if self._conn is not None and self._conn.is_connected:
-            return self._conn
+        current = _live(self._conn)
+        if current is not None:
+            return current, conn
+        dropped, self._conn = self._conn, conn
+        self._window = RECONNECT_FACTOR * _bound(conn)
+        return getattr(conn, 'transport', None), dropped
 
-        delay = INITIAL_RECONNECT_DELAY
+    def _attempt(self, pending: _Pending) -> Connection:
+        """One connect: build a connection and open it. Runs on a worker thread.
 
-        while delay <= MAX_RECONNECT_DELAY:
-            try:
-                self.open()
-                return self._conn
-            except (SSHException, OSError):
-                time.sleep(delay)
-                delay = min(delay * 2, MAX_RECONNECT_DELAY)
-
-        # Final attempt after max delay
+        The connection is shared through `pending.conn` as soon as it is built, so the last call to
+        stop waiting can abort it. A failure releases it and raises. `self._conn` is never touched.
+        """
+        conn = None
         try:
-            self.open()
-            return self._conn
-        except (SSHException, OSError) as exc:
-            raise ConnectionError(
-                f'Failed to connect to {self._host} after exponential backoff: {exc}'
-            ) from exc
+            conn = self._new()
+            with self._lock:
+                pending.conn = conn
+            conn.open()
+        except BaseException:
+            if conn is not None:
+                _release(conn)
+            raise
+        return conn
+
+    def _settle(self, pending: _Pending) -> None:
+        """Run the attempt `pending` and record its outcome; the worker thread's body.
+
+        The worker owns the outcome whether or not any call still waits: under the lock it
+        publishes a success (or hands back the live connection already published, releasing its
+        own) or records the failure, then frees the slot and sets `done`. An attempt aborted
+        (`_abort`) is never published, even one that opened before its transports were closed: it
+        is recorded as failed and released. Every release happens once the lock is let go.
+        """
+        try:
+            conn = self._attempt(pending)
+        except BaseException as exc:
+            with self._lock:
+                pending.error = exc
+                if self._inflight is pending:
+                    self._inflight = None
+                pending.done.set()
+            return
+        with self._lock:
+            if pending.aborted:
+                pending.error = ConnectionAbortedError('the connect attempt was aborted')
+                dropped = conn
+            else:
+                pending.transport, dropped = self._publish(conn)
+            if self._inflight is pending:
+                self._inflight = None
+            pending.done.set()
+        if dropped is not None:
+            _release(dropped)
+
+    def _leave(self, pending: _Pending) -> bool:
+        """Stop waiting on `pending` at the call's deadline; False when its outcome has just come.
+
+        The last call to leave aborts the attempt (`_abort`), outside the lock. The slot stays
+        taken until the worker ends, so a later call joins that same attempt rather than start one.
+        """
+        with self._lock:
+            if pending.done.is_set():
+                return False
+            pending.waiters -= 1
+            last = pending.waiters == 0
+        if last:
+            self._abort(pending)
+        return True
+
+    def _abort(self, pending: _Pending) -> None:
+        """End the attempt `pending`, which its last waiting call has just left: close its client's
+        transport and every gateway's (`_transports`).
+
+        That ends a key exchange, an authentication or a gateway's channel open within about 0.1 s.
+        A step before the client has made its transport (building the connection, name resolution,
+        the TCP connect) has nothing to close: it runs to its own end, and its late success is
+        published. A step that waits on something else once the transport exists (an SSH-agent
+        query, during authentication) has its transport closed, but runs on until that answers; the
+        attempt is aborted, so its late outcome, success or failure, is discarded.
+
+        The decision is taken again under the lock, at the moment the abort acts: an attempt whose
+        outcome has come is left alone, so a connection it published is never closed, and so is one
+        a call has joined since. An attempt with transports to close is marked `aborted` under the
+        lock before they are closed, outside it: its worker then never publishes it, and a call that
+        joins it never takes its failure as its own.
+        """
+        with self._lock:
+            if pending.done.is_set() or pending.waiters:
+                return
+            transports = _transports(pending.conn)
+            if not transports:
+                return
+            pending.aborted = True
+        for transport in transports:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+    def _ensure_connected(self, deadline: float) -> Transport | str:
+        """
+        The live transport, reconnecting until `deadline` if the connection is lost; or, on giving
+        up, the message `cannot connect to <host>: <cause>`.
+
+        A live connection's transport is returned at once, captured here so another call's reconnect
+        cannot swap it out. Otherwise the call joins the connect attempt in flight, or starts one on
+        a worker thread named `cluster-mcp-reconnect` when there is none, and waits on it
+        `ATTEMPT_POLL` at a time, checking its own deadline between waits. After a failure it sleeps
+        its backoff, which ends no later than its last start (`FINAL_ATTEMPT_LEAD` before the
+        deadline), and tries again. It starts or joins no attempt after that last start: a call
+        that reaches it later, as a `write`'s later command can, or whose attempt failed past it,
+        gives up at once. It also gives up at the deadline, or at once on a refused authentication
+        (`_auth_ending`), with the last cause it saw (`timed out` when none came); an
+        authentication the link's loss or its own timeout cut short is retried like any other
+        failure. An attempt aborted at another call's deadline is no outcome of this call's: the
+        call starts or joins a fresh one at once, unless its last start has passed. A worker that
+        cannot start frees the slot and gives up at once with that failure, so the next call starts
+        a fresh attempt. An outcome that is not an `Exception` (an interrupt) is raised.
+        """
+        transport = _live(self._conn)
+        if transport is not None:
+            return transport
+        delay = INITIAL_RECONNECT_DELAY
+        cause: BaseException = TimeoutError('timed out')
+        # Whether the call has just slept a backoff, which ends no later than its last start.
+        scheduled = False
+        while True:
+            with self._lock:
+                pending = self._inflight
+                if pending is None:
+                    transport = _live(self._conn)
+                    if transport is not None:
+                        return transport
+                if not scheduled and time.monotonic() >= deadline - FINAL_ATTEMPT_LEAD:
+                    return connect_failure_message(self._host, cause)
+                scheduled = False
+                if pending is not None:
+                    pending.waiters += 1
+                else:
+                    pending = self._inflight = _Pending()
+                    try:
+                        threading.Thread(target=self._settle, args=(pending,), name='cluster-mcp-reconnect',
+                                         daemon=True).start()
+                    except BaseException as exc:
+                        # A worker that never started would hold the slot for good, and every later
+                        # call would wait out its deadline on it: free the slot and end the attempt
+                        # with the failure, for this call and any joined to it.
+                        self._inflight = None
+                        pending.error = exc
+                        pending.done.set()
+                        if not isinstance(exc, Exception):
+                            raise
+                        return connect_failure_message(self._host, exc)
+            while not _await(pending.done, max(0.0, min(ATTEMPT_POLL, deadline - time.monotonic()))):
+                if time.monotonic() >= deadline and self._leave(pending):
+                    return connect_failure_message(self._host, cause)
+            if pending.error is None:
+                return pending.transport
+            if not isinstance(pending.error, Exception):
+                raise pending.error
+            if pending.aborted:
+                continue
+            cause = pending.error
+            if _auth_ending(cause) == 'refused':
+                return connect_failure_message(self._host, cause)
+            now = time.monotonic()
+            if now >= deadline - FINAL_ATTEMPT_LEAD:
+                return connect_failure_message(self._host, cause)
+            time.sleep(min(delay, deadline - FINAL_ATTEMPT_LEAD - now))
+            delay = min(delay * 2, MAX_RECONNECT_DELAY)
+            scheduled = True
+
+    def _not_run(self, message: str) -> CommandResult:
+        """The result of a command that was not run because the call could not reconnect."""
+        return CommandResult('', f'cluster-mcp: {message}; the command was not run\n', NOT_STARTED_EXIT_CODE,
+                             self._host)
 
     def run(
         self,
@@ -494,12 +934,16 @@ class SSHExecutor:
         remote login shell parses none of it. It starts in the login home (`$HOME`), whatever a
         startup file `cd`s to. Its stdin is empty: the end of it is sent at once, so a remote rc
         file that reads stdin reads nothing. The output is read up to the program's end records,
-        however long it takes to arrive after the exit status (`_collect`).
+        however long it takes to arrive after the exit status (`_collect`). A lost connection is
+        re-established first, within the bound the class states; a call that cannot reconnect runs
+        nothing and returns `NOT_STARTED_EXIT_CODE`, its stderr
+        `cluster-mcp: cannot connect to <host>: <cause>; the command was not run`.
 
         Args:
             command: An argv (each element one literal argument) or a bash script.
             cwd: Working directory; a leading `~` or `~/` is the remote user's home.
-            timeout: Seconds to wait; at the deadline the result carries `TIMEOUT_EXIT_CODE`.
+            timeout: Seconds to wait; at the deadline the result carries `TIMEOUT_EXIT_CODE`. It
+                bounds the command once it has been sent, never the reconnect.
 
         Returns:
             CommandResult with stdout, stderr, exit_code, and hostname.
@@ -507,10 +951,17 @@ class SSHExecutor:
         Raises:
             ValueError: The exec string is over the per-argument limit, before connecting.
         """
+        return self._run(command, cwd, timeout, deadline=time.monotonic() + self._window)
+
+    def _run(self, command: Sequence[str] | str, cwd: str | None = None, timeout: float | None = None, *,
+             deadline: float) -> CommandResult:
+        """`run`, reconnecting no later than `deadline`, which the calling method took at its entry."""
         timeout = launch.check_timeout(timeout)
         prog, marks = launch.program(command, cwd, start='home')
         wire = launch.ssh_command(prog)
-        transport = self._ensure_connected().client.get_transport()
+        transport = self._ensure_connected(deadline)
+        if isinstance(transport, str):
+            return self._not_run(transport)
         out, err, code, note = self._exec(transport, wire, timeout, marks.end)
         out, err, code = launch.separate(out, err, code, marks, note)
         return CommandResult(stdout=launch.decode(out), stderr=launch.decode(err), exit_code=code,
@@ -560,7 +1011,12 @@ class SSHExecutor:
         file, or a regular file in a directory this user may not add to, is written through
         instead, from a staging directory in the login home. A transfer that fails or falls short
         leaves the target untouched; the remote filesystem is then asked the reason (`PROBE`). The
-        staging directory is removed whatever happens.
+        staging directory is removed afterwards, except when the host is lost after the content is
+        staged: removing it needs the connection, so the directory (mode 0700, the user's own) can
+        then remain beside the target, or in the login home. A lost connection is
+        re-established first, and every command the write runs shares one deadline, so a write
+        spends at most one reconnect window; one that cannot reconnect writes nothing to the target
+        and returns `NOT_STARTED_EXIT_CODE`, as `run` does.
 
         Raises:
             OSError: The content could not be staged (the target is a directory or a link whose
@@ -568,13 +1024,18 @@ class SSHExecutor:
                 (`ELOOP`), its directory is missing or closed, a transfer
                 failed or fell short, with the reason); nothing was written.
         """
+        deadline = time.monotonic() + self._window
         if not path:
             # As a shell's `>` with an empty name.
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
-        with self._ensure_connected().client.open_sftp() as sftp:
+        transport = self._ensure_connected(deadline)
+        if isinstance(transport, str):
+            return self._not_run(transport)
+        with transport.open_sftp_client() as sftp:
             # A parent that is already a directory needs no command, and no login shell's start.
             if parent is not None and not _is_dir(sftp, _remote(parent)):
-                made = self.run(launch.fixed_argv(MAKE_PARENT, 'cluster-mcp-write', UserPath(parent)))
+                made = self._run(launch.fixed_argv(MAKE_PARENT, 'cluster-mcp-write', UserPath(parent)),
+                                 deadline=deadline)
                 if made.exit_code != 0:
                     return made
             remote = _remote(path)
@@ -601,7 +1062,7 @@ class SSHExecutor:
                     _upload(sftp, expected, cksum(data).encode('ascii'))
                 except Short as exc:
                     raise Short(f'the transfer of {len(data)} bytes to {target!r} failed: '
-                                f'{self._reason(staged) or exc}; the file is unchanged') from None
+                                f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None
                 if append:
                     script = PLACE_APPEND
                 elif through:
@@ -612,23 +1073,26 @@ class SSHExecutor:
                     script = PLACE
                 if executable:
                     script += PLACE_EXECUTABLE
-                return self.run(launch.fixed_argv(VERIFY + script, 'cluster-mcp-write', UserPath(staged),
-                                                  UserPath(target), mode or '=rw', UserPath(expected)))
+                return self._run(launch.fixed_argv(VERIFY + script, 'cluster-mcp-write', UserPath(staged),
+                                                   UserPath(target), mode or '=rw', UserPath(expected)),
+                                 deadline=deadline)
             finally:
                 _discard(sftp, directory, staged, expected)
 
-    def _reason(self, staged: str) -> str | None:
+    def _reason(self, staged: str, deadline: float) -> str | None:
         """Why a transfer into `staged` failed, in the remote filesystem's words, or None.
 
         `PROBE` appends zero bytes to the staged file, which is discarded; when the filesystem is
-        full or the quota spent, that fails as the transfer did, and its error names the cause.
+        full or the quota spent, that fails as the transfer did, and its error names the cause. A
+        probe that did not run (no reconnect by the write's `deadline`) gives no reason.
         """
         try:
-            probe = self.run(launch.fixed_argv(PROBE, 'cluster-mcp-write', UserPath(staged)), timeout=60)
+            probe = self._run(launch.fixed_argv(PROBE, 'cluster-mcp-write', UserPath(staged)), timeout=60,
+                              deadline=deadline)
         except Exception:
             return None
         lines = [line for line in probe.stderr.splitlines() if line.strip()]
-        if probe.exit_code in (0, TIMEOUT_EXIT_CODE, CONNECTION_LOST_EXIT_CODE) or not lines:
+        if probe.exit_code in (0, TIMEOUT_EXIT_CODE, CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE) or not lines:
             return None
         return lines[-1].rsplit(': ', 1)[-1].strip() or None
 
@@ -644,9 +1108,17 @@ class SSHExecutor:
         Args:
             local_path: Path to local file.
             remote_path: Destination path on remote system.
+
+        Raises:
+            ConnectionError: The lost connection could not be re-established within the bound the
+                class states: `cannot connect to <host>: <cause>; nothing was transferred`.
         """
+        deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)
-        with self._ensure_connected().client.open_sftp() as sftp:
+        transport = self._ensure_connected(deadline)
+        if isinstance(transport, str):
+            raise ConnectionError(f'{transport}; nothing was transferred')
+        with transport.open_sftp_client() as sftp:
             remote = _remote(remote_path)
             if _is_dir(sftp, remote):
                 remote = posixpath.join(remote, os.path.basename(local))
@@ -664,9 +1136,17 @@ class SSHExecutor:
         Args:
             remote_path: Path to file on remote system.
             local_path: Destination path on local system.
+
+        Raises:
+            ConnectionError: The lost connection could not be re-established within the bound the
+                class states: `cannot connect to <host>: <cause>; nothing was transferred`.
         """
+        deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)
-        with self._ensure_connected().client.open_sftp() as sftp:
+        transport = self._ensure_connected(deadline)
+        if isinstance(transport, str):
+            raise ConnectionError(f'{transport}; nothing was transferred')
+        with transport.open_sftp_client() as sftp:
             remote = _remote(remote_path)
             if os.path.isdir(local):
                 local = os.path.join(local, posixpath.basename(remote))

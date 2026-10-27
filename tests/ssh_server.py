@@ -42,6 +42,10 @@ or a quota does, report a short write as done, or change a staged byte (`write_l
 `DroppingSSH` is the same server on a link that is lost once a command has run: the command runs to
 its end and none of its output reaches the client, the connection dropping either after the exec
 request was answered or before.
+
+Any of them can go down and come back, as a host that reboots does: `refuse()` stops accepting, so a
+new connection is refused, and cuts every connection it holds as a lost link does; `serve_again()`
+listens on the same port once more.
 """
 
 from __future__ import annotations
@@ -353,6 +357,9 @@ class LoopbackSSH:
     and reports success. `write_flip` changes the first byte of a staged content file on its way to
     disk, as a faulty disk would. `close_failure` fails the close of a staged content file once it
     is closed, as NFS reports a deferred write error.
+
+    `refuse()` takes the host down: every new connection is refused and every one it holds is cut,
+    with no close sent. `serve_again()` brings it back on the same port.
     """
 
     def __init__(self, home: Path, shell: str, jail: Path, sftp_server: str | None = None) -> None:
@@ -367,17 +374,43 @@ class LoopbackSSH:
         self.stdin_bytes: list[list[int]] = []
         self.processes: list[subprocess.Popen[bytes]] = []
         self._transports: list[paramiko.Transport] = []
-        self._listener = socket.socket()
-        self._listener.bind((LOOPBACK, 0))
-        self._listener.listen(8)
+        self.port = 0
+        self._listen()
         self.port = self._listener.getsockname()[1]
-        self._accepting = threading.Thread(target=self._accept, daemon=True)
+
+    def _listen(self) -> None:
+        # The port is reused at once on a return: the connections `refuse` cut leave it in TIME_WAIT.
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind((LOOPBACK, self.port))
+        listener.listen(8)
+        self._listener = listener
+        self._accepting = threading.Thread(target=self._accept, args=(listener,), daemon=True)
         self._accepting.start()
 
-    def _accept(self) -> None:
+    def _stop_listening(self) -> None:
+        # A shutdown wakes the accept thread where a close alone does not (Linux).
+        try:
+            self._listener.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self._listener.close()
+        self._accepting.join(5)
+
+    def refuse(self) -> None:
+        """Go down, as a host does: refuse every new connection, and cut each one held (`_drop`)."""
+        self._stop_listening()
+        for transport in self._transports:
+            _drop(transport)
+
+    def serve_again(self) -> None:
+        """Come back after `refuse()`, as a host that returns does: accept on the same port again."""
+        self._listen()
+
+    def _accept(self, listener: socket.socket) -> None:
         while True:
             try:
-                conn, _ = self._listener.accept()
+                conn, _ = listener.accept()
             except OSError:
                 return
             transport = paramiko.Transport(conn)
@@ -449,7 +482,7 @@ class LoopbackSSH:
 
     def close(self) -> None:
         """Stop serving, and kill every process group an exec started that is still running."""
-        self._listener.close()
+        self._stop_listening()
         for proc in self.processes:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)

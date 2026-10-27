@@ -541,8 +541,22 @@ def test_local_transfers_return_the_absolute_destination(executes: Any, monkeypa
     assert (tmp_path / 'rel copy').read_bytes() == b'local\n'
 
 
+class FakeTransport:
+    """The transport an opened `FakeConnection` holds: it opens no channel."""
+
+    def is_active(self) -> bool:
+        return True
+
+    def open_session(self, *args: Any, **kwargs: Any) -> Any:
+        raise AssertionError('the fake connection runs nothing')
+
+
 class FakeConnection:
-    """Stands in for `fabric.Connection`: records that it was built and opened, reaches no host."""
+    """Stands in for `fabric.Connection`: records that it was built and opened, reaches no host.
+
+    Once opened it holds a transport, as Fabric's does, so the executor reads it as live and never
+    reconnects; a command on it fails without a channel.
+    """
 
     made: list[FakeConnection]
 
@@ -551,11 +565,13 @@ class FakeConnection:
         self.kwargs = kwargs
         self.opened = 0
         self.is_connected = False
+        self.transport: FakeTransport | None = None
         self.made.append(self)
 
     def open(self) -> None:
         self.opened += 1
         self.is_connected = True
+        self.transport = FakeTransport()
 
     def close(self) -> None:
         self.is_connected = False

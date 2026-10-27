@@ -38,7 +38,8 @@ import paramiko
 import pytest
 from cmdkit.app import exit_status
 from fabric import Config, Connection
-from paramiko.ssh_exception import AuthenticationException, NoValidConnectionsError, SSHException
+from paramiko.ssh_exception import (AuthenticationException, BadAuthenticationType, NoValidConnectionsError,
+                                    SSHException)
 
 import rcac_mcp
 import rcac_mcp.executor.ssh
@@ -245,12 +246,33 @@ def _banner_timeout() -> SSHException:
         return exc
 
 
+def _auth_failure(*results: BaseException) -> paramiko.AuthFailure:
+    """What Paramiko's `AuthStrategy` raises when no source succeeded: each source's failure, in order."""
+    from paramiko.auth_strategy import AuthResult, NoneAuth, SourceResult
+    return paramiko.AuthFailure(AuthResult(None, [SourceResult(NoneAuth('user'), result) for result in results]))
+
+
 CAUSES = [
     pytest.param(socket.gaierror(8, 'nodename nor servname provided, or not known'),
                  'unknown host or SSH alias', id='unknown-host'),
     pytest.param(NoValidConnectionsError({(LOOPBACK, 22): ConnectionRefusedError(61, 'Connection refused')}),
                  'connection refused', id='refused'),
     pytest.param(AuthenticationException('Authentication failed.'), 'authentication failed', id='authentication'),
+    pytest.param(AuthenticationException('Authentication failed: transport shut down or saw EOF'),
+                 'connection closed during authentication', id='authentication-closed'),
+    pytest.param(AuthenticationException('Authentication timeout.'), 'timed out', id='authentication-timeout'),
+    pytest.param(BadAuthenticationType('Bad authentication type', ['password']), 'authentication failed',
+                 id='authentication-type'),
+    pytest.param(paramiko.ssh_exception.PartialAuthentication(['keyboard-interactive']), 'authentication failed',
+                 id='authentication-partial'),
+    pytest.param(paramiko.PasswordRequiredException('Private key file is encrypted'), 'authentication failed',
+                 id='authentication-passphrase'),
+    pytest.param(_auth_failure(AuthenticationException('Authentication failed.')), 'authentication failed',
+                 id='authentication-strategy-refused'),
+    pytest.param(_auth_failure(AuthenticationException('Authentication failed.'),
+                               AuthenticationException('Authentication failed: transport shut down or saw EOF')),
+                 'connection closed during authentication', id='authentication-strategy-closed'),
+    pytest.param(_auth_failure(SSHException('lost ssh-agent')), 'lost ssh-agent', id='authentication-strategy-agent'),
     pytest.param(TimeoutError('timed out'), 'timed out', id='timeout'),
     pytest.param(SSHException('No existing session'), 'timed out', id='negotiation-timeout'),
     pytest.param(_banner_timeout(), 'timed out', id='banner-timeout'),

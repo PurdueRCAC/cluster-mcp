@@ -128,7 +128,7 @@ Top-level package `src/rcac_mcp/`:
 |------|----------------|
 | `__init__.py` | `MCPServerApp` (cmdkit `Application`) — all CLI wiring, `APP_HELP`, defaults, `_resolve_exec_mode()`, `_create_executor()`, `main()`. **There is no `cli/` package.** |
 | `__main__.py` | `python -m rcac_mcp` shim. |
-| `startup.py` | What a server that cannot start tells its client: `connect_failure_message` (`cannot connect to <host>: <cause>`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
+| `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance, attaches auth, registers tools/resources/middleware/custom routes. Home of **`SERVER_INSTRUCTIONS`**, the agent-facing contract. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — both set the per-request executor in `on_call_tool` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result carrying `str(exc)`. |
@@ -138,7 +138,7 @@ Top-level package `src/rcac_mcp/`:
 | `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (the site context read at startup, from `site_of`; runs nothing) and `rcac://storage`. |
 | `executor/base.py` | `Executor` `Protocol` + the `CommandResult` dataclass. The contract all backends satisfy. Also `UserPath` and the reserved exit codes `TIMEOUT_EXIT_CODE` (−1001) and `NOT_STARTED_EXIT_CODE` (−1002). |
 | `executor/launch.py` | The launcher every backend runs commands through: renders an argv or a script into one bash program for the pinned login bash (`program`), the local/delegate stage (`bash_argv`) and the SSH bootstrap (`ssh_command`), `separate` (drops login-initialisation output), and `run_process` (local/delegate processes and their timeouts). |
-| `executor/ssh.py` | `SSHExecutor` — Fabric `Connection` (`~/.ssh/config`-aware, each connect step bounded by `CONNECT_TIMEOUT` unless the SSH config sets it, reconnect with exponential backoff) for the connection; each command on a raw Paramiko channel, transfers over Paramiko's SFTP client. |
+| `executor/ssh.py` | `SSHExecutor` — Fabric `Connection` (`~/.ssh/config`-aware, each connect step bounded by `CONNECT_TIMEOUT` unless the SSH config sets it; a lost connection re-established with backoff within three times that bound of the call's start, one attempt at a time on a worker thread, or the call reported as not run) for the connection, and `connect_failure_message`, the `cannot connect to <host>: <cause>` text startup and reconnect share; each command on a raw Paramiko channel, transfers over Paramiko's SFTP client. |
 | `executor/shell.py` | `LocalShellExecutor` — the launcher's program under the pinned login bash, as the server's user. Development only. |
 | `executor/delegate.py` | `DelegatingExecutor` + `load_user_map()` — `sudo -n -H -u <user>` on behalf of an authenticated identity; commands and transfers both run as that user. |
 | `scripts.py` | `FIXED_SCRIPTS`, `fixed()` and `script_argv()`: the constant bash scripts a tool or resource runs when one call needs a redirection or two steps, every caller value only a positional parameter. The tool tests refuse any other shell text. |
@@ -359,8 +359,10 @@ import has no effect.
     two answers, the message on stderr naming `127.0.0.1:<port>` and exit 5 come out. A real client
     in each era gets the message (`test_startup_failure_is_answered[legacy|modern]`, each era on its
     own row, through `stdio_refusal`). In-process rows with the connection stubbed name the host and
-    each cause class (unknown host or alias, refused, authentication, timed out, including Paramiko's
-    banner and negotiation timeouts) with one log line, and `-t http` exits 5 without reading stdin.
+    each cause class (unknown host or alias, refused, authentication refused, of a bad type, partial
+    or needing a passphrase, connection closed during authentication, timed out, including Paramiko's
+    banner, negotiation and authentication timeouts, and an `AuthFailure` named for its deciding
+    source) with one log line, and `-t http` exits 5 without reading stdin.
     The connect bound reaches Fabric (an ssh_config `ConnectTimeout` and an explicit
     `connect_timeout` win), and a loopback listener that never sends a banner is answered "timed
     out" within a lowered bound, well under Paramiko's own 15 s banner wait.
@@ -653,7 +655,10 @@ import has no effect.
     at a size with ENOSPC or EDQUOT, report a short write as done, change a staged byte, or fail a
     staged file's close; with `sftp_server` it relays SFTP to OpenSSH's own `sftp-server` instead).
     `DroppingSSH` runs a command to its end and drops the connection with its output unsent, after
-    the exec request is answered or before. `ThrottledSSH` is the same
+    the exec request is answered or before. Any of them goes down and comes back as a host does:
+    `refuse()` closes the listener, so a new connection is refused, and cuts every connection it
+    holds with no close sent; `serve_again()` listens on the same port again (`SO_REUSEADDR`).
+    `ThrottledSSH` is the same
     server on a slow link: it reads the output as fast as a 2 MiB window allows, sends both streams
     over one link at a fixed rate a packet at a time, sends the exit status ahead of the queued
     output, and can stall after the exit status or once some bytes have gone. Under bash, zsh, sh
@@ -700,7 +705,91 @@ import has no effect.
     at both end records and not at one, output trickling in after the status is read to its record,
     a command whose records have not come by the deadline is a timeout naming its status, a lost
     status stays `-1`, and what the command prints after the TERM at a deadline is read; an
-    oversize program is refused, naming the limit, before connecting.
+    oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
+    a published connection that has gone dead, with Fabric's `Connection` scripted or built for
+    real with its `open()` stubbed, under a fake clock (`ssh.time`, and `ssh._await` for the wait
+    on an attempt) that only a calling thread moves and that raises `Runaway` past twice the bound,
+    so a 45 s bound costs no real wait: a reconnect refused, timed out, with no banner, to an
+    unknown host or whose connection cannot be built gives `-1002` with `cannot connect to <host>:
+    <cause>; the command was not run` within the bound, its last attempt at least 2 s before it,
+    never `-1003`; so does an authentication that a closed link or its own timeout cut short, after
+    retrying, named `connection closed during authentication` or `timed out`, and an `AuthFailure`
+    with a source closed or failed for another reason, named for that source; a refused
+    authentication gives up after one attempt, and so does each refusal Paramiko raises by its class
+    (`BadAuthenticationType`, `PartialAuthentication`, `PasswordRequiredException`) and an
+    `AuthFailure` whose every source was refused (`test_every_refusal_ends_the_reconnect_at_once`);
+    the floor `pyproject.toml` declares for Paramiko is `PARAMIKO_FLOOR`, and the installed
+    Paramiko still raises `AUTH_CLOSED` and `AUTH_TIMED_OUT`
+    (`test_the_declared_paramiko_floor_matches_the_classifier`); a call that reaches its last start
+    with the connection lost, with or without an attempt in flight, starts and joins none and gives
+    up at once with `timed out` (`test_a_call_past_its_last_start_starts_no_attempt`); a 30 s
+    connect timeout (from ssh_config or the connect arguments) raises the window to 90 s, and a 5 s
+    one (from ssh_config, the connect arguments or `connect_timeout`) leaves it at 45 s
+    (`test_a_reconnect_bound_never_falls_below_the_default`); an attempt that hangs before it has a
+    transport, or a real connection whose ssh_config canonicalisation stalls, is abandoned at the
+    bound on its worker, and its late success is published; concurrent reconnects publish one
+    connection, a success at the deadline's instant is owned once, and four calls during a stall
+    start one attempt, a call after them joining it; `put` and `get` raise `cannot connect to <host>: <cause>;
+    nothing was transferred` and `write` returns `-1002`; the bound statement is pinned in the
+    `SSHExecutor` docstring and the `executor/ssh.py` footgun (`test_reconnect_texts_state_the_bound`).
+    An abort and a publish never cross, each way round, by a hook at the seam with no timing race:
+    an attempt that publishes between the last call's decision to abort and the abort stays
+    published and live, and one that opened before the abort closed it is never published
+    (`test_an_abort_and_a_publish_never_cross[published-first|opened-first]`); an attempt held in its
+    authentication, its transport made, that another call joins between the last call's decision to
+    abort and the abort, is spared and published to that call
+    (`test_an_abort_spares_an_attempt_another_call_joined_since`); a call whose attempt
+    succeeds as it reaches its deadline takes that success
+    (`test_a_call_at_its_deadline_takes_an_outcome_that_has_come`); and a connection `open()`
+    publishes while an attempt runs stays published, the attempt's own released
+    (`test_a_reconnect_keeps_a_connection_published_meanwhile`). The mutation cases
+    `ssh-reconnect-unbounded-poll`, `-unbounded-retry`, `-reads-as-lost`, `-retries-refused-auth`,
+    `-late-success-leaks`, `-attempt-per-call`, `-abort-unchecked`, `-publishes-aborted`,
+    `-leave-ignores-outcome`, `-publish-replaces-live`, `-bound-unfloored`, `-starts-past-last-start`
+    and `-abort-spares-no-joiner`, and `ssh-auth-strategy-read-as-refusal`,
+    `ssh-auth-subclass-not-refusal` and `ssh-paramiko-floor-disagrees`, each turn one of these rows
+    red. The recovery rows take the loopback server down with `refuse()`: a reconnect whose
+    host comes back (`serve_again()`) on the second attempt, or on an attempt 40 s into the window,
+    gives the unbroken connection's result over a second accepted connection and a new published one
+    (`test_a_reconnect_after_the_host_returns_gives_the_same_result`); in one in-memory session a
+    call while the host is down gives `-1002` within the bound, and once it is back the next call
+    runs (`test_a_failed_reconnect_leaves_the_server_serving`); a reconnect whose worker thread
+    cannot start (`Thread.start` patched to raise once) gives `-1002` naming the host and the cause
+    at once, frees the attempt's slot, and the next call starts a fresh attempt and runs
+    (`test_a_reconnect_worker_that_cannot_start_frees_the_attempt`, which the mutation case
+    `ssh-reconnect-unstarted-worker-holds-slot` turns red); an attempt stalled in a real
+    handshake, against a host that never sends its banner, is abandoned at a 3 s window and its
+    worker ends within 1 s (`test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`).
+    An authentication the server cuts short, by closing the link while the client waits or by
+    answering after a 1 s auth timeout, fails that attempt as `connection closed during
+    authentication` or `timed out`, and the call retries and gives the unbroken connection's result
+    (`test_an_authentication_cut_short_is_retried[closed|timed-out]`, which the mutation case
+    `ssh-reconnect-auth-class-not-cause` turns red). A call whose 3 s window ends while the server
+    holds the attempt's authentication aborts it there (`connection closed during authentication`),
+    and a call that joins the aborted attempt (held until it has joined) starts a fresh one at once,
+    with no backoff, and runs (`test_a_call_never_inherits_an_aborted_attempt`, which
+    `ssh-reconnect-joiner-inherits-abort` turns red). A write whose first own command (the parent's
+    `mkdir`, the placing program, or the probe after a failed transfer) meets a lost host 30 s into
+    the write gives up within the write's one window, the target untouched
+    (`test_a_write_spends_one_reconnect_window[parent|place|probe]`, which
+    `ssh-write-parent-own-deadline`, `-place-own-deadline` and `-probe-own-deadline` each turn red);
+    one whose placing program meets it 44 s into the write, past its last start, starts no attempt
+    and gives `-1002` naming `timed out` at once (`test_a_write_command_past_its_last_start_starts_no_attempt`,
+    which `ssh-reconnect-starts-past-last-start` also turns red). An attempt whose authentication
+    outlasts a 1 s auth timeout, the server holding it, leaves no transport active once it has
+    failed, and the next attempt runs the command (`test_a_failed_attempt_releases_its_connection`,
+    which `ssh-reconnect-failed-attempt-unreleased` turns red).
+    Through the tools, in the selected era and under a real-time watchdog, a reconnect that gives up
+    spends at most one window and reads as nothing run: `run_command` returns `-1002`; `sbatch`, on
+    a script path or on script content, says the job was not submitted, never that it failed or may
+    have been submitted; `write_file` names the host; `upload_file` and `download_file` say nothing
+    was transferred (`test_a_reconnect_failure_reaches_each_tool_as_not_run`); `sacct` stops at its
+    failed `whoami` (`test_sacct_spends_one_reconnect_window`). A `run_command` whose reconnect gives
+    up changes nothing `cluster_context` or `rcac://context` serve, before or after it: both return
+    the startup read, and neither starts a connect attempt
+    (`test_a_reconnect_failure_never_changes_the_cluster_context`). The mutation cases
+    `ssh-reconnect-gives-up-for-good`, `sbatch-not-started-reads-as-failed`, `sacct-whoami-unchecked`
+    and `context-served-from-a-failed-read` each turn one of these rows red.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
     installed `rcac-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
     exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the
@@ -1200,8 +1289,36 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   triple that must match across signer and verifier; OIDC's all-four check and the proxy's held
   posture (§6). `AUTH_MODES`' annotation is checked in its resolved shape: a stray `:` once made its
   `Final` argument a `slice`, which evaluated without error, PEP 563 or not.
-- **`executor/ssh.py`** — reconnect backoff (`_ensure_connected` never gives up once its delay
-  reaches the cap; `issues/ssh-reconnect-loop.md`); the connect bound (`_bounded`: the TCP connect,
+- **`executor/ssh.py`** — the reconnect bound (`_ensure_connected`). A call that finds the
+  connection lost keeps trying to reconnect, with backoff, and gives up at most three times the
+  connect bound after the call began: 45 s with the default 15 s (`CONNECT_TIMEOUT`). It starts
+  or joins no attempt later than 2 s before that: one that finds the connection lost after then, as
+  a `write`'s later command can, gives up at once. An ssh_config `ConnectTimeout` (or a caller's
+  `connect_timeout`) longer than 15 s raises the bound to three times that value; a shorter one
+  never lowers it. A refused authentication, the server rejecting the credentials or a key that
+  cannot be used, gives up at once; one cut short by a lost link or its own timeout is retried,
+  and no call takes the failure of an attempt aborted at another call's deadline as its own. The
+  call then reports `cannot connect to <host>: <cause>` and runs nothing, and the next call tries
+  again. The bound
+  holds for each executor call (`run`, `write`, `put`, `get`; a `write`'s own commands share its
+  deadline). Every attempt runs on a worker thread, building the connection included, so no step
+  holds a call past its deadline; at most one attempt is in flight, and a call that arrives during
+  one joins it; a worker that cannot start frees the slot at once, and the call gives up with
+  `cannot connect to <host>: <cause>`; the worker publishes a connection only once it has opened, under the lock, whether
+  or not a call still waits, and never one aborted; the last call to give up aborts the attempt
+  (`_abort`), taking the decision again under the lock as it acts, so an attempt whose outcome has
+  come, a published connection, or one another call has joined since, is never closed. An abort
+  closes the transports an attempt has made: a step before the transport exists (building the
+  connection, name resolution, the TCP connect) runs to its end and its late success is published;
+  one that waits on an SSH agent during authentication has its transport closed but runs on until
+  the agent answers, and its late outcome is discarded. The authentication outcome is read by its
+  cause (`_auth_ending`): a link closed during authentication (Paramiko's `transport shut down`)
+  or its `Authentication timeout.` is no refusal; every other `AuthenticationException` is
+  (`BadAuthenticationType`, `PartialAuthentication` and `PasswordRequiredException` among them),
+  and an `AuthFailure` is one only when every source it tried was refused. Paramiko before 3.2
+  raises the refusal's text for a closed link, so `pyproject.toml` declares `paramiko>=3.2`
+  (`PARAMIKO_FLOOR`; `test_the_declared_paramiko_floor_matches_the_classifier` keeps the two
+  equal). The connect bound (`_bounded`: the TCP connect,
   banner and auth timeouts default to `CONNECT_TIMEOUT` through Fabric's config, so an ssh_config
   `ConnectTimeout` still wins, and a startup against an unreachable host is answered within it); the channel loop (`_collect`), which must
   send no stdin and its EOF at once; wait without spinning; read to both end records, never stopping
@@ -1215,7 +1332,7 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   refuse an unwritable target and move the file into place (keeping the target's mode but setuid
   and setgid, following a link, refusing one whose target's directory is missing, writing through
   a target that is not a regular file or sits in a directory closed to new entries), and removes
-  the staging on every path; `run`, which starts every program in `$HOME`
+  the staging afterwards, but for a host lost after staging, which can leave it (§2); `run`, which starts every program in `$HOME`
   and builds the exec string (refusing an oversize one) before connecting; the SFTP `~` mapping
   (`_remote`).
 - **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder.
@@ -1305,7 +1422,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   by its user clears (a new file gets the mode `cat >` gives); an append adds the staged bytes; a
   symbolic link is followed; a target that is not a regular file, or a regular file in a directory
   closed to new entries, is written through instead, staged in the login home; the staging
-  directory is removed on every path. A write refuses what `cat >` refuses: an existing target the
+  directory is removed afterwards, except when the host is lost after the content is staged:
+  removing it needs the connection, so it can then remain (mode 0700, the user's own) beside the
+  target or in the login home, a known limitation (`issues/ssh-write-staging-leftover.md`). A
+  write refuses what `cat >` refuses: an existing target the
   user may not write (`[ -w ]`: a read-only file, another user's file in a group-writable
   directory) fails with `Permission denied`, a symbolic link whose target's directory does not
   exist fails naming that target, the link kept (one to a missing file in an existing directory
@@ -1372,8 +1492,11 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
     `exec 58>file` do so): the program checks each parked descriptor against a second copy, and on a
     mismatch runs nothing, so stderr is instead `cluster-mcp: the command did not start: the login
     initialisation took a descriptor its streams were parked on, so it was not run; the server log
-    has the details` (`launch.TAKEN_NOTE`). A command that ran is never reported as not started on
-    that account, and its output is never lost there unnoted.
+    has the details` (`launch.TAKEN_NOTE`). Or, over `ssh`, a lost connection could not be
+    re-established within the reconnect bound (the `executor/ssh.py` footgun above): no channel was
+    opened, nothing ran, and stderr is
+    `cluster-mcp: cannot connect to <host>: <cause>; the command was not run`. A command that ran is
+    never reported as not started on that account, and its output is never lost there unnoted.
   - **`CONNECTION_LOST_EXIT_CODE = -1003`** (`ssh` only): the connection was lost before both end
     records arrived, so the command may have run, and may have finished: the channel closed without
     its end of output (as the transport closes it when the link goes), or the link went once the
