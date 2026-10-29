@@ -5,10 +5,11 @@ seed holds the evidence and the draft criteria, this file holds the order and th
 order. Nothing here is a contract — the factory's feature step promotes a seed into a `spec/{slug}/GOAL.md`, and
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
-The first three Parts each end in a release. **Part 0** makes the server safe and useful as it stands and
-ships as 0.1.3, with its last fix, the resource read `rcac://storage`, following in 0.1.4. **Part I** is the arc this project is actually on — becoming a general `cluster-mcp`
-rather than a Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that
-comes after. **Part III** holds infrastructure work that no release waits on.
+The first three Parts each end in a release. **Part 0** made the server safe and useful as it stood:
+it shipped as 0.1.3, and its last fix, the resource read `rcac://storage`, ships in 0.1.4. **Part I**
+is the arc this project is actually on — becoming a general `cluster-mcp` rather than a
+Purdue-specific `rcac-mcp` — and ships as 0.2.0. **Part II** is the hosted mode that comes after.
+**Part III** holds infrastructure work that no release waits on.
 
 The order was revised on 2026-10-16. Users install `main` directly, so fixes for today's users ship
 first, under the name they already have, before the rename. The dependency stack moves before any
@@ -27,10 +28,13 @@ seeds; its method lives in the operator's KB.
 
 # Part 0 — Safe and useful as it stands
 
-Every cycle Part 0 holds for **release 0.1.3** has landed, the last being
+Every cycle Part 0 holds has landed. **Release 0.1.3** carried all but the last, ending with
 `ssh-reconnect-loop` on 2026-10-27 ([`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/)),
-after `sbatch-script-name-collision` and `agents-d-instructions` on 2026-10-26. The resource read
-`rcac://storage`, the one entry left, follows in 0.1.4 (Geoffrey, 2026-10-27). `stack-upgrade` landed
+after `sbatch-script-name-collision` and `agents-d-instructions` on 2026-10-26. The last,
+`resource-reads-without-executor`, landed on 2026-10-29
+([`spec/resource-reads-without-executor/`](spec/resource-reads-without-executor/)): reading
+`rcac://storage` now returns the user's storage paths through the executor of the request that read
+it, and it ships in **release 0.1.4**, as decided on 2026-10-27. `stack-upgrade` landed
 on `develop` on 2026-10-17 ([`spec/stack-upgrade/`](spec/stack-upgrade/)), and `ci-workflow` on
 2026-10-18 ([`spec/ci-workflow/`](spec/ci-workflow/)), so the release gate now runs on every push.
 `safe-execution` landed on 2026-10-23 ([`spec/safe-execution/`](spec/safe-execution/)): every
@@ -59,34 +63,6 @@ in the release that closes Part 0 (now 0.1.3) rather than wait for Part I.*
 handler runs `findscratch` and `myquota` through the request's executor, which a read does not get
 yet, so fixing the `TypeError` alone would only change the error a client sees.*
 
-## Neither advertised resource can be read
-
-Both executor middlewares set the request's executor in `on_call_tool` only, so a resource read
-carries none, and `rcac://context` fails with `No executor configured` in every mode and both
-protocol eras, on FastMCP 2 and 4 alike. It fails closed: nothing runs. The fix gives a read the
-executor of the request that made it, the mapped user's in `delegate` mode, which is also what makes
-the process-global context cache above reachable across users through the resource, so it lands
-with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026-10-17.
-
-- 2026-10-26: `agents-d-instructions` settled `rcac://context`: it now returns the text read once at
-  startup, with no executor, and the cross-user cache is gone. What remains is `rcac://storage`,
-  absorbed below.
-
-*Horizon: near-term, release 0.1.4 · Depends on: agents-d-instructions (cleared: landed on `develop` 2026-10-26; it retired the cache and settled `rcac://context`) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
-**Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: adopted:resource-reads-without-executor*
-
-### Absorbed: the rcac://storage resource fails on every read
-
-`resources.py:151` calls `storage_paths()`, but `@mcp_tool` replaced that function with a
-`fastmcp.tools.tool.FunctionTool`, which is not callable — the resource raises
-`TypeError: 'FunctionTool' object is not callable` on every read. The generic lesson is already an
-invariant (`AGENTS.md` § Invariants §7: a decorated tool cannot be called from Python; factor shared
-logic into an undecorated helper). The tool it calls runs `findscratch` and `myquota` through the
-request's executor, so the summary comes back only once a read has one: the two fixes land together.
-
-*Horizon: with resource-reads-without-executor · Depends on: — · Refs: absorbed by `resource-reads-without-executor`; the same helper split that `generalize-storage-discovery` needs*
-**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: adopted:resource-reads-without-executor*
-
 **Release 0.1.3.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
 connection errors, a call that fails rather than hangs when the connection drops, job scripts that
@@ -99,12 +75,13 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Twelve cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
+Thirteen cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
 with Purdue as one supported site*, ending in **release 0.2.0**. Rename and restructure what stays,
 make capabilities optional, then build each capability on that mechanism — Slurm first, then LMOD
 and xdu as the consumers that prove it generalizes — and finally the site extra that bundles them.
 Ahead of the tool families sit the executor fixes: stopping a timed-out command, once its
-measurement is approved, and the four that `ssh-reconnect-loop` deferred on the SSH connection.
+measurement is approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a
+reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## Nothing here should assume Purdue
 
@@ -312,7 +289,7 @@ is built on the same assumption. Generalizing means a discovery protocol with a 
 implementation and an honest "unknown" rather than a parse failure — and the site hook is what
 `site-extras` builds. Found by the harness port, 2026-08-26.
 
-*Horizon: with site-extras · Depends on: — · Refs: absorbed by `site-extras`; `storage-paths-resource-typeerror` leaves the helper seam it needs*
+*Horizon: with site-extras · Depends on: — · Refs: absorbed by `site-extras`; the helper seam it needs, the undecorated `resolve_storage_paths()`, exists (`resource-reads-without-executor`, landed on `develop` 2026-10-29)*
 **Seed:** [`issues/generalize-storage-discovery.md`](issues/generalize-storage-discovery.md) · *status: unshaped*
 
 **Release 0.2.0.** The new names, the capability extras and the new tool families reach `main`

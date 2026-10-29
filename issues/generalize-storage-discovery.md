@@ -13,11 +13,12 @@ Storage is the one piece of cluster context an agent needs before it can do almo
 write job output, what is purged, what has quota left. This server answers that question with two
 Purdue commands and no fallback:
 
-- `storage_paths()` (`tools/rcac.py:337`) runs `myquota` and hands the output to
-  `_parse_myquota_output()` (`:269`), a parser written against Purdue's exact column layout.
+- `resolve_storage_paths()` (`tools/rcac.py:339`), the undecorated helper behind the
+  `storage_paths` tool and the `rcac://storage` resource, runs `myquota` and hands the output to
+  `_parse_myquota_output()` (`:272`), a parser written against Purdue's exact column layout.
 - Scratch resolution shells out to `findscratch`, treated as the authoritative source (commit
   `d73f972`).
-- The `rcac://storage` resource (`resources.py:137`) formats `paths.home`, `paths.scratch` and
+- The `rcac://storage` resource (`resources.py:55`) formats `paths.home`, `paths.scratch` and
   `paths.depots` — a data model with `depot` in it, which is a Purdue concept, not an HPC one.
 
 On a cluster with neither command, `myquota` returns nonzero, the parser sees nothing it recognizes,
@@ -66,11 +67,11 @@ Two design questions worth naming now:
 
 ## Notes
 
-- The `rcac://storage` resource is **also** broken for an unrelated reason — it calls a `@mcp_tool`-
-  decorated function that is no longer callable. See
-  [`storage-paths-resource-typeerror.md`](storage-paths-resource-typeerror.md); that fix factors
-  `storage_paths` into an undecorated helper, which is exactly the seam this cycle needs. Doing the
-  small fix first makes this one cheaper.
+- The seam this cycle needs exists. `resource-reads-without-executor` (landed on `develop`
+  2026-10-29, [`spec/resource-reads-without-executor/`](../spec/resource-reads-without-executor/))
+  fixed the `rcac://storage` resource, which had called the `@mcp_tool`-decorated `storage_paths`,
+  and factored its logic into the undecorated `resolve_storage_paths()` that the tool and the
+  resource both call.
 - Related: [`site-extras.md`](site-extras.md) (strict prerequisite),
   [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) (starts the `SERVER_INSTRUCTIONS` split).
 - Found by: the harness port, 2026-08-26 (out of cycle).

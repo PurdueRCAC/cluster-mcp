@@ -73,9 +73,10 @@ connection is established eagerly, and it fails differently in `local` mode.
 
 - `AGENTS.md` § Invariants §7 must be rewritten in lockstep — it is the checklist the review step grades against,
   and leaving it describing the old mechanism makes every subsequent review wrong.
-- The `@mcp_tool`-returns-a-`FunctionTool` gotcha (see
-  [`storage-paths-resource-typeerror.md`](storage-paths-resource-typeerror.md)) is a property of the
-  decorator and survives any registration redesign — do not assume a new mechanism fixes it.
+- The `@mcp_tool`-returns-a-`FunctionTool` gotcha (`AGENTS.md` § Invariants §7; it broke the
+  `rcac://storage` resource until `resource-reads-without-executor`,
+  [`spec/resource-reads-without-executor/`](../spec/resource-reads-without-executor/)) is a property
+  of the decorator and survives any registration redesign — do not assume a new mechanism fixes it.
 - Related: [`lmod-tool-group.md`](lmod-tool-group.md), [`site-extras.md`](site-extras.md).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: design question 1 answered. Each capability is its own distribution in a uv workspace
