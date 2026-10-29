@@ -102,6 +102,87 @@ EXPLICIT_MODE = '        if self.exec_mode:\n'
 BOUNDARY_ROWS = tuple(f'test_protocol.py::test_middleware_refusal_is_a_tool_error_result[{row}]'
                       for row in ('permission-memory', 'permission-http', 'runtime-memory', 'mcp-error-memory'))
 
+STORAGE = 'test_storage_resource.py'
+
+ERAS = ('legacy', 'modern')
+
+CONCURRENT_READS = tuple(f'{STORAGE}::test_concurrent_storage_reads_stay_isolated[{era}]' for era in ERAS)
+
+TOKENLESS_READS = tuple(f'{STORAGE}::test_storage_read_without_token_{name}[{era}]'
+                        for name in ('after_an_authenticated_read_fails', 'while_an_authenticated_read_is_in_flight')
+                        for era in ERAS)
+
+
+def refused_reads(*rows: str, eras: Sequence[str] = ERAS) -> tuple[str, ...]:
+    """The storage read refusal rows `rows`, in `eras`."""
+    return tuple(f'{STORAGE}::test_storage_read_refused[{row}-{era}]' for row in rows for era in eras)
+
+
+# Every refusal the delegate middleware itself raises (not the tokenless row, which fails in the handler).
+MIDDLEWARE_REFUSALS = ('no-claims', 'all-empty', 'unmapped', 'first-claim-unmapped')
+
+UNKNOWN_REFUSED = tuple(f'{STORAGE}::test_unknown_uri_read_is_refused[{row}-{era}]'
+                        for row in MIDDLEWARE_REFUSALS for era in ERAS)
+
+# The generated neighbourhood of every served URI, read by an unmapped caller in the selected era (the
+# sweeps run each case in both): the row a URI normaliser in the read hook's membership test fails,
+# whatever shape it lets through.
+NEAR_REFUSED = (f'{STORAGE}::test_near_open_read_is_refused[unmapped]',)
+
+NOT_FOUND = (*(f'{STORAGE}::test_unknown_uri_is_not_found[{era}]' for era in ERAS),
+             *(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[{who}-{era}]'
+               for who in ('mapped', 'no-token') for era in ERAS))
+
+MAPPED_READS = tuple(f'{STORAGE}::test_storage_read_runs_as_the_mapped_user[{era}]' for era in ERAS)
+
+SEQUENTIAL_READS = tuple(f'{STORAGE}::test_sequential_storage_reads_each_get_their_executor[{era}]' for era in ERAS)
+
+DELEGATE_NOT_FOUND = tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[{who}-{era}]'
+                           for who in ('mapped', 'no-token') for era in ERAS)
+
+# The delegate read hook's membership test, which every URI-shape case replaces.
+OPEN_TEST = '        if context.message.uri not in OPEN_RESOURCES:\n'
+
+URLLIB = "__import__('urllib.parse', fromlist=['urlsplit', 'unquote'])"
+
+
+def resolves_if(condition: str) -> tuple[tuple[str, str], ...]:
+    """Replace the read hook's membership test: resolve identity only where `condition` holds of `u`, the URI read."""
+    return ((OPEN_TEST, f'        if (lambda u: {condition})(context.message.uri):\n'),)
+
+
+def let_through(uri: str) -> str:
+    """The failure fragment naming `uri`, a URI not exactly open, as a refused caller's read let through."""
+    return f'reading {uri!r} ('
+
+
+OPEN_TO_REFUSED = tuple(f'test_context.py::test_any_client_reads_the_context_in_delegate_mode[{who}-{era}]'
+                        for who in ('no-claim', 'unmapped') for era in ERAS)
+
+
+def read_boundary_rows(*rows: str) -> tuple[str, ...]:
+    """The read boundary rows `rows` of `test_protocol.py`, in both eras."""
+    return tuple(f'test_protocol.py::test_middleware_refusal_is_a_read_error[{row}-{era}]' for row in rows for era in ERAS)
+
+
+# The read boundary rows whose exception is not already an MCPError, so a read hook that lets it
+# through unconverted changes what the client sees.
+CONVERTED_READS = read_boundary_rows('permission-memory', 'permission-http', 'runtime-memory', 'runtime-http',
+                                     'other-memory')
+
+READ_HOOK = ('        return await _bounded(context, call_next, ResourceError, (FastMCPError, NotFoundError, DisabledError))\n')
+
+
+def read_hook_raising(text: str) -> str:
+    """The read boundary written out inline, raising `ResourceError(<text>)` for a converted exception."""
+    return ('        try:\n'
+            '            return await call_next(context)\n'
+            '        except (FastMCPError, NotFoundError, DisabledError):\n'
+            '            raise\n'
+            '        except Exception as exc:\n'
+            f'            raise ResourceError({text}) from exc\n')
+
+
 OIDC_ROWS = tuple(f'test_auth_modes.py::test_oidc_requires_all_four[{variable}-{how}]'
                   for variable in ('OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
                   for how in ('unset', 'empty'))
@@ -111,32 +192,267 @@ CASES: tuple[Case, ...] = (
     Case('isolation-module-global', 'context.py',
          ((CONTEXT_VAR, PROCESS_GLOBAL),),
          ('test_isolation.py::test_concurrent_delegate_calls_stay_isolated',
-          'test_isolation.py::test_concurrent_shared_servers_stay_isolated'),
+          'test_isolation.py::test_concurrent_shared_servers_stay_isolated', *CONCURRENT_READS),
          'ran as'),
     Case('isolation-executor-cached', 'middleware.py',
          (('        executor = DelegatingExecutor(identity, self._user_map)\n',
            "        executor = getattr(self, '_cached', None) or DelegatingExecutor(identity, self._user_map)\n"
            '        self._cached = executor\n'),),
-         ('test_isolation.py::test_concurrent_delegate_calls_stay_isolated',),
+         ('test_isolation.py::test_concurrent_delegate_calls_stay_isolated', *CONCURRENT_READS),
          'ran as'),
     # Each executor middleware sets the executor on every call; set once, the later calls of the
     # same server find none.
     Case('shared-middleware-sets-first-call-only', 'middleware.py',
-         (('        set_executor(self._executor)\n        return await call_next(context)\n',
+         (('        set_executor(self._executor)\n',
            "        if not getattr(self, '_set_once', False):\n"
            '            set_executor(self._executor)\n'
-           '            self._set_once = True\n'
-           '        return await call_next(context)\n'),),
+           '            self._set_once = True\n'),),
          ('test_isolation.py::test_sequential_shared_calls_each_get_the_executor',),
          'ran 0 times'),
+    # A resource read gets its request's executor as a tool call does: the shared middleware sets it
+    # for each read too, and the handler reaches it through the undecorated storage helper.
+    Case('shared-read-sets-no-executor', 'middleware.py',
+         (('    async def on_read_resource(self, context: MiddlewareContext, call_next):\n'
+           '        """Set the shared executor for this resource read, then run the rest of the chain."""\n'
+           '        self._install()\n',
+           '    async def on_read_resource(self, context: MiddlewareContext, call_next):\n'
+           '        """Set the shared executor for this resource read, then run the rest of the chain."""\n'),),
+         tuple(f'test_storage_resource.py::test_storage_read_{name}[{era}]'
+               for name in ('runs_on_the_shared_executor', 'runs_the_local_executor') for era in ('legacy', 'modern')),
+         'No executor configured'),
+    Case('resource-calls-decorated-tool', 'resources.py',
+         (('    from rcac_mcp.tools.rcac import resolve_storage_paths\n\n    paths = resolve_storage_paths()\n',
+           '    from rcac_mcp.tools.rcac import storage_paths\n\n    paths = storage_paths()\n'),),
+         ('test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[legacy]',
+          'test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[modern]'),
+         'not callable'),
     Case('auth-middleware-sets-first-call-only', 'middleware.py',
          (('        executor = DelegatingExecutor(identity, self._user_map)\n        set_executor(executor)\n',
            '        executor = DelegatingExecutor(identity, self._user_map)\n'
            "        if not getattr(self, '_set_once', False):\n"
            '            set_executor(executor)\n'
            '            self._set_once = True\n'),),
-         ('test_isolation.py::test_sequential_delegate_calls_each_get_their_executor',),
+         ('test_isolation.py::test_sequential_delegate_calls_each_get_their_executor', *SEQUENTIAL_READS),
          'ran 0 times'),
+    # A delegate-mode read is resolved and refused by the path a tool call takes, except a read of a
+    # resource that runs nothing, which answers any client; a tokenless read finds no executor, never
+    # one an earlier read installed.
+    Case('auth-read-sets-no-executor', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n', ''),),
+         (*MAPPED_READS, *refused_reads('unmapped')),
+         'No executor configured'),
+    # The read hook refuses by default: every URI outside OPEN_RESOURCES is resolved, an unknown one
+    # included, and only the open set skips it; the hook resolves before the handler runs and
+    # returns what the handler returned.
+    Case('read-hook-resolves-storage-only', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n', "        if context.message.uri == 'rcac://storage':\n"),),
+         UNKNOWN_REFUSED,
+         'refused read: error'),
+    Case('read-hook-ignores-open-set', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n', '        if True:\n'),),
+         OPEN_TO_REFUSED,
+         '(error=True)'),
+    Case('read-hook-open-set-inverted', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n', '        if context.message.uri in OPEN_RESOURCES:\n'),),
+         MAPPED_READS,
+         'No executor configured'),
+    Case('read-hook-installs-after-handler', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n'
+           '        return await call_next(context)\n',
+           '        result = await call_next(context)\n'
+           '        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n'
+           '        return result\n'),),
+         MAPPED_READS,
+         'No executor configured'),
+    Case('read-hook-drops-result', 'middleware.py',
+         (('            await self._install(context)\n        return await call_next(context)\n',
+           '            await self._install(context)\n        await call_next(context)\n'),),
+         MAPPED_READS,
+         'the read failed'),
+    # The read hook's membership test is the exact string the client sent: a URI that only looks like
+    # an open one (a prefix, suffix or substring of it, a case, slash, space, query, encoding or scheme
+    # variant) is resolved like any read that may run commands, so a refused caller is refused.
+    Case('read-hook-open-by-prefix', 'middleware.py',
+         ((OPEN_TEST, '        if not context.message.uri.startswith(tuple(OPEN_RESOURCES)):\n'),),
+         UNKNOWN_REFUSED,
+         let_through('rcac://contextual')),
+    Case('read-hook-rcac-scheme-only', 'middleware.py',
+         ((OPEN_TEST, "        if context.message.uri.startswith('rcac://') and context.message.uri not in OPEN_RESOURCES:\n"),),
+         UNKNOWN_REFUSED,
+         let_through('file:///nope')),
+    Case('read-hook-open-by-suffix', 'middleware.py',
+         resolves_if('not u.endswith(tuple(OPEN_RESOURCES))'),
+         UNKNOWN_REFUSED,
+         let_through('xrcac://context')),
+    Case('read-hook-open-by-substring', 'middleware.py',
+         resolves_if('not any(o in u for o in OPEN_RESOURCES)'),
+         UNKNOWN_REFUSED,
+         let_through(' rcac://context')),
+    Case('read-hook-open-within-open-uri', 'middleware.py',
+         resolves_if('not any(u in o for o in OPEN_RESOURCES)'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://contex')),
+    Case('read-hook-open-if-prefix-of-open', 'middleware.py',
+         resolves_if('not any(o.startswith(u) for o in OPEN_RESOURCES)'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://contex')),
+    Case('read-hook-open-by-host', 'middleware.py',
+         resolves_if(f'{URLLIB}.urlsplit(u).netloc not in {{{URLLIB}.urlsplit(o).netloc for o in OPEN_RESOURCES}}'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context/x')),
+    Case('read-hook-case-folded', 'middleware.py',
+         resolves_if('u.lower() not in OPEN_RESOURCES'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://CONTEXT')),
+    Case('read-hook-casefolded', 'middleware.py',
+         resolves_if('u.casefold() not in OPEN_RESOURCES'),
+         UNKNOWN_REFUSED,
+         let_through('RCAC://context')),
+    Case('read-hook-scheme-case-folded', 'middleware.py',
+         resolves_if("u.partition(':')[0].lower() + ''.join(u.partition(':')[1:]) not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('RCAC://context')),
+    Case('read-hook-strips-trailing-slash', 'middleware.py',
+         resolves_if("u.rstrip('/') not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context/')),
+    Case('read-hook-strips-space', 'middleware.py',
+         resolves_if('u.strip() not in OPEN_RESOURCES'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context ')),
+    Case('read-hook-strips-leading-space', 'middleware.py',
+         resolves_if('u.lstrip() not in OPEN_RESOURCES'),
+         UNKNOWN_REFUSED,
+         let_through(' rcac://context')),
+    Case('read-hook-drops-query-and-fragment', 'middleware.py',
+         resolves_if("u.split('#')[0].split('?')[0] not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context?x=1')),
+    Case('read-hook-authority-only', 'middleware.py',
+         resolves_if(f"'{{0}}://{{1}}'.format(*{URLLIB}.urlsplit(u)) not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context#f')),
+    Case('read-hook-ignores-scheme', 'middleware.py',
+         resolves_if("u.partition('://')[2] not in {o.partition('://')[2] for o in OPEN_RESOURCES}"),
+         UNKNOWN_REFUSED,
+         let_through('xrcac://context')),
+    Case('read-hook-defaults-scheme', 'middleware.py',
+         resolves_if("(u if '://' in u else 'rcac://' + u) not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('context')),
+    Case('read-hook-adds-authority-slashes', 'middleware.py',
+         resolves_if("(u if '://' in u else u.replace(':', '://', 1)) not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         let_through('rcac:context')),
+    Case('read-hook-unquotes', 'middleware.py',
+         resolves_if(f'{URLLIB}.unquote(u) not in OPEN_RESOURCES'),
+         UNKNOWN_REFUSED,
+         let_through('rcac://%63ontext')),
+    Case('read-hook-nfkc-normalised', 'middleware.py',
+         resolves_if("__import__('unicodedata').normalize('NFKC', u) not in OPEN_RESOURCES"),
+         UNKNOWN_REFUSED,
+         '(the open URI, a letter full-width)'),
+    Case('open-set-holds-slash-variants', 'resources.py',
+         (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
+           "    uri for entry in RESOURCE_REGISTRY if not entry['executor'] for uri in (entry['uri'], entry['uri'] + '/'))"),),
+         UNKNOWN_REFUSED,
+         let_through('rcac://context/')),
+    # URI normalisers that change only shapes one edit, a wrapper or a suffix away from a served URI:
+    # each maps such a shape onto the open URI, so a refused caller's read of it is let through, and
+    # only the generated neighbourhood (`NEAR_OPEN`) reaches it.
+    Case('read-hook-strips-crlf', 'middleware.py',
+         resolves_if("u.strip('\\r\\n') not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://context\n')),
+    Case('read-hook-strips-trailing-query-or-fragment-mark', 'middleware.py',
+         resolves_if("u.rstrip('?#') not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://context?')),
+    Case('read-hook-drops-port', 'middleware.py',
+         resolves_if("__import__('re').sub(r':[0-9]*$', '', u) not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://context:80')),
+    Case('read-hook-drops-userinfo', 'middleware.py',
+         resolves_if("__import__('re').sub(r'(?<=://)[^/@]*@', '', u, count=1) not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://u@context')),
+    Case('read-hook-strips-trailing-dot', 'middleware.py',
+         resolves_if("u.rstrip('.') not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://context.')),
+    Case('read-hook-removes-tab-and-newline', 'middleware.py',
+         resolves_if('u.translate({9: None, 10: None, 13: None}) not in OPEN_RESOURCES'),
+         NEAR_REFUSED,
+         let_through('rcac://con\ttext')),
+    Case('read-hook-strips-leading-slash', 'middleware.py',
+         resolves_if("u.lstrip('/') not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('/rcac://context')),
+    Case('read-hook-strips-quotes-and-brackets', 'middleware.py',
+         resolves_if("u.strip('<>' + chr(34) + chr(39)) not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('<rcac://context>')),
+    Case('read-hook-strips-trailing-nul', 'middleware.py',
+         resolves_if('u.rstrip(chr(0)) not in OPEN_RESOURCES'),
+         NEAR_REFUSED,
+         let_through('rcac://context\x00')),
+    Case('read-hook-drops-dot-segment', 'middleware.py',
+         resolves_if("__import__('re').sub(r'/\\.(?=/|$)', '', u) not in OPEN_RESOURCES"),
+         NEAR_REFUSED,
+         let_through('rcac://context/.')),
+    Case('read-hook-any-normaliser', 'middleware.py',
+         resolves_if("all(f(u) not in OPEN_RESOURCES for f in (lambda v: v, lambda v: v.strip('\\r\\n'), "
+                     "lambda v: v.rstrip('?#'), lambda v: __import__('re').sub(r':[0-9]*$', '', v), "
+                     "lambda v: __import__('re').sub(r'(?<=://)[^/@]*@', '', v, count=1), lambda v: v.rstrip('.'), "
+                     "lambda v: v.translate({9: None, 10: None, 13: None}), lambda v: v.lstrip('/'), "
+                     "lambda v: v.strip('<>' + chr(34) + chr(39)), lambda v: v.rstrip(chr(0)), "
+                     "lambda v: __import__('re').sub(r'/\\.(?=/|$)', '', v)))"),
+         NEAR_REFUSED,
+         let_through('rcac://context#')),
+    Case('open-set-holds-query-variants', 'resources.py',
+         (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
+           "    uri for entry in RESOURCE_REGISTRY if not entry['executor'] for uri in (entry['uri'], entry['uri'] + '?'))"),),
+         NEAR_REFUSED,
+         let_through('rcac://context?')),
+    # The other side: a caller the hook does not refuse still gets the protocol's not-found for every
+    # such shape, so the hook refuses by identity, never by what the URI looks like.
+    Case('read-hook-refuses-unserved', 'middleware.py',
+         ((OPEN_TEST,
+           "        if context.message.uri not in {e['uri'] for e in __import__('rcac_mcp.resources', "
+           "fromlist=['RESOURCE_REGISTRY']).RESOURCE_REGISTRY}:\n"
+           "            raise PermissionError('Unknown resource.')\n" + OPEN_TEST),),
+         DELEGATE_NOT_FOUND,
+         let_through('RCAC://storage')),
+    # A tokenless request is let through with nothing set, never refused in the middleware: a read of
+    # a URI the server does not serve is still not found.
+    Case('no-token-refused-in-middleware', 'middleware.py',
+         (("            # No auth - this shouldn't happen in delegate mode\n"
+           '            # but let the request proceed (will fail at executor access)\n'
+           '            return\n',
+           "            raise RuntimeError('No executor configured. Set executor via set_executor() first.')\n"),),
+         tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[no-token-{era}]' for era in ERAS),
+         'expected -32602'),
+    Case('storage-read-left-open', 'resources.py',
+         (("    'handler': _storage_paths_resource,\n    'executor': True,\n",
+           "    'handler': _storage_paths_resource,\n    'executor': False,\n"),),
+         refused_reads('unmapped', 'first-claim-unmapped'),
+         'not authorized'),
+    Case('context-read-closed', 'resources.py',
+         (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
+           "    entry['uri'] for entry in RESOURCE_REGISTRY if False)"),),
+         tuple(f'test_context.py::test_any_client_reads_the_context_in_delegate_mode[{who}-{era}]'
+               for who in ('no-claim', 'unmapped') for era in ERAS),
+         '(error=True)'),
+    Case('read-no-token-reuses-last-executor', 'middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n',
+           '        if context.message.uri not in OPEN_RESOURCES:\n'
+           "            if get_access_token() is None and getattr(self, '_last', None) is not None:\n"
+           '                set_executor(self._last)\n'
+           '            else:\n'
+           '                await self._install(context)\n'
+           "                self._last = __import__('rcac_mcp.context', fromlist=['executor_var']).executor_var.get()\n"),),
+         TOKENLESS_READS,
+         'not an error'),
     # The tool surface: tools reach the cluster only through get_executor(), never an executor of
     # their own.
     Case('tool-builds-local-executor', 'tools/slurm.py',
@@ -158,7 +474,8 @@ CASES: tuple[Case, ...] = (
          ('test_no_executor.py::test_no_executor_after_earlier_request',
           'test_no_executor.py::test_no_executor_while_other_request_in_flight',
           'test_no_executor.py::test_delegate_without_token_after_authenticated_request',
-          'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight'),
+          'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight',
+          *TOKENLESS_READS),
          'not an error'),
     Case('no-executor-default-fallback', 'context.py',
          (("        raise RuntimeError('No executor configured. Set executor via set_executor() first.')",
@@ -169,10 +486,10 @@ CASES: tuple[Case, ...] = (
     Case('no-token-fallback-identity', 'middleware.py',
          (("            # No auth - this shouldn't happen in delegate mode\n"
            '            # but let the request proceed (will fail at executor access)\n'
-           '            return await call_next(context)',
+           '            return\n',
            '            set_executor(DelegatingExecutor(next(iter(self._user_map)), self._user_map))\n'
-           '            return await call_next(context)'),),
-         ('test_no_executor.py::test_delegate_without_token_fails',),
+           '            return\n'),),
+         ('test_no_executor.py::test_delegate_without_token_fails', *refused_reads('no-token')),
          'not an error'),
     Case('auth-middleware-sets-at-construction', 'middleware.py',
          (('        self._user_map = load_user_map(user_map_path)\n',
@@ -180,7 +497,8 @@ CASES: tuple[Case, ...] = (
            '        set_executor(DelegatingExecutor(next(iter(self._user_map)), self._user_map))\n'),),
          ('test_no_executor.py::test_delegate_without_token_fails',
           'test_no_executor.py::test_delegate_without_token_after_authenticated_request',
-          'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight'),
+          'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight',
+          *refused_reads('no-token'), *TOKENLESS_READS),
          'not an error'),
     Case('shared-middleware-sets-at-construction', 'middleware.py',
          (('        super().__init__()\n        self._executor = executor\n',
@@ -222,8 +540,17 @@ CASES: tuple[Case, ...] = (
          (('                return str(claims[claim])\n        return None\n',
            '                return str(claims[claim])\n        return next(iter(self._user_map))\n'),),
          ('test_identity.py::test_token_without_identity_fails[no-claims]',
-          'test_identity.py::test_token_without_identity_fails[all-empty]'),
+          'test_identity.py::test_token_without_identity_fails[all-empty]',
+          *refused_reads('no-claims', 'all-empty')),
          'not an error'),
+    # The middleware's own check: a token naming no identity is refused for what it lacks, not looked
+    # up in the map as None.
+    Case('no-claim-not-refused', 'middleware.py',
+         (('        if identity is None:\n', '        if False:\n'),),
+         (*refused_reads('no-claims', 'all-empty'),
+          *(f'{STORAGE}::test_unknown_uri_read_is_refused[{row}-{era}]' for row in ('no-claims', 'all-empty')
+            for era in ERAS)),
+         'error lacks reason'),
     # The user map: an unmapped identity is refused by the middleware and by the executor, never
     # given a default user; a malformed line fails naming its line; comments load as nothing.
     Case('unmapped-gets-default-user', 'middleware.py',
@@ -231,7 +558,8 @@ CASES: tuple[Case, ...] = (
            '        if identity not in self._user_map:\n            identity = next(iter(self._user_map))\n'
            '        if False:\n            raise PermissionError('),),
          ('test_identity.py::test_unmapped_identity_is_not_authorized',
-          'test_identity.py::test_first_claim_unmapped_does_not_fall_through'),
+          'test_identity.py::test_first_claim_unmapped_does_not_fall_through',
+          *refused_reads('unmapped', 'first-claim-unmapped')),
          'not an error'),
     Case('executor-unmapped-default', 'executor/delegate.py',
          (("        if identity not in user_map:\n            raise KeyError(f'Identity {identity!r} not found in user map')\n",
@@ -857,18 +1185,65 @@ CASES: tuple[Case, ...] = (
          BOUNDARY_ROWS,
          'protocol error instead of a tool error result'),
     Case('boundary-leaks-traceback', 'middleware.py',
-         (('raise ToolError(str(exc)) from exc', "raise ToolError(str(exc) + __import__('traceback').format_exc()) from exc"),),
-         BOUNDARY_ROWS,
+         (('raise error(str(exc)) from exc', "raise error(str(exc) + __import__('traceback').format_exc()) from exc"),),
+         (*BOUNDARY_ROWS, *read_boundary_rows('permission-memory', 'mcp-error-memory'),
+          *refused_reads(*MIDDLEWARE_REFUSALS)),
+         'error text differs'),
+    Case('boundary-type-name', 'middleware.py',
+         (('raise error(str(exc)) from exc', "raise error(f'{type(exc).__name__}: {exc}') from exc"),),
+         (*BOUNDARY_ROWS, *read_boundary_rows('permission-memory', 'mcp-error-memory'),
+          *refused_reads(*MIDDLEWARE_REFUSALS)),
          'error text differs'),
     Case('boundary-catches-base-exception', 'middleware.py',
-         (('        except Exception as exc:\n            raise ToolError(', '        except BaseException as exc:\n            raise ToolError('),),
-         ('test_protocol.py::test_boundary_lets_cancellation_through',),
+         (('    except Exception as exc:\n        raise error(', '    except BaseException as exc:\n        raise error('),),
+         ('test_protocol.py::test_boundary_lets_cancellation_through[on_call_tool]',
+          'test_protocol.py::test_boundary_lets_cancellation_through[on_read_resource]'),
          'swallowed cancellation'),
+    Case('boundary-catches-named-only', 'middleware.py',
+         (('    except Exception as exc:\n        raise error(', '    except (PermissionError, RuntimeError) as exc:\n        raise error('),),
+         read_boundary_rows('other-memory'),
+         'refused read: error'),
+    # Re-raised unconverted around a tool call, the refusal is a protocol error that aborts a test's
+    # tool call before its read is checked, so the read rows here are the ones that read alone.
+    Case('boundary-reraises-original', 'middleware.py',
+         (('raise error(str(exc)) from exc', 'raise'),),
+         CONVERTED_READS,
+         'refused read: error'),
+    Case('boundary-passes-nothing', 'middleware.py',
+         (('    except passes:\n        raise\n', ''),),
+         NOT_FOUND,
+         'expected -32602'),
+    Case('boundary-drops-result', 'middleware.py',
+         (('    try:\n        return await call_next(context)\n', '    try:\n        await call_next(context)\n'),),
+         tuple(f'{STORAGE}::test_storage_read_runs_the_local_executor[{era}]' for era in ERAS),
+         'the read failed'),
     Case('boundary-reraises-mcp-error', 'middleware.py',
-         (('        except FastMCPError:\n            raise\n',
-           "        except (FastMCPError, __import__('mcp').MCPError):\n            raise\n"),),
+         (('    except passes:\n        raise\n',
+           "    except (*passes, __import__('mcp').MCPError):\n        raise\n"),),
          ('test_protocol.py::test_middleware_refusal_is_a_tool_error_result[mcp-error-memory]',),
          'protocol error instead of a tool error result'),
+    # The read boundary: a refusal raised around a read reaches the client as an internal error whose
+    # text is exactly str(exc), in both eras (unbounded, the modern era masks the text and the
+    # handshake era sends code 0), while the not-found error FastMCP raises for a URI it does not
+    # serve passes through as the protocol's own.
+    Case('read-boundary-dropped', 'middleware.py',
+         ((READ_HOOK, '        return await call_next(context)\n'),),
+         (*CONVERTED_READS, *refused_reads(*MIDDLEWARE_REFUSALS)),
+         'refused read: error'),
+    Case('read-boundary-leaks-traceback', 'middleware.py',
+         ((READ_HOOK, read_hook_raising("str(exc) + __import__('traceback').format_exc()")),),
+         (*read_boundary_rows('permission-memory', 'mcp-error-memory', 'other-memory'),
+          *refused_reads(*MIDDLEWARE_REFUSALS)),
+         'error text differs'),
+    Case('read-boundary-type-name', 'middleware.py',
+         ((READ_HOOK, read_hook_raising("f'{type(exc).__name__}: {exc}'")),),
+         (*read_boundary_rows('permission-memory', 'mcp-error-memory', 'other-memory'),
+          *refused_reads(*MIDDLEWARE_REFUSALS)),
+         'error text differs'),
+    Case('read-boundary-wraps-not-found', 'middleware.py',
+         (('ResourceError, (FastMCPError, NotFoundError, DisabledError))', 'ResourceError, (FastMCPError,))'),),
+         NOT_FOUND,
+         'expected -32602'),
     # The identity the delegate middleware stores in the context state is request-scoped: it never
     # reaches the session store, where a later request on the same session would read it. Only the
     # handshake era has a session to leak into: under revision 2026-07-28 FastMCP keys each request's
@@ -877,8 +1252,16 @@ CASES: tuple[Case, ...] = (
          (("set_state('rcac_user', identity, serializable=False)", "set_state('rcac_user', identity)"),
           ("set_state('rcac_local_user', executor.local_user, serializable=False)",
            "set_state('rcac_local_user', executor.local_user)")),
-         ('test_protocol.py::test_delegate_state_is_request_scoped[legacy]',),
+         ('test_protocol.py::test_delegate_state_is_request_scoped[legacy]',
+          'test_protocol.py::test_delegate_read_state_is_request_scoped[legacy]'),
          'state outlived its request'),
+    Case('delegate-state-not-set', 'middleware.py',
+         (("        await context.fastmcp_context.set_state('rcac_user', identity, serializable=False)\n"
+           "        await context.fastmcp_context.set_state('rcac_local_user', executor.local_user, serializable=False)\n",
+           ''),),
+         tuple(f'test_protocol.py::test_delegate_{what}state_is_request_scoped[{era}]'
+               for what in ('', 'read_') for era in ERAS),
+         'no state was set'),
     # The server's instructions reach a client in both protocol eras: in the InitializeResult of a
     # handshake and in the DiscoverResult of revision 2026-07-28.
     Case('instructions-dropped', 'server.py',

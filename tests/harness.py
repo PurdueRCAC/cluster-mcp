@@ -11,10 +11,15 @@ in the stack); `fastmcp.Client` over a server object or a transport, with its `m
 forces the `initialize` handshake, `'auto'` probes `server/discover`) and its negotiated
 `protocol_version` and `initialize_result`; `fastmcp.Client.list_tools()`, `.list_resources()` and
 `.instructions`, with the MCP SDK 2 field names `input_schema`, `output_schema` and `mime_type`; the
-`Middleware.on_call_tool`, `on_message` and `on_request` hooks that `Rendezvous`, `Raises`,
-`MethodLog` and `StateProbe` implement; `MiddlewareContext.fastmcp_context` and its async
+`Middleware.on_call_tool`, `on_read_resource`, `on_message` and `on_request` hooks that
+`Rendezvous` and `Raises` (the first two), `MethodLog` and `StateProbe` implement, and the
+`asyncio.Barrier.n_waiting` a `Rendezvous` reports as `waiting`; `MiddlewareContext.fastmcp_context` and its async
 `Context.get_state` (read by `StateProbe`); `FastMCP.middleware` (read to find a server's `MethodLog`); FastMCP running middleware
-added later inside middleware added earlier (the builders' `extra` relies on it); `mcp.MCPError`;
+added later inside middleware added earlier (the builders' `extra` relies on it); `mcp.MCPError`,
+with its `code` (read by `read_resource` and `read_verbatim` into `Outcome.code`);
+`fastmcp.Client.read_resource` normalising a string URI through pydantic's `AnyUrl` (lowercasing the scheme,
+stripping surrounding whitespace) before sending it, and the connected `Client.session`'s
+`read_resource(uri)` sending the string as given (`read_verbatim`);
 the import path of `JWTVerifier`, re-exported for the test that checks what `create_jwt_auth()`
 returns; and, for servers in another process, `StdioTransport(command, args, env=..., keep_alive=...)`
 (whose default `keep_alive=True` leaves the server running after the client exits),
@@ -113,7 +118,7 @@ __all__ = ['Outcome', 'drive', 'serving', 'http_client', 'in_memory', 'call', 'c
            'select_era', 'era_mismatch', 'session_era', 'rejection_status', 'served_tools',
            'served_instructions', 'served_surface', 'protocol_error', 'Negotiated', 'negotiate', 'Listed',
            'stdio_tools', 'url_tools', 'Refused', 'stdio_refusal', 'SANDBOX', 'LOOPBACK', 'installed_auth', 'StateProbe', 'tool_names',
-           'launched_script', 'read_resource', 'SITE']
+           'launched_script', 'read_resource', 'read_verbatim', 'SITE']
 
 T = TypeVar('T')
 
@@ -241,11 +246,13 @@ def _log_connect(version: str | None, first: str | None) -> None:
 
 @dataclass(frozen=True)
 class Outcome:
-    """What the client saw: an error flag, the joined text content, and the HTTP status on rejection."""
+    """What the client saw: an error flag, the joined text content, the HTTP status on rejection, and,
+    for a read that failed with a protocol error, that error's code."""
 
     is_error: bool
     text: str
     status: int | None = None
+    code: int | None = None
 
 
 def drive(coro: Coroutine[Any, Any, T], timeout: float = 30) -> T:
@@ -325,12 +332,32 @@ async def call(client: Client, tool: str, args: dict[str, Any]) -> Outcome:
 
 
 async def read_resource(client: Client, uri: str) -> Outcome:
-    """Read `uri` on a connected client: its joined text, or the error's text with `is_error` set."""
+    """Read `uri` on a connected client: its joined text, or the error's text with `is_error` set.
+
+    A protocol error also gives its code, so a test can tell an internal error carrying a reason
+    from a malformed one carrying the same text.
+    """
     try:
         contents = await client.read_resource(uri)
+    except MCPError as exc:
+        return Outcome(True, str(exc), code=exc.code)
     except Exception as exc:
         return Outcome(True, str(exc))
     return Outcome(False, ''.join(getattr(part, 'text', '') for part in contents))
+
+
+async def read_verbatim(client: Client, uri: str) -> Outcome:
+    """Read `uri` sending exactly that string on the wire: its joined text, or the error's text and code.
+
+    `read_resource` goes through FastMCP's client, which normalises a URI before sending it (it
+    lowercases the scheme and strips surrounding whitespace); any other client may send the string
+    as it is, and the server sees, and looks up, exactly what was sent.
+    """
+    try:
+        result = await client.session.read_resource(uri)
+    except MCPError as exc:
+        return Outcome(True, str(exc), code=exc.code)
+    return Outcome(False, ''.join(getattr(part, 'text', '') for part in result.contents))
 
 
 async def tool_names(client: Client) -> tuple[str, ...]:
@@ -642,11 +669,13 @@ class RecordingExecutor:
 
 
 class Rendezvous(Middleware):
-    """Hold each tool call until `parties` calls are in flight together, then let them all proceed.
+    """Hold each tool call and resource read until `parties` are in flight together, then let them all proceed.
 
     Added after the executor middleware, it sits inside it (FastMCP applies middleware in reverse),
-    so every call has set its executor before any call's tool body runs. Without it, sync tools
-    never yield and two "concurrent" calls run one after the other, which a module global survives.
+    so every call or read has set its executor before any handler runs. Without it, sync handlers
+    never yield and two "concurrent" requests run one after the other, which a module global
+    survives. Tool calls and reads share one barrier; `waiting` is how many it holds now, so a test
+    can send one request only once another is held.
     """
 
     def __init__(self, parties: int, timeout: float = 5.0) -> None:
@@ -654,23 +683,37 @@ class Rendezvous(Middleware):
         self.timeout = timeout
         self._barrier = asyncio.Barrier(parties)
 
-    async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Awaitable[Any]]) -> Any:
+    @property
+    def waiting(self) -> int:
+        return self._barrier.n_waiting
+
+    async def _meet(self) -> None:
         try:
             async with asyncio.timeout(self.timeout):
                 await self._barrier.wait()
         except TimeoutError:
             raise RuntimeError('rendezvous: calls were never in flight together') from None
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Awaitable[Any]]) -> Any:
+        await self._meet()
+        return await call_next(context)
+
+    async def on_read_resource(self, context: MiddlewareContext, call_next: Callable[..., Awaitable[Any]]) -> Any:
+        await self._meet()
         return await call_next(context)
 
 
 class Raises(Middleware):
-    """Raise `exc` on every tool call, as an executor middleware's refusal does."""
+    """Raise `exc` on every tool call and every resource read, as an executor middleware's refusal does."""
 
     def __init__(self, exc: Exception) -> None:
         super().__init__()
         self.exc = exc
 
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable[..., Awaitable[Any]]) -> Any:
+        raise self.exc
+
+    async def on_read_resource(self, context: MiddlewareContext, call_next: Callable[..., Awaitable[Any]]) -> Any:
         raise self.exc
 
 

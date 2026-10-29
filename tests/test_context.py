@@ -14,7 +14,9 @@ an ACL entry, is served as unreadable, its one line and no site text. The tool r
 user: the middleware refuses every tool call from an authenticated identity absent from the user
 map, before the body runs (§ Invariants §5), and the tool is no exception, while the instructions
 and `rcac://context` reach any client that can connect. That is intended: what is served there is
-text every account can read, so the difference discloses nothing.
+text every account can read, so the difference discloses nothing. A `delegate`-mode read of
+`rcac://context` answers in both eras with no token, a token naming no identity, an unmapped and a
+mapped identity alike, and runs nothing.
 """
 
 from __future__ import annotations
@@ -269,3 +271,37 @@ def test_delegate_serves_only_what_every_account_can_read(row: str, era: str, tm
     assert seen['instructions'].text == f'{SERVER_INSTRUCTIONS}\n\n{site.HEADING}\n\n{line}'
     assert 'Bravo' not in str(seen) and 'Alpha' not in str(seen)
     assert launches == [] and guard.refused == []
+
+
+# Each reader of the context in `delegate` mode: the claims its token carries (None: no token at
+# all, over the in-memory client).
+CONTEXT_READERS = {
+    'no-token': None,
+    'no-claim': {},
+    'unmapped': {'sub': 'mallory'},
+    'mapped': {'sub': 'alice'},
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('era', ERAS)
+@pytest.mark.parametrize('who', list(CONTEXT_READERS))
+def test_any_client_reads_the_context_in_delegate_mode(who: str, era: str, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch,
+                                                       launches: list[list[str]], guard) -> None:
+    claims = CONTEXT_READERS[who]
+    monkeypatch.setenv('JWT_SECRET', SECRET)
+    map_path = user_map(tmp_path, USER_MAP)
+
+    async def scenario() -> Outcome:
+        server = delegate_server(map_path, site=SITES['files'])
+        if claims is None:
+            async with in_memory(server, era=era) as client:
+                return await read_resource(client, 'rcac://context')
+        async with serving(server) as app:
+            async with http_client(app, mint(SECRET, **claims), era=era) as client:
+                return await read_resource(client, 'rcac://context')
+
+    violations = context_violations({who: drive(scenario())}, EXPECTED['files'], launches)
+    assert violations == [], violations
+    assert guard.refused == []

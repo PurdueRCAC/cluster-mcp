@@ -10,6 +10,7 @@ serves the /etc/agents.d markdown the server read once at startup.
 
 # Type annotations
 from __future__ import annotations
+from typing import Final
 
 # External libs
 from fastmcp.server.dependencies import get_server
@@ -18,11 +19,11 @@ from fastmcp.server.dependencies import get_server
 from rcac_mcp.site import site_of
 
 # Public interface
-__all__ = ['RESOURCE_REGISTRY']
+__all__ = ['OPEN_RESOURCES', 'RESOURCE_REGISTRY']
 
 
-# Resource registry for server to register
-# Each entry is (uri, name, description, handler_function)
+# Resource registry for server to register. Each entry holds the uri, name, description and
+# handler, and 'executor': whether the handler runs commands through its request's executor.
 RESOURCE_REGISTRY = []
 
 
@@ -47,6 +48,7 @@ RESOURCE_REGISTRY.append({
     'name': 'cluster_context',
     'description': 'The site context read from /etc/agents.d at startup: every *.md file but AGENTS.md',
     'handler': _cluster_context_resource,
+    'executor': False,
 })
 
 
@@ -61,10 +63,10 @@ def _storage_paths_resource() -> str:
     Returns:
         Formatted text showing home, scratch, and depot paths with usage.
     """
-    # Import here to avoid circular dependency
-    from rcac_mcp.tools.rcac import storage_paths
+    # Imported here, so importing this module does not register the tools.
+    from rcac_mcp.tools.rcac import resolve_storage_paths
 
-    paths = storage_paths()
+    paths = resolve_storage_paths()
 
     lines = [
         'User Storage Paths:',
@@ -90,4 +92,12 @@ RESOURCE_REGISTRY.append({
     'name': 'storage_paths',
     'description': "User's resolved storage paths for home, scratch, and depot spaces",
     'handler': _storage_paths_resource,
+    'executor': True,
 })
+
+
+# The resources that run nothing, so a read needs no executor: they answer any client that can
+# connect, and the delegate middleware lets their reads through without resolving an identity.
+# Every entry must say whether it needs an executor; one that does not fails here, at import.
+OPEN_RESOURCES: Final[frozenset[str]] = frozenset(
+    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])

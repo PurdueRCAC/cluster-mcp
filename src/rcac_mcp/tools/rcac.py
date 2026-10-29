@@ -336,6 +336,35 @@ def _parse_myquota_output(output: str, scratch_path: str) -> StoragePaths:
     return StoragePaths(home=home, scratch=scratch, depots=depots)
 
 
+def resolve_storage_paths() -> StoragePaths:
+    """
+    Resolve the current request's storage paths on the executor its middleware installed.
+
+    The undecorated helper that the `storage_paths` tool and the `rcac://storage` resource both
+    call: a decorated tool is not callable (§ Invariants §7). It runs `findscratch`, then `myquota`,
+    through `get_executor()`, so it runs as whoever the request's executor runs as, and raises when
+    the request has none.
+
+    Returns:
+        StoragePaths with resolved home, scratch, and depot spaces.
+    """
+    executor = get_executor()
+
+    # Get the actual scratch path using findscratch (authoritative source)
+    # This returns the full path like /scratch/gautschi/glentner
+    scratch_result = executor.run(['findscratch'])
+    if scratch_result.exit_code != 0 or not scratch_result.stdout.strip():
+        raise RuntimeError(f'Failed to get scratch path: {scratch_result.stderr}')
+    scratch_path = scratch_result.stdout.strip()
+
+    # Get myquota output
+    quota_result = executor.run(['myquota'])
+    if quota_result.exit_code != 0:
+        raise RuntimeError(f'Failed to get quota info: {quota_result.stderr}')
+
+    return _parse_myquota_output(quota_result.stdout, scratch_path)
+
+
 @mcp_tool
 def storage_paths() -> StoragePaths:
     """
@@ -355,18 +384,4 @@ def storage_paths() -> StoragePaths:
     Examples:
         storage_paths()
     """
-    executor = get_executor()
-
-    # Get the actual scratch path using findscratch (authoritative source)
-    # This returns the full path like /scratch/gautschi/glentner
-    scratch_result = executor.run(['findscratch'])
-    if scratch_result.exit_code != 0 or not scratch_result.stdout.strip():
-        raise RuntimeError(f'Failed to get scratch path: {scratch_result.stderr}')
-    scratch_path = scratch_result.stdout.strip()
-
-    # Get myquota output
-    quota_result = executor.run(['myquota'])
-    if quota_result.exit_code != 0:
-        raise RuntimeError(f'Failed to get quota info: {quota_result.stderr}')
-
-    return _parse_myquota_output(quota_result.stdout, scratch_path)
+    return resolve_storage_paths()

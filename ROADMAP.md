@@ -73,7 +73,7 @@ with or after that cache's retirement. Found by `stack-upgrade`'s research, 2026
   absorbed below.
 
 *Horizon: near-term, release 0.1.4 · Depends on: agents-d-instructions (cleared: landed on `develop` 2026-10-26; it retired the cache and settled `rcac://context`) · Refs: `AGENTS.md` § Invariants §8 documents the defect as a known one; absorbs `storage-paths-resource-typeerror`, the other resource's failure*
-**Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: unshaped*
+**Seed:** [`issues/resource-reads-without-executor.md`](issues/resource-reads-without-executor.md) · *status: adopted:resource-reads-without-executor*
 
 ### Absorbed: the rcac://storage resource fails on every read
 
@@ -85,7 +85,7 @@ logic into an undecorated helper). The tool it calls runs `findscratch` and `myq
 request's executor, so the summary comes back only once a read has one: the two fixes land together.
 
 *Horizon: with resource-reads-without-executor · Depends on: — · Refs: absorbed by `resource-reads-without-executor`; the same helper split that `generalize-storage-discovery` needs*
-**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: unshaped*
+**Seed:** [`issues/storage-paths-resource-typeerror.md`](issues/storage-paths-resource-typeerror.md) · *status: adopted:resource-reads-without-executor*
 
 **Release 0.1.3.** `main` fast-forwards to the released `develop` commit, and everyone who installs
 `main` gets byte-exact writes, literal paths, `sbatch` arguments, one shell's semantics, clear
@@ -213,6 +213,18 @@ passes. The bound still holds; a hop could be left running unnoticed. Found by
 
 *Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
 **Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
+
+## A real-time reconnect test fails under full-suite load
+
+The stalled-reconnect test checks the call gives up within its window plus 0.5 s, by wall clock. It
+failed once in a full local run and passed alone and on re-run, so it measures load as well as
+behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
+
+- 2026-10-29: a second loopback test (`test_startup_output_is_separated[tcsh]`, `EOFError`) failed
+  once on CI and passed on re-run; the seed records it.
+
+*Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
+**Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
 

@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:resource-reads-without-executor
 kind: fix
 appetite: small
 lane: public

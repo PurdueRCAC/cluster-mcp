@@ -131,11 +131,11 @@ Top-level package `src/rcac_mcp/`:
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance, attaches auth, registers tools/resources/middleware/custom routes. Home of **`SERVER_INSTRUCTIONS`**, the agent-facing contract. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
-| `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — both set the per-request executor in `on_call_tool` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result carrying `str(exc)`. |
+| `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
 | `token.py` | `ISSUER`/`AUDIENCE`/`ALGORITHM` constants + `generate_token()` (the `--generate-token` path). Signer side of the JWT contract. |
 | `site.py` | The site context: `/etc/agents.d/*.md` read once at startup (`read_local`, or `READ_SITE` through the shared executor in `ssh` mode, either under `read_bounded`'s `READ_TIMEOUT`), `compose()` of the served instructions within the budget, and `register`/`site_of`, the per-server holder the tool and the resource read. |
-| `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (the site context read at startup, from `site_of`; runs nothing) and `rcac://storage`. |
+| `resources.py` | `RESOURCE_REGISTRY` — `rcac://context` (the site context read at startup, from `site_of`; runs nothing) and `rcac://storage` (the storage summary, from `resolve_storage_paths()` on the request's executor), each entry's `executor` key saying whether its handler needs one — and `OPEN_RESOURCES`, derived from it: the URIs whose handler runs nothing. |
 | `executor/base.py` | `Executor` `Protocol` + the `CommandResult` dataclass. The contract all backends satisfy. Also `UserPath` and the reserved exit codes `TIMEOUT_EXIT_CODE` (−1001) and `NOT_STARTED_EXIT_CODE` (−1002). |
 | `executor/launch.py` | The launcher every backend runs commands through: renders an argv or a script into one bash program for the pinned login bash (`program`), the local/delegate stage (`bash_argv`) and the SSH bootstrap (`ssh_command`), `separate` (drops login-initialisation output), and `run_process` (local/delegate processes and their timeouts). |
 | `executor/ssh.py` | `SSHExecutor` — Fabric `Connection` (`~/.ssh/config`-aware, each connect step bounded by `CONNECT_TIMEOUT` unless the SSH config sets it; a lost connection re-established with backoff within three times that bound of the call's start, one attempt at a time on a worker thread, or the call reported as not run) for the connection, and `connect_failure_message`, the `cannot connect to <host>: <cause>` text startup and reconnect share; each command on a raw Paramiko channel, transfers over Paramiko's SFTP client. |
@@ -146,7 +146,7 @@ Top-level package `src/rcac_mcp/`:
 | `tools/{shell,filesystem,transfer}.py` | Generic backend-agnostic tools: `run_command`, directory/file read+write (`write_file` byte-exact, its content through the executor's `write`, `encoding` `utf-8` or `base64`), `upload_file`/`download_file` (returning the path the executor wrote). |
 | `tools/context.py` | `cluster_context`: the site context read at startup, in full; runs nothing and needs no executor. |
 | `tools/slurm.py` | Slurm tools: `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`, plus RCAC's `slist`/`sfeatures`. |
-| `tools/rcac.py` | Purdue-specific: `myquota`, `storage_paths`, `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`. |
+| `tools/rcac.py` | Purdue-specific: `myquota`, `storage_paths` (its body the undecorated `resolve_storage_paths()`, which `rcac://storage` also calls), `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`. |
 
 Five repo-level paths sit outside the package: **`bin/sandbox.sh`** — the throwaway-environment
 helper every CLI drive runs under (§ Factory → Throwaway environment); **`bin/audit_lock.py`** — the
@@ -172,9 +172,10 @@ Where each kind of deferral goes is fixed: § Factory → Where deferred work go
 ## Architecture & data flow
 
 ```
-MCP client ──stdio│sse│http──▶ FastMCP ──▶ middleware.on_call_tool ──▶ set_executor(ContextVar)
-                                                                            │
-                                              tool fn ──get_executor()──────┘
+MCP client ──stdio│sse│http──▶ FastMCP ──▶ middleware ──▶ set_executor(ContextVar)
+                                           .on_call_tool                         │
+                                           .on_read_resource                     │
+                                    tool fn │ resource handler ──get_executor()──┘
                                                   │
                                                   ▼
                    Executor.run(argv | script) ──▶ ssh │ local │ sudo -n -H -u <user>
@@ -186,7 +187,9 @@ MCP client ──stdio│sse│http──▶ FastMCP ──▶ middleware.on_cal
 Every tool follows the same three-line shape: `get_executor()`, run something, return a
 `CommandResult` or a formatted string. Tools are backend-agnostic by construction — that is the whole
 point of the `Executor` protocol, and it is why `run_command` works identically over SSH, locally,
-and under `sudo`.
+and under `sudo`. A resource read takes the same path: the executor middleware sets the read's
+executor in `on_read_resource`, and `rcac://storage`'s handler reaches it through
+`resolve_storage_paths()`, the helper the `storage_paths` tool also calls (§1, §7, §8).
 
 One read happens before any request: at startup, `run()` reads `/etc/agents.d` once, as the server
 (over the shared executor in `ssh` mode, in this process otherwise), bounded by `site.READ_TIMEOUT`,
@@ -339,7 +342,9 @@ import has no effect.
     no `sudo`; the served instructions are `compose(SERVER_INSTRUCTIONS, site)`; nothing reads the
     site after construction, and a directory rewritten and grown mid-session changes nothing served;
     in `delegate` mode an identity absent from the user map is refused the tool and still gets the
-    instructions and the resource (§8); two servers built in one process each serve their own site
+    instructions and the resource (§8), and a read of the resource answers, in both eras, with no
+    token, a token naming no identity, an unmapped and a mapped identity alike, launching nothing
+    (`test_any_client_reads_the_context_in_delegate_mode`); two servers built in one process each serve their own site
     (`test_each_server_keeps_its_own_site`); and in `delegate` mode, in both eras, a file, the
     directory or a directory above it (directly or through a symlink) that not every account can
     read, group class included, serves its one line and no site text, while `local` mode's read of
@@ -376,6 +381,45 @@ import has no effect.
     request (a bare server, every tool but `EXECUTORLESS`; a tokenless delegate call), including right after and while
     another request did set one, fails where the client sees it with `No executor configured`, and
     nothing runs. Any error is not enough: the stated reason is required (§1).
+  - `tests/test_storage_resource.py` (`unit`): `read_violations`, `tool_path_violations`,
+    `storage_isolation_violations`. Reading `rcac://storage` runs on the executor its request's
+    middleware installed, in both eras: over a `SharedExecutorMiddleware` server the text is exactly
+    the summary format, built from that executor's `findscratch`, then `myquota`, and names the
+    home, scratch and depot paths the `storage_paths` tool returns there; through a
+    `LocalShellExecutor` under `storage_launches` it launches both as the server's own account,
+    never through `sudo`; on a server with no executor middleware it fails with
+    `No executor configured`, and nothing runs (§1, §7). In `delegate` mode over HTTP a mapped
+    identity's read launches both through `sudo -n -H -u` as its mapped user and names that user's
+    paths; two reads under different identities held together at a `Rendezvous`, and alternating
+    reads on one server (each launching exactly its own two commands), each run and answer only as
+    their own user, in both eras (`test_storage_check_catches_crossing` is the check's drift
+    control). A read whose request a `storage_paths` call is refused for (no token, no identity
+    claim, all claims empty, unmapped, first claim unmapped) fails with exactly that row's reason,
+    which the call gets too: an internal error (-32603) whose text is the reason alone, or for the
+    tokenless row FastMCP's `Error reading resource 'rcac://storage': ` before it
+    (`test_protocol.read_boundary_violations`), and nothing runs; a tokenless read finds no
+    executor right after, and while, an authenticated read did set one (the in-flight row sends it
+    only once the other is held, `Rendezvous.waiting`). The delegate read hook refuses by default,
+    over every shape of URI not exactly in `OPEN_RESOURCES` (`NOT_OPEN`: a path below the open URI,
+    a prefix of it or a URI it prefixes, a URI ending in it, a trailing slash, case, percent-encoded
+    and full-width variants, surrounding space, a query, a fragment, no scheme or no authority
+    slashes, variants of `rcac://storage`, other schemes), each sent verbatim (`read_verbatim`): a
+    request of each refused row but the tokenless one gets exactly that reason for every shape
+    (`test_unknown_uri_read_is_refused`), while for a mapped caller, a tokenless one
+    (`test_unknown_uri_is_not_found_in_delegate_mode`) and every caller in shared mode each is still
+    `Resource not found`, code -32602; `test_not_open_shapes_are_neither_open_nor_served` keeps the
+    table clear of a served or open URI. The table names shapes; `NEAR_OPEN` covers the
+    neighbourhood of every served URI, generated: every one-character insertion, deletion and
+    substitution over printable ASCII and NUL, tab, newline, vertical tab, form feed, carriage return
+    and DEL, at every position, plus wrappers (angle brackets, quotes, brackets, surrounding
+    whitespace), suffixes (`?`, `#`, `:`, `:80`, `.`, `/.`, `/`, CRLF) and userinfo, leaving out
+    exactly the URIs the registry marks open (not whatever `OPEN_RESOURCES` holds, so a grown open set
+    is read too). A no-claim and an unmapped caller each read every shape verbatim on one session
+    and get exactly their reason, with nothing launched (`test_near_open_read_is_refused`, about
+    5,700 reads and 4–5 s each, so it speaks the selected era rather than both on every run);
+    `test_near_open_shapes_cover_every_served_uri` pins what the generated set holds. A membership
+    test that normalises the URI (drops a port, userinfo, a query mark or a dot segment, strips
+    quotes or control characters) maps some shape onto the open URI and fails it (§1, §5, §8, §9).
   - `tests/test_tools.py` (`unit`): `TOOL_CASES`, `tool_violations`, `argv_violations`. Every
     `EXPECTED_TOOLS` tool but `EXECUTORLESS` (`cluster_context`, which runs nothing and answers
     from the startup read), on a `SharedExecutorMiddleware` server, reaches only the installed
@@ -540,16 +584,19 @@ import has no effect.
   - `tests/test_protocol.py` (`unit`): `boundary_violations`, `cancellation_violations`,
     `era_violations`. A `PermissionError` (in memory and over HTTP), a `RuntimeError` and an
     `MCPError` raised by middleware around a tool call each arrive as a tool error result whose
-    text is exactly `str(exc)`, and nothing runs; cancellation passes through `ToolErrorMiddleware`
-    (§1). Both protocol eras, each pinned on its own rows whatever era the run selected
+    text is exactly `str(exc)`, and nothing runs; raised around a resource read (those, a
+    `RuntimeError` over HTTP and any other `Exception`), each arrives in both eras as an internal
+    error, code -32603, whose text is exactly `str(exc)` (`read_boundary_violations`, with its drift
+    control): unbounded, the modern era masks the text and the handshake era sends code 0.
+    Cancellation passes through `ToolErrorMiddleware` around either (§1). Both protocol eras, each pinned on its own rows whatever era the run selected
     (`test_client_era_is_served[<era>-<memory|http>]`): a handshake-era client gets an
     `InitializeResult` and the server sees `initialize` and no `server/discover`; a 2026-07-28 client
     gets no `InitializeResult` and the server sees `server/discover` and no `initialize`; each
     receives `SERVER_INSTRUCTIONS` and lists exactly `EXPECTED_TOOLS` (§9). The delegate contracts
     (isolation, the tokenless refusal, a foreign token's 401) also run in the modern era on every
     run (§1, §5, §6). The identity the delegate middleware stores in the context state is visible
-    to its own tool call and to no later request on the same session, in either era
-    (`state_scope_violations`, §1; only the handshake era has a session for it to leak into). It
+    to its own tool call, or its own read, and to no later request on the same session, in either
+    era (`state_scope_violations`, §1; only the handshake era has a session for it to leak into). It
     also pins the harness's era selection (`select_era`, the post-connect
     check) and `call_http`'s last-answer 401 rule (`rejection_status`).
   - `tests/test_surface.py` (`unit`): `surface_violations`, `TOLERATED`, `tolerated_differences`.
@@ -868,7 +915,11 @@ import has no effect.
     runs, and the recorded argv is what the test asserts. For a launcher program it answers
     `<user>|<command>` between the program's sentinel and its end record on both streams (the record
     reporting `answer_code`), so the backend's `separate`
-    keeps the answer (`launched_script`, a harness verb, reads the command back).
+    keeps the answer (`launched_script`, a harness verb, reads the command back). The answer is the
+    recorder's `answer(argv, command)` hook, `traced_answer` by default; **`storage_launches`** sets
+    it to `storage_answer`, which answers `findscratch` and `myquota` as the launch's own user
+    (the user after `-u`, or `LOCAL_OWNER` for a launch with none), so a storage summary names
+    whose launch it read.
   - **`executes`** (`integration` only) runs the `local` and `delegate` backends for real, fenced:
     it replaces `Popen` in `rcac_mcp.executor.launch` with a launcher that accepts only a `/bin/bash`
     argv or one starting exactly `sudo -n -H -u <mapped user>` (anything else is refused before it
@@ -893,10 +944,14 @@ import has no effect.
   the FastMCP 4 / MCP SDK 2 touchpoints it relies on. The contract-test modules speak only its
   verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `negotiate`, `mint`,
   `user_map`, `served_tools`, `served_instructions`, `served_surface`, `installed_auth`, `protocol_error`,
-  `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `launched_script`, `read_resource`, `delegate_server`,
-  `shared_server`, `bare_server`, `stdio_tools`, `stdio_refusal`, `url_tools`; the builders take extra middleware, such as a `Rendezvous`, added inside the
+  `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `launched_script`, `read_resource`, `read_verbatim`, `delegate_server`,
+  `shared_server`, `bare_server`, `stdio_tools`, `stdio_refusal`, `url_tools`; the builders take extra middleware, such as a `Rendezvous` (which holds tool calls and resource reads at one barrier) or a `Raises` (which raises its exception on every tool call and every read), added inside the
   executor middleware, and add a `MethodLog` last; each serves the site context `site=` names, by
-  default `SITE`, a host without `/etc/agents.d`) and the `JWTVerifier` type it re-exports. `negotiate` connects in a given
+  default `SITE`, a host without `/etc/agents.d`) and the `JWTVerifier` type it re-exports. A read that fails
+  with a protocol error comes back from `read_resource` with that error's code in `Outcome.code`. `read_resource` reads
+  through FastMCP's client, which normalises a URI before sending it (lowercasing the scheme, stripping
+  surrounding space); `read_verbatim` sends the string exactly as given, as any other client may, and
+  returns the same `Outcome`. `negotiate` connects in a given
   era without the post-connect check and returns what both ends saw (`Negotiated`: version,
   whether an `InitializeResult` exists, instructions, tool names, and the methods the server's
   `MethodLog` saw), so a test decides the era itself. `stdio_refusal` connects in a given era to a
@@ -1357,28 +1412,44 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 
 - **The current executor lives in a `ContextVar` (`context.py`), never a module-level global.**
   `executor_var` is task-local; async tasks (one per request under FastMCP/Starlette) each get their
-  own copy, so each request gets its own executor. A sync tool runs on a worker thread that receives
-  a copy of the request's context, so it reads the executor its call's middleware set; a
-  `set_executor()` inside a tool would land only in that thread's copy. Replacing it with a plain module global is a
+  own copy, so each request gets its own executor. A sync tool, or a sync resource handler such as
+  `rcac://storage`'s, runs on a worker thread that receives a copy of the request's context, so it
+  reads the executor its request's middleware set; a `set_executor()` inside a tool or a handler
+  would land only in that thread's copy. Replacing it with a plain module global is a
   **cross-user command-execution vulnerability** — user A's request would run as user B.
   `SECURITY.md` § *Request Isolation in Delegate Mode* states the contract and shows the unsafe form
   explicitly — read it before touching this. The three bullets below are its consequences that are
   easy to get wrong.
-- **`set_executor()` is called per tool call, from middleware `on_call_tool`** — not at server
-  construction, not once per connection. `SharedExecutorMiddleware` re-sets the *same* instance every
-  call precisely because a ContextVar set in one task is invisible to the next.
-- **Tools never construct an executor.** They call `get_executor()`, which raises `RuntimeError` when
-  unset. A tool that instantiates its own executor bypasses delegation entirely.
+- **`set_executor()` is called per tool call and per resource read, from middleware `on_call_tool`
+  and `on_read_resource`** — not at server construction, not once per connection. Each executor
+  middleware holds its one resolution path in a private `_install`, which both hooks call, so a read
+  gets its executor, or is refused, exactly as a tool call from the same request would.
+  `SharedExecutorMiddleware` re-sets the *same* instance on every call and every read precisely
+  because a ContextVar set in one task is invisible to the next. `AuthExecutorMiddleware`'s read
+  hook skips `_install` for a URI exactly in `OPEN_RESOURCES` (`resources.py`), the resources that run
+  nothing (§8), and resolves every other read, an unknown URI included. Membership is the string the
+  client sent, compared whole: no case-folding, prefix, slash, decoding or scheme normalisation, since
+  FastMCP looks a URI up by that same string; the shared read hook sets
+  its executor for every read.
+- **Tools and resource handlers never construct an executor.** They call `get_executor()` (a
+  handler through an undecorated helper, as `rcac://storage` calls `resolve_storage_paths()`), which
+  raises `RuntimeError` when unset. One that instantiates its own executor bypasses delegation
+  entirely.
 - **Any new middleware must not swallow the call chain** (`return await call_next(context)`), above
   all one that runs *before* the executor middleware, or the executor is never set for that request.
 - **`ToolErrorMiddleware` is the error boundary and wraps the executor middleware.**
   `create_mcp_server` adds it before the middleware it is given, and FastMCP runs middleware added
-  later inside middleware added earlier. FastMCP 4 turns only exceptions from a tool's *body* into
-  an error result; one raised by middleware (§5's `PermissionError` and `RuntimeError`, an
-  `MCPError`) would reach the client as a masked `Internal server error`. The boundary re-raises any
+  later inside middleware added earlier. FastMCP 4 turns only exceptions from a tool's or a resource
+  handler's *body* into an error the client reads; one raised by middleware (§5's `PermissionError`
+  and `RuntimeError`, an `MCPError`) would reach the client as a masked `Internal server error` (for
+  a read, in the modern era). Around a tool call (`on_call_tool`) the boundary re-raises any
   `Exception` but a `FastMCPError` as `ToolError(str(exc))`, so the client sees the reason as a
-  tool error result, exactly as on 2.x. It catches `Exception`, never `BaseException`
-  (cancellation propagates), sets nothing, and returns `await call_next(context)`. It would also
+  tool error result, exactly as on 2.x. Around a resource read (`on_read_resource`) it re-raises any
+  `Exception` but a `FastMCPError`, `NotFoundError` or `DisabledError` as `ResourceError(str(exc))`,
+  so a refused read's error carries the same reason in both eras, while an unknown URI keeps the
+  protocol's `Resource not found` (-32602). Both hooks run one `_bounded`. It catches `Exception`,
+  never `BaseException` (cancellation propagates), sets nothing, and returns
+  `await call_next(context)`. It would also
   turn the error FastMCP 4 raises for a tool that needs a capability the client lacks into a tool
   error result rather than a protocol error; no tool here needs one, and the first that does
   revisits the boundary. Middleware state
@@ -1678,11 +1749,13 @@ What each mode means:
   not callable** (the function itself is behind its `.fn`, a wrapper that first refuses any string
   argument, or string element of a list argument, holding a lone surrogate, with an error naming
   the parameter; the wrapper keeps the function's name, docstring and signature, which FastMCP
-  reads for the schema). Other Python code cannot invoke a decorated
-  tool directly; `storage_paths()` from
-  `resources.py` raises `TypeError: 'FunctionTool' object is not callable`. When logic must be shared
-  between a tool and something else, factor it into an undecorated helper and have both call that.
-  (`resources.py` currently gets this wrong — see the `storage-paths-resource-typeerror` seed.)
+  reads for the schema). Other Python code cannot invoke a decorated tool directly: a call fails
+  with `TypeError: 'FunctionTool' object is not callable`. When logic must be shared between a tool
+  and something else, factor it into an undecorated helper and have both call that, as the
+  `storage_paths` tool and the `rcac://storage` resource both call `resolve_storage_paths()`
+  (`tools/rcac.py`). The resource imports the helper inside its handler, so importing
+  `resources.py` registers no tool; `tests/test_storage_resource.py` reads the resource in both
+  eras, so a handler that calls the decorated tool again fails the suite.
 - **`@mcp_tool` serves the full docstring as the description**
   (`Tool.from_function(func, description=inspect.getdoc(func))`). FastMCP 4 on its own serves only
   the summary paragraph; dropping the keyword silently cuts `Args:`, `Returns:` and `Examples:` from
@@ -1693,7 +1766,13 @@ What each mode means:
 
 ### 8. Resources and the `/etc/agents.d/*.md` convention (`resources.py`, `site.py`)
 
-- `RESOURCE_REGISTRY` (`resources.py`) exposes `rcac://context` and `rcac://storage`.
+- `RESOURCE_REGISTRY` (`resources.py`) exposes `rcac://context` and `rcac://storage`. Each entry's
+  `executor` key says whether its handler runs commands through its request's executor: `False`
+  for `rcac://context`, `True` for `rcac://storage`. **`OPEN_RESOURCES`** is derived from it, the
+  URIs whose entry says `False`, and reads the key directly, so an entry without one fails at import
+  rather than being silently open. Only a handler that runs nothing may be marked open: in
+  `delegate` mode an open read gets no executor, so a handler that needs one fails with
+  `No executor configured`.
 - **`/etc/agents.d/*.md` is a deliberate, external, cross-site convention** — cluster administrators
   drop markdown there and any conforming client picks it up. Files are found with a `maxdepth 1`
   glob (regular files only; a symlink is not read) and concatenated in `sort` order, the byte order
@@ -1766,14 +1845,25 @@ What each mode means:
   per host; do not key any new cache on `hostname` alone (§3).
 - **Reading `rcac://context` needs no executor**: its handler returns the held text and calls
   neither `get_executor()` nor `set_executor()` (§1), so it answers in every mode and both eras.
-  `rcac://storage` is unchanged: its handler still needs the request's executor, which a resource
-  read does not get (`issues/resource-reads-without-executor.md`). Never satisfy a read with an
-  executor that is not the request's own (§1).
-- **In `delegate` mode the tool reaches only a mapped user.** The middleware refuses every tool call
-  from an identity absent from the user map before the body runs (§5), `cluster_context` included,
-  while the instructions and `rcac://context` reach any client that can connect. That is
-  intended: what is served there is text every account can read (above) and identical for every
-  user, so the difference discloses nothing. Exempting the tool from the map check is a §5 change.
+- **Every other read gets its request's executor, as a tool call does** (§1): the executor
+  middleware sets it in `on_read_resource`. Reading `rcac://storage` runs `findscratch`, then
+  `myquota`, through `resolve_storage_paths()` on that executor (the shared one in `ssh` and
+  `local` mode, the mapped user's in `delegate` mode) and returns the same summary the
+  `storage_paths` tool resolves there. Never satisfy a read with an executor that is not the
+  request's own (§1); no caching middleware is installed, so no read is answered from another
+  request's result.
+- **In `delegate` mode a tool call, or a read of a URI outside `OPEN_RESOURCES`, reaches only a
+  mapped user.** The middleware refuses every tool call, `cluster_context` included, and every read
+  of a URI not exactly in `OPEN_RESOURCES`, an unknown one included, from a token naming no identity or an
+  identity absent from the user map, before the handler runs and with the same reason (§5). A
+  request with no token is let through with no executor, so a tool call or a `rcac://storage` read
+  fails with `No executor configured` and runs nothing, and an unknown URI is `Resource not found`.
+  The check runs before FastMCP looks a URI up, so a refused caller reading an unknown URI gets the
+  refusal, not `Resource not found`, which every other caller keeps; the refusal names at most the
+  caller's own identity. The instructions and the reads in `OPEN_RESOURCES` (`rcac://context`)
+  reach any client that can connect. That is intended: what is served there is text every account
+  can read (above) and identical for every user, so the difference discloses nothing. Exempting a
+  tool, or a resource that runs commands, from the map check is a §5 change.
 
 ### 9. The agent-facing surface is part of the API (`server.py`) [human gate]
 

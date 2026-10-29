@@ -8,7 +8,11 @@ identity's `PermissionError`, a token without an identity claim's `RuntimeError`
 as a tool error result whose text is exactly `str(exc)`: no type name, no traceback. FastMCP 4
 converts only exceptions from a tool's body, so without `ToolErrorMiddleware` the reason is erased
 into a masked protocol error. An `MCPError` is converted too, as the server did before the stack
-move. Cancellation is never converted: the boundary catches `Exception`, not `BaseException`.
+move. Around a resource read, which has no error-result shape, the same exceptions reach the client
+as a protocol error whose code is the internal error's (-32603) and whose text is exactly `str(exc)`,
+in both protocol eras: without the boundary the modern era masks the text as `Internal server
+error`, and the handshake era sends it under the malformed code 0. Cancellation is never converted:
+the boundary catches `Exception`, not `BaseException`, around either.
 
 **The harness era.** `CLUSTER_MCP_TEST_ERA` selects the protocol era every harness client speaks
 (default `legacy`); an unknown value is refused, and each connect is checked against the selection.
@@ -38,7 +42,8 @@ import pytest
 import harness
 from harness import (MODERN_VERSION, SITE, Negotiated, Outcome, RecordingExecutor, Raises, Rendezvous, StateProbe,
                      call, call_http, delegate_server, drive, http_client, in_memory, mint, negotiate, protocol_error,
-                     rejection_status, select_era, serving, session_era, shared_server, tool_names, user_map)
+                     read_resource, rejection_status, select_era, serving, session_era, shared_server, tool_names,
+                     user_map)
 from rcac_mcp.middleware import ToolErrorMiddleware
 from rcac_mcp.server import SERVER_INSTRUCTIONS as BASE
 from rcac_mcp.site import compose
@@ -64,6 +69,25 @@ def boundary_violations(outcome: Outcome | None, raised: BaseException | None, e
         violations.append(f'not an error result: {outcome.text!r}')
     if outcome.text != expected:
         violations.append(f'error text differs: {outcome.text!r}, expected {expected!r}')
+    return violations
+
+
+# The code a refused read's error carries on the wire: the JSON-RPC internal error.
+INTERNAL_ERROR = -32603
+
+
+def read_boundary_violations(outcome: Outcome, expected: str) -> list[str]:
+    """Every way a refused read fails to arrive as an internal error whose text is exactly `expected`.
+
+    `outcome` is what `harness.read_resource` returned for the read.
+    """
+    if not outcome.is_error:
+        return [f'refused read: not an error: {outcome.text!r}']
+    violations: list[str] = []
+    if outcome.code != INTERNAL_ERROR:
+        violations.append(f'refused read: error code differs: {outcome.code}, expected {INTERNAL_ERROR}')
+    if outcome.text != expected:
+        violations.append(f'refused read: error text differs: {outcome.text!r}, expected {expected!r}')
     return violations
 
 
@@ -123,13 +147,61 @@ def test_boundary_check_catches_drift(outcome: Outcome | None, raised: BaseExcep
     assert any(fragment in v for v in violations), violations
 
 
+# Each refusal a read hook can raise, and how the read reaches the server.
+READ_REFUSALS = [
+    *REFUSALS,
+    pytest.param(lambda: RuntimeError('Could not extract user identity from token claims.'), 'http',
+                 id='runtime-http'),
+    pytest.param(lambda: LookupError('the user map has no entry for this request'), 'memory', id='other-memory'),
+]
+
+
 @pytest.mark.unit
-def test_boundary_lets_cancellation_through() -> None:
+@pytest.mark.parametrize('era', ['legacy', 'modern'])
+@pytest.mark.parametrize(('make', 'route'), READ_REFUSALS)
+def test_middleware_refusal_is_a_read_error(make: Callable[[], Exception], route: str, era: str, guard) -> None:
+    exc = make()
+    executor = RecordingExecutor('refused')
+
+    async def scenario() -> Outcome:
+        server = shared_server(executor, Raises(exc))
+        if route == 'memory':
+            async with in_memory(server, era=era) as client:
+                return await read_resource(client, 'rcac://storage')
+        async with serving(server) as app:
+            async with http_client(app, None, era=era) as client:
+                return await read_resource(client, 'rcac://storage')
+
+    violations = read_boundary_violations(drive(scenario()), str(exc))
+    assert violations == [], report(violations)
+    assert executor.calls == []
+    assert guard.refused == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('outcome', 'fragment'), [
+    pytest.param(Outcome(True, 'denied', code=0), 'error code differs', id='malformed-code'),
+    pytest.param(Outcome(True, 'Internal server error', code=INTERNAL_ERROR), 'error text differs', id='masked'),
+    pytest.param(Outcome(True, 'PermissionError: denied', code=INTERNAL_ERROR), 'error text differs', id='type-name'),
+    pytest.param(Outcome(True, 'denied\nTraceback (most recent call last):', code=INTERNAL_ERROR),
+                 'error text differs', id='traceback'),
+    pytest.param(Outcome(True, 'denied'), 'error code differs', id='no-code'),
+    pytest.param(Outcome(False, 'denied'), 'not an error', id='not-an-error'),
+])
+def test_read_boundary_check_catches_drift(outcome: Outcome, fragment: str) -> None:
+    assert read_boundary_violations(Outcome(True, 'denied', code=INTERNAL_ERROR), 'denied') == []
+    violations = read_boundary_violations(outcome, 'denied')
+    assert any(fragment in v for v in violations), violations
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('hook', ['on_call_tool', 'on_read_resource'])
+def test_boundary_lets_cancellation_through(hook: str) -> None:
     async def cancelled(context: Any) -> Any:
         raise asyncio.CancelledError()
 
     # Stepped by hand: the chain raises at once, so no event loop is needed to see what escapes.
-    step = ToolErrorMiddleware().on_call_tool(None, cancelled)
+    step = getattr(ToolErrorMiddleware(), hook)(None, cancelled)
     try:
         step.send(None)
         outcome = 'suspended'
@@ -347,27 +419,29 @@ STATE_KEYS = ('rcac_user', 'rcac_local_user')
 ALICE_STATE = {'rcac_user': 'alice', 'rcac_local_user': 'ualice'}
 
 
-def state_scope_violations(seen: list[tuple[str, dict[str, Any]]], expected: dict[str, Any]) -> list[str]:
+def state_scope_violations(seen: list[tuple[str, dict[str, Any]]], expected: dict[str, Any],
+                           method: str = 'tools/call') -> list[str]:
     """Every way the delegate middleware's state fails to be request-scoped; empty means it is.
 
-    `seen` is a `StateProbe`'s record of one session: a tool call, then later requests. The tool call
-    must see `expected`, so the state was set and is readable and its absence later is not vacuous;
-    no request after the call may see any of it.
+    `seen` is a `StateProbe`'s record of one session: a request of `method` (a tool call, or a
+    resource read), then later requests. That request must see `expected`, so the state was set and
+    is readable and its absence later is not vacuous; no request after it may see any of it.
     """
-    calls = [i for i, (method, _) in enumerate(seen) if method == 'tools/call']
+    what = 'tool call' if method == 'tools/call' else method
+    calls = [i for i, (seen_method, _) in enumerate(seen) if seen_method == method]
     if not calls:
-        return [f'no tool call reached the probe: {[method for method, _ in seen]}']
+        return [f'no {what} reached the probe: {[seen_method for seen_method, _ in seen]}']
     violations: list[str] = []
     first = calls[0]
     if seen[first][1] != expected:
-        violations.append(f'the tool call saw {seen[first][1]!r}, expected {expected!r}: no state was set')
+        violations.append(f'the {what} saw {seen[first][1]!r}, expected {expected!r}: no state was set')
     later = seen[first + 1:]
     if not later:
         violations.append('no later request on the session reached the probe')
-    for method, values in later:
+    for later_method, values in later:
         leaked = {key: value for key, value in values.items() if value is not None}
         if leaked:
-            violations.append(f'state outlived its request: {method} saw {leaked!r}')
+            violations.append(f'state outlived its request: {later_method} saw {leaked!r}')
     return violations
 
 
@@ -396,6 +470,32 @@ def test_delegate_state_is_request_scoped(era: str, tmp_path: Path, monkeypatch:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('era', ['legacy', 'modern'])
+def test_delegate_read_state_is_request_scoped(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                               storage_launches: list[list[str]], guard) -> None:
+    # A read resolves its identity by the path a tool call takes, so it stores the same state, as
+    # request-scoped.
+    monkeypatch.setenv('JWT_SECRET', SECRET)
+    map_path = user_map(tmp_path, USER_MAP)
+    probe = StateProbe(*STATE_KEYS)
+
+    async def scenario() -> Outcome:
+        server = delegate_server(map_path, probe)
+        async with serving(server) as app:
+            async with http_client(app, mint(SECRET, sub='alice'), era=era) as client:
+                outcome = await read_resource(client, 'rcac://storage')
+                await tool_names(client)
+                return outcome
+
+    outcome = drive(scenario())
+    violations = state_scope_violations(probe.seen, ALICE_STATE, 'resources/read')
+    if outcome.is_error:
+        violations.append(f'the read failed: {outcome.text!r}')
+    assert violations == [], report(violations)
+    assert guard.refused == []
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(('seen', 'fragment'), [
     pytest.param([('tools/call', ALICE_STATE), ('tools/list', {'rcac_user': 'alice', 'rcac_local_user': None})],
                  'state outlived its request', id='leaked'),
@@ -412,3 +512,16 @@ def test_state_scope_check_catches_drift(seen: list[tuple[str, dict[str, Any]]],
     assert state_scope_violations(clean, ALICE_STATE) == []
     violations = state_scope_violations(seen, ALICE_STATE)
     assert any(fragment in v for v in violations), violations
+
+
+@pytest.mark.unit
+def test_read_state_scope_check_catches_drift() -> None:
+    unset = {'rcac_user': None, 'rcac_local_user': None}
+    assert state_scope_violations([('resources/read', ALICE_STATE), ('tools/list', unset)], ALICE_STATE,
+                                  'resources/read') == []
+    for seen, fragment in [([('tools/call', ALICE_STATE), ('tools/list', unset)], 'no resources/read'),
+                           ([('resources/read', unset), ('tools/list', unset)], 'no state was set'),
+                           ([('resources/read', ALICE_STATE), ('tools/list', {**unset, 'rcac_user': 'alice'})],
+                            'state outlived its request')]:
+        violations = state_scope_violations(seen, ALICE_STATE, 'resources/read')
+        assert any(fragment in v for v in violations), (fragment, violations)

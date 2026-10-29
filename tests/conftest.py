@@ -203,11 +203,51 @@ def guard(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, tmp_p
         pytest.fail(f'unit guard: the test tried to launch a process or reach a host: {g.refused}', pytrace=False)
 
 
+def launch_user(argv: list[str]) -> str | None:
+    """The user a recorded launch runs as: the element after `-u`, or None for a launch naming none."""
+    return argv[argv.index('-u') + 1] if '-u' in argv[:-1] else None
+
+
+def traced_answer(argv: list[str], command: str) -> str:
+    """`RecordedPopen`'s default answer: `<user>|<command>`, the program name standing in for no user."""
+    return f'{launch_user(argv) or argv[0]}|{command}'
+
+
+# The owner `storage_answer` names for a launch that runs as the server's own account (no `-u`).
+LOCAL_OWNER = 'server'
+
+
+def storage_quota(owner: str) -> str:
+    """The `myquota` table `storage_answer` gives `owner`: a home, a scratch and one depot, each `owner`'s."""
+    return ('Type        Location        Size    Limit   Use     Files   Limit   Use\n'
+            '==============================================================================\n'
+            f'home        {owner}           14.6GB  25.0GB  58.6%   -       -       -\n'
+            f'scratch     {owner}           1.2TB   200TB   0.6%    10k     2000k   0.5%\n'
+            f'depot       lab-{owner}       3.0TB   10TB    30.0%   -       -       -\n')
+
+
+def storage_answer(argv: list[str], command: str) -> str:
+    """Answer `findscratch` and `myquota` as the launch's own user would see them; anything else as traced.
+
+    The owner is the user after `-u`, or `LOCAL_OWNER` for a launch with none, so the summary built
+    from the answers names `/home/<owner>`, `/scratch/test/<owner>` and `/depot/lab-<owner>`: whose
+    launch it read is visible in the text.
+    """
+    owner = launch_user(argv) or LOCAL_OWNER
+    if command == 'findscratch':
+        return f'/scratch/test/{owner}\n'
+    if command == 'myquota':
+        return storage_quota(owner)
+    return traced_answer(argv, command)
+
+
 class RecordedPopen:
     """A `subprocess.Popen` stand-in that records the argv and answers at once, launching nothing.
 
-    It answers stdout with `<user>|<command>`, where the user follows `-u` (or is the program name
-    when there is none), so a tool result can be traced to the exact launch. For a launcher program
+    It answers stdout with `answer(argv, command)`, by default `traced_answer`'s `<user>|<command>`,
+    where the user follows `-u` (or is the program name when there is none), so a tool result can be
+    traced to the exact launch; a test that needs a parseable answer sets `answer` on the recorder
+    class (the `storage_launches` fixture sets `storage_answer`). For a launcher program
     (the last element of every backend's launch) the command is the script or argv the program runs,
     and both streams carry the program's start sentinel first and its end record last, as a real
     launch's do, so the backend's `separate` keeps the answer; for any other argv it is the last
@@ -218,6 +258,7 @@ class RecordedPopen:
     test_fence = True
     store: list[list[str]]
     answer_code = 0
+    answer: Callable[[list[str], str], str] = staticmethod(traced_answer)
 
     def __init__(self, args: Any, *rest: Any, **kwargs: Any) -> None:
         from harness import launched_script
@@ -228,7 +269,6 @@ class RecordedPopen:
         # Far outside any real pid range, so a stray signal to it reaches nothing.
         self.pid = 2_147_483_100
         self.returncode = self.answer_code
-        user = argv[argv.index('-u') + 1] if '-u' in argv[:-1] else argv[0]
         try:
             command, marks = launched_script(argv)
             code = self.answer_code
@@ -237,7 +277,7 @@ class RecordedPopen:
         except ValueError:
             command, start, end = argv[-1], b'', b''
         shown = command if isinstance(command, str) else ' '.join(command)
-        self.stdout = self._pipe(start + f'{user}|{shown}'.encode() + end)
+        self.stdout = self._pipe(start + self.answer(argv, shown).encode() + end)
         self.stderr = self._pipe(start + end)
         self.stdin = open(os.devnull, 'wb')
 
@@ -278,6 +318,13 @@ def launches(guard: UnitGuard, monkeypatch: pytest.MonkeyPatch) -> list[list[str
     recorder = type('RecordedPopen', (RecordedPopen,), {'store': store})
     monkeypatch.setattr(subprocess, 'Popen', recorder)
     return store
+
+
+@pytest.fixture
+def storage_launches(launches: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """`launches`, with `findscratch` and `myquota` answered per user by `storage_answer`."""
+    monkeypatch.setattr(subprocess.Popen, 'answer', staticmethod(storage_answer))
+    return launches
 
 
 # PATH inside a fenced launch: the shim first, then what sudo's secure_path and sshd give.

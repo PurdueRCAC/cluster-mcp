@@ -151,7 +151,7 @@ gets its own isolated copy of the context:
 ```
 Request 1 (alice)                    Request 2 (bob)
 ─────────────────────────            ─────────────────────────
-on_call_tool middleware              on_call_tool middleware
+on_call_tool / on_read_resource      on_call_tool / on_read_resource
   │                                    │
   ▼                                    ▼
 set_executor(                        set_executor(
@@ -164,6 +164,15 @@ get_executor() → alice's executor    get_executor() → bob's executor
   ▼                                    ▼
 sudo -u alice <command>              sudo -u bob <command>
 ```
+
+The middleware sets the executor in the same way for a tool call (`on_call_tool`) and for a
+resource read (`on_read_resource`), through one code path. A read that runs commands
+(`rcac://storage`) therefore runs as the mapped user of the request that read it, and a request
+whose token names no identity, or an identity absent from the user map, is refused the read before
+its handler runs, with the reason its tool call would get. Reads of the resources that run nothing
+(`OPEN_RESOURCES`, today `rcac://context`, matched as the exact URI string sent) are let through
+without resolving an identity: they serve the same text, readable by every account, to every
+client.
 
 **Why this is safe:**
 
