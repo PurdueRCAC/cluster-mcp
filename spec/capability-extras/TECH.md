@@ -58,6 +58,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
@@ -273,6 +274,12 @@ the root installs every capability; the docs name the extras.
       the release recipe's `post_verify` and its `install-probe` and `ci-mirror-no-index` caveats
       (PLAN §2.4).
 - **Verify:** `sh spec/capability-extras/verify/p4.sh`.
+  *Attempt 1 (red, 2026-10-31):* every step green but `probe.sh`'s compare of the root install's
+  surface with `BASE_REF`'s: `outputSchema` of `run_command`, `list_directory` and `storage_paths`
+  carries a `description`. The probe's `uv pip install` ignores `uv.lock` and resolved a newer
+  pydantic from the cache than the lock pins, while `base.json` comes from a locked sync; the
+  `BASE_REF` root installed the same unlocked way differs from `base.json` identically, and this
+  tree's root installed with the lock as constraints equals it. Held for a ruling on the gate.
 - **Touches:** the four `pyproject.toml`, `uv.lock`, `README.md`, `packages/*/README.md`,
   `Dockerfile`, `AGENTS.md`, `tests/`.
 
