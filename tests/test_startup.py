@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""A server whose SSH connection fails at startup says why, to the client, in both protocol eras.
+"""A server that cannot start says why, to the client, in both protocol eras.
 
-The failure is reported three ways: once on stderr, as `cannot connect to <host>: <cause>`; on stdio,
+A failed SSH connect is reported three ways: once on stderr, as `cannot connect to <host>: <cause>`; on stdio,
 as a JSON-RPC internal error carrying the same message in answer to every request until the client
 closes the stream; and as exit status `exit_status.runtime_error`. Every request is answered because a
 2026-07-28 client swallows the error to its `server/discover` probe and retries with `initialize`.
@@ -20,6 +20,13 @@ closes the stream; and as exit status `exit_status.runtime_error`. Every request
   defaults reach Fabric and an ssh_config `ConnectTimeout` still wins (unit), and a loopback listener
   that never sends an SSH banner is answered "timed out" within the bound (integration, with the
   bound lowered so the row is fast; Paramiko's own banner wait would answer it only after 15 s).
+
+An installed capability that cannot load takes the same path, with `cannot load capability
+<distribution>: <cause>` as the message, before the mode ladder runs. A distribution whose entry point
+names a missing module is planted in a scratch directory put first on `PYTHONPATH` (or `sys.path`
+in process): over the raw wire, with stdin closed, through a real client in each era and through the
+deprecated `rcac-mcp` command, the start is refused, naming it; `--help` and `--version` still work;
+in process the ladder is never consulted; and over HTTP the server exits before it serves.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import socket
 import subprocess
 import threading
@@ -42,11 +50,13 @@ from paramiko.ssh_exception import (AuthenticationException, BadAuthenticationTy
                                     SSHException)
 
 import cluster_mcp.core
+import cluster_mcp.core.capabilities
 import cluster_mcp.core.executor.ssh
+import cluster_mcp.core.tools
 from harness import Refused, stdio_refusal
 from cluster_mcp.core import MCPServerApp
 from cluster_mcp.core.startup import answer_until_eof
-from test_cli import CLI, SANDBOX
+from test_cli import CLI, LEGACY_CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
 MESSAGE = 'cannot connect to alias.example: connection refused'
@@ -442,4 +452,132 @@ def test_silent_banner_is_answered_within_the_bound(monkeypatch: pytest.MonkeyPa
     if elapsed >= SILENT_DEADLINE:
         violations.append(f'the connect has no bound: answered after {elapsed:.1f} s, '
                           f'expected within {SILENT_DEADLINE} s of a {SILENT_BOUND} s bound')
+    assert violations == [], '\n'.join(violations)
+
+
+# An installed capability that cannot load: a distribution whose entry point names a module that
+# does not exist, planted beside nothing else in a scratch directory put first on the path.
+BROKEN = 'planted-broken'
+BROKEN_MESSAGE = f"cannot load capability {BROKEN}: ModuleNotFoundError: No module named 'planted_nowhere_at_all'"
+
+# What the mode ladder writes once it has run, and what it raises when stdio has no SSH host.
+LADDER = ('Execution mode', 'SSH host required')
+
+
+def plant_broken(root: Path) -> Path:
+    """Plant the broken capability's distribution under `root` and return the directory to put on the path."""
+    info = root / f"{BROKEN.replace('-', '_')}-0.0.1.dist-info"
+    info.mkdir(parents=True)
+    (info / 'METADATA').write_text(f'Metadata-Version: 2.1\nName: {BROKEN}\nVersion: 0.0.1\n')
+    (info / 'entry_points.txt').write_text('[cluster_mcp.capabilities]\nbroken = planted_nowhere_at_all.capability:CAPABILITY\n')
+    return root
+
+
+def broken_env(root: Path) -> dict[str, str]:
+    """This environment with the broken capability first on PYTHONPATH, whatever it already held kept after it."""
+    held = os.environ.get('PYTHONPATH')
+    planted = str(plant_broken(root))
+    return {**os.environ, 'PYTHONPATH': planted + (os.pathsep + held if held else ''), 'FASTMCP_CHECK_FOR_UPDATES': 'off'}
+
+
+def load_refusal_violations(status: int, stderr: Sequence[str], stdout: Sequence[str],
+                            lines_in: Sequence[str]) -> list[str]:
+    """Every way a start with the broken capability installed differs from refusing to start for it.
+
+    It exits `exit_status.runtime_error`; stderr reports the message naming the distribution once, and
+    nothing the mode ladder says, because the load comes before it; stdout carries exactly the answers
+    to the requests in `lines_in`, each with that message.
+    """
+    violations: list[str] = []
+    if status != exit_status.runtime_error:
+        violations.append(f'exit status {status}, expected {exit_status.runtime_error}')
+    reported = [line.split('] ', 1)[-1] for line in stderr if 'cannot load capability' in line]
+    if reported != [BROKEN_MESSAGE]:
+        violations.append(f'stderr does not name the distribution {BROKEN} once with its cause: {list(stderr)[-6:]!r}')
+    ladder = [line for line in stderr if any(said in line for said in LADDER)]
+    if ladder:
+        violations.append(f'the mode ladder ran before the capability load: {ladder!r}')
+    violations.extend(startup_refusal_violations(lines_in, stdout, BROKEN_MESSAGE))
+    return violations
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(('command', 'drive'), [
+    pytest.param('cluster-mcp', 'raw-wire', id='raw-wire'),
+    pytest.param('cluster-mcp', 'stdin-closed', id='stdin-closed'),
+    pytest.param('cluster-mcp', 'legacy', id='legacy'),
+    pytest.param('cluster-mcp', 'modern', id='modern'),
+    pytest.param('rcac-mcp', 'raw-wire', id='rcac-mcp'),
+])
+def test_a_broken_capability_stops_startup(command: str, drive: str, tmp_path: Path) -> None:
+    # No SSH host is configured (the sandbox unsets it), so a start that reached the mode ladder would
+    # refuse for that instead.
+    env = broken_env(tmp_path / 'planted')
+    cli = CLI if command == 'cluster-mcp' else LEGACY_CLI
+    if drive in ('legacy', 'modern'):
+        refused = stdio_refusal([str(SANDBOX), str(cli)], drive, env=env)
+        violations = [] if refused.code == INTERNAL_ERROR else [f'the client got code {refused.code}, expected {INTERNAL_ERROR}']
+        if refused.message != BROKEN_MESSAGE:
+            violations.append(f'the answer the client got does not name the distribution {BROKEN}: {refused.message!r}')
+        assert violations == [], '\n'.join(violations)
+        return
+    lines_in = RAW_WIRE_IN if drive == 'raw-wire' else []
+    began = time.monotonic()
+    result = subprocess.run([str(SANDBOX), str(cli)], input=''.join(line + '\n' for line in lines_in),
+                            capture_output=True, text=True, timeout=60, env=env)
+    elapsed = time.monotonic() - began
+    violations = load_refusal_violations(result.returncode, result.stderr.splitlines(), result.stdout.splitlines(),
+                                         lines_in)
+    if command == 'rcac-mcp' and 'the rcac-mcp command is' not in result.stderr:
+        violations.append(f'rcac-mcp did not warn before refusing: {result.stderr[-400:]!r}')
+    assert violations == [], '\n'.join(violations)
+    assert elapsed < 30, f'with stdin closed the refusal took {elapsed:.1f} s'
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('flag', ['--help', '--version'])
+def test_help_works_with_a_broken_capability(flag: str, tmp_path: Path) -> None:
+    result = subprocess.run([str(SANDBOX), str(CLI), flag], input='', capture_output=True, text=True, timeout=60,
+                            env=broken_env(tmp_path / 'planted'))
+    assert result.returncode == 0, result.stderr[-400:]
+    assert result.stdout.startswith(('Usage:\n  cluster-mcp', 'cluster-mcp v')), result.stdout[:80]
+    assert 'cannot load capability' not in result.stdout + result.stderr, result.stderr[-400:]
+
+
+@pytest.mark.unit
+def test_capabilities_load_before_the_mode_ladder(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+                                                  tmp_path: Path, guard) -> None:
+    # The suite loaded every member once at startup; forget it, so this start loads again and finds
+    # the planted distribution too. The cache is restored when the test ends.
+    monkeypatch.syspath_prepend(str(plant_broken(tmp_path / 'planted')))
+    monkeypatch.setattr(cluster_mcp.core.capabilities, '_installed', None)
+    before = list(cluster_mcp.core.tools.TOOL_REGISTRY)
+    consulted: list[str] = []
+    ladder = MCPServerApp._resolve_exec_mode
+    monkeypatch.setattr(MCPServerApp, '_resolve_exec_mode', lambda self: consulted.append('ladder') or ladder(self))
+    observed = run_app([], RAW_WIRE_IN, monkeypatch, caplog)
+    logged = [r.getMessage() for r in caplog.records if r.name == 'cluster_mcp.core']
+    stderr = [*(line for line in logged if any(said in line for said in LADDER)), *observed['critical']]
+    violations = load_refusal_violations(observed['status'], stderr, observed['stdout'], RAW_WIRE_IN)
+    if consulted:
+        violations.append('the mode ladder ran before the capability load: _resolve_exec_mode was called')
+    if observed['started']:
+        violations.append('the server was built')
+    assert violations == [], '\n'.join(violations)
+    assert cluster_mcp.core.tools.TOOL_REGISTRY == before
+    assert guard.refused == []
+
+
+@pytest.mark.integration
+def test_http_load_failure_exits_before_binding(tmp_path: Path) -> None:
+    port = closed_port()
+    result = subprocess.run([str(SANDBOX), str(CLI), '-e', 'local', '-t', 'http', '-H', LOOPBACK, '-p', str(port)],
+                            input=''.join(line + '\n' for line in RAW_WIRE_IN), capture_output=True, text=True,
+                            timeout=60, env=broken_env(tmp_path / 'planted'))
+    # Over HTTP nothing reads stdin: the requests on it go unanswered, and stdout stays empty.
+    violations = load_refusal_violations(result.returncode, result.stderr.splitlines(), [], [])
+    if result.stdout:
+        violations.append(f'stdout is not empty over http: {result.stdout[:200]!r}')
+    if 'Starting MCP server' in result.stderr or 'Uvicorn running' in result.stderr:
+        violations.append(f'the server began serving before it refused: {result.stderr[-400:]!r}')
     assert violations == [], '\n'.join(violations)

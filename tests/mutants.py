@@ -2316,6 +2316,37 @@ CASES: tuple[Case, ...] = (
           'test_capabilities.py::test_a_capability_resource_must_need_an_executor[missing]',
           'test_capabilities.py::test_a_capability_resource_must_need_an_executor[truthy]'),
          'an open resource loaded'),
+    # An installed capability that cannot load stops the server at startup, before the mode ladder
+    # runs, with the message naming its distribution: never a start with the capability missing.
+    Case('capability-load-failure-swallowed', 'core/capabilities.py',
+         (('                capability = _checked(ep.load())\n'
+           '            except _Invalid as exc:\n'
+           '                raise CapabilityLoadError(distribution, str(exc)) from exc\n'
+           '            except Exception as exc:\n'
+           '                raise CapabilityLoadError(distribution, _cause(exc)) from exc\n',
+           '                capability = _checked(ep.load())\n'
+           '            except _Invalid as exc:\n'
+           '                raise CapabilityLoadError(distribution, str(exc)) from exc\n'
+           '            except Exception:\n'
+           '                continue\n'),),
+         ('test_startup.py::test_a_broken_capability_stops_startup[raw-wire]',
+          'test_startup.py::test_a_broken_capability_stops_startup[modern]',
+          'test_startup.py::test_a_broken_capability_stops_startup[rcac-mcp]',
+          'test_startup.py::test_capabilities_load_before_the_mode_ladder'),
+         'does not name the distribution'),
+    Case('capability-load-after-ladder', 'core/__init__.py',
+         (('        self._load_capabilities()\n\n'
+           '        # Determine execution mode\n'
+           '        exec_mode = self._resolve_exec_mode()\n'
+           "        log.info(f'Execution mode: {exec_mode}')\n",
+           '\n        # Determine execution mode\n'
+           '        exec_mode = self._resolve_exec_mode()\n'
+           "        log.info(f'Execution mode: {exec_mode}')\n"
+           '        self._load_capabilities()\n'),),
+         ('test_startup.py::test_a_broken_capability_stops_startup[raw-wire]',
+          'test_startup.py::test_a_broken_capability_stops_startup[rcac-mcp]',
+          'test_startup.py::test_capabilities_load_before_the_mode_ladder'),
+         'the mode ladder ran before the capability load'),
     # The deprecation window is one string, deprecated in 0.2.0, removed no earlier than 0.4.0, wherever
     # a user reads it: the constant, every warning (each emitter, and each call site that emits one),
     # and README's upgrade section, which states it once and pairs each deprecated name with its

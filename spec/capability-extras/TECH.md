@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -35,7 +35,7 @@ phases:
   verify: sh spec/capability-extras/verify/p2.sh
 - id: P3
   name: A capability that fails to load stops startup, naming its distribution
-  status: pending
+  status: done
   satisfies:
   - R8
   depends_on:
@@ -241,11 +241,11 @@ with it; the core's resources and open set are its context URIs; the core names 
 **Goal:** `run()` loads before the mode ladder; a failure is reported as an SSH connect failure is
 (stderr once, the stdio error answer until EOF) and exits 5; `--help` and `--version` unaffected.
 
-- [ ] `C/__init__.py` `run()`: `installed()` after the `--generate-token` branch, before
+- [x] `C/__init__.py` `run()`: `installed()` after the `--generate-token` branch, before
       `_resolve_exec_mode()`; `CapabilityLoadError` → `_report_startup_failure` → `StartupFailure`.
       `_resolve_exec_mode()` is not edited (§4, human gate).
-- [ ] `C/startup.py` docstring; AGENTS.md §4's startup-refusal bullet and §7 name the message.
-- [ ] Tests: `tests/test_startup.py` P3 ids (planted dist-infos prepended to `PYTHONPATH`, both
+- [x] `C/startup.py` docstring; AGENTS.md §4's startup-refusal bullet and §7 name the message.
+- [x] Tests: `tests/test_startup.py` P3 ids (planted dist-infos prepended to `PYTHONPATH`, both
       eras, the raw wire; `run_app` for the order; an HTTP start that exits 5 before binding); the
       `rcac-mcp` command once. New cases
       `capability-load-failure-swallowed` (the loader skips a failing entry point) and

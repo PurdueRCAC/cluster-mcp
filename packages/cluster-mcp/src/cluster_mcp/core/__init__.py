@@ -22,6 +22,7 @@ from cmdkit.logging import Logger, level_by_name, logging_styles
 
 # Internal libs
 from cluster_mcp.core.server import create_mcp_server
+from cluster_mcp.core.capabilities import CapabilityLoadError, installed
 from cluster_mcp.core import site as site_context
 from cluster_mcp.core.site import DEFAULT_BUDGET
 from cluster_mcp.core.executor.ssh import connect_failure_message
@@ -185,6 +186,9 @@ class MCPServerApp(Application):
             print(generate_token(secret, self.lifetime, self.subject))
             return
 
+        # Load every installed capability before the mode ladder: one that cannot load stops startup
+        self._load_capabilities()
+
         # Determine execution mode
         exec_mode = self._resolve_exec_mode()
         log.info(f'Execution mode: {exec_mode}')
@@ -221,6 +225,20 @@ class MCPServerApp(Application):
             # Clean up executor (if any)
             if executor:
                 executor.close()
+
+    def _load_capabilities(self) -> None:
+        """Load every installed capability, or report the one that cannot load and refuse to start.
+
+        The refusal takes the path a failed SSH connect takes: nothing is built, registered or served,
+        and the message, `cannot load capability <distribution>: <cause>`, is reported as
+        `_report_startup_failure` reports it, then the server exits `exit_status.runtime_error`.
+        """
+        try:
+            installed()
+        except CapabilityLoadError as exc:
+            message = str(exc)
+            self._report_startup_failure(message)
+            raise StartupFailure(message) from exc
 
     def _resolve_exec_mode(self) -> str:
         """Determine execution mode from args or defaults."""

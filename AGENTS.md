@@ -149,10 +149,10 @@ member modules:
 
 | Path | Responsibility |
 |------|----------------|
-| `__init__.py` | `MCPServerApp` (cmdkit `Application`) — all CLI wiring, `APP_HELP`, defaults, `_resolve_exec_mode()`, `_create_executor()`, `main()`, and `legacy_main()`, the deprecated `rcac-mcp` command (one warning, then `main`). **There is no `cli/` package.** |
+| `__init__.py` | `MCPServerApp` (cmdkit `Application`) — all CLI wiring, `APP_HELP`, defaults, `_load_capabilities()` (the capability load, before the ladder), `_resolve_exec_mode()`, `_create_executor()`, `main()`, and `legacy_main()`, the deprecated `rcac-mcp` command (one warning, then `main`). **There is no `cli/` package.** |
 | `__main__.py` | `python -m cluster_mcp.core` shim. |
 | `deprecation.py` | `WINDOW`, the deprecation window of the server's old names, and `legacy_warning()`, the warning a legacy name prints on stderr, once per process per name, never on stdout. |
-| `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
+| `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`) or a capability's load failure (`cannot load capability <distribution>: <cause>`, from `capabilities.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
 | `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a capability resource that is malformed, not marked `executor: True` or at a URI already served (§8). Imports no member. |
@@ -522,6 +522,13 @@ import has no effect.
     The connect bound reaches Fabric (an ssh_config `ConnectTimeout` and an explicit
     `connect_timeout` win), and a loopback listener that never sends a banner is answered "timed
     out" within a lowered bound, well under Paramiko's own 15 s banner wait.
+    `load_refusal_violations`: a planted distribution whose entry point names a missing module,
+    first on `PYTHONPATH`, stops the start with `cannot load capability <distribution>: <cause>`
+    (§4) over the raw wire, with stdin closed, through a real client in each era and through
+    `rcac-mcp` (`test_a_broken_capability_stops_startup`), with nothing the mode ladder says on
+    stderr; `--help` and `--version` still exit 0; in process (`sys.path`, `installed()`'s cache
+    cleared for the test) `_resolve_exec_mode()` is never called; over `http` it exits 5 without
+    serving.
   - `tests/test_isolation.py` (`unit`): `isolation_violations`. Two concurrent calls, each under
     its own delegate identity over HTTP (and, in shared mode, on two servers in one process), each
     run as their own user and get back only their own result. A `Rendezvous` holds both inside the
@@ -1979,6 +1986,15 @@ runs what, where. The current order is:
   <host>: <cause>` once on stderr, answers every `stdio` request with that message as a JSON-RPC
   error until EOF (`startup.py`), and exits `exit_status.runtime_error`; `http` and `sse` log and
   exit. The ladder's order and the missing-host `ValueError` (`bad_argument`) are unchanged.
+- **A capability that cannot load stops startup before the ladder runs.** `run()` calls
+  `installed()` (§7) right after the `--generate-token` branch and before `_resolve_exec_mode()`; a
+  `CapabilityLoadError` takes the same refusal path: `cannot load capability <distribution>:
+  <cause>` once on stderr, that message answering every `stdio` request until EOF (at once when
+  stdin is already closed), then exit `exit_status.runtime_error`; `http` and `sse` log and exit
+  before binding. Nothing is built, registered or served, and no connection is opened, so a broken
+  capability is reported ahead of a missing SSH host. The server never starts with an installed
+  capability silently missing. `--help` and `--version` never reach `run()`, so they work with a
+  broken capability installed (`tests/test_startup.py`).
 
 What each mode means:
 
@@ -2059,8 +2075,9 @@ What each mode means:
 - Every other tool belongs to a **capability**: a distribution that declares one entry point in the
   group **`cluster_mcp.capabilities`**, `<name> = "cluster_mcp.<name>.capability:CAPABILITY"`,
   naming a `Capability(name, order, tools, instructions, resources)` (`capabilities.py`). The
-  Slurm and RCAC members are capabilities. `installed()` loads every one the environment has, once,
-  when a server is built with no capability set given (and once at the top of `tests/conftest.py`);
+  Slurm and RCAC members are capabilities. `installed()` loads every one the environment has, once:
+  when the CLI starts, before the mode ladder (§4), and otherwise when a server is built with no
+  capability set given (and once at the top of `tests/conftest.py`);
   nothing on the import chain of `cluster_mcp.core` loads one, so `--help` and `--version` never do.
   A new capability needs no core edit (`test_a_planted_capability_needs_no_core_edit`).
 - `load()` takes the group's entry points in (distribution, entry-point name) order, never the
@@ -2072,7 +2089,8 @@ What each mode means:
   is malformed, not marked `executor: True` or at a URI already served (§8), or whose instructions
   do not list exactly its tools, each once. The first refusal raises `CapabilityLoadError`,
   `cannot load capability <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back
-  to what it held before the load began.
+  to what it held before the load began. At startup that error stops the server, reported as a
+  failed SSH connect is (§4); nothing catches it to start without the capability.
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;
   `test_installed_finds_every_workspace_member` fails loudly in that state.
