@@ -26,7 +26,9 @@ An installed capability that cannot load takes the same path, with `cannot load 
 names a missing module is planted in a scratch directory put first on `PYTHONPATH` (or `sys.path`
 in process): over the raw wire, with stdin closed, through a real client in each era and through the
 deprecated `rcac-mcp` command, the start is refused, naming it; `--help` and `--version` still work;
-in process the ladder is never consulted; and over HTTP the server exits before it serves.
+in process the ladder is never consulted; and over HTTP the server exits before it serves. Each kind
+of contribution the server would refuse while it is assembled is planted too, and refused at
+startup the same way, over the raw wire, with stdin closed and over HTTP.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ import io
 import json
 import logging
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -56,6 +59,7 @@ import cluster_mcp.core.tools
 from harness import Refused, stdio_refusal
 from cluster_mcp.core import MCPServerApp
 from cluster_mcp.core.startup import answer_until_eof
+from test_capabilities import REJECTED, rejected_package
 from test_cli import CLI, LEGACY_CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
@@ -481,10 +485,10 @@ def broken_env(root: Path) -> dict[str, str]:
 
 
 def load_refusal_violations(status: int, stderr: Sequence[str], stdout: Sequence[str],
-                            lines_in: Sequence[str]) -> list[str]:
-    """Every way a start with the broken capability installed differs from refusing to start for it.
+                            lines_in: Sequence[str], message: str = BROKEN_MESSAGE) -> list[str]:
+    """Every way a start with a capability that cannot load differs from refusing to start for it.
 
-    It exits `exit_status.runtime_error`; stderr reports the message naming the distribution once, and
+    It exits `exit_status.runtime_error`; stderr reports `message`, naming the distribution, once, and
     nothing the mode ladder says, because the load comes before it; stdout carries exactly the answers
     to the requests in `lines_in`, each with that message.
     """
@@ -492,12 +496,13 @@ def load_refusal_violations(status: int, stderr: Sequence[str], stdout: Sequence
     if status != exit_status.runtime_error:
         violations.append(f'exit status {status}, expected {exit_status.runtime_error}')
     reported = [line.split('] ', 1)[-1] for line in stderr if 'cannot load capability' in line]
-    if reported != [BROKEN_MESSAGE]:
-        violations.append(f'stderr does not name the distribution {BROKEN} once with its cause: {list(stderr)[-6:]!r}')
+    if reported != [message]:
+        dist = message.removeprefix('cannot load capability ').split(':', 1)[0]
+        violations.append(f'stderr does not name the distribution {dist} once with its cause: {list(stderr)[-6:]!r}')
     ladder = [line for line in stderr if any(said in line for said in LADDER)]
     if ladder:
         violations.append(f'the mode ladder ran before the capability load: {ladder!r}')
-    violations.extend(startup_refusal_violations(lines_in, stdout, BROKEN_MESSAGE))
+    violations.extend(startup_refusal_violations(lines_in, stdout, message))
     return violations
 
 
@@ -581,3 +586,71 @@ def test_http_load_failure_exits_before_binding(tmp_path: Path) -> None:
     if 'Starting MCP server' in result.stderr or 'Uvicorn running' in result.stderr:
         violations.append(f'the server began serving before it refused: {result.stderr[-400:]!r}')
     assert violations == [], '\n'.join(violations)
+
+
+def run_bounded(args: list[str], stdin: str, env: dict[str, str], timeout: float = 60) -> subprocess.CompletedProcess[str]:
+    """Run `args` under `bin/sandbox.sh` in its own process group, feeding `stdin`; past `timeout`, kill
+    the whole group and fail.
+
+    A server that starts instead of refusing (over HTTP it would serve until killed) leaves nothing
+    running behind the test: `subprocess.run` kills only the sandbox script on a timeout.
+    """
+    proc = subprocess.Popen([str(SANDBOX), *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=env, start_new_session=True)
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        out, err = proc.communicate()
+        pytest.fail(f'the server was still running after {timeout} s instead of refusing to start: {err[-400:]!r}')
+    return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+
+def plant_rejected(root: Path, kind: str) -> tuple[Path, str]:
+    """Plant the `REJECTED` capability `kind` (its package and distribution) under `root`; return the
+    directory to put on the path and the distribution's name."""
+    dist, entry, files = rejected_package(kind)
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    info = root / f"{dist.replace('-', '_')}-0.0.1.dist-info"
+    info.mkdir(parents=True)
+    (info / 'METADATA').write_text(f'Metadata-Version: 2.1\nName: {dist}\nVersion: 0.0.1\n')
+    (info / 'entry_points.txt').write_text(f'[cluster_mcp.capabilities]\n{entry}\n')
+    return root, dist
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('drive', ['raw-wire', 'stdin-closed', 'http'])
+@pytest.mark.parametrize('kind', list(REJECTED))
+def test_a_contribution_the_server_would_refuse_stops_startup(kind: str, drive: str, tmp_path: Path) -> None:
+    # Started in `local` mode, the server would build itself without the load's refusal and fail
+    # there, after the mode ladder, with no answer on stdio; the load refuses first instead.
+    root, dist = plant_rejected(tmp_path / 'planted', kind)
+    held = os.environ.get('PYTHONPATH')
+    env = {**os.environ, 'PYTHONPATH': str(root) + (os.pathsep + held if held else ''),
+           'FASTMCP_CHECK_FOR_UPDATES': 'off'}
+    port = closed_port()
+    argv = [str(CLI), '-e', 'local']
+    argv += ['-t', 'http', '-H', LOOPBACK, '-p', str(port)] if drive == 'http' else []
+    lines_in = RAW_WIRE_IN if drive != 'stdin-closed' else []
+    began = time.monotonic()
+    result = run_bounded(argv, ''.join(line + '\n' for line in lines_in), env)
+    elapsed = time.monotonic() - began
+    stderr = result.stderr.splitlines()
+    reported = [line.split('] ', 1)[-1] for line in stderr if 'cannot load capability' in line]
+    message = reported[0] if reported else ''
+    cause = REJECTED[kind]['cause']
+    violations = [] if message.startswith(f'cannot load capability {dist}: ') and cause in message else \
+        [f'the start was not refused naming {dist} with {cause!r}: status {result.returncode}, {stderr[-6:]!r}']
+    # Over HTTP nothing reads stdin: the requests on it go unanswered, and stdout stays empty.
+    stdout = result.stdout.splitlines() if drive != 'http' else []
+    violations += load_refusal_violations(result.returncode, stderr, stdout, [] if drive == 'http' else lines_in,
+                                          message)
+    if drive == 'http':
+        if result.stdout:
+            violations.append(f'stdout is not empty over http: {result.stdout[:200]!r}')
+        if 'Starting MCP server' in result.stderr or 'Uvicorn running' in result.stderr:
+            violations.append(f'the server began serving before it refused: {result.stderr[-400:]!r}')
+    assert violations == [], '\n'.join(violations)
+    assert elapsed < 30, f'the refusal took {elapsed:.1f} s'

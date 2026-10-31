@@ -163,7 +163,7 @@ member modules:
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`) or a capability's load failure (`cannot load capability <distribution>: <cause>`, from `capabilities.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
-| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a capability resource that is malformed, not marked `executor: True` or at a URI already served (§8). Imports no member. |
+| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a capability resource that is not a well-formed entry, not marked `executor: True`, at a URI already served, or that FastMCP refuses when `serve()` assembles it on the load's scratch server (§7, §8); `serve()` is how every server registers tools and resources. Imports no member. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
@@ -363,7 +363,15 @@ import has no effect.
     truthy), a malformed resource (not a dict, a non-`str` `uri`, `name` or `description`, a handler
     not callable), a resource URI the core, an earlier capability or the capability itself already
     serves. Each is refused in one line naming its distribution, and a failed load leaves
-    `TOOL_REGISTRY` as it was. The core's registry is its two context URIs and its open set exactly
+    `TOOL_REGISTRY` as it was. Every kind of contribution a server would refuse while it is
+    assembled, or would let replace another (`REJECTED`: a URI that is not a URL, a parameter on a
+    static URI, a template its handler does not match, a method, a handler FastMCP cannot mark, two
+    URIs FastMCP keys alike, one keyed as the core's, a tools import registering a non-tool or a tool
+    with no module), is refused at load beside each member set, core only, each member and both
+    (`test_what_a_server_would_refuse_is_refused_at_load`), and so is a URI keyed as an earlier
+    capability's; each resource kind's control registers it on a bare FastMCP server and sees it
+    raise, or, for the two collisions, sees one replace the other; and a capability that loads is
+    served whole, every declared URI under its own key (`test_what_loads_is_served_whole`). The core's registry is its two context URIs and its open set exactly
     those; `cluster://storage` and `rcac://storage` are served exactly when the RCAC capability is
     given (`test_storage_is_served_only_with_the_rcac_capability`), and under every set each
     `rcac://` alias is listed after every `cluster://` URI, one for one, serving what its target
@@ -554,7 +562,11 @@ import has no effect.
     `rcac-mcp` (`test_a_broken_capability_stops_startup`), with nothing the mode ladder says on
     stderr; `--help` and `--version` still exit 0; in process (`sys.path`, `installed()`'s cache
     cleared for the test) `_resolve_exec_mode()` is never called; over `http` it exits 5 without
-    serving.
+    serving. Each `REJECTED` kind, planted the same way and started in `local` mode (where the
+    server would otherwise build itself and fail there, after the ladder, unanswered), is refused
+    naming its distribution over the raw wire, with stdin closed and over `http` before binding
+    (`test_a_contribution_the_server_would_refuse_stops_startup`); each drive runs in its own
+    process group, killed whole if it outlives its bound.
   - `tests/test_isolation.py` (`unit`): `isolation_violations`. Two concurrent calls, each under
     its own delegate identity over HTTP (and, in shared mode, on two servers in one process), each
     run as their own user and get back only their own result. A `Rendezvous` holds both inside the
@@ -2134,13 +2146,26 @@ What each mode means:
   discovery order, and for each loads the entry point, checks it is a well-formed `Capability`,
   imports its `tools` module and attributes to it every registered tool defined in that module or
   below it. It refuses a capability whose entry point or tools module raises, that is not a
-  `Capability`, whose tools import registers a tool outside it, whose name or one of whose tool
-  names is already taken (by the core, or by a capability loaded before it), one of whose resources
-  is malformed, not marked `executor: True` or at a URI already served (§8), or whose instructions
-  do not list exactly its tools, each once. The first refusal raises `CapabilityLoadError`,
-  `cannot load capability <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back
-  to what it held before the load began. At startup that error stops the server, reported as a
-  failed SSH connect is (§4); nothing catches it to start without the capability.
+  `Capability`, whose tools import registers anything but a `FunctionTool` or a tool outside it,
+  whose name or one of whose tool names is already taken (by the core, or by a capability loaded
+  before it), one of whose resources is not a dict with a `str` `uri`, `name` and `description`
+  and a callable `handler`, is not marked `executor: True` or is at a URI already served (§8), or
+  whose instructions do not list exactly its tools, each once. Then it assembles the capability's
+  tools and resources through `serve()`, the one function every server registers them with, on a
+  scratch server that holds the core's and every earlier capability's, and refuses any FastMCP
+  refuses there (a URI that is not a URL, a handler whose parameters do not match its URI, a
+  method, a handler FastMCP cannot mark) or keys as one it already holds (`cluster://a b` beside
+  `cluster://a%20b`, or a served URI with an upper-case scheme or surrounding space, which a
+  served server would let replace one another). Any other exception while loading a capability is
+  refused the same way. The first refusal raises `CapabilityLoadError`, `cannot load capability
+  <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back to what it held before
+  the load began. At startup that error stops the server, reported as a failed SSH connect is (§4);
+  nothing catches it to start without the capability. So whatever a capability declares fails at the
+  load or not at all (`test_what_a_server_would_refuse_is_refused_at_load`,
+  `test_what_loads_is_served_whole`, and each kind driven through the CLI in
+  `test_a_contribution_the_server_would_refuse_stops_startup`). The load does not decide the
+  instructions budget: a base too long for it is refused when the server is built, as a budget too
+  small (§ Configuration), whatever made it long.
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;
   `test_installed_finds_every_workspace_member` fails loudly in that state.
@@ -2179,8 +2204,8 @@ What each mode means:
 - **A capability's resources are never open.** `middleware.py` resolves every read of a URI not in
   the core's `OPEN_RESOURCES`, so a capability resource is gated by construction; `load()` refuses
   one whose `executor` is not exactly `True` rather than serve it gated under a claim that it runs
-  nothing, and refuses a malformed entry or a URI the core or an earlier capability already serves
-  (§7). `create_mcp_server` lists every `cluster://` entry, the core's then each capability's in
+  nothing, and refuses a malformed entry, a URI the core or an earlier capability already serves,
+  and an entry FastMCP refuses or keys as one already served (§7). `create_mcp_server` lists every `cluster://` entry, the core's then each capability's in
   load order, then every alias in the same order.
 - **The `rcac://` URIs are deprecated aliases, derived, never written by hand.** Through the
   deprecation window `rcac://context` and `rcac://storage` are served too, each derived by

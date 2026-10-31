@@ -19,7 +19,7 @@ from starlette.responses import Response, FileResponse
 
 # Internal libs
 from cluster_mcp.core.auth import AUTH_MODES
-from cluster_mcp.core.capabilities import Loaded, composed, installed
+from cluster_mcp.core.capabilities import Loaded, composed, installed, serve
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
 from cluster_mcp.core.middleware import ToolErrorMiddleware
 from cluster_mcp.core.tools import CLOSING_TOOLS, CORE_TOOLS
@@ -143,16 +143,8 @@ def create_mcp_server(
     for route, impl in CUSTOM_ROUTES.items():
         server.custom_route(route, methods=['GET'])(impl)
 
-    for tool in _tools_of(loaded):
-        server.add_tool(tool)
-
-    # Register resources using the @resource decorator approach
-    for resource in _resources_of(loaded):
-        server.resource(
-            resource['uri'],
-            name=resource['name'],
-            description=resource['description'],
-        )(resource['handler'])
+    # Registered as the load assembled each capability, so nothing a capability declares fails here.
+    serve(server, _tools_of(loaded), _resources_of(loaded))
 
     # The error boundary goes before the caller's middleware: FastMCP runs later middleware inside
     # earlier middleware, so the boundary sees whatever the executor middleware raises.

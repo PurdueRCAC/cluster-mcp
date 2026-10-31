@@ -3,10 +3,10 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -20,7 +20,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-extras/verify/p1.sh
+  verify: sh spec/capability-extras/verify/p4.sh && sh spec/capability-extras/verify/p1.sh mutants && uv run python -I spec/capability-extras/remediation/F2-mutant-sweep.py
 - id: P2
   name: The storage resource belongs to the RCAC member; no core module names a member
   status: done
@@ -43,7 +43,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-extras/verify/p3.sh
+  verify: sh spec/capability-extras/verify/p4.sh phase && sh spec/capability-extras/verify/p3.sh phase && sh spec/capability-extras/verify/p3.sh mutants && sh spec/capability-extras/remediation/F1-contribution-refusal.sh
 - id: P4
   name: The extras, the core alone, and the compat root that keeps every tool
   status: done
@@ -62,7 +62,7 @@ phases:
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R9
@@ -72,7 +72,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-extras/verify/p5.sh
+  verify: sh spec/capability-extras/verify/p5.sh && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
 review:
   last_reviewed_commit: '4772784'
   verdict: changes-requested
@@ -199,9 +199,62 @@ per-phase checklists below are the work. `code-build` executes the next actionab
 - [x] AGENTS.md: §7 and §9 rewritten (PLAN §3), the footgun and repository-map rows for
       `tools/__init__.py` and `server.py`, the high-blast-radius list widened with
       `core/capabilities.py` and both `capability.py` files.
-- **Verify:** `sh spec/capability-extras/verify/p1.sh`.
+- **Verify:** `sh spec/capability-extras/verify/p1.sh` (until review cycle 1; see below).
 - **Touches:** `C/capabilities.py`, `C/tools/__init__.py`, `C/server.py`, `S/`, `RC/`, both member
   `pyproject.toml`, `uv.lock` (if it moves), `tests/`, `AGENTS.md`.
+
+### Reopened at review cycle 1 — F2 (R5): a mutant sweep over every decision of the loader
+
+*Amended at remediation (2026-10-31).* REVIEW.md F2: three documented refusals of `load()` survived
+behaviour-changing mutants (the stray-tool refusal, the same-capability duplicate, attribution to
+"that module or below it"). The class is every decision in `C/capabilities.py`, the ones F1's fix
+adds included, so this phase is committed with P3 in one commit, as if `bundle` had been passed: the
+sweep must cover the decisions F1 adds, in the same file.
+
+- [x] Every decision enumerated by parsing the file (each `if`, conditional expression, boolean
+      operator, comparison, comprehension condition, `except` clause and sort key: 41, one per
+      line) and mutated: 56 new cases in `tests/mutants.py` (`capability-message-not-one-line` …
+      `capability-composition-tie-unbroken`), plus the six P1–P3 cases planting into the file, two
+      of them re-anchored where F1 moved their line (`capability-tools-unfiltered` on `serve(...)`
+      in `C/server.py`; `title-at-add-tool` now plants into `C/capabilities.py`, where `serve()`
+      adds each tool), ids and `why` kept. The P1–P3 capability cases gain the rows beside every
+      member set as targets.
+- [x] Each new case's targets are the rows of its killing test beside every member set
+      (`MEMBER_SETS`: core only, slurm, rcac, both; `every_set()` in `tests/mutants.py`), and the
+      sweep runs every case in both eras. New set-wide tests in `tests/test_capabilities.py`, each
+      asserting the whole refusal message: a tool below the tools module attributed to it; a tool in
+      a sibling module sharing its prefix refused as outside it; a tool registered twice by one
+      capability; a tool name taken by the core or an earlier capability; a capability name taken;
+      a resource URI taken by the core, its alias, the capability itself or an earlier one; sixteen
+      malformed capabilities and resources (`MALFORMED`); the three instruction mismatches; a failing
+      capability module and a failing tools module with their causes; a hand-built entry point named
+      by its value; the load order by (distribution, entry-point name); a capability whose tools
+      module was already imported keeps its tools. `load_error()` now fails a test on any exception
+      that is not a `CapabilityLoadError`, so a mutant that lets one escape fails with a reason.
+- [x] Equivalent mutants, recorded with why in the sweep (`EQUIVALENT`) and run against the whole
+      capability selection in both eras to show they pass: `installed()`'s cache dropped (a second
+      load registers nothing new); the scratch assembly of each tool dropped (every tool reaching it
+      has a name the three name refusals already made unique, and FastMCP 4.1.4's `add_tool` refuses
+      only a held key or versioned beside unversioned under one name; kept as the path a later
+      FastMCP's refusal would take); the scratch server without the core's tools (a core-named tool
+      is refused before the assembly); the listing check's duplicate clause dropped (names are
+      distinct by then).
+- **Verify (retuned at remediation):** P1 is earlier than P4, the latest done phase, so its gate is
+  P4's, then the frozen P1 mutants, then the class checker:
+  `sh spec/capability-extras/verify/p4.sh && sh spec/capability-extras/verify/p1.sh mutants && uv run python -I spec/capability-extras/remediation/F2-mutant-sweep.py`.
+  `F2-mutant-sweep.py coverage` fails on any decision of the file no mutant edits (seen red with
+  two cases and one equivalent withheld: lines 221, 229 and 285 reported).
+  *Observed at remediation (2026-10-31), P1 and P3 run together, each distinct step once (P3's
+  `p4.sh phase` is P4's `phase`; `p1.sh mutants` and `p3.sh mutants` are subsets of `p5.sh
+  mutants`, which ran instead):* `p4.sh phase` green (pyprojects, docs, coreonly for core, slurm,
+  rcac and both, probe's five installs and both compares, baseline); `full` 3043 passed and 14
+  skipped in each era (the 14 are the bash 4.1 `need_shell` rows of
+  `test_site.py::test_remote_read_ignores_exported_shell_options`, which CI runs); `p5.sh mutants`
+  122 killed, none survived, 3 controls reported; `F2-mutant-sweep.py`: coverage 41 of 41
+  decisions, 63 of 63 cases killed in each era, the 4 equivalents passing the 555-test capability
+  selection in each era. The three known survivors are killed beside every member set in both
+  eras: `capability-stray-allowed`, `capability-same-capability-duplicate-allowed`,
+  `capability-attribution-exact-module`.
 
 ## Phase P2 — The storage resource belongs to the RCAC member; no core module names a member
 **Satisfies:** R3, R7 · **Depends on:** P1
@@ -251,9 +304,58 @@ with it; the core's resources and open set are its context URIs; the core names 
       `rcac-mcp` command once. New cases
       `capability-load-failure-swallowed` (the loader skips a failing entry point) and
       `capability-load-after-ladder` (the load moved after `_resolve_exec_mode()`).
-- **Verify:** `sh spec/capability-extras/verify/p3.sh`.
+- **Verify:** `sh spec/capability-extras/verify/p3.sh` (until review cycle 1; see below).
 - **Touches:** `C/__init__.py`, `C/startup.py`, `C/capabilities.py` (if a check needs it), `tests/`,
   `AGENTS.md`.
+
+### Reopened at review cycle 1 — F1 (R8, Q5): whatever a capability declares fails at the load or not at all
+
+*Amended at remediation (2026-10-31; the foreman ruled F1 a fix as judge at the human gate on the
+high-blast-radius paths).* REVIEW.md F1: a resource FastMCP rejects passed the load's shape checks
+and failed while the server was built, after the mode ladder, exit 2, unanswered on stdio. The class,
+read off how the server builds tools and resources from a capability: every way FastMCP refuses a
+resource (`server.resource(...)`: a URI that is not a URL, a parameter on a static URI, a template
+its handler does not match, a method's `self`, a handler that cannot carry FastMCP's metadata), two
+URIs FastMCP keys alike (`a b` and `a%20b`, a scheme's case, surrounding space), which a served server
+(`on_duplicate` "warn") would let replace one another silently, and a tools import that registers
+something the load cannot read (not a `FunctionTool`, a tool with no module), which raised out of the
+load uncaught (exit 6, unanswered). Committed with P1 (see P1's amendment).
+
+- [x] `C/capabilities.py`: `serve(server, tools, resources)`, the one way every server registers
+      tools and resources; `create_mcp_server` calls it. `load()` assembles each capability's
+      tools and resources through it on a scratch server (`_scratch()`: the core's tools and
+      resources, `on_duplicate='error'`) that keeps every earlier capability's, and refuses what it
+      refuses: `its resource <uri> cannot be served: <cause>` (`its tool …` likewise). It refuses a
+      registry entry that is not a `FunctionTool`, and turns any other exception while loading a
+      capability into the refusal, rolling the registry back.
+- [x] Pins (each seen red on the unfixed loader): `REJECTED` in `tests/test_capabilities.py`, nine
+      kinds, refused at load beside every member set
+      (`test_what_a_server_would_refuse_is_refused_at_load`, 36 rows); controls showing FastMCP
+      refuses each resource kind on a bare server, and keys each collision as one; a URI keyed as an
+      earlier capability's; a capability that loads served whole. `tests/test_startup.py`
+      `test_a_contribution_the_server_would_refuse_stops_startup`: each kind through the CLI in
+      `local` mode over the raw wire (each request answered, exit 5), with stdin closed (exit 5 at
+      once) and over HTTP (exit 5 before binding), 27 drives, each in its own process group killed
+      whole past its bound. Red first on the unfixed code: 27 of 27 failed — exit 2 for the URL and
+      template kinds, exit 6 for the method, no-metadata and tool kinds, and for the two collisions
+      a server that started and served (exit 0 on stdio; over HTTP it bound and was killed at 60 s).
+- [x] AGENTS.md §7 narrowed to what the load decides (and that the instructions budget is not one
+      of them: a base too long for it is refused at build, as a budget too small, whatever made it
+      long); its restatements in the repository map's `capabilities.py` row, §8's capability-resource
+      bullet and § Testing's `test_capabilities.py` and `test_startup.py` rows follow.
+- **Verify (retuned at remediation):** P3 is earlier than P4, so P4's phase checks, then the frozen
+  P3 checks, then the class checker:
+  `sh spec/capability-extras/verify/p4.sh phase && sh spec/capability-extras/verify/p3.sh phase && sh spec/capability-extras/verify/p3.sh mutants && sh spec/capability-extras/remediation/F1-contribution-refusal.sh`.
+  The checker evaluates the property over a generated domain (19 URIs × 11 handlers, every ordered
+  pair of 11 URIs in one capability and split across two, the two odd tools modules) beside each
+  member set: each case is refused in one line naming its capability, or a server built from what
+  loaded serves every declared resource under its own key. Seen red on the unfixed loader and
+  server (1,233 violations: servers that failed to build with `ValueError`, `ValidationError`,
+  `AttributeError` and `TypeError`, collisions served as one, and loads that raised).
+  *Observed at remediation (2026-10-31), with P1 (see there):* `p3.sh phase` green (planted
+  `broken`'s eleven cases and the HTTP one, planted `extra`, docs p3, P3's tests in both eras);
+  `F1-contribution-refusal.sh` green: 432 accepted and served whole, 1,292 refused naming the
+  capability over 4 member sets, then its pins in both eras.
 
 ## Phase P4 — The extras, the core alone, and the compat root that keeps every tool
 **Satisfies:** R1, R4, R5, R9, R10 · **Depends on:** P3
@@ -340,6 +442,7 @@ steps pass on this head, and every deferral has its record.
   is residual by design, and the FastMCP update check points at its existing seed,
   `issues/fastmcp-update-check.md`.
 - **Touches:** whatever a failing check names; `issues/`, `ROADMAP.md` only for a deferral.
+
 
 ---
 

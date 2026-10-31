@@ -11,7 +11,9 @@ every read of one resolves the caller.
 
 Nothing here runs at import. `installed()` loads every capability the environment has, once, when
 the server starts; a capability that cannot be loaded stops the load with a `CapabilityLoadError`
-naming its distribution, and leaves the tool registry as it was before the load began.
+naming its distribution, and leaves the tool registry as it was before the load began. The load
+assembles each capability's tools and resources on a scratch server through `serve()`, the one way
+every server takes them, so whatever a capability declares fails at the load or not at all.
 """
 
 # Type annotations
@@ -25,14 +27,16 @@ from importlib import import_module
 from importlib.metadata import EntryPoint, entry_points
 
 # External libs
+from fastmcp import FastMCP
 from fastmcp.tools import Tool
+from fastmcp.tools.function_tool import FunctionTool
 
 # Internal libs
 from cluster_mcp.core.resources import RESOURCE_REGISTRY
 from cluster_mcp.core.tools import CORE_TOOLS, TOOL_REGISTRY
 
 # Public interface
-__all__ = ['GROUP', 'Capability', 'Loaded', 'CapabilityLoadError', 'load', 'installed', 'composed']
+__all__ = ['GROUP', 'Capability', 'Loaded', 'CapabilityLoadError', 'serve', 'load', 'installed', 'composed']
 
 
 # The entry-point group every capability distribution declares itself in.
@@ -144,17 +148,45 @@ def _listing_violation(text: str, names: list[str]) -> str | None:
     return 'its instructions ' + ', and '.join(parts)
 
 
+def serve(server: FastMCP, tools: Iterable[Tool], resources: Iterable[dict]) -> None:
+    """Register `tools`, then the resource entries `resources`, on `server`.
+
+    The one way a server takes the core's and each capability's tools and resources. `load()` assembles
+    every capability through it before any server is built, so what FastMCP refuses here is refused at
+    load, naming the capability.
+    """
+    for tool in tools:
+        server.add_tool(tool)
+    for entry in resources:
+        server.resource(entry['uri'], name=entry['name'], description=entry['description'])(entry['handler'])
+
+
+def _scratch() -> FastMCP:
+    """A server holding the core's tools and resources, on which `load()` assembles each capability.
+
+    It refuses a component under a key it already holds, where a served server would let the later
+    replace the earlier with a warning. FastMCP keys a resource by its URI read as a URL, so
+    `cluster://a b` and `cluster://a%20b` are one key, and so are two URIs that differ only in the
+    case of their scheme or in surrounding space.
+    """
+    server = FastMCP(name='cluster-mcp', on_duplicate='error')
+    serve(server, CORE_TOOLS, RESOURCE_REGISTRY)
+    return server
+
+
 def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     """Load the capabilities `eps` name (default: every entry point in `GROUP`), uncached.
 
     They load in order of (distribution, entry-point name), so which failure is reported never
     depends on `sys.path` or directory order. A capability fails to load when its entry point or its
     tools module raises, when it is not a well-formed `Capability` (a resource of it included), when
-    its tools module registers a tool outside itself, when one of its tools, its name or one of its
-    resource URIs is already taken (by the core or by a capability loaded before it), or when its
-    instructions do not list exactly its tools. The first
-    failure raises `CapabilityLoadError`, after `TOOL_REGISTRY` is cut back to what it held before
-    this load began.
+    its tools module registers anything but a `FunctionTool` or a tool outside itself, when one of its
+    tools, its name or one of its resource URIs is already taken (by the core or by a capability
+    loaded before it), when its instructions do not list exactly its tools, or when one of its tools
+    or resources cannot be served: assembled through `serve()` on a scratch server that holds the
+    core's and every earlier capability's, FastMCP refuses it or keys it as one it already holds. Any
+    other exception while loading a capability fails it too. The first failure raises
+    `CapabilityLoadError`, after `TOOL_REGISTRY` is cut back to what it held before this load began.
     """
     found = entry_points(group=GROUP) if eps is None else eps
     ordered = sorted(found, key=lambda ep: (_distribution(ep), ep.name))
@@ -165,6 +197,7 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     uri_owners: dict[str, str] = {}
     names: dict[str, str] = {}
     loaded: list[Loaded] = []
+    scratch = _scratch()
     try:
         for ep in ordered:
             distribution = _distribution(ep)
@@ -179,6 +212,10 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
                 import_module(capability.tools)
             except Exception as exc:
                 raise CapabilityLoadError(distribution, _cause(exc)) from exc
+            odd = [type(entry).__name__ for entry in TOOL_REGISTRY[before:] if not isinstance(entry, FunctionTool)]
+            if odd:
+                raise CapabilityLoadError(distribution, f'importing {capability.tools} registered a {odd[0]}, '
+                                                        f'not a FunctionTool')
             stray = [tool.name for tool in TOOL_REGISTRY[before:]
                      if not _below(tool.fn.__module__, capability.tools)]
             if stray:
@@ -209,6 +246,18 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
             why = _listing_violation(capability.instructions, [tool.name for tool in tools])
             if why:
                 raise CapabilityLoadError(distribution, why)
+            for tool in tools:
+                try:
+                    serve(scratch, (tool,), ())
+                except Exception as exc:
+                    raise CapabilityLoadError(distribution, f'its tool {tool.name!r} cannot be served: '
+                                                            f'{_cause(exc)}') from exc
+            for entry in capability.resources:
+                try:
+                    serve(scratch, (), (entry,))
+                except Exception as exc:
+                    raise CapabilityLoadError(distribution, f'its resource {entry["uri"]!r} cannot be served: '
+                                                            f'{_cause(exc)}') from exc
             names[capability.name] = distribution
             owners.update((tool.name, distribution) for tool in tools)
             uri_owners.update((uri, distribution) for uri in uris)
@@ -216,6 +265,9 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     except CapabilityLoadError:
         del TOOL_REGISTRY[start:]
         raise
+    except Exception as exc:
+        del TOOL_REGISTRY[start:]
+        raise CapabilityLoadError(distribution, _cause(exc)) from exc
     return tuple(loaded)
 
 
