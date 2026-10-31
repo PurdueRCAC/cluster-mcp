@@ -224,7 +224,7 @@ Gate #2 (after design):
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
 | §8's "keep every entry, the alias line and `OPEN_RESOURCES` in this one module" no longer holds for the storage entry (R10 names §7, §9 and § Packaging; §8 is rewritten too) | R7 requires the RCAC member to register `cluster://storage` and its alias | Deriving every capability resource's alias in the core would give a future capability a `rcac://` URI that never existed; computing `OPEN_RESOURCES` from capability entries would edit `middleware.py`'s contract. Read against R7: it does exactly what R7 SHALL; against R10: §8 is described in the same commit too, which R10 does not forbid |
-| On stdio, a capability load failure answers every request with its message until the client closes stdin, then exits 5, rather than exiting the instant it is detected | A stdio client that discards stderr would otherwise see only a closed connection; this is the codebase's one startup-refusal path (the SSH connect failure, §4) | A bare log-and-exit is simpler, but loses the message for exactly the clients R8's "message naming that distribution" is for. Read against R8: the server never builds, registers or serves anything, opens no connection, and its exit is decided at startup; with stdin closed (`< /dev/null`) it exits 5 at once. GOAL leaves "how R8's load failure is … reported" to the plan. **Flagged for the PLAN/TECH sign-off** (the adversarial review read it as a GOAL clarification) |
+| On stdio, a capability load failure answers every request with its message until the client closes stdin, then exits 5, rather than exiting the instant it is detected | A stdio client that discards stderr would otherwise see only a closed connection; this is the codebase's one startup-refusal path (the SSH connect failure, §4) | A bare log-and-exit is simpler, but loses the message for exactly the clients R8's "message naming that distribution" is for. Read against R8: the server never builds, registers or serves anything, opens no connection, and its exit is decided at startup; with stdin closed (`< /dev/null`) it exits 5 at once. GOAL leaves "how R8's load failure is … reported" to the plan. **Settled at the PLAN/TECH sign-off as GOAL Clarification Q5** (2026-10-31) |
 
 ## 4. Rabbit holes (resolved)
 
@@ -293,7 +293,7 @@ Gate #2 (after design):
   - L3, raw-string metadata checks → canonical names, extras as sets, markers evaluated.
   - L4, R8 over HTTP undriven → one HTTP drive that must exit 5 before binding.
   - L5, empty texts, a loose §9 check, an online `uvx` → refused, tightened, `--offline`.
-  The stdio answer-until-EOF reading of R8 stays a plan decision, flagged for sign-off (§3).
+  The stdio answer-until-EOF reading of R8 is GOAL Clarification Q5, ruled at sign-off (§3).
 
 ## 6. Verification strategy
 

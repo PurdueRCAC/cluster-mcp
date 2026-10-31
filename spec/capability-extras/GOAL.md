@@ -141,6 +141,13 @@ it serves today, and nobody running the old install line notices a thing.
   generalization and site-context composition. Whether the RCAC member declares a dependency on
   the Slurm member (several RCAC tools take a Slurm job id) is left to the plan (ruled by the
   foreman, 2026-10-31).
+- **Q5:** How does R8's "exit at startup with a message naming that distribution" behave on stdio,
+  where a client may discard stderr? — **A:** The failure takes the server's existing startup-refusal
+  path, the one an SSH connect failure takes: the server builds, registers and serves nothing, and
+  opens no connection; on stdio it answers every request with the message naming the distribution
+  until the client closes stdin, then exits 5 (at once when stdin is already closed); on HTTP it
+  exits 5 before binding. That is R8's exit, decided at startup (ruled by the foreman at the
+  PLAN/TECH sign-off, 2026-10-31).
 
 ## Related materials
 
