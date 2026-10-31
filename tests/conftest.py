@@ -33,7 +33,12 @@ import _posixsubprocess
 import pytest
 
 import cluster_mcp.core.context
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.executor import launch
+
+# Every installed capability, loaded once before any test module runs: the registry then holds the
+# same tools in the same order whatever a test imports first, and no capability registers twice.
+installed()
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'

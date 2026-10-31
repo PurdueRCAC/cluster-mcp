@@ -1,11 +1,15 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""MCP tool definitions."""
+"""MCP tool definitions: the registry, the decorator that fills it, and the core's own tools.
+
+Importing this package registers the core's tools and nothing else. A capability's tools register
+when `capabilities.load()` imports its tools module, at startup.
+"""
 
 # Type annotations
 from __future__ import annotations
-from typing import List, Callable, Any
+from typing import List, Callable, Any, Final
 
 # Standard libs
 import functools
@@ -15,7 +19,7 @@ import inspect
 from fastmcp.tools import Tool
 
 # Public interface
-__all__ = ['TOOL_REGISTRY', 'mcp_tool']
+__all__ = ['TOOL_REGISTRY', 'CORE_TOOLS', 'CLOSING_TOOLS', 'mcp_tool']
 
 
 # Registry of tool functions for us to add to server later
@@ -72,12 +76,18 @@ def mcp_tool(func: Callable[..., Any]) -> Tool:
     return tool
 
 
-# Import tool modules to trigger registration
-# These imports must come after TOOL_REGISTRY and mcp_tool are defined. The Slurm and RCAC
-# members' modules import only those two names from this package (and modules it does not import).
+# The core's tool modules, imported to register their tools. These imports must come after
+# TOOL_REGISTRY and mcp_tool are defined. A capability's tools module imports only those two names
+# from this package (and modules it does not import).
 from cluster_mcp.core.tools import shell  # noqa: E402, F401
 from cluster_mcp.core.tools import filesystem  # noqa: E402, F401
 from cluster_mcp.core.tools import transfer  # noqa: E402, F401
-from cluster_mcp.rcac import tools as rcac  # noqa: E402, F401
-from cluster_mcp.slurm import tools as slurm  # noqa: E402, F401
+_OPENING = len(TOOL_REGISTRY)
 from cluster_mcp.core.tools import context  # noqa: E402, F401
+
+# Every tool of the core, in registration order: no capability may register one of these names.
+CORE_TOOLS: Final[tuple[Tool, ...]] = tuple(TOOL_REGISTRY)
+
+# The site context tool, which closes the served listing as the site section closes the
+# instructions: every capability's tools are listed before it.
+CLOSING_TOOLS: Final[tuple[Tool, ...]] = CORE_TOOLS[_OPENING:]

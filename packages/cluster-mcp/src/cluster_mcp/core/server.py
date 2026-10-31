@@ -6,7 +6,7 @@
 
 # Type annotations
 from __future__ import annotations
-from typing import Dict, List, Optional, Final, Callable, Awaitable
+from typing import Dict, Iterable, List, Optional, Final, Callable, Awaitable
 
 # Standard libs
 from pathlib import Path
@@ -19,17 +19,17 @@ from starlette.responses import Response, FileResponse
 
 # Internal libs
 from cluster_mcp.core.auth import AUTH_MODES
+from cluster_mcp.core.capabilities import Loaded, composed, installed
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
 from cluster_mcp.core.middleware import ToolErrorMiddleware
-from cluster_mcp.core.tools import TOOL_REGISTRY
+from cluster_mcp.core.tools import CLOSING_TOOLS, CORE_TOOLS
 from cluster_mcp.core.resources import RESOURCE_REGISTRY
 from cluster_mcp.core.site import DEFAULT_BUDGET, SiteContext, compose, register
-from cluster_mcp.rcac.instructions import RCAC_INSTRUCTIONS
-from cluster_mcp.slurm.instructions import SLURM_INSTRUCTIONS
 
 # Public interface
 __all__ = [
-    'create_mcp_server'
+    'base_instructions',
+    'create_mcp_server',
 ]
 
 
@@ -66,9 +66,41 @@ async def serve_icon(request: Request) -> FileResponse:
     return FileResponse(ICON_PATH, media_type="image/x-icon")
 
 
-# The served base, never cut: the generic core, then each member's text, the RCAC-specific overlay
-# last, directly above the site context `compose` appends.
-SERVER_INSTRUCTIONS: Final[str] = '\n\n'.join((CORE_INSTRUCTIONS, SLURM_INSTRUCTIONS, RCAC_INSTRUCTIONS))
+def base_instructions(capabilities: Iterable[Loaded]) -> str:
+    """The served base, never cut: the core's text, then each capability's in composition order.
+
+    Composition order is (order, distribution), so a site overlay such as the RCAC member's sits
+    last, directly above the site context `compose` appends. Every text is joined by a blank line.
+    """
+    texts = [loaded.capability.instructions for loaded in composed(capabilities)]
+    return '\n\n'.join((CORE_INSTRUCTIONS, *texts))
+
+
+def _listed(capabilities: Iterable[Loaded]) -> tuple[Loaded, ...]:
+    """`capabilities` in load order, by distribution: the order their tools and resources are listed in."""
+    return tuple(sorted(capabilities, key=lambda loaded: (loaded.distribution, loaded.capability.name)))
+
+
+def _tools_of(capabilities: Iterable[Loaded]) -> list:
+    """The tools a server for `capabilities` registers, in listing order.
+
+    The core's tools but the site context tool, then each capability's in load order, then the site
+    context tool, which closes the list as the site section closes the instructions.
+    """
+    opening = [tool for tool in CORE_TOOLS if tool not in CLOSING_TOOLS]
+    return [*opening, *(tool for loaded in _listed(capabilities) for tool in loaded.tools), *CLOSING_TOOLS]
+
+
+def _resources_of(capabilities: Iterable[Loaded]) -> list[dict]:
+    """The resource entries a server for `capabilities` registers, in listing order.
+
+    Every `cluster://` entry, the core's then each capability's in load order, then every other
+    entry (the deprecated aliases) in the same order.
+    """
+    entries = [*RESOURCE_REGISTRY,
+               *(entry for loaded in _listed(capabilities) for entry in loaded.capability.resources)]
+    primary = [entry for entry in entries if entry['uri'].startswith('cluster://')]
+    return primary + [entry for entry in entries if not entry['uri'].startswith('cluster://')]
 
 
 def create_mcp_server(
@@ -77,6 +109,7 @@ def create_mcp_server(
     *,
     site: SiteContext,
     budget: int = DEFAULT_BUDGET,
+    capabilities: Optional[Iterable[Loaded]] = None,
 ) -> FastMCP:
     """
     Create and configure the MCP server.
@@ -86,13 +119,16 @@ def create_mcp_server(
         middlewares: Optional list of FastMCP Middleware instances to add.
         site: The site context read at startup; the server never reads it again.
         budget: The most characters the composed instructions may take.
+        capabilities: The loaded capabilities to serve, in any order; None serves every installed one
+            (`installed()`). No flag or environment variable reaches it: installation is the switch.
 
     Returns:
         Configured FastMCP server instance.
     """
+    loaded = installed() if capabilities is None else tuple(capabilities)
     server = FastMCP(
         name='cluster-mcp',
-        instructions=compose(SERVER_INSTRUCTIONS, site, budget),
+        instructions=compose(base_instructions(loaded), site, budget),
         auth=AUTH_MODES[auth_mode](),
         icons=[
             Icon(
@@ -107,11 +143,11 @@ def create_mcp_server(
     for route, impl in CUSTOM_ROUTES.items():
         server.custom_route(route, methods=['GET'])(impl)
 
-    for tool in TOOL_REGISTRY:
+    for tool in _tools_of(loaded):
         server.add_tool(tool)
 
     # Register resources using the @resource decorator approach
-    for resource in RESOURCE_REGISTRY:
+    for resource in _resources_of(loaded):
         server.resource(
             resource['uri'],
             name=resource['name'],

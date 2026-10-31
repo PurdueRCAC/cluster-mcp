@@ -32,7 +32,8 @@ era: revision 2026-07-28 deprecates HTTP+SSE, and a 2026-07-28 client that reach
 falls back to the handshake. It is still served, so `-t sse` stays.
 
 It serves **both MCP protocol eras** with no configuration: a client on a handshake revision
-(2024-11-05 through 2025-11-25) completes `initialize` and gets `SERVER_INSTRUCTIONS` in its
+(2024-11-05 through 2025-11-25) completes `initialize` and gets the served instructions (the base
+composed from the loaded capabilities, then the site context, § Invariants §9) in its
 `InitializeResult`; a client on revision **2026-07-28** is answered on `server/discover`, gets the
 same instructions in its `DiscoverResult`, and never sends `initialize`. Both list the same tools.
 
@@ -136,8 +137,8 @@ portion of the `cluster_mcp` namespace package, which is a pure PEP 420 namespac
 | Member | Distribution | Package | Holds |
 |--------|--------------|---------|-------|
 | `packages/cluster-mcp/` | `cluster-mcp` | `cluster_mcp.core` | the server, the CLI, the execution backends and the generic tools (the table below) |
-| `packages/cluster-mcp-slurm/` | `cluster-mcp-slurm` | `cluster_mcp.slurm` | `tools.py`: the Slurm tools; `instructions.py`: their part of the served instructions |
-| `packages/cluster-mcp-rcac/` | `cluster-mcp-rcac` | `cluster_mcp.rcac` | `tools.py`: the Purdue RCAC tools; `instructions.py`: the RCAC-specific overlay on the served instructions |
+| `packages/cluster-mcp-slurm/` | `cluster-mcp-slurm` | `cluster_mcp.slurm` | `capability.py`: the capability its `cluster_mcp.capabilities` entry point names; `tools.py`: the Slurm tools; `instructions.py`: their part of the served instructions |
+| `packages/cluster-mcp-rcac/` | `cluster-mcp-rcac` | `cluster_mcp.rcac` | `capability.py`: the capability its `cluster_mcp.capabilities` entry point names; `tools.py`: the Purdue RCAC tools; `instructions.py`: the RCAC-specific overlay on the served instructions |
 
 Each member keeps its code under `src/cluster_mcp/<member>/`, beside its own `pyproject.toml` and a
 short `README.md`. The root `pyproject.toml` is the workspace root and the code-less compat
@@ -152,8 +153,9 @@ member modules:
 | `__main__.py` | `python -m cluster_mcp.core` shim. |
 | `deprecation.py` | `WINDOW`, the deprecation window of the server's old names, and `legacy_warning()`, the warning a legacy name prints on stderr, once per process per name, never on stdout. |
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
-| `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers tools/resources/middleware/custom routes. Home of **`SERVER_INSTRUCTIONS`**, the agent-facing contract: the join of the three instructions texts (§9). |
+| `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
+| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). Imports no member. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
@@ -166,13 +168,15 @@ member modules:
 | `executor/shell.py` | `LocalShellExecutor` — the launcher's program under the pinned login bash, as the server's user. Development only. |
 | `executor/delegate.py` | `DelegatingExecutor` + `load_user_map()` — `sudo -n -H -u <user>` on behalf of an authenticated identity; commands and transfers both run as that user. |
 | `scripts.py` | `FIXED_SCRIPTS`, `fixed()` and `script_argv()`: the constant bash scripts a tool or resource runs when one call needs a redirection or two steps, every caller value only a positional parameter. The tool tests refuse any other shell text. |
-| `tools/__init__.py` | `TOOL_REGISTRY`, the `@mcp_tool` decorator, and the **import list that makes registration happen**: the core's tool modules and the members' `cluster_mcp.rcac.tools` and `cluster_mcp.slurm.tools`. |
+| `tools/__init__.py` | `TOOL_REGISTRY`, the `@mcp_tool` decorator, the core's own tool modules (imported at the bottom, which registers them) and `CORE_TOOLS` / `CLOSING_TOOLS`, the core's tools and the site context tool that closes the served list. It imports no member: a capability's tools register when `capabilities.load()` imports its tools module (§7). |
 | `tools/{shell,filesystem,transfer}.py` | Generic backend-agnostic tools: `run_command`, directory/file read+write (`write_file` byte-exact, its content through the executor's `write`, `encoding` `utf-8` or `base64`), `upload_file`/`download_file` (returning the path the executor wrote). |
 | `tools/context.py` | `cluster_context`: the site context read at startup, in full; runs nothing and needs no executor. |
 | `cluster_mcp.slurm.tools` | The Slurm member (`packages/cluster-mcp-slurm/src/cluster_mcp/slurm/tools.py`): `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`. |
 | `cluster_mcp.slurm.instructions` | `SLURM_INSTRUCTIONS`, the Slurm snippet of the served instructions: every Slurm member tool. Imports nothing. |
+| `cluster_mcp.slurm.capability` | `CAPABILITY`: name `slurm`, order 100, tools `cluster_mcp.slurm.tools`, text `SLURM_INSTRUCTIONS`. The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 | `cluster_mcp.rcac.tools` | The RCAC member (`packages/cluster-mcp-rcac/src/cluster_mcp/rcac/tools.py`), Purdue-specific: `myquota`, `storage_paths` (its body the undecorated `resolve_storage_paths()`, which `cluster://storage` also calls), `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`, and RCAC's Slurm extensions `slist`/`sfeatures`. |
 | `cluster_mcp.rcac.instructions` | `RCAC_INSTRUCTIONS`, the overlay on the served instructions: first line `RCAC-specific tools:`, then every RCAC member tool and `cluster://storage`. Imports nothing. |
+| `cluster_mcp.rcac.capability` | `CAPABILITY`: name `rcac`, order 900 (the overlay sorts last), tools `cluster_mcp.rcac.tools`, text `RCAC_INSTRUCTIONS`. The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 
 Five repo-level paths sit outside the members: **`bin/sandbox.sh`** — the throwaway-environment
 helper every CLI drive runs under (§ Factory → Throwaway environment); **`bin/audit_lock.py`** — the
@@ -316,24 +320,43 @@ import has no effect.
     unless the git on PATH runs (`git --version` exits 0), and never skips on CI (its own test
     catches every outcome, so it cannot skip itself).
     `EXPECTED_TOOLS` is hard-coded, so a tool change edits it in the same
-    commit as `SERVER_INSTRUCTIONS` and the README (§ Invariants §9).
+    commit as its capability's instructions text and the README (§ Invariants §9). The served
+    tools are also exactly the core's and those of every capability that loaded.
   - `tests/test_instructions.py` (`unit`): `instruction_violations`, `guidance_violations`,
-    `NON_TOOL_TERMS`. `SERVER_INSTRUCTIONS`, both as the constant and as served (what a harness
-    client receives on connecting, `served_instructions`), lists exactly the
-    registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
+    `NON_TOOL_TERMS`. The base (`base_instructions(installed())`, `SERVER_INSTRUCTIONS` in the
+    module), both as composed and as served (what a harness client receives on connecting,
+    `served_instructions`), lists exactly the registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
     search — that is the separate `rcac-docs-mcp` service, which only the README points to. This
     is §9 made executable; it reads list entries and backticked or snake_case names, so a tool
     whose name is a plain word, mentioned in bare prose, escapes it. `test_base_leaves_room_for_the_site`
-    holds `SERVER_INSTRUCTIONS` to 1,500 UTF-16 code units, so the default budget has room for site
-    rules (§8, §9). The base's three texts (`tools_by_member`, `listing_violations`,
-    `core_violations`, `base_violations`, each with its drift control): every registered tool
-    belongs to the core, the Slurm or the RCAC member (the `cluster_mcp.<member>` module its
-    function was defined in); `CORE_INSTRUCTIONS` names neither RCAC nor Purdue, in any case, nor any
-    RCAC member tool, and lists exactly the core's tools; `RCAC_INSTRUCTIONS` opens
-    `RCAC-specific tools:` and lists exactly the RCAC member's, `SLURM_INSTRUCTIONS` exactly the
-    Slurm member's, each once; `SERVER_INSTRUCTIONS` is core, Slurm and overlay joined by a blank
-    line, and the served instructions open with it, uncut, directly above the site context
-    (`test_base_is_core_slurm_then_overlay`).
+    holds the base to 1,500 UTF-16 code units, so the default budget has room for site
+    rules (§8, §9). The base's texts, each member's read from its loaded capability
+    (`tools_by_member`, `listing_violations`, `core_violations`, `base_violations`, each with its
+    drift control): every registered tool belongs to the core or a loaded capability's member (the
+    `cluster_mcp.<member>` module its function was defined in); `CORE_INSTRUCTIONS` names neither
+    RCAC nor Purdue, in any case, nor any RCAC member tool, and lists exactly the core's tools; the
+    RCAC capability's text opens `RCAC-specific tools:` and lists exactly the RCAC member's, the
+    Slurm capability's exactly the Slurm member's, each once; the base is the core's text, then each
+    loaded capability's in composition order (order, then distribution), joined by a blank line,
+    the overlay last, and the served instructions open with it, uncut, directly above the site
+    context (`test_base_is_core_slurm_then_overlay`).
+  - `tests/test_capabilities.py` (`unit`): the capability contract (§7, §9). `installed()` finds
+    exactly the workspace members beside the core, each from its own distribution, so a stale
+    editable install fails here (`test_installed_finds_every_workspace_member`); `composed()`
+    orders by `(order, distribution)` whatever order capabilities are found or given in; a server
+    built for each capability set (none, each, both, both reversed) serves the core's tools and
+    exactly the given capabilities', listed in load order with `cluster_context` last, and a base
+    that lists exactly the tools it serves. Load failures are planted as scratch distributions
+    (`Distribution.at`, the directory first on `sys.path`), never as edits to the tree: a missing
+    or raising module, a missing attribute, a wrong type or field, a hand-built entry point with no
+    distribution, a failing tools module, a duplicate tool or capability name, a text that does not
+    list exactly its tools. Each is refused in one line naming its distribution, and a failed load
+    leaves `TOOL_REGISTRY` as it was. A planted capability with a tool and a resource is discovered
+    and served beside the members, its text placed by its order, with no core edit. No core module
+    imports a member by name (`member_import_violations`, an AST scan of every core module but
+    `resources.py`, whose storage handler still imports the RCAC member's helper, §7).
+    `tests/conftest.py` calls `installed()` once at import, so every test sees the same registry,
+    in the same order, whatever it imports first.
   - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
     read on a planted directory: every regular `*.md` file directly in it but `AGENTS.md` (dotfiles,
     `.md`, a space, `-n.md` and `end 0.md` included; `Upper.MD`, a `.txt`, a whitespace-only file, a
@@ -436,7 +459,7 @@ import has no effect.
     return the startup text for every site state (files, missing, empty, unreadable, timed out) on
     bare and shared servers in both eras, and no executor runs; two delegate users over HTTP, whose
     stub `DelegatingExecutor`s report one hostname, get identical text and instructions and launch
-    no `sudo`; the served instructions are `compose(SERVER_INSTRUCTIONS, site)`; nothing reads the
+    no `sudo`; the served instructions are `compose(base_instructions(installed()), site)`; nothing reads the
     site after construction, and a directory rewritten and grown mid-session changes nothing served;
     in `delegate` mode an identity absent from the user map is refused the tool and still gets the
     instructions and the resource (§8), and a read of the resource answers, in both eras, with no
@@ -736,7 +759,7 @@ import has no effect.
     (`test_client_era_is_served[<era>-<memory|http>]`): a handshake-era client gets an
     `InitializeResult` and the server sees `initialize` and no `server/discover`; a 2026-07-28 client
     gets no `InitializeResult` and the server sees `server/discover` and no `initialize`; each
-    receives `SERVER_INSTRUCTIONS` and lists exactly `EXPECTED_TOOLS` (§9). The delegate contracts
+    receives the composed base and lists exactly `EXPECTED_TOOLS` (§9). The delegate contracts
     (isolation, the tokenless refusal, a foreign token's 401) also run in the modern era on every
     run (§1, §5, §6). The identity the delegate middleware stores in the context state is visible
     to its own tool call, or its own read, and to no later request on the same session, in either
@@ -1231,7 +1254,7 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   ["packages/*"]` in the root `pyproject.toml`: `packages/cluster-mcp` (`cluster-mcp`, the core,
   `cluster_mcp.core`), `packages/cluster-mcp-slurm` (`cluster-mcp-slurm`, `cluster_mcp.slurm`) and
   `packages/cluster-mcp-rcac` (`cluster-mcp-rcac`, `cluster_mcp.rcac`). The core depends on both
-  members (a default install serves every tool: its tool registry imports them) and each member on
+  members (a default install serves every tool: each member registers through its entry point, § Invariants §7) and each member on
   the core, every internal requirement a bare name with a `{ workspace = true }` source, so a git
   install with `#subdirectory=packages/cluster-mcp` builds the siblings from the same commit. `uv
   sync` installs every member, editable.
@@ -1279,7 +1302,7 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
 - A **container build does exist locally**: `Dockerfile` + `compose.yml` (+ `nginx-dev.conf` for the
   TLS dev proxy), documented in `README.md` § *Docker Compose with TLS*. `compose.yml` pins the
   server's argv (`-t http -H 0.0.0.0 -p 8000 -a jwt`), so a change to a CLI flag name or default is
-  a change to those files too — same same-commit rule as `SERVER_INSTRUCTIONS` and the README.
+  a change to those files too — same same-commit rule as the instructions texts and the README.
 
 ## Working on this codebase as an agent
 
@@ -1567,12 +1590,18 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
   host §4's rung 3 reads and the user map §5 loads; a mistake there selects the wrong host or map
 - `packages/cluster-mcp/src/cluster_mcp/core/instructions.py`,
   `packages/cluster-mcp-slurm/src/cluster_mcp/slurm/instructions.py` and
-  `packages/cluster-mcp-rcac/src/cluster_mcp/rcac/instructions.py` — the texts of
-  `SERVER_INSTRUCTIONS`, moved out of `server.py` (§9)
+  `packages/cluster-mcp-rcac/src/cluster_mcp/rcac/instructions.py` — the texts of the served base,
+  moved out of `server.py` (§9)
+- `packages/cluster-mcp/src/cluster_mcp/core/capabilities.py` — decides which capabilities load,
+  which tools each registers and the order of the base's texts (§7, §9)
+- `packages/cluster-mcp-slurm/src/cluster_mcp/slurm/capability.py` and
+  `packages/cluster-mcp-rcac/src/cluster_mcp/rcac/capability.py` — each selects its member's tools
+  module, its text and the text's place in the base (§9)
 
 The `src/rcac_mcp/` entries are these files' homes before the workspace move, kept because the list
 only widens. These are the files where a mistake executes someone else's command, executes as the wrong user, or
-executes on the wrong machine, but for the three `instructions.py` entries: they hold the base's
+executes on the wrong machine, but for the three `instructions.py` entries and the three that load
+and place them (`capabilities.py` and the two `capability.py`): they hold or compose the base's
 text, which left `server.py` for them, so the list widened to follow it, and a mistake there
 misleads every model rather than running anything. Everything else in the tree is a leaf.
 
@@ -1651,9 +1680,15 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   and builds the exec string (refusing an oversize one) before connecting; the SFTP `~` mapping
   (`_remote`).
 - **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder.
-- **`server.py`** — `SERVER_INSTRUCTIONS` (what every model reads; its texts are the members'
-  `instructions.py`, §9) and import-time `MCP_BASE_URL`.
-- **`tools/__init__.py`** — the bottom-of-file import list; a missing entry silently drops a tool.
+- **`server.py`** — `base_instructions()` (what every model reads; its texts are the core's and
+  each loaded capability's, §9), the listing order `create_mcp_server` keeps (the core's tools,
+  each capability's by distribution, `cluster_context` last), and import-time `MCP_BASE_URL`.
+- **`tools/__init__.py`** — the core's tool modules, imported at the bottom, and the
+  `CORE_TOOLS` / `CLOSING_TOOLS` snapshots taken after them; a member import here would register
+  its tools whether or not its capability loads (§7).
+- **`capabilities.py`** — `installed()` is the one load: a second `load()` of the same capabilities
+  registers nothing new, and a member whose editable install was not re-synced after its entry
+  point was added is silently absent (§7).
 - **`site.py`** — the per-server holder (`register`/`site_of`, a `WeakKeyDictionary` keyed by the
   server object): the site context is set once at construction and read by that server's tool and
   resource, never per user and never keyed by hostname, never one module value (two servers in one
@@ -2006,11 +2041,31 @@ What each mode means:
   `<home>/oauth-proxy/<key-fingerprint>/` (`<home>` is FastMCP's home directory), and the new store
   does not read the old one, so every client registered before the upgrade must register again.
 
-### 7. Tool registration is an import-time side effect (`tools/__init__.py`)
+### 7. Tool registration is a startup load through the entry-point group (`capabilities.py`, `tools/__init__.py`)
 
-- `TOOL_REGISTRY` and `mcp_tool` are defined **first**, then each tool module is imported at the
-  bottom of the file. `@mcp_tool` appends at decoration time, so **a tool module missing from that
-  import list registers nothing and fails silently** — no error, just an absent tool.
+- `TOOL_REGISTRY` and `mcp_tool` are defined **first** in `tools/__init__.py`; the core's own tool
+  modules are imported at the bottom of the file, and `CORE_TOOLS` and `CLOSING_TOOLS` record what
+  they registered. `@mcp_tool` appends at decoration time. **No core module imports a member**
+  (`tests/test_capabilities.py::test_core_imports_no_member`).
+- Every other tool belongs to a **capability**: a distribution that declares one entry point in the
+  group **`cluster_mcp.capabilities`**, `<name> = "cluster_mcp.<name>.capability:CAPABILITY"`,
+  naming a `Capability(name, order, tools, instructions, resources)` (`capabilities.py`). The
+  Slurm and RCAC members are capabilities. `installed()` loads every one the environment has, once,
+  when a server is built with no capability set given (and once at the top of `tests/conftest.py`);
+  nothing on the import chain of `cluster_mcp.core` loads one, so `--help` and `--version` never do.
+  A new capability needs no core edit (`test_a_planted_capability_needs_no_core_edit`).
+- `load()` takes the group's entry points in (distribution, entry-point name) order, never the
+  discovery order, and for each loads the entry point, checks it is a well-formed `Capability`,
+  imports its `tools` module and attributes to it every registered tool defined in that module or
+  below it. It refuses a capability whose entry point or tools module raises, that is not a
+  `Capability`, whose tools import registers a tool outside it, whose name or one of whose tool
+  names is already taken (by the core, or by a capability loaded before it), or whose instructions
+  do not list exactly its tools, each once. The first refusal raises `CapabilityLoadError`,
+  `cannot load capability <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back
+  to what it held before the load began.
+- **A capability with no entry point in the group is never loaded.** An editable member whose entry
+  point was added without a `uv sync` has none, so the server silently serves without it;
+  `test_installed_finds_every_workspace_member` fails loudly in that state.
 - **`@mcp_tool` replaces the function with a `fastmcp.tools.function_tool.FunctionTool`, which is
   not callable** (the function itself is behind its `.fn`, a wrapper that first refuses any string
   argument, or string element of a list argument, holding a lone surrogate, with an error naming
@@ -2144,23 +2199,34 @@ What each mode means:
 
 ### 9. The agent-facing surface is part of the API (`server.py`) [human gate]
 
-- **The served instructions are `SERVER_INSTRUCTIONS` followed by the site context** (§8), composed
-  once by `create_mcp_server(…, site=…, budget=…)` within the instructions budget (§ Configuration;
-  default 4096, Claude Code's cut). `SERVER_INSTRUCTIONS` is the base: it is never cut, and §9's
-  rules below govern it alone, not the site's text after it.
-- **The base is three texts, each in an import-free leaf module of its member**, joined by a blank
-  line in this order: `CORE_INSTRUCTIONS` (`cluster_mcp/core/instructions.py`), the generic core,
-  which names neither RCAC nor Purdue nor any RCAC member tool and lists the core's own tools;
-  `SLURM_INSTRUCTIONS` (`cluster_mcp/slurm/instructions.py`), the Slurm member's tools; and
-  `RCAC_INSTRUCTIONS` (`cluster_mcp/rcac/instructions.py`), the overlay, whose first line labels it
-  `RCAC-specific tools:` and which sits last, directly above the site context. Each text lists
-  exactly the tools its member registers, each once; a tool belongs in the text of the member whose
-  module defines it (`tests/test_instructions.py`, § Testing).
+- **The served instructions are the base followed by the site context** (§8), composed once by
+  `create_mcp_server(…, site=…, budget=…)` within the instructions budget (§ Configuration;
+  default 4096, Claude Code's cut). The base, `base_instructions()` (`server.py`), is never cut, and
+  §9's rules below govern it alone, not the site's text after it.
+- **The base is the core's text, then each loaded capability's, in composition order.**
+  `CORE_INSTRUCTIONS` (`cluster_mcp/core/instructions.py`) is the generic core, which names neither
+  RCAC nor Purdue nor any RCAC member tool and lists the core's own tools. After it, joined by a
+  blank line, comes the `instructions` of each capability loaded through the entry-point group
+  `cluster_mcp.capabilities` (§7), sorted by the capability's `order`, ties by distribution name
+  (`composed()`): the Slurm member's `SLURM_INSTRUCTIONS` (`cluster_mcp/slurm/instructions.py`,
+  order 100), then the RCAC member's overlay, `RCAC_INSTRUCTIONS`
+  (`cluster_mcp/rcac/instructions.py`, order 900), whose first line labels it
+  `RCAC-specific tools:` and which sits last, directly above the site context. Each text lives in
+  an import-free leaf module of its member, and its capability carries it. With every member
+  installed the base is the same text, byte for byte, as when the core imported the three by name.
+  Each text lists exactly the tools its capability registers, each once: `load()` refuses one that
+  does not (§7), and `tests/test_instructions.py` and `tests/test_capabilities.py` cross-check the
+  served base against the served tools under every capability set (§ Testing).
+- **The listings keep their own order**, the load order: the core's tools but `cluster_context`,
+  then each capability's in distribution order (`cluster-mcp-rcac` before `cluster-mcp-slurm`),
+  then `cluster_context`; and every `cluster://` resource, the core's then each capability's, before
+  every `rcac://` alias, in the same order.
 - The server's name, in the serverInfo every client receives in either era, is `cluster-mcp`
   (`FastMCP(name=…)` in `server.py`; pinned by `test_server_identifies_as_cluster_mcp`).
-- `SERVER_INSTRUCTIONS` (`server.py`) is what every connecting model reads before choosing a tool.
-  **Adding, renaming, or removing a tool — any tool change — updates `SERVER_INSTRUCTIONS` (the
-  text of the tool's member) in the same commit** — a tool the instructions do not mention is a
+- The base is what every connecting model reads before choosing a tool.
+  **Adding, renaming, or removing a tool — any tool change — updates the instructions text of the
+  tool's capability (its member's `instructions.py`, or `CORE_INSTRUCTIONS` for a core tool) in the
+  same commit** — a tool the instructions do not mention is a
   tool agents will not reach for, and an instruction naming a tool that no longer exists is a
   hallucination the server itself induced.
 - The same commit also updates the tool inventory in `README.md`, which is what a human reads before
@@ -2184,8 +2250,8 @@ What each mode means:
   `description` and `properties.extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo`
   this way, `agents-d-instructions` changed `instructions`, `tools.cluster_context` and
   `resources.rcac://context.description`, `sbatch-script-name-collision` changed
-  `sbatch.description`, and `rename-to-cluster-mcp` changed `instructions` (the base became the
-  three texts above) and added the `resources.cluster://context` and `resources.cluster://storage`
+  `sbatch.description`, and `rename-to-cluster-mcp` changed `instructions` (the base became the core's,
+  the Slurm member's and the RCAC member's texts) and added the `resources.cluster://context` and `resources.cluster://storage`
   keys, each a copy of its `rcac://` entry (§8); its third delta, the server name, is not in the
   fixture's shape and is pinned by `test_server_identifies_as_cluster_mcp`.
 

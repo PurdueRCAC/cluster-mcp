@@ -3,7 +3,8 @@
 
 """The Slurm member's part of the served instructions: every tool this member registers.
 
-This module imports nothing, so the core can import it without a cycle.
+This module imports nothing. The member's capability (`capability.py`) carries the text to the
+core, which places it in the base by the capability's order.
 """
 
 SLURM_INSTRUCTIONS = """\

@@ -12,7 +12,7 @@ dependencies = [
     # Direct for its floor: from 3.2 Paramiko names a link closed during authentication apart from a
     # refused one, which `executor/ssh.py` (`PARAMIKO_FLOOR`) relies on; Fabric allows older.
     "paramiko>=3.2",
-    # The capability members a default install carries: the core's tool registry imports them.
+    # The capability members a default install carries; each registers through its entry point.
     "cluster-mcp-slurm",
     "cluster-mcp-rcac",
 ]

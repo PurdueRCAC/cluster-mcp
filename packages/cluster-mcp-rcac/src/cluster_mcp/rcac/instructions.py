@@ -4,7 +4,8 @@
 """The RCAC member's overlay on the served instructions: every tool this member registers.
 
 The overlay is labelled RCAC-specific on its first line and comes last in the base, directly above
-the site context. This module imports nothing, so the core can import it without a cycle.
+the site context, by its capability's order. This module imports nothing. The member's capability
+(`capability.py`) carries the text to the core.
 """
 
 RCAC_INSTRUCTIONS = """\

@@ -21,7 +21,7 @@ the boundary catches `Exception`, not `BaseException`, around either.
 **Both protocol eras, each pinned.** A client on a handshake revision completes `initialize`; a
 client on revision 2026-07-28 is answered on `server/discover` and never sends `initialize`. Each
 receives the base instructions composed with the harness's site context (`SERVER_INSTRUCTIONS`
-here) and lists exactly `EXPECTED_TOOLS`, in memory and over HTTP, whatever era the run selected. What each end saw is read through `negotiate`, and
+here, the base composed from every installed capability) and lists exactly `EXPECTED_TOOLS`, in memory and over HTTP, whatever era the run selected. What each end saw is read through `negotiate`, and
 `era_violations` decides. The delegate contracts (isolation, the tokenless refusal, a foreign
 token's 401) also run in the modern era on every run, so the default handshake-era pass does not
 leave them unproven there.
@@ -50,15 +50,17 @@ from harness import (MODERN_VERSION, SITE, STORAGE_URIS, Negotiated, Outcome, Re
                      StateProbe, call, call_http, delegate_server, drive, http_client, in_memory, mint, negotiate,
                      protocol_error, read_resource, rejection_status, scheme, select_era, serving, session_era,
                      shared_server, tool_names, user_map)
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.middleware import ToolErrorMiddleware
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS as BASE
+from cluster_mcp.core.server import base_instructions
 from cluster_mcp.core.site import compose
 from test_isolation import isolation_violations, launched_as
 from test_no_executor import NO_EXECUTOR, refusal_violations, report
 from test_registry import EXPECTED_TOOLS
 
-# What every harness server serves: the base instructions and the harness's site context.
-SERVER_INSTRUCTIONS = compose(BASE, SITE)
+# What every harness server serves: the base composed from every installed capability, and the
+# harness's site context.
+SERVER_INSTRUCTIONS = compose(base_instructions(installed()), SITE)
 
 
 def boundary_violations(outcome: Outcome | None, raised: BaseException | None, expected: str) -> list[str]:

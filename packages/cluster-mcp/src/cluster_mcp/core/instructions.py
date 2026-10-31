@@ -3,8 +3,9 @@
 
 """The generic core of the served instructions: the core's own tools and its context resource.
 
-The served base is this text, then each member's (`server.py` joins them). It names no site and no
-tool a member registers. This module imports nothing, so any module can import it without a cycle.
+The served base is this text, then each loaded capability's (`server.base_instructions` joins
+them). It names no site and no tool a capability registers. This module imports nothing, so any
+module can import it without a cycle.
 """
 
 CORE_INSTRUCTIONS = """\

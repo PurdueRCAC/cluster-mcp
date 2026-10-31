@@ -6,12 +6,12 @@ appetite: big
 status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-10-31'
 phases:
 - id: P1
   name: The capability contract; Slurm and RCAC register through the entry-point group
-  status: pending
+  status: done
   satisfies:
   - R2
   - R5
@@ -169,21 +169,21 @@ per-phase checklists below are the work. `code-build` executes the next actionab
 **Goal:** the core composes tools and base instructions from the capabilities loaded through
 `cluster_mcp.capabilities` at startup; with every member installed the surface is today's.
 
-- [ ] `C/capabilities.py` (new): `GROUP`, `Capability`, `Loaded`, `CapabilityLoadError`, `load()`,
+- [x] `C/capabilities.py` (new): `GROUP`, `Capability`, `Loaded`, `CapabilityLoadError`, `load()`,
       `installed()`, `composed()` as PLAN §2.1 — the type checks, a failing `ep.load()` or tools
       import, tool attribution by module, the instructions-list-exactly-its-tools check, the
       duplicate tool and capability-name checks, the rollback, the message shape. (Resource checks
       land in P2; startup wiring in P3.)
-- [ ] `C/tools/__init__.py`: drop the two member imports; `CORE_TOOLS` and `CLOSING_TOOLS`.
-- [ ] `C/server.py`: drop the member imports and `SERVER_INSTRUCTIONS`; `base_instructions()`;
+- [x] `C/tools/__init__.py`: drop the two member imports; `CORE_TOOLS` and `CLOSING_TOOLS`.
+- [x] `C/server.py`: drop the member imports and `SERVER_INSTRUCTIONS`; `base_instructions()`;
       `create_mcp_server(..., capabilities=None)` registering tools and resources in today's listing
       order (PLAN §2.3: load order, `CLOSING_TOOLS` last; primaries then aliases). Capability
       resources are served from this phase (the planted capability carries one); the core's storage
       entry stays until P2.
-- [ ] `S/capability.py`, `RC/capability.py` (orders 100, 900; no resources yet); the entry point in
+- [x] `S/capability.py`, `RC/capability.py` (orders 100, 900; no resources yet); the entry point in
       each member's `pyproject.toml`; `uv sync --locked`; docstrings of the two member
       `instructions.py` (texts untouched).
-- [ ] `tests/conftest.py` loads once; `tests/test_capabilities.py` with the P1 ids `p1.sh` names;
+- [x] `tests/conftest.py` loads once; `tests/test_capabilities.py` with the P1 ids `p1.sh` names;
       the seven `SERVER_INSTRUCTIONS` importers, `test_instructions.py` (members from the loaded
       capabilities), `test_registry.py` re-pointed; mutants re-anchored; new cases
       `capability-order-from-discovery` (the composer keeps discovery order),
@@ -192,7 +192,10 @@ per-phase checklists below are the work. `code-build` executes the next actionab
       `capability-duplicate-tool-allowed` (the duplicate-tool check removed),
       `capability-tools-import-swallowed` (a failing tools import skipped) and
       `capability-instructions-unchecked` (the text check removed).
-- [ ] AGENTS.md: §7 and §9 rewritten (PLAN §3), the footgun and repository-map rows for
+      *Amended at build:* `core-imports-member-by-name` needs a target this phase, so
+      `test_core_imports_no_member` (named by `p2.sh`) lands here, its AST scan skipping
+      `C/resources.py`, whose storage handler still imports the RCAC member's helper until P2.
+- [x] AGENTS.md: §7 and §9 rewritten (PLAN §3), the footgun and repository-map rows for
       `tools/__init__.py` and `server.py`, the high-blast-radius list widened with
       `core/capabilities.py` and both `capability.py` files.
 - **Verify:** `sh spec/capability-extras/verify/p1.sh`.
@@ -211,6 +214,8 @@ with it; the core's resources and open set are its context URIs; the core names 
 - [ ] `C/capabilities.py`: the resource checks (a dict with `str` `uri`, `name`, `description`, a
       callable `handler`, `executor` exactly `True`; URI unique against the core and earlier
       capabilities).
+- [ ] `tests/test_capabilities.py::test_core_imports_no_member` stops skipping `C/resources.py`,
+      and AGENTS.md § Testing's note of the skip goes with it (amended at P1's build).
 - [ ] Tests: `test_storage_resource.py` reads served resources from composed servers;
       `tests/test_capabilities.py` P2 ids; mutants re-anchored; new cases
       `storage-resource-unconditional` (the core registers the storage entry again) and

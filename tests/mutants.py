@@ -1448,7 +1448,7 @@ CASES: tuple[Case, ...] = (
     # The server's instructions reach a client in both protocol eras: in the InitializeResult of a
     # handshake and in the DiscoverResult of revision 2026-07-28.
     Case('instructions-dropped', 'core/server.py',
-         (('        instructions=compose(SERVER_INSTRUCTIONS, site, budget),\n', '        instructions=None,\n'),),
+         (('        instructions=compose(base_instructions(loaded), site, budget),\n', '        instructions=None,\n'),),
          ('test_protocol.py::test_client_era_is_served[legacy-memory]',
           'test_protocol.py::test_client_era_is_served[modern-memory]'),
          'instructions differ'),
@@ -2240,7 +2240,8 @@ CASES: tuple[Case, ...] = (
     # order; the core names no site and no tool of the RCAC member; the server is named cluster-mcp in
     # both protocol eras.
     Case('overlay-dropped', 'core/server.py',
-         (('SLURM_INSTRUCTIONS, RCAC_INSTRUCTIONS))', 'SLURM_INSTRUCTIONS))'),),
+         (("    return '\\n\\n'.join((CORE_INSTRUCTIONS, *texts))\n",
+           "    return '\\n\\n'.join((CORE_INSTRUCTIONS, *texts[:-1]))\n"),),
          ('test_instructions.py::test_base_is_core_slurm_then_overlay',),
          'not core, Slurm then overlay'),
     Case('core-names-rcac-tool', 'core/instructions.py',
@@ -2253,6 +2254,51 @@ CASES: tuple[Case, ...] = (
          ('test_protocol.py::test_server_identifies_as_cluster_mcp[legacy]',
           'test_protocol.py::test_server_identifies_as_cluster_mcp[modern]'),
          "serverInfo name is 'RCAC'"),
+    # Capabilities register through the entry-point group: their texts compose by (order,
+    # distribution) whatever order they are found or given in; a server serves the core's tools and
+    # the given capabilities' only; no core module imports a member by name; and a capability whose
+    # tool name is taken, whose tools module fails to import, or whose text does not list exactly its
+    # tools is refused.
+    Case('capability-order-from-discovery', 'core/capabilities.py',
+         (('    return tuple(sorted(capabilities, key=lambda c: (c.capability.order, c.distribution)))\n',
+           '    return tuple(capabilities)\n'),),
+         ('test_capabilities.py::test_composition_order_ignores_discovery_order',),
+         'composition follows the given order'),
+    Case('capability-tools-unfiltered', 'core/server.py',
+         (('    for tool in _tools_of(loaded):\n',
+           "    for tool in __import__('cluster_mcp.core.tools', fromlist=['TOOL_REGISTRY']).TOOL_REGISTRY:\n"),),
+         ('test_capabilities.py::test_served_tools_are_the_core_and_the_given_capabilities[core-only]',
+          'test_capabilities.py::test_served_tools_are_the_core_and_the_given_capabilities[slurm]'),
+         'serves tools beyond or short of'),
+    Case('core-imports-member-by-name', 'core/tools/__init__.py',
+         (('from cluster_mcp.core.tools import context  # noqa: E402, F401\n',
+           'from cluster_mcp.core.tools import context  # noqa: E402, F401\nimport cluster_mcp.slurm  # noqa: E402, F401\n'),),
+         ('test_capabilities.py::test_core_imports_no_member',),
+         'imports cluster_mcp.slurm'),
+    Case('capability-duplicate-tool-allowed', 'core/capabilities.py',
+         (("                if tool.name in core:\n"
+           "                    raise CapabilityLoadError(distribution, f'tool {tool.name!r} is already registered by the core')\n"
+           "                if tool.name in owners:\n"
+           "                    raise CapabilityLoadError(distribution, f'tool {tool.name!r} is already registered by '\n"
+           "                                                            f'{owners[tool.name]}')\n", ''),),
+         ('test_capabilities.py::test_a_duplicate_tool_is_refused[member-tool]',
+          'test_capabilities.py::test_a_duplicate_tool_is_refused[core-tool]'),
+         'a duplicate tool loaded'),
+    Case('capability-tools-import-swallowed', 'core/capabilities.py',
+         (('                import_module(capability.tools)\n'
+           '            except Exception as exc:\n'
+           '                raise CapabilityLoadError(distribution, _cause(exc)) from exc\n',
+           '                import_module(capability.tools)\n'
+           '            except Exception:\n'
+           '                continue\n'),),
+         ('test_capabilities.py::test_a_tools_module_failure_names_the_distribution[tools-missing]',
+          'test_capabilities.py::test_a_tools_module_failure_names_the_distribution[tools-raising]'),
+         'a failing tools module loaded'),
+    Case('capability-instructions-unchecked', 'core/capabilities.py',
+         (('            if why:\n                raise CapabilityLoadError(distribution, why)\n', ''),),
+         ('test_capabilities.py::test_instructions_must_list_exactly_the_tools[lists-another]',
+          'test_capabilities.py::test_instructions_must_list_exactly_the_tools[omits-its-tool]'),
+         'instructions that do not list exactly its tools loaded'),
     # The deprecation window is one string, deprecated in 0.2.0, removed no earlier than 0.4.0, wherever
     # a user reads it: the constant, every warning (each emitter, and each call site that emits one),
     # and README's upgrade section, which states it once and pairs each deprecated name with its

@@ -3,12 +3,13 @@
 
 """The agent-facing instructions name exactly the registered tools and carry no documentation search.
 
-The base is three texts, each owned by a member: the generic core (`CORE_INSTRUCTIONS`), which names
-no site and no tool of the RCAC member; the Slurm snippet (`SLURM_INSTRUCTIONS`); and the overlay
-(`RCAC_INSTRUCTIONS`), labelled RCAC-specific on its first line. Each lists exactly the tools its
-member registers, a tool's member being the `cluster_mcp.<member>` module its function was defined
-in, and `SERVER_INSTRUCTIONS` is the three joined by a blank line in that order, so the overlay sits
-directly above the site context.
+The base is the generic core's text (`CORE_INSTRUCTIONS`), which names no site and no tool of the
+RCAC member, then the text of each loaded capability, read from the capabilities themselves: the
+Slurm snippet, then the overlay, labelled RCAC-specific on its first line, in composition order
+(each capability's order, then its distribution). Each lists exactly the tools its member registers,
+a tool's member being the `cluster_mcp.<member>` module its function was defined in, and the base
+(`SERVER_INSTRUCTIONS` here, as `base_instructions` composes it) is the texts joined by a blank line
+in that order, so the overlay sits directly above the site context.
 """
 
 from __future__ import annotations
@@ -20,12 +21,24 @@ from typing import Callable, Iterable, Sequence
 import pytest
 
 from harness import SITE, served_instructions
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS, create_mcp_server
+from cluster_mcp.core.server import base_instructions, create_mcp_server
 from cluster_mcp.core.site import HEADING, compose, units
 from cluster_mcp.core.tools import TOOL_REGISTRY
-from cluster_mcp.rcac.instructions import RCAC_INSTRUCTIONS
-from cluster_mcp.slurm.instructions import SLURM_INSTRUCTIONS
+
+
+# Every loaded capability in composition order, read here rather than through the composer under
+# test: lower order first, ties by distribution.
+CAPABILITIES = tuple(sorted(installed(), key=lambda loaded: (loaded.capability.order, loaded.distribution)))
+
+# Each member's text, as its capability carries it.
+TEXTS = {loaded.capability.name: loaded.capability.instructions for loaded in CAPABILITIES}
+SLURM_INSTRUCTIONS = TEXTS['slurm']
+RCAC_INSTRUCTIONS = TEXTS['rcac']
+
+# The served base, as the server composes it from every installed capability.
+SERVER_INSTRUCTIONS = base_instructions(installed())
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -152,8 +165,9 @@ def test_base_leaves_room_for_the_site() -> None:
     assert units(SERVER_INSTRUCTIONS) <= 1500, units(SERVER_INSTRUCTIONS)
 
 
-# The members that register tools, each owning one text of the base.
-MEMBERS = ('core', 'slurm', 'rcac')
+# The members that register tools, each owning one text of the base: the core and every loaded
+# capability.
+MEMBERS = ('core', *(loaded.capability.name for loaded in CAPABILITIES))
 
 # Words that name a site; the generic core carries none of them, in any case.
 SITE_NAMES = re.compile(r'(?i)rcac|purdue')
@@ -191,9 +205,16 @@ def core_violations(text: str, rcac_tools: set[str]) -> list[str]:
 
 
 def base_violations(base: str, served: str) -> list[str]:
-    """Every way `base` is not core, Slurm then overlay, or `served` does not open with it, uncut, above the site."""
+    """Every way `base` is not core, Slurm then overlay, or `served` does not open with it, uncut, above the site.
+
+    The expected base is the core's text, then each loaded capability's in composition order, its
+    last text the overlay.
+    """
     violations = []
-    if base != '\n\n'.join((CORE_INSTRUCTIONS, SLURM_INSTRUCTIONS, RCAC_INSTRUCTIONS)):
+    texts = [loaded.capability.instructions for loaded in CAPABILITIES]
+    if not texts or texts[-1].splitlines()[0] != OVERLAY_LABEL:
+        violations.append('the last capability in composition order is not the overlay')
+    if base != '\n\n'.join((CORE_INSTRUCTIONS, *texts)):
         violations.append('the base is not core, Slurm then overlay, joined by a blank line')
     if not served.startswith(f'{base}\n\n{HEADING}\n\n'):
         violations.append('the served instructions do not open with the whole base directly above the site context')

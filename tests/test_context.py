@@ -30,7 +30,11 @@ import pytest
 from harness import (CONTEXT_URIS, Outcome, RecordingExecutor, bare_server, call, delegate_server, drive, http_client,
                      in_memory, mint, read_resource, scheme, serving, served_instructions, shared_server, user_map)
 from cluster_mcp.core import MCPServerApp, middleware, site
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS, create_mcp_server
+from cluster_mcp.core.capabilities import installed
+from cluster_mcp.core.server import base_instructions, create_mcp_server
+
+# The served base: the core's text and every installed capability's.
+SERVER_INSTRUCTIONS = base_instructions(installed())
 
 SECRET = 'context-test-secret-0123456789abcdef0123'
 USER_MAP = 'alice ualice\nbob ubob\n'
