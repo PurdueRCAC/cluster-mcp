@@ -3,10 +3,10 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-extras
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -62,7 +62,7 @@ phases:
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R9
@@ -73,7 +73,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: sh spec/capability-extras/verify/p5.sh && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
+  verify: sh spec/capability-extras/verify/p5.sh phase && sh spec/capability-extras/verify/p5.sh recipe && sh spec/capability-extras/verify/p5.sh mutants && uv run --no-project python -I spec/capability-extras/remediation/P5-ledger-headings.py && sh spec/capability-extras/verify/p5.sh full && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
 review:
   last_reviewed_commit: '4772784'
   verdict: changes-requested
@@ -471,6 +471,23 @@ approved, its entry said it still waited for approval. It was approved on 2026-1
   `issues/capability-reload-after-failure.md`, which exists and has its `ROADMAP.md` entry. The
   gate is frozen and is not amended; the attempt stays recorded until the foreman rules (a
   recorded wrapper under `remediation/`, or another reading).
+  *Ruled by the foreman, as judge, 2026-10-31:* a false positive. The property the ledger guards
+  holds (the deferral under the heading is seeded and in `ROADMAP.md`); the frozen `ledger.py`
+  reads a heading line as a block of its own, and the review template writes one that says "Out of
+  scope". It runs unchanged under `remediation/P5-ledger-headings.py`, which loads it by path,
+  wraps its `blocks()` to drop Markdown heading lines and calls its `main()`. Seen red first: on a
+  copy of the spec, `ROADMAP.md` and `issues/` outside the worktree, with an unseeded deferral item
+  planted under that heading in REVIEW.md, the wrapper fails naming the planted item (and not the
+  heading); on this tree it passes, where the frozen `ledger.py` alone fails on the heading. The
+  instructions budget's floor stays with the operator, decided after the ladder as §7 says: no §4
+  change in this cycle and no seed (same ruling).
+- **Verify (retuned at the ruling):**
+  `sh spec/capability-extras/verify/p5.sh phase && sh spec/capability-extras/verify/p5.sh recipe && sh spec/capability-extras/verify/p5.sh mutants && uv run --no-project python -I spec/capability-extras/remediation/P5-ledger-headings.py && sh spec/capability-extras/verify/p5.sh full && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py`.
+  *Observed (2026-10-31):* `phase`, `recipe`, `mutants` (122 killed, 3 controls) and `full` (3043
+  passed and 14 skipped in each era) stand in from attempt 1's run, on the tree `10c5ee5` commits
+  (the code, tests, docs, ROADMAP and seed it holds; only TECH.md differed, and none of those steps
+  reads it). Rerun after this amendment, as the only steps it can touch (each reads TECH.md or
+  the wrapper): the wrapper (`ledger: ok`) and the F3 checker (ok).
 
 ---
 
