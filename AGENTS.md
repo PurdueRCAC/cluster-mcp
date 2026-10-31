@@ -155,13 +155,13 @@ member modules:
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
-| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). Imports no member. |
+| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a capability resource that is malformed, not marked `executor: True` or at a URI already served (§8). Imports no member. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
 | `token.py` | `ISSUER`/`AUDIENCE`/`ALGORITHM` constants + `generate_token()` (the `--generate-token` path). Signer side of the JWT contract. |
 | `site.py` | The site context: `/etc/agents.d/*.md` read once at startup (`read_local`, or `READ_SITE` through the shared executor in `ssh` mode, either under `read_bounded`'s `READ_TIMEOUT`), `compose()` of the served instructions within the budget, and `register`/`site_of`, the per-server holder the tool and the resource read. |
-| `resources.py` | `RESOURCE_REGISTRY` — `cluster://context` (the site context read at startup, from `site_of`; runs nothing) and `cluster://storage` (the storage summary, from `resolve_storage_paths()` on the request's executor), each entry's `executor` key saying whether its handler needs one, then the deprecated `rcac://context` and `rcac://storage` aliases, derived from those entries — and `OPEN_RESOURCES`, derived from it after the aliases: the URIs whose handler runs nothing. |
+| `resources.py` | `RESOURCE_REGISTRY`, the core's own resources — `cluster://context` (the site context read at startup, from `site_of`; runs nothing), its entry's `executor` key saying whether its handler needs one, then the deprecated `rcac://context` alias, derived by `legacy_aliases()` (each entry with only its URI's scheme changed, the helper a capability calls for its own aliases) — and `OPEN_RESOURCES`, derived from it after the alias: the URIs whose handler runs nothing. It names no capability resource (§8). |
 | `executor/base.py` | `Executor` `Protocol` + the `CommandResult` dataclass. The contract all backends satisfy. Also `UserPath` and the reserved exit codes `TIMEOUT_EXIT_CODE` (−1001) and `NOT_STARTED_EXIT_CODE` (−1002). |
 | `executor/launch.py` | The launcher every backend runs commands through: renders an argv or a script into one bash program for the pinned login bash (`program`), the local/delegate stage (`bash_argv`) and the SSH bootstrap (`ssh_command`), `separate` (drops login-initialisation output), and `run_process` (local/delegate processes and their timeouts). |
 | `executor/ssh.py` | `SSHExecutor` — Fabric `Connection` (`~/.ssh/config`-aware, each connect step bounded by `CONNECT_TIMEOUT` unless the SSH config sets it; a lost connection re-established with backoff within three times that bound of the call's start, one attempt at a time on a worker thread, or the call reported as not run) for the connection, and `connect_failure_message`, the `cannot connect to <host>: <cause>` text startup and reconnect share; each command on a raw Paramiko channel, transfers over Paramiko's SFTP client. |
@@ -176,7 +176,8 @@ member modules:
 | `cluster_mcp.slurm.capability` | `CAPABILITY`: name `slurm`, order 100, tools `cluster_mcp.slurm.tools`, text `SLURM_INSTRUCTIONS`. The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 | `cluster_mcp.rcac.tools` | The RCAC member (`packages/cluster-mcp-rcac/src/cluster_mcp/rcac/tools.py`), Purdue-specific: `myquota`, `storage_paths` (its body the undecorated `resolve_storage_paths()`, which `cluster://storage` also calls), `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`, and RCAC's Slurm extensions `slist`/`sfeatures`. |
 | `cluster_mcp.rcac.instructions` | `RCAC_INSTRUCTIONS`, the overlay on the served instructions: first line `RCAC-specific tools:`, then every RCAC member tool and `cluster://storage`. Imports nothing. |
-| `cluster_mcp.rcac.capability` | `CAPABILITY`: name `rcac`, order 900 (the overlay sorts last), tools `cluster_mcp.rcac.tools`, text `RCAC_INSTRUCTIONS`. The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
+| `cluster_mcp.rcac.resources` | `STORAGE`, the `cluster://storage` entry (`executor: True`): its handler formats the storage summary from `resolve_storage_paths()` on the request's executor, importing the helper inside the handler, so importing this module registers no tool. |
+| `cluster_mcp.rcac.capability` | `CAPABILITY`: name `rcac`, order 900 (the overlay sorts last), tools `cluster_mcp.rcac.tools`, text `RCAC_INSTRUCTIONS`, resources `STORAGE` and its `rcac://storage` alias (`legacy_aliases`). The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 
 Five repo-level paths sit outside the members: **`bin/sandbox.sh`** — the throwaway-environment
 helper every CLI drive runs under (§ Factory → Throwaway environment); **`bin/audit_lock.py`** — the
@@ -350,11 +351,18 @@ import has no effect.
     (`Distribution.at`, the directory first on `sys.path`), never as edits to the tree: a missing
     or raising module, a missing attribute, a wrong type or field, a hand-built entry point with no
     distribution, a failing tools module, a duplicate tool or capability name, a text that does not
-    list exactly its tools. Each is refused in one line naming its distribution, and a failed load
-    leaves `TOOL_REGISTRY` as it was. A planted capability with a tool and a resource is discovered
-    and served beside the members, its text placed by its order, with no core edit. No core module
-    imports a member by name (`member_import_violations`, an AST scan of every core module but
-    `resources.py`, whose storage handler still imports the RCAC member's helper, §7).
+    list exactly its tools, a resource not marked `executor: True` (`False`, missing or merely
+    truthy), a malformed resource (not a dict, a non-`str` `uri`, `name` or `description`, a handler
+    not callable), a resource URI the core, an earlier capability or the capability itself already
+    serves. Each is refused in one line naming its distribution, and a failed load leaves
+    `TOOL_REGISTRY` as it was. The core's registry is its two context URIs and its open set exactly
+    those; `cluster://storage` and `rcac://storage` are served exactly when the RCAC capability is
+    given (`test_storage_is_served_only_with_the_rcac_capability`), and under every set each
+    `rcac://` alias is listed after every `cluster://` URI, one for one, serving what its target
+    serves (`test_aliases_follow_every_primary_uri`). A planted capability with a tool and a
+    resource is discovered and served beside the members, its text placed by its order, with no
+    core edit. No core module imports a member by name (`member_import_violations`, an AST scan of
+    every core module, §7).
     `tests/conftest.py` calls `installed()` once at import, so every test sees the same registry,
     in the same order, whatever it imports first.
   - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
@@ -560,7 +568,7 @@ import has no effect.
     substitution over printable ASCII and NUL, tab, newline, vertical tab, form feed, carriage return
     and DEL, at every position, plus wrappers (angle brackets, quotes, brackets, surrounding
     whitespace), suffixes (`?`, `#`, `:`, `:80`, `.`, `/.`, `/`, CRLF) and userinfo, leaving out
-    exactly the URIs the registry marks open (not whatever `OPEN_RESOURCES` holds, so a grown open set
+    exactly the URIs the entries mark open (not whatever `OPEN_RESOURCES` holds, so a grown open set
     is read too). A no-claim and an unmapped caller each read every shape near one served URI
     verbatim on one session and get exactly their reason, with nothing launched
     (`test_near_open_read_is_refused`, one row per served URI of the four, written out in
@@ -570,8 +578,9 @@ import has no effect.
     mark or a dot segment, strips quotes or control characters) maps some shape onto an open URI and
     fails it, under either scheme: each mutation case whose failure names an `rcac://` shape has a
     `cluster://` twin (`mutants.CLUSTER_TWINS`) whose failure names that shape's twin. The aliases
-    are pinned structurally and by behaviour: the registry holds exactly the four URIs, each
-    `rcac://` entry shares its target's handler object and equals it but for its URI
+    are pinned structurally and by behaviour: a server composed with every capability serves
+    exactly the four URIs, and each `rcac://` entry (the core's, then the RCAC capability's) shares
+    its target's handler object and equals it but for its URI
     (`test_aliases_are_derived_from_their_targets`), `OPEN_RESOURCES` is exactly the two context URIs
     (`test_open_resources_are_the_context_uris`), and on a bare, a shared and a delegate server, in
     both eras, each alias read right after its target answers as the target did and runs what it
@@ -2059,7 +2068,8 @@ What each mode means:
   imports its `tools` module and attributes to it every registered tool defined in that module or
   below it. It refuses a capability whose entry point or tools module raises, that is not a
   `Capability`, whose tools import registers a tool outside it, whose name or one of whose tool
-  names is already taken (by the core, or by a capability loaded before it), or whose instructions
+  names is already taken (by the core, or by a capability loaded before it), one of whose resources
+  is malformed, not marked `executor: True` or at a URI already served (§8), or whose instructions
   do not list exactly its tools, each once. The first refusal raises `CapabilityLoadError`,
   `cannot load capability <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back
   to what it held before the load began.
@@ -2074,8 +2084,9 @@ What each mode means:
   with `TypeError: 'FunctionTool' object is not callable`. When logic must be shared between a tool
   and something else, factor it into an undecorated helper and have both call that, as the
   `storage_paths` tool and the `cluster://storage` resource (and its alias) both call `resolve_storage_paths()`
-  (`cluster_mcp.rcac.tools`). The resource imports the helper inside its handler, so importing
-  `resources.py` registers no tool; `tests/test_storage_resource.py` reads the resource in both
+  (`cluster_mcp.rcac.tools`). The resource (`cluster_mcp.rcac.resources`) imports the helper inside
+  its handler, so importing it, or the member's `capability.py`, registers no tool;
+  `tests/test_storage_resource.py` reads the resource in both
   eras, so a handler that calls the decorated tool again fails the suite.
 - **`@mcp_tool` serves the full docstring as the description**
   (`Tool.from_function(func, description=inspect.getdoc(func))`). FastMCP 4 on its own serves only
@@ -2087,22 +2098,34 @@ What each mode means:
 
 ### 8. Resources and the `/etc/agents.d/*.md` convention (`resources.py`, `site.py`)
 
-- `RESOURCE_REGISTRY` (`resources.py`) exposes `cluster://context` and `cluster://storage`. Each
-  entry's `executor` key says whether its handler runs commands through its request's executor:
-  `False` for `cluster://context`, `True` for `cluster://storage`. **`OPEN_RESOURCES`** is derived
-  from it, the URIs whose entry says `False`, and reads the key directly, so an entry without one
-  fails at import rather than being silently open. Only a handler that runs nothing may be marked
-  open: in `delegate` mode an open read gets no executor, so a handler that needs one fails with
+- `RESOURCE_REGISTRY` (`resources.py`) holds the core's own resource, `cluster://context`; the
+  **RCAC member** registers `cluster://storage` through the entry-point group, as a resource of its
+  `Capability` (`cluster_mcp.rcac.resources`, `cluster_mcp.rcac.capability`), so it is served only
+  where that member is installed. Each entry's `executor` key says whether its handler runs
+  commands through its request's executor: `False` for `cluster://context`, `True` for
+  `cluster://storage`. **`OPEN_RESOURCES`** is derived from the core's registry alone, the URIs
+  whose entry says `False`, and reads the key directly, so an entry without one fails at import
+  rather than being silently open. Only a handler that runs nothing may be marked open: in
+  `delegate` mode an open read gets no executor, so a handler that needs one fails with
   `No executor configured`.
+- **A capability's resources are never open.** `middleware.py` resolves every read of a URI not in
+  the core's `OPEN_RESOURCES`, so a capability resource is gated by construction; `load()` refuses
+  one whose `executor` is not exactly `True` rather than serve it gated under a claim that it runs
+  nothing, and refuses a malformed entry or a URI the core or an earlier capability already serves
+  (§7). `create_mcp_server` lists every `cluster://` entry, the core's then each capability's in
+  load order, then every alias in the same order.
 - **The `rcac://` URIs are deprecated aliases, derived, never written by hand.** Through the
-  deprecation window `rcac://context` and `rcac://storage` are served too: after the `cluster://`
-  entries, one line appends a copy of each with only its URI's scheme changed, and `OPEN_RESOURCES`
-  is computed after that line. So an alias shares its target's handler object, name, description
-  and `executor` flag by construction, `OPEN_RESOURCES` is exactly `{cluster://context,
-  rcac://context}`, and a flip of a target's flag flips its alias. Both schemes are listed in
-  `resources/list`. Keep every entry, the alias line and `OPEN_RESOURCES` in this one module, in that
-  order: an entry appended later, or the open set computed before the aliases, leaves an alias
-  without its target's handling. No alias carries an `executor` literal of its own, and nothing
+  deprecation window `rcac://context` and `rcac://storage` are served too, each derived by
+  `legacy_aliases()` (`resources.py`), a copy of its target with only its URI's scheme changed:
+  the core's line appends the alias of its own entries before `OPEN_RESOURCES` is computed, and the
+  RCAC capability declares `(STORAGE, *legacy_aliases((STORAGE,)))`. So an alias shares its
+  target's handler object, name, description and `executor` flag by construction,
+  `OPEN_RESOURCES` is exactly `{cluster://context, rcac://context}`, and a flip of a target's flag
+  flips its alias. Both schemes are listed in `resources/list`. In `resources.py` keep the core's
+  entries, then the alias line, then `OPEN_RESOURCES`, in that order: an entry appended later, or
+  the open set computed before the alias line, leaves an alias without its target's handling. A
+  capability gets an `rcac://` URI only by calling `legacy_aliases()` on its own entries; the core
+  never derives one for it. No alias carries an `executor` literal of its own, and nothing
   rewrites a URI before the read hook (§1). The tests write the four URIs out
   (`harness.CONTEXT_URIS`, `STORAGE_URIS`) and run every read under both.
 - **`/etc/agents.d/*.md` is a deliberate, external, cross-site convention** — cluster administrators

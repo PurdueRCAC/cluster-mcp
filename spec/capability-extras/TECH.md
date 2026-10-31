@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
   verify: sh spec/capability-extras/verify/p1.sh
 - id: P2
   name: The storage resource belongs to the RCAC member; no core module names a member
-  status: pending
+  status: done
   satisfies:
   - R3
   - R7
@@ -207,20 +207,32 @@ per-phase checklists below are the work. `code-build` executes the next actionab
 **Goal:** `cluster://storage` and its `rcac://storage` alias are the RCAC capability's, served only
 with it; the core's resources and open set are its context URIs; the core names no member.
 
-- [ ] `C/resources.py`: `legacy_aliases()`; the core's registry is the context entry and its alias;
+- [x] `C/resources.py`: `legacy_aliases()`; the core's registry is the context entry and its alias;
       the storage entry and its member import go; `OPEN_RESOURCES` unchanged.
-- [ ] `RC/resources.py` (new): the storage handler and entry, moved verbatim; `RC/capability.py`
+- [x] `RC/resources.py` (new): the storage handler and entry, moved verbatim; `RC/capability.py`
       carries `(STORAGE, *legacy_aliases((STORAGE,)))`.
-- [ ] `C/capabilities.py`: the resource checks (a dict with `str` `uri`, `name`, `description`, a
+- [x] `C/capabilities.py`: the resource checks (a dict with `str` `uri`, `name`, `description`, a
       callable `handler`, `executor` exactly `True`; URI unique against the core and earlier
       capabilities).
-- [ ] `tests/test_capabilities.py::test_core_imports_no_member` stops skipping `C/resources.py`,
+- [x] `tests/test_capabilities.py::test_core_imports_no_member` stops skipping `C/resources.py`,
       and AGENTS.md § Testing's note of the skip goes with it (amended at P1's build).
-- [ ] Tests: `test_storage_resource.py` reads served resources from composed servers;
+- [x] Tests: `test_storage_resource.py` reads served resources from composed servers;
       `tests/test_capabilities.py` P2 ids; mutants re-anchored; new cases
       `storage-resource-unconditional` (the core registers the storage entry again) and
       `capability-resource-open-allowed` (the executor check removed).
-- [ ] AGENTS.md §8 (PLAN §3, deviation row 1) and the `resources.py` repository-map row.
+      *Amended at build:* a core registry entry at `cluster://storage` is now refused at load as a
+      duplicate of the RCAC capability's, which a mutant child sees as a collection error (a
+      survivor), so `storage-resource-unconditional` plants in `C/server.py` instead: the server
+      lists every installed capability's resources whatever set it is given. A capability
+      resource's `executor` flag no longer decides openness (only the core's `OPEN_RESOURCES` does,
+      and the loader refuses a flag that is not `True`), so `storage-read-left-open` and
+      `alias-flag-hand-set-open` re-anchor on the core's open set, which they grow by the storage
+      URIs; `alias-handler-differs` gives every alias a constant handler, since each
+      `legacy_aliases()` call now derives one alias and a handler swap between entries no longer
+      applies. Ids, targets and `why` are kept.
+- [x] AGENTS.md §8 (PLAN §3, deviation row 1) and the `resources.py` repository-map row (with the
+      rows for `capabilities.py`, the new `cluster_mcp.rcac.resources` and `cluster_mcp.rcac.capability`,
+      §7's refusal list and helper home, and § Testing's notes, which the move made false).
 - **Verify:** `sh spec/capability-extras/verify/p2.sh`.
 - **Touches:** `C/resources.py`, `C/capabilities.py`, `C/server.py`, `RC/`, `tests/`, `AGENTS.md`.
 

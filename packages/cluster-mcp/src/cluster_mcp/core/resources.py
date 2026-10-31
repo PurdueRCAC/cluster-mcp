@@ -4,17 +4,19 @@
 """MCP resources for cluster context and configuration.
 
 Resources provide read-only access to data that can be used as context
-for LLM interactions. The primary resource is cluster_context, which
-serves the /etc/agents.d markdown the server read once at startup.
+for LLM interactions. The core's resource is cluster_context, which
+serves the /etc/agents.d markdown the server read once at startup; a
+capability brings its own resources, which the server lists after these.
 
-Each resource is served as `cluster://<name>` and, through the deprecation window, under its old
-`rcac://<name>` URI too. Every `rcac://` entry is a copy of its `cluster://` target but for its URI,
-derived below rather than written by hand, so it shares the target's handler and executor flag.
+Each core resource is served as `cluster://<name>` and, through the deprecation window, under its
+old `rcac://<name>` URI too. Every `rcac://` entry is a copy of its `cluster://` target but for its
+URI, derived by `legacy_aliases` rather than written by hand, so it shares the target's handler and
+executor flag. A capability that keeps an old URI derives its aliases with the same helper.
 """
 
 # Type annotations
 from __future__ import annotations
-from typing import Final
+from typing import Final, Iterable
 
 # External libs
 from fastmcp.server.dependencies import get_server
@@ -23,11 +25,20 @@ from fastmcp.server.dependencies import get_server
 from cluster_mcp.core.site import site_of
 
 # Public interface
-__all__ = ['OPEN_RESOURCES', 'RESOURCE_REGISTRY']
+__all__ = ['OPEN_RESOURCES', 'RESOURCE_REGISTRY', 'legacy_aliases']
 
 
-# Resource registry for server to register. Each entry holds the uri, name, description and
-# handler, and 'executor': whether the handler runs commands through its request's executor.
+def legacy_aliases(entries: Iterable[dict]) -> list[dict]:
+    """The deprecated `rcac://` alias of each entry: the entry with only its URI's scheme changed.
+
+    An alias runs its target's handler and needs an executor exactly when its target does.
+    """
+    return [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1)} for entry in entries]
+
+
+# Resource registry for server to register: the core's own entries. Each entry holds the uri, name,
+# description and handler, and 'executor': whether the handler runs commands through its request's
+# executor.
 RESOURCE_REGISTRY = []
 
 
@@ -56,59 +67,14 @@ RESOURCE_REGISTRY.append({
 })
 
 
-def _storage_paths_resource() -> str:
-    """
-    User's resolved storage paths.
-
-    Returns the actual filesystem paths for all storage spaces the user
-    has access to. This provides immediate context about where data can
-    be read and written.
-
-    Returns:
-        Formatted text showing home, scratch, and depot paths with usage.
-    """
-    # Imported here, so importing this module does not register the tools.
-    from cluster_mcp.rcac.tools import resolve_storage_paths
-
-    paths = resolve_storage_paths()
-
-    lines = [
-        'User Storage Paths:',
-        '',
-        f'Home: {paths.home.path}',
-        f'  Usage: {paths.home.size} / {paths.home.limit} ({paths.home.usage_percent})',
-        '',
-        f'Scratch: {paths.scratch.path}',
-        f'  Usage: {paths.scratch.size} / {paths.scratch.limit} ({paths.scratch.usage_percent})',
-        '',
-        f'Depot Spaces ({len(paths.depots)} available):',
-    ]
-
-    for depot in paths.depots:
-        lines.append(f'  - {depot.path}')
-        lines.append(f'    Usage: {depot.size} / {depot.limit} ({depot.usage_percent})')
-
-    return '\n'.join(lines)
-
-
-RESOURCE_REGISTRY.append({
-    'uri': 'cluster://storage',
-    'name': 'storage_paths',
-    'description': "User's resolved storage paths for home, scratch, and depot spaces",
-    'handler': _storage_paths_resource,
-    'executor': True,
-})
-
-
-# The deprecated `rcac://` aliases, one per entry above: each is its target with only the URI
-# changed, so it runs the same handler and needs an executor exactly when its target does. They are
-# appended before OPEN_RESOURCES is computed, so an open target's alias is open too.
-RESOURCE_REGISTRY += [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1)}
-                      for entry in list(RESOURCE_REGISTRY)]
+# The deprecated `rcac://` aliases, one per entry above. They are appended before OPEN_RESOURCES is
+# computed, so an open target's alias is open too.
+RESOURCE_REGISTRY += legacy_aliases(list(RESOURCE_REGISTRY))
 
 
 # The resources that run nothing, so a read needs no executor: they answer any client that can
 # connect, and the delegate middleware lets their reads through without resolving an identity.
-# Every entry must say whether it needs an executor; one that does not fails here, at import.
+# Every entry must say whether it needs an executor; one that does not fails here, at import. Only
+# the core's entries are here: a capability's resource always needs an executor, so it is never open.
 OPEN_RESOURCES: Final[frozenset[str]] = frozenset(
     entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])

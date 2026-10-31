@@ -6,6 +6,8 @@
 A capability is a distribution that declares one entry point in the group `cluster_mcp.capabilities`,
 naming a `Capability`: its name, its place in the served instructions, the module whose `@mcp_tool`
 functions are its tools, its part of the instructions, and its resources. The core never names one.
+A capability's resources are never open: each needs its request's executor, so in `delegate` mode
+every read of one resolves the caller.
 
 Nothing here runs at import. `installed()` loads every capability the environment has, once, when
 the server starts; a capability that cannot be loaded stops the load with a `CapabilityLoadError`
@@ -26,6 +28,7 @@ from importlib.metadata import EntryPoint, entry_points
 from fastmcp.tools import Tool
 
 # Internal libs
+from cluster_mcp.core.resources import RESOURCE_REGISTRY
 from cluster_mcp.core.tools import CORE_TOOLS, TOOL_REGISTRY
 
 # Public interface
@@ -47,7 +50,9 @@ class Capability:
     lower first: a site overlay takes a high one, so it sits last, directly above the site context.
     `tools` is the dotted name of the module whose `@mcp_tool` functions (that module's or any module
     below it) are its tools. `instructions` is its part of the base and lists exactly those tools, each
-    once, as `- name:` lines. `resources` are entries shaped as the core's `RESOURCE_REGISTRY` ones.
+    once, as `- name:` lines. `resources` are entries shaped as the core's `RESOURCE_REGISTRY` ones,
+    each a dict with a `str` `uri`, `name` and `description`, a callable `handler`, and `executor`
+    exactly True, its URI served by nothing else.
     """
 
     name: str
@@ -106,7 +111,23 @@ def _checked(value: object) -> Capability:
         raise _Invalid('its name is empty')
     if not value.instructions.strip():
         raise _Invalid('its instructions are empty')
+    for entry in value.resources:
+        _check_resource(entry)
     return value
+
+
+def _check_resource(entry: object) -> None:
+    """Raise `_Invalid` saying why `entry` is not a well-formed capability resource."""
+    if not isinstance(entry, dict):
+        raise _Invalid(f'one of its resources is a {type(entry).__name__}, not a dict')
+    for key in ('uri', 'name', 'description'):
+        if not isinstance(entry.get(key), str):
+            raise _Invalid(f'its resource {entry.get("uri")!r} has a {type(entry.get(key)).__name__} {key}, not a str')
+    if not callable(entry.get('handler')):
+        raise _Invalid(f'the handler of its resource {entry["uri"]!r} is not callable')
+    if entry.get('executor') is not True:
+        raise _Invalid(f'its resource {entry["uri"]!r} has executor {entry.get("executor")!r}, not True: '
+                       f'a capability resource is never open')
 
 
 def _listing_violation(text: str, names: list[str]) -> str | None:
@@ -128,9 +149,10 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
 
     They load in order of (distribution, entry-point name), so which failure is reported never
     depends on `sys.path` or directory order. A capability fails to load when its entry point or its
-    tools module raises, when it is not a well-formed `Capability`, when its tools module registers a
-    tool outside itself, when one of its tools or its name is already taken (by the core or by a
-    capability loaded before it), or when its instructions do not list exactly its tools. The first
+    tools module raises, when it is not a well-formed `Capability` (a resource of it included), when
+    its tools module registers a tool outside itself, when one of its tools, its name or one of its
+    resource URIs is already taken (by the core or by a capability loaded before it), or when its
+    instructions do not list exactly its tools. The first
     failure raises `CapabilityLoadError`, after `TOOL_REGISTRY` is cut back to what it held before
     this load began.
     """
@@ -138,7 +160,9 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     ordered = sorted(found, key=lambda ep: (_distribution(ep), ep.name))
     start = len(TOOL_REGISTRY)
     core = {tool.name for tool in CORE_TOOLS}
+    core_uris = {entry['uri'] for entry in RESOURCE_REGISTRY}
     owners: dict[str, str] = {}
+    uri_owners: dict[str, str] = {}
     names: dict[str, str] = {}
     loaded: list[Loaded] = []
     try:
@@ -173,11 +197,21 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
                 if tool.name in owners:
                     raise CapabilityLoadError(distribution, f'tool {tool.name!r} is already registered by '
                                                             f'{owners[tool.name]}')
+            uris = [entry['uri'] for entry in capability.resources]
+            for i, uri in enumerate(uris):
+                if uri in uris[:i]:
+                    raise CapabilityLoadError(distribution, f'resource {uri!r} is declared twice')
+                if uri in core_uris:
+                    raise CapabilityLoadError(distribution, f'resource {uri!r} is already registered by the core')
+                if uri in uri_owners:
+                    raise CapabilityLoadError(distribution, f'resource {uri!r} is already registered by '
+                                                            f'{uri_owners[uri]}')
             why = _listing_violation(capability.instructions, [tool.name for tool in tools])
             if why:
                 raise CapabilityLoadError(distribution, why)
             names[capability.name] = distribution
             owners.update((tool.name, distribution) for tool in tools)
+            uri_owners.update((uri, distribution) for uri in uris)
             loaded.append(Loaded(capability, distribution, tools))
     except CapabilityLoadError:
         del TOOL_REGISTRY[start:]

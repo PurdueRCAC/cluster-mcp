@@ -13,6 +13,11 @@ registry is left as it was. The failures are planted as distributions in a scrat
 `*.dist-info` beside its package, read with `Distribution.at`), so no test edits the tree; a planted
 capability with a tool and a resource is served beside the members with no core edit. The core's
 modules name no member.
+
+The core serves its two context URIs; `cluster://storage` and its `rcac://storage` alias are the RCAC
+capability's, served exactly when it is given, and every alias is listed after every primary URI, a
+copy of its target but for the URI. A capability resource must need an executor (it is never open),
+must be well formed, and must not take a URI the core or an earlier capability serves.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ import cluster_mcp.core
 from harness import SITE, served_instructions, served_surface, served_tools
 from cluster_mcp.core.capabilities import GROUP, CapabilityLoadError, Loaded, composed, installed, load
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
+from cluster_mcp.core.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
 from cluster_mcp.core.server import create_mcp_server
 from cluster_mcp.core.site import HEADING
 from cluster_mcp.core.tools import CLOSING_TOOLS, CORE_TOOLS, TOOL_REGISTRY
@@ -49,6 +55,10 @@ WANT = {
     'rcac': {'storage_paths', 'myquota', 'jobinfo', 'jobcmd', 'jobenv', 'jobscript', 'showpartitions',
              'average_wait', 'slist', 'sfeatures'},
 }
+
+# The resources each side serves, primary URI first, then its deprecated alias.
+CONTEXT_URIS = ('cluster://context', 'rcac://context')
+STORAGE_URIS = ('cluster://storage', 'rcac://storage')
 
 # A tool's line in an instructions text.
 LISTED = re.compile(r'^- (\w+):', re.MULTILINE)
@@ -415,8 +425,120 @@ def test_core_imports_no_member() -> None:
     for f in files:
         parts = ['cluster_mcp', *f.relative_to(core.parent).with_suffix('').parts]
         parts = parts[:-1]
-        # The storage summary resource still reaches the RCAC member's helper from inside its handler.
-        if f.name == 'resources.py' and f.parent == core:
-            continue
         violations += member_import_violations(f.read_text(), str(f.relative_to(core.parent)), parts, members)
     assert violations == [], 'a core module imports a member by name:\n' + '\n'.join(violations)
+
+
+def resource(at: str = 'cluster://planted', **fields: str | None) -> str:
+    """A planted resource entry's source at the URI `at`; `fields` replace its values as source text, None drops one."""
+    entry = {'uri': repr(at), 'name': "'planted'", 'description': "'Planted'", 'handler': '_read',
+             'executor': 'True', **fields}
+    return '{' + ', '.join(f'{key!r}: {value}' for key, value in entry.items() if value is not None) + '}'
+
+
+@pytest.mark.unit
+def test_storage_is_served_only_with_the_rcac_capability() -> None:
+    # The core's registry is its context entry and that entry's alias; the storage resource and its
+    # alias are the RCAC capability's own.
+    assert [entry['uri'] for entry in RESOURCE_REGISTRY] == list(CONTEXT_URIS), RESOURCE_REGISTRY
+    assert OPEN_RESOURCES == frozenset(CONTEXT_URIS), sorted(OPEN_RESOURCES)
+    assert [entry['uri'] for entry in by_name()['rcac'].capability.resources] == list(STORAGE_URIS)
+    assert by_name()['slurm'].capability.resources == ()
+    violations = []
+    for names in (param.values[0] for param in SETS):
+        given = tuple(by_name()[n] for n in names)
+        served = list(served_surface(create_mcp_server('none', site=SITE, capabilities=given))['resources'])
+        want = [CONTEXT_URIS[0], *STORAGE_URIS[:1], CONTEXT_URIS[1], *STORAGE_URIS[1:]] if 'rcac' in names \
+            else list(CONTEXT_URIS)
+        if served != want:
+            violations.append(f"{'+'.join(names) or 'core only'}: serves resources {served}, expected {want}")
+    assert violations == [], 'served beyond or short of the core\'s and the given capabilities\' resources:\n' \
+        + '\n'.join(violations)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', SETS)
+def test_aliases_follow_every_primary_uri(names: tuple[str, ...]) -> None:
+    # Every deprecated `rcac://` alias is listed after every `cluster://` URI, in the same order, and
+    # serves what its target serves but for its URI; each capability alias shares its target's handler.
+    given = tuple(by_name()[n] for n in names)
+    served = served_surface(create_mcp_server('none', site=SITE, capabilities=given))['resources']
+    uris = list(served)
+    primaries = [uri for uri in uris if uri.startswith('cluster://')]
+    aliases = [uri for uri in uris if uri.startswith('rcac://')]
+    assert primaries and uris == primaries + aliases, f'an alias is listed before a primary URI: {uris}'
+    assert aliases == [uri.replace('cluster://', 'rcac://', 1) for uri in primaries], \
+        f'the aliases {aliases} do not follow the primary URIs {primaries} one for one'
+    for target in primaries:
+        alias = target.replace('cluster://', 'rcac://', 1)
+        assert served[alias] == served[target], \
+            f'the alias {alias!r} serves {served[alias]}, its target {served[target]}'
+    for loaded in given:
+        entries = {entry['uri']: entry for entry in loaded.capability.resources}
+        for uri, entry in entries.items():
+            if uri.startswith('rcac://'):
+                target = entries[uri.replace('rcac://', 'cluster://', 1)]
+                assert entry['handler'] is target['handler'] and {**entry, 'uri': target['uri']} == target, \
+                    f'the alias {uri!r} of {loaded.distribution} is not a copy of its target but for its URI'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('executor', [
+    pytest.param('False', id='false'),
+    pytest.param(None, id='missing'),
+    pytest.param('1', id='truthy'),
+])
+def test_a_capability_resource_must_need_an_executor(executor: str | None, plant: Callable[..., EntryPoint]) -> None:
+    # A capability resource is never in the core's open set, so one claiming to run nothing would be
+    # silently gated; it is refused instead, naming its distribution.
+    ep = plant('planted-open-resource', 'open = planted_open.capability:CAPABILITY',
+               package('planted_open', resources=f'({resource(executor=executor)},)'))
+    before = list(TOOL_REGISTRY)
+    message = load_error([ep])
+    assert 'a capability resource is never open' in message, f'an open resource loaded: got {message!r}'
+    assert message.startswith("cannot load capability planted-open-resource: its resource 'cluster://planted' "
+                              "has executor "), message
+    assert TOOL_REGISTRY == before
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('uri', 'twice', 'fragment'), [
+    pytest.param('cluster://context', False, "resource 'cluster://context' is already registered by the core",
+                 id='core'),
+    pytest.param('rcac://context', False, "resource 'rcac://context' is already registered by the core",
+                 id='core-alias'),
+    pytest.param('cluster://storage', False, "resource 'cluster://storage' is already registered by cluster-mcp-rcac",
+                 id='member'),
+    pytest.param('rcac://storage', False, "resource 'rcac://storage' is already registered by cluster-mcp-rcac",
+                 id='member-alias'),
+    pytest.param('cluster://planted', True, "resource 'cluster://planted' is declared twice", id='twice'),
+])
+def test_a_duplicate_resource_uri_is_refused(uri: str, twice: bool, fragment: str,
+                                             plant: Callable[..., EntryPoint]) -> None:
+    entries = (resource(uri),) * (2 if twice else 1)
+    ep = plant('planted-uri', 'uri = planted_uri.capability:CAPABILITY',
+               package('planted_uri', resources='(' + ', '.join(entries) + ',)'))
+    before = list(TOOL_REGISTRY)
+    message = load_error([member_entry_point('rcac'), ep])
+    assert fragment in message, f'a duplicate resource URI loaded: expected {fragment!r}, got {message!r}'
+    assert message.startswith('cannot load capability planted-uri: '), message
+    assert TOOL_REGISTRY == before
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('entry', 'fragment'), [
+    pytest.param("'cluster://planted'", 'one of its resources is a str, not a dict', id='not-a-dict'),
+    pytest.param(resource(uri='42'), 'has a int uri, not a str', id='uri'),
+    pytest.param(resource(name=None), "its resource 'cluster://planted' has a NoneType name, not a str", id='name'),
+    pytest.param(resource(description='b"Planted"'), "has a bytes description, not a str", id='description'),
+    pytest.param(resource(handler="'_read'"), "the handler of its resource 'cluster://planted' is not callable",
+                 id='handler'),
+])
+def test_a_capability_resource_is_validated(entry: str, fragment: str, plant: Callable[..., EntryPoint]) -> None:
+    ep = plant('planted-bad-resource', 'bad = planted_bad.capability:CAPABILITY',
+               package('planted_bad', resources=f'({entry},)'))
+    before = list(TOOL_REGISTRY)
+    message = load_error([ep])
+    assert fragment in message, f'a malformed resource loaded: expected {fragment!r}, got {message!r}'
+    assert message.startswith('cannot load capability planted-bad-resource: '), message
+    assert TOOL_REGISTRY == before

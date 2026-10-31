@@ -190,9 +190,10 @@ OPEN_TEST = '        if context.message.uri not in OPEN_RESOURCES:\n'
 
 URLLIB = "__import__('urllib.parse', fromlist=['urlsplit', 'unquote'])"
 
-# The registry's alias derivation and the open set's, which the alias cases plant against.
-DERIVATION = ("RESOURCE_REGISTRY += [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1)}\n"
-              "                      for entry in list(RESOURCE_REGISTRY)]\n")
+# The alias derivation (`legacy_aliases`, which the core and the RCAC capability both call), the
+# core's alias line and the open set's, which the alias cases plant against.
+DERIVATION = "    return [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1)} for entry in entries]\n"
+ALIAS_LINE = 'RESOURCE_REGISTRY += legacy_aliases(list(RESOURCE_REGISTRY))\n'
 OPEN_SET = ("OPEN_RESOURCES: Final[frozenset[str]] = frozenset(\n"
             "    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])\n")
 
@@ -366,7 +367,7 @@ CASES: tuple[Case, ...] = (
                       for name in ('runs_on_the_shared_executor', 'runs_the_local_executor')
                       for era in ('legacy', 'modern'))),
          'No executor configured'),
-    Case('resource-calls-decorated-tool', 'core/resources.py',
+    Case('resource-calls-decorated-tool', 'rcac/resources.py',
          (('    from cluster_mcp.rcac.tools import resolve_storage_paths\n\n    paths = resolve_storage_paths()\n',
            '    from cluster_mcp.rcac.tools import storage_paths\n\n    paths = storage_paths()\n'),),
          per_scheme('test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[legacy]',
@@ -587,9 +588,11 @@ CASES: tuple[Case, ...] = (
            "            raise RuntimeError('No executor configured. Set executor via set_executor() first.')\n"),),
          tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[no-token-{era}]' for era in ERAS),
          'expected -32602'),
+    # The storage resource is the RCAC capability's, so the core's open set alone decides that it is
+    # resolved: a capability resource marked open is refused at load, never served open.
     Case('storage-read-left-open', 'core/resources.py',
-         (("    'handler': _storage_paths_resource,\n    'executor': True,\n",
-           "    'handler': _storage_paths_resource,\n    'executor': False,\n"),),
+         ((OPEN_SET, OPEN_SET.replace("if not entry['executor'])",
+                                      "if not entry['executor']) | {'cluster://storage', 'rcac://storage'}")),),
          refused_reads('unmapped', 'first-claim-unmapped'),
          'not authorized'),
     Case('context-read-closed', 'core/resources.py',
@@ -599,9 +602,10 @@ CASES: tuple[Case, ...] = (
          '(error=True)'),
     # Each deprecated rcac:// alias is derived from its cluster:// target before the open set is: it
     # keeps the target's executor flag and handler, it exists, and the open set holds it when it
-    # holds its target.
+    # holds its target. The storage alias is the RCAC capability's, so only the core's open set can
+    # open it.
     Case('alias-flag-hand-set-open', 'core/resources.py',
-         ((DERIVATION, DERIVATION.replace("1)}", "1), 'executor': False}")),),
+         ((OPEN_SET, OPEN_SET.replace("if not entry['executor'])", "if not entry['executor']) | {'rcac://storage'}")),),
          refused_reads('unmapped', 'first-claim-unmapped', schemes=('rcac',)),
          'not authorized'),
     Case('alias-flag-hand-set-closed', 'core/resources.py',
@@ -609,7 +613,7 @@ CASES: tuple[Case, ...] = (
          open_to_refused(('rcac',)),
          '(error=True)'),
     Case('open-set-before-aliases', 'core/resources.py',
-         ((DERIVATION, ''), (OPEN_SET, OPEN_SET + DERIVATION)),
+         ((ALIAS_LINE, ''), (OPEN_SET, OPEN_SET + ALIAS_LINE)),
          open_to_refused(('rcac',)),
          '(error=True)'),
     Case('open-set-target-scheme-only', 'core/resources.py',
@@ -617,13 +621,11 @@ CASES: tuple[Case, ...] = (
          open_to_refused(('rcac',)),
          '(error=True)'),
     Case('alias-handler-differs', 'core/resources.py',
-         ((DERIVATION,
-           "RESOURCE_REGISTRY += [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1), 'handler': other['handler']}\n"
-           "                      for entry, other in zip(list(RESOURCE_REGISTRY), list(RESOURCE_REGISTRY)[::-1])]\n"),),
+         ((DERIVATION, DERIVATION.replace("1)}", "1), 'handler': lambda: 'not the target'}")),),
          ALIAS_READS,
          'reading the alias'),
     Case('alias-missing', 'core/resources.py',
-         ((DERIVATION, ''),),
+         ((DERIVATION, '    return []\n'),),
          ALIAS_READS,
          'code=-32602'),
     Case('read-no-token-reuses-last-executor', 'core/middleware.py',
@@ -2299,6 +2301,21 @@ CASES: tuple[Case, ...] = (
          ('test_capabilities.py::test_instructions_must_list_exactly_the_tools[lists-another]',
           'test_capabilities.py::test_instructions_must_list_exactly_the_tools[omits-its-tool]'),
          'instructions that do not list exactly its tools loaded'),
+    # The storage resource and its alias are served exactly with the RCAC capability, and a capability
+    # resource that claims to run nothing is refused at load rather than served gated.
+    Case('storage-resource-unconditional', 'core/server.py',
+         (('               *(entry for loaded in _listed(capabilities) for entry in loaded.capability.resources)]\n',
+           '               *(entry for loaded in _listed(installed()) for entry in loaded.capability.resources)]\n'),),
+         ('test_capabilities.py::test_storage_is_served_only_with_the_rcac_capability',),
+         'served beyond or short of the core'),
+    Case('capability-resource-open-allowed', 'core/capabilities.py',
+         (("    if entry.get('executor') is not True:\n"
+           "        raise _Invalid(f'its resource {entry[\"uri\"]!r} has executor {entry.get(\"executor\")!r}, not True: '\n"
+           "                       f'a capability resource is never open')\n", ''),),
+         ('test_capabilities.py::test_a_capability_resource_must_need_an_executor[false]',
+          'test_capabilities.py::test_a_capability_resource_must_need_an_executor[missing]',
+          'test_capabilities.py::test_a_capability_resource_must_need_an_executor[truthy]'),
+         'an open resource loaded'),
     # The deprecation window is one string, deprecated in 0.2.0, removed no earlier than 0.4.0, wherever
     # a user reads it: the constant, every warning (each emitter, and each call site that emits one),
     # and README's upgrade section, which states it once and pairs each deprecated name with its
