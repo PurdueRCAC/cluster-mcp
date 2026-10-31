@@ -144,15 +144,14 @@ once per process.
 Every mode now returns a result at the deadline, but whether the command stops is open over SSH
 (OpenSSH may ignore the `signal` request, and closing a non-PTY channel stops nothing) and under a
 non-root `delegate` server (TERM reaches only the command, through `sudo`). Measuring it needs a
-long-running process on a login node, outside the read-only dogfood class, so it waits for
-approval. Found by `safe-execution`'s planning research, 2026-10-17.
+long-running process on a login node, outside the read-only dogfood class, so it waited for
+approval, given on 2026-10-29. Found by `safe-execution`'s planning research, 2026-10-17.
 
 It sits ahead of the tool families because they lean on bounded calls (a bounded `file_find`, a
 `job_wait` considered), which make a timeout a routine outcome on a shared login node rather than
-an accident. Its measurement needs Geoffrey's approval first; until it has it, nothing below waits
-on it.
+an accident. Its measurement was approved on 2026-10-29.
 
-*Horizon: mid-term; the measurement needs Geoffrey's approval · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
+*Horizon: mid-term; the measurement approved on 2026-10-29 · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
 **Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: unshaped*
 
 ## A dead SSH link that still reads as connected holds file transfers without limit

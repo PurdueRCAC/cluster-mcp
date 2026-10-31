@@ -72,6 +72,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/capability-extras/verify/p5.sh && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
 review:
   last_reviewed_commit: '4772784'
@@ -443,6 +444,33 @@ steps pass on this head, and every deferral has its record.
   `issues/fastmcp-update-check.md`.
 - **Touches:** whatever a failing check names; `issues/`, `ROADMAP.md` only for a deferral.
 
+### Reopened at review cycle 1 — F3: the roadmap agrees that the timeout measurement is approved
+
+*Amended at remediation (2026-10-31).* REVIEW.md F3: Part I's intro says the timeout measurement is
+approved, its entry said it still waited for approval. It was approved on 2026-10-29.
+
+- [x] `ROADMAP.md`, "A timed-out command may keep running after its call returns": its prose and
+      its Horizon line say the measurement was approved on 2026-10-29. The sweep's other live site,
+      `issues/timeout-process-cleanup.md`'s "Why it was deferred", gets a dated, append-only
+      correction beneath it (`- 2026-10-29: the measurement was approved.`), its history kept.
+- [x] This phase is also the cycle's last, so its frozen gate runs again on the remediated tree.
+- **Verify (retuned at remediation):**
+  `sh spec/capability-extras/verify/p5.sh && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py`.
+  The checker reads every tracked Markdown file outside `spec/` for a claim that the measurement
+  still waits for approval with no dated correction after it, and the entry and its Horizon line
+  for the approval and its date. Seen red on `HEAD` (the entry's three claims, the seed's, and both
+  missing statements).
+  *Attempt 1 (red, 2026-10-31), stopped for the foreman's ruling:* every step green but `p5.sh
+  ledger` — `phase` (pyprojects, imports, compose, docs, planted `extra` and `broken`, coreonly,
+  probe, baseline), `recipe` (4 wheels and 4 sdists, `twine check --strict`, hygiene clean), `full`
+  3043 passed and 14 skipped in each era, `mutants` 122 killed with 3 controls, and the F3 checker.
+  `ledger.py` reports `REVIEW.md: defers without a seed: ### Out of scope (recorded, not
+  blocking)`: it reads the review's heading as a deferral block of its own. The red is on the
+  review commit `54ff4fc` already, and `ledger.py` passes on `4772784`, before REVIEW.md existed;
+  this remediation does not touch it. The one deferral under the heading links
+  `issues/capability-reload-after-failure.md`, which exists and has its `ROADMAP.md` entry. The
+  gate is frozen and is not amended; the attempt stays recorded until the foreman rules (a
+  recorded wrapper under `remediation/`, or another reading).
 
 ---
 

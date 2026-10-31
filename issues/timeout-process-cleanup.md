@@ -31,6 +31,8 @@ remote `timeout -k` wrapper in the bootstrap, or a PTY-free process-group kill) 
 and wants that measurement first. **Pre-existing:** yes; before `safe-execution` the SSH backend
 raised at the deadline and left the command running the same way.
 
+- 2026-10-29: the measurement was approved.
+
 ## Outcome / vision
 
 A timed-out command, and what it started, is stopped on the cluster within a bound, in every mode,
