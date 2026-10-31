@@ -3,10 +3,10 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-extras
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -62,7 +62,7 @@ phases:
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
-  status: pending
+  status: done
   satisfies:
   - R6
   - R9
@@ -313,16 +313,32 @@ the root installs every capability; the docs name the extras.
 **Goal:** every independent check passes on the finished tree, the release recipe's offline gate
 steps pass on this head, and every deferral has its record.
 
-- [ ] Run `p5.sh phase` and fix what it finds in the phase that owns it (amend this file and say so
+- [x] Run `p5.sh phase` and fix what it finds in the phase that owns it (amend this file and say so
       in the commit body).
-- [ ] The deferral ledger: walk every earlier phase body, PLAN.md and REVIEW.md (if any) for "do not
+- [x] The deferral ledger: walk every earlier phase body, PLAN.md and REVIEW.md (if any) for "do not
       fix here", "known limitation", "deferred", "follow-up", "out of scope"; each must name an
       `issues/{slug}.md` (pre-shaped from the KB `ISSUE.md` template) with its `ROADMAP.md` entry
       (the gitignored security lane instead for a sensitive item). `p5.sh ledger`
       checks the links; the walk is this item's.
-- [ ] `p5.sh recipe`: build, `twine check --strict`, sdist hygiene on this head.
-- [ ] `verify/retired.txt` empty, or each line justified in its phase's commit body.
+- [x] `p5.sh recipe`: build, `twine check --strict`, sdist hygiene on this head.
+- [x] `verify/retired.txt` empty, or each line justified in its phase's commit body.
 - **Verify:** `sh spec/capability-extras/verify/p5.sh`.
+  *Observed at build (2026-10-31), each mode run alone on `0cf635f`'s tree, nothing to fix:*
+  `phase` green on every step (pyprojects p4, imports, compose over 4 capability sets, docs p4,
+  planted `extra` and 11 `broken` cases plus one over HTTP, coreonly for core, slurm, rcac and
+  both, probe's five installs with the lock-free and lock-pinned compares at 24 tools, 4 resources
+  and 1477 characters of instructions, baseline with 452 functions and 417 cases kept, 0 retired);
+  `ledger` ok, and seen red first on a copy outside the worktree (a planted unseeded deferral, a
+  seed dropped from `ROADMAP.md`); `recipe` built 4 wheels and 4 sdists, `twine check --strict`
+  passed each, sdist hygiene clean; `mutants` 66 killed, none survived, 3 controls reported;
+  `full` 2765 passed and 14 skipped in each era. The 14 skips are
+  `test_site.py::test_remote_read_ignores_exported_shell_options`, which needs bash 4.1 or later
+  (`need_shell`); the CI runner has it, and there `need_shell` fails rather than skips.
+  The walk found two deferrals, each seeded and in `ROADMAP.md`: the runtime probe (GOAL Q2,
+  `issues/capability-probe.md`, filed at the shape commit) and the lock that pins no user install
+  (P4's ruling, `issues/unlocked-install-floors.md`). PLAN §5's member-without-an-entry-point risk
+  is residual by design, and the FastMCP update check points at its existing seed,
+  `issues/fastmcp-update-check.md`.
 - **Touches:** whatever a failing check names; `issues/`, `ROADMAP.md` only for a deferral.
 
 ---
