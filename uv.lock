@@ -284,8 +284,6 @@ name = "cluster-mcp"
 version = "0.1.5"
 source = { editable = "packages/cluster-mcp" }
 dependencies = [
-    { name = "cluster-mcp-rcac" },
-    { name = "cluster-mcp-slurm" },
     { name = "cmdkit" },
     { name = "fabric" },
     { name = "fastmcp" },
@@ -293,16 +291,25 @@ dependencies = [
     { name = "pyjwt" },
 ]
 
+[package.optional-dependencies]
+rcac = [
+    { name = "cluster-mcp-rcac" },
+]
+slurm = [
+    { name = "cluster-mcp-slurm" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "cluster-mcp-rcac", editable = "packages/cluster-mcp-rcac" },
-    { name = "cluster-mcp-slurm", editable = "packages/cluster-mcp-slurm" },
+    { name = "cluster-mcp-rcac", marker = "extra == 'rcac'", editable = "packages/cluster-mcp-rcac" },
+    { name = "cluster-mcp-slurm", marker = "extra == 'slurm'", editable = "packages/cluster-mcp-slurm" },
     { name = "cmdkit", specifier = ">=2.7.7" },
     { name = "fabric", specifier = ">=3.0" },
     { name = "fastmcp", specifier = ">=4,<5" },
     { name = "paramiko", specifier = ">=3.2" },
     { name = "pyjwt", specifier = ">=2.0" },
 ]
+provides-extras = ["slurm", "rcac"]
 
 [[package]]
 name = "cluster-mcp-rcac"
@@ -1117,7 +1124,7 @@ name = "rcac-mcp"
 version = "0.1.5"
 source = { editable = "." }
 dependencies = [
-    { name = "cluster-mcp" },
+    { name = "cluster-mcp", extra = ["rcac", "slurm"] },
 ]
 
 [package.dev-dependencies]
@@ -1127,7 +1134,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cluster-mcp", editable = "packages/cluster-mcp" }]
+requires-dist = [{ name = "cluster-mcp", extras = ["slurm", "rcac"], editable = "packages/cluster-mcp" }]
 
 [package.metadata.requires-dev]
 dev = [

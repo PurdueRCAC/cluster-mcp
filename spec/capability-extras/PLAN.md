@@ -265,6 +265,12 @@ Gate #2 (after design):
   after this cycle. It has never been in a release (0.1.5's tree has no `packages/`; its README
   installs the repository root, which R9 keeps whole), so no released client config uses it; the
   README's install note says so and names the extras.
+- **A surface compare across install forms must hold one resolution mode** (amended at P4's build,
+  at the foreman's ruling, 2026-10-31): `probe.sh` first compared a lock-free root install with the
+  locked `base.json`, and a newer cached dependency turned it red with no product change. It now
+  compares lock-free with lock-free (`BASE_REF`'s root, same run) and lock-pinned with locked
+  (the exported lock as constraints, against `base.json`), both fatal (TECH P4). The lock pins no
+  user install: `issues/unlocked-install-floors.md`.
 - **The FastMCP update check** makes stdio drives fetch from the network; new drives turn it off,
   and the suite-wide fix stays with `issues/fastmcp-update-check.md`.
 - **Adversarial review** (fresh subagent, GOAL + this design + the drafted gates, with a scratch

@@ -1,8 +1,9 @@
 # cluster-mcp
 
 An MCP server for HPC clusters: shell, files, jobs and storage for AI agents. It runs commands on a
-cluster over SSH for one user, or serves many users from a shared host, and carries the Slurm tools
-and the Purdue RCAC-specific tools beside its core.
+cluster over SSH for one user, or serves many users from a shared host. Its core serves shell and
+file tools on any cluster; the rest are capabilities you install as extras, for what your cluster
+has: the Slurm tools (`[slurm]`) and the Purdue RCAC-specific tools (`[rcac]`).
 
 ## Quick Start (Desktop Clients)
 
@@ -14,7 +15,7 @@ to your MCP configuration with an SSH host pointing at your cluster:
   "mcpServers": {
     "cluster": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp",
+      "args": ["--from", "cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp",
                "cluster-mcp", "--ssh-host", "cluster.rcac.purdue.edu"]
     }
   }
@@ -24,11 +25,21 @@ to your MCP configuration with an SSH host pointing at your cluster:
 This runs the server locally in `stdio` mode, executing commands on the cluster over SSH
 using your existing `~/.ssh/config` and keys.
 
-Install with uv, from git, as above. The server is a uv workspace: `cluster-mcp` depends on its
-Slurm and RCAC members, `cluster-mcp-slurm` and `cluster-mcp-rcac`, by bare name, and none of the
-three is registered on PyPI. uv builds them from the same git commit; pip, or any install that skips
-uv's workspace sources, would look for them on the package index instead, where anyone could
-register those names.
+Install with uv, from git, as above, naming the extras your cluster needs in the requirement (one
+`args` element, spaces included): `[slurm]` adds the Slurm tools, `[rcac]` the Purdue RCAC-specific
+tools, which go with `[slurm]`, so a Purdue cluster takes `cluster-mcp[slurm,rcac]`, as above.
+`cluster-mcp` with no extra is the core alone: the shell, file and site-context tools. The server
+lists only the tools of what is installed, and its instructions name only those. In a shell, quote
+the requirement, since `[slurm,rcac]` is otherwise a glob:
+
+```bash
+uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
+```
+
+The server is a uv workspace: each extra installs one member, `cluster-mcp-slurm` or
+`cluster-mcp-rcac`, required by bare name, and none of the three is registered on PyPI. uv builds
+them from the same git commit; pip, or any install that skips uv's workspace sources, would look for
+them on the package index instead, where anyone could register those names.
 
 Alternatively, set `CLUSTER_MCP_SSH_HOST` in your environment and omit `--ssh-host` from the args.
 
@@ -87,7 +98,8 @@ The command and each old variable print a warning on stderr naming the replaceme
 When an old and a new variable are both set, the new one wins, and the warning says the old one is
 ignored. An `rcac://` URI returns the same content as its `cluster://` replacement. The install
 line earlier releases documented keeps working through the window too: it installs a compatibility
-distribution that runs the deprecated `rcac-mcp` command. Update your MCP client
+distribution that carries every capability (`cluster-mcp[slurm,rcac]`) and runs the deprecated
+`rcac-mcp` command. Update your MCP client
 configuration to the Quick Start form above.
 
 ## Execution Modes
@@ -122,7 +134,8 @@ See [SECURITY.md](SECURITY.md) for detailed architecture and configuration.
 
 ## Hosted HTTP Server
 
-For a shared hosted instance with authentication:
+For a shared hosted instance with authentication, run `cluster-mcp` installed with the extras the
+cluster needs (the Quick Start's requirement):
 
 ### Basic HTTP Server
 
@@ -169,8 +182,10 @@ This server does not search RCAC documentation. The separate `rcac-docs-mcp` ser
 
 ## Available Tools
 
-The tools come in three groups, as the server's instructions list them: the core, which any
-cluster has; the Slurm tools; and the RCAC-specific tools.
+The tools come in three groups, as the server's instructions list them: the core, which every
+install serves; the Slurm tools, served with the `[slurm]` extra; and the RCAC-specific tools,
+served with the `[rcac]` extra (install it with `[slurm]`: several of its tools take a Slurm job id).
+A server serves only the groups installed.
 
 ### Core
 
@@ -187,7 +202,7 @@ Site context:
 
 - `cluster_context()` — The cluster's rules from `/etc/agents.d`, in full, as read at startup
 
-### Slurm
+### Slurm (`[slurm]`)
 
 - `sbatch(...)` — Submit a batch job (from script path or inline content, written byte for byte); `args` are the job script's arguments, `extra_args` more sbatch options, each a list with one argument per element
 - `squeue(...)` — View the job queue
@@ -199,7 +214,7 @@ Site context:
 
 The `extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` is a list of options, one argument per element (`extra_args=["--long"]`); a string is refused.
 
-### RCAC-specific
+### RCAC-specific (`[rcac]`, with `[slurm]`)
 
 - `myquota()` — Show storage usage and quota limits
 - `storage_paths()` — Get resolved paths for home, scratch, and depot
@@ -215,7 +230,7 @@ The `extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` is a list
 ## Development
 
 ```bash
-uv sync
+uv sync               # the core and every capability, editable, through the root's extras
 cluster-mcp -e local
 ```
 

@@ -20,9 +20,18 @@
 #      `git+file://…@<sha>#subdirectory=packages/cluster-mcp` form) and `rcac-mcp @ git+file://…@<sha>`
 #      (the repository root, the old line) — installs every cluster-mcp distribution it has from
 #      commit <sha>, without the marker, and registry.py holds for its set;
-#   3. the root install's served surface equals BASE_REF's (baseline.sh writes it), whole, and its
-#      `rcac-mcp -e local` command, driven over stdio, serves the core, Slurm and RCAC tools and
-#      resources with the base in that order (served.py);
+#   3. the root install serves what the old install line served before the cycle, whole, compared
+#      within one resolution mode (amended at the foreman's ruling, 2026-10-31: the first compare
+#      set a lock-free install against the locked base.json, so a newer cached dependency turned
+#      it red with no product change):
+#      a. lock-free, as a user's install line resolves: BASE_REF's tree, committed into a second
+#         throwaway repository and installed the same way from the same offline cache in this
+#         run, serves exactly what this snapshot's root install serves;
+#      b. lock-pinned: the snapshot's root installed with its uv.lock exported as constraints
+#         (`uv export --frozen --no-hashes --no-emit-workspace --no-dev`) serves exactly base.json
+#         (baseline.sh writes it from BASE_REF's locked sync);
+#      and the root install's `rcac-mcp -e local` command, driven over stdio, serves the core,
+#      Slurm and RCAC tools and resources with the base in that order (served.py);
 #   4. `uvx --from 'cluster-mcp[slurm,rcac] @ <spec>' cluster-mcp --help` (the README line) and
 #      `uvx --from 'git+file://…@<sha>' rcac-mcp --help` (the old line) exit 0.
 # Footprint: one uv or python process tree at a time, under 1 GB; about 2 min warm.
@@ -34,6 +43,9 @@ cd "$CLUSTER_MCP_REPO"
 R=$CLUSTER_MCP_REPO
 V=spec/capability-extras/verify
 fail() { echo "probe: $*" >&2; exit 1; }
+# The base commit, from its one definition in lib.sh.
+BASE_REF=$(sed -n 's/^BASE_REF=//p' "$V/lib.sh")
+[ -n "$BASE_REF" ] || fail 'lib.sh defines no BASE_REF'
 sh $V/baseline.sh > /dev/null 2>&1 || fail 'baseline.sh failed: run it alone for the reason'
 [ -s "$HOME/base.json" ] || fail 'baseline.sh wrote no base.json'
 export FASTMCP_CHECK_FOR_UPDATES=off
@@ -101,9 +113,15 @@ EOF
 
 spec="git+file://$snap@$sha#subdirectory=packages/cluster-mcp"
 install() { # install LABEL REQUIREMENT SET…: a fresh venv from REQUIREMENT, checked for SET
+  # With CONSTRAINTS naming a file, the install is pinned by it (uv pip install -c).
   label=$1; req=$2; shift 2
   uv venv -q "$HOME/venv-$label" || fail "$label: uv venv failed"
-  uv pip install -q --offline --python "$HOME/venv-$label/bin/python" "$req" || fail "$label: uv pip install $req failed"
+  if [ -n "${CONSTRAINTS:-}" ]; then
+    uv pip install -q --offline --python "$HOME/venv-$label/bin/python" -c "$CONSTRAINTS" "$req" \
+      || fail "$label: uv pip install -c $CONSTRAINTS $req failed"
+  else
+    uv pip install -q --offline --python "$HOME/venv-$label/bin/python" "$req" || fail "$label: uv pip install $req failed"
+  fi
   "$HOME/venv-$label/bin/python" -I - "$sha" "$snap" <<'EOF' || fail "$label: an installed distribution is not from the snapshot commit (above)"
 import importlib.metadata as md, json, sys
 sha, snap = sys.argv[1], sys.argv[2]
@@ -134,8 +152,34 @@ install both "cluster-mcp[slurm,rcac] @ $spec" slurm rcac
 install root "rcac-mcp @ git+file://$snap@$sha" slurm rcac
 
 "$HOME/venv-root/bin/python" -I "$R/$V/surface.py" "$HOME/root.json" || fail 'cannot describe the root install surface'
-uv run --no-project --offline python -I "$R/$V/compare.py" "$HOME/base.json" "$HOME/root.json" \
-  || fail 'the old install line serves another surface than before the cycle'
+
+# 3a. Lock-free: BASE_REF's old install line, resolved as this run resolved the snapshot's.
+oldsnap="$HOME/base-snapshot"
+mkdir -p "$oldsnap"
+git -C "$R" archive "$BASE_REF" | tar -xf - -C "$oldsnap"
+O() { git -C "$oldsnap" -c user.name=probe -c user.email=probe@invalid -c commit.gpgsign=false "$@"; }
+O init -q
+O add -A
+O commit -q -m base
+oldsha=$(O rev-parse HEAD)
+uv venv -q "$HOME/venv-baseroot" || fail 'baseroot: uv venv failed'
+uv pip install -q --offline --python "$HOME/venv-baseroot/bin/python" "rcac-mcp @ git+file://$oldsnap@$oldsha" \
+  || fail "baseroot: uv pip install of BASE_REF's root failed"
+"$HOME/venv-baseroot/bin/python" -I "$R/$V/surface.py" "$HOME/baseroot.json" || fail "cannot describe BASE_REF's root install surface"
+uv run --no-project --offline python -I "$R/$V/compare.py" "$HOME/baseroot.json" "$HOME/root.json" \
+  || fail 'lock-free: the old install line serves another surface than it did at BASE_REF'
+echo 'probe: lock-free compare ok' >&2
+
+# 3b. Lock-pinned: the snapshot's root under its own lock, against BASE_REF's locked sync.
+( cd "$snap" && uv export -q --frozen --offline --no-hashes --no-emit-workspace --no-dev -o "$HOME/constraints.txt" ) \
+  || fail 'cannot export the snapshot lock as constraints'
+grep -q '^fastmcp==' "$HOME/constraints.txt" || fail 'the exported constraints pin no fastmcp'
+CONSTRAINTS="$HOME/constraints.txt" install lockroot "rcac-mcp @ git+file://$snap@$sha" slurm rcac
+"$HOME/venv-lockroot/bin/python" -I "$R/$V/surface.py" "$HOME/lockroot.json" || fail 'cannot describe the lock-pinned root install surface'
+uv run --no-project --offline python -I "$R/$V/compare.py" "$HOME/base.json" "$HOME/lockroot.json" \
+  || fail 'lock-pinned: the old install line serves another surface than before the cycle'
+echo 'probe: lock-pinned compare ok' >&2
+
 "$R/.venv/bin/python" -I "$R/$V/expect.py" "$HOME/root-expect.json" core slurm rcac
 "$R/.venv/bin/python" -I "$R/$V/served.py" "$HOME/root-expect.json" -- "$HOME/venv-root/bin/rcac-mcp" -e local \
   || fail 'the rcac-mcp command of the old install line serves another surface over stdio'

@@ -267,7 +267,8 @@ UPGRADING_SECTION = (
     'When an old and a new variable are both set, the new one wins, and the warning says the old one is\n'
     'ignored. An `rcac://` URI returns the same content as its `cluster://` replacement. The install\n'
     'line earlier releases documented keeps working through the window too: it installs a compatibility\n'
-    'distribution that runs the deprecated `rcac-mcp` command. Update your MCP client\n'
+    'distribution that carries every capability (`cluster-mcp[slurm,rcac]`) and runs the deprecated\n'
+    '`rcac-mcp` command. Update your MCP client\n'
     'configuration to the Quick Start form above.\n\n')
 COMMAND_ROW = '| the `rcac-mcp` command | `cluster-mcp` |\n'
 VARIABLES_ROW = ('| `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_INSTRUCTIONS_BUDGET` | `CLUSTER_MCP_SSH_HOST`, '

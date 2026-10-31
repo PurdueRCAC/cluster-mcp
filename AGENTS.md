@@ -19,11 +19,14 @@ management, and site-specific tooling to AI agents over the Model Context Protoc
 agent can actually work on a cluster instead of guessing about one. The code is a uv workspace of
 three distributions under one `cluster_mcp` namespace: the core `cluster-mcp` (`cluster_mcp.core`)
 and the Slurm and RCAC members (`cluster_mcp.slurm`, `cluster_mcp.rcac`; § Repository map,
-§ Packaging). The console entry point (`packages/cluster-mcp/pyproject.toml [project.scripts]`) is
-**`cluster-mcp`** → `cluster_mcp.core:main`, and `python -m cluster_mcp.core` works via
-`__main__.py`. The server's old name, **`rcac-mcp`**, is a deprecated command
-(`cluster_mcp.core:legacy_main`, installed by the root compat distribution): it prints one
-deprecation warning on stderr, then runs `cluster-mcp` with the same arguments.
+§ Packaging). The members are capabilities, installed as the core's extras
+(`cluster-mcp[slurm,rcac]`); a bare `cluster-mcp` is the core alone, and the server serves the tools
+of the capabilities installed (§ Invariants §7). The console entry point
+(`packages/cluster-mcp/pyproject.toml [project.scripts]`) is **`cluster-mcp`** →
+`cluster_mcp.core:main`, and `python -m cluster_mcp.core` works via `__main__.py`. The server's old
+name, **`rcac-mcp`**, is a deprecated command (`cluster_mcp.core:legacy_main`, installed by the root
+compat distribution with every capability): it prints one deprecation warning on stderr, then runs
+`cluster-mcp` with the same arguments.
 
 The server is built on **FastMCP 4.x** and the **MCP SDK 2.x** with a **cmdkit** CLI, and speaks
 three transports (`stdio`, `sse`, `http`) against three execution backends (`ssh`, `local`,
@@ -55,14 +58,17 @@ the others as real but secondary.
 
 ### Direction
 
-**Nothing in this section is true yet.** It is the agreed trajectory, recorded so a change can be
-made *with the grain* rather than against it. Do not code against it, cite it as an invariant, or
-"prepare" for it speculatively — the cycles in `ROADMAP.md` are how it lands.
+**Nothing in this section is true yet**, except what a bullet marks as landed. It is the agreed
+trajectory, recorded so a change can be made *with the grain* rather than against it. Do not code
+against it, cite it as an invariant, or "prepare" for it speculatively — the cycles in `ROADMAP.md`
+are how it lands.
 
 - **Capabilities become packaging extras.** `cluster-mcp[slurm,lmod]` installs the schedulers and
   module systems you actually have; a site extra like `cluster-mcp[rcac]` is shorthand for the right
   capability extras *plus* that center's specific tools and context. Others follow
-  (`cluster-mcp[alcf]`, `[ncsa]`, `[tacc]`).
+  (`cluster-mcp[alcf]`, `[ncsa]`, `[tacc]`). *Landed so far:* the extras `[slurm]` and `[rcac]`, each
+  one member registered through the entry-point group (§ Packaging, § Invariants §7); `[rcac]` is
+  an ordinary capability, not yet the site bundle described here.
 - **The long game is any HPC cluster** — not necessarily Slurm, not necessarily LMOD, not necessarily
   a Lustre scratch. Today's Slurm and RCAC members (`cluster_mcp.slurm`, `cluster_mcp.rcac`) are
   the *first* implementations of what become pluggable capability groups, not the shape of the
@@ -91,7 +97,8 @@ made *with the grain* rather than against it. Do not code against it, cite it as
 Dependency management is `uv` (`uv.lock`, `[dependency-groups] dev` syncs by default).
 
 ```bash
-uv sync                                  # install all deps (incl. dev) and every workspace member
+uv sync                                  # install all deps (incl. dev) and every workspace member,
+                                         #   the capabilities through the root's extras
 uv run cluster-mcp --help                # the CLI
 uv run cluster-mcp -e local              # run locally (development only)
 
@@ -141,8 +148,9 @@ portion of the `cluster_mcp` namespace package, which is a pure PEP 420 namespac
 | `packages/cluster-mcp-rcac/` | `cluster-mcp-rcac` | `cluster_mcp.rcac` | `capability.py`: the capability its `cluster_mcp.capabilities` entry point names; `tools.py`: the Purdue RCAC tools; `instructions.py`: the RCAC-specific overlay on the served instructions |
 
 Each member keeps its code under `src/cluster_mcp/<member>/`, beside its own `pyproject.toml` and a
-short `README.md`. The root `pyproject.toml` is the workspace root and the code-less compat
-distribution `rcac-mcp` (§ Packaging).
+short `README.md`. The Slurm and RCAC members are the core's extras `[slurm]` and `[rcac]`. The root
+`pyproject.toml` is the workspace root and the code-less compat distribution `rcac-mcp`, which
+installs `cluster-mcp[slurm,rcac]` (§ Packaging).
 
 The core package `packages/cluster-mcp/src/cluster_mcp/core/` (paths relative to it) and the two
 member modules:
@@ -502,7 +510,25 @@ import has no effect.
     with planted-tree controls); the four distributions carry one version, the core's
     (`test_every_distribution_carries_one_version`: uv does not check it), and `__version__` reads
     it from the installed metadata; the core installs only `cluster-mcp` and the root only
-    `rcac-mcp` (`test_console_scripts_are_cluster_mcp_and_the_legacy_alias`).
+    `rcac-mcp` (`test_console_scripts_are_cluster_mcp_and_the_legacy_alias`). The core depends on
+    no member unconditionally and declares exactly the extras `slurm` and `rcac`, each one member
+    through its workspace source, in the source and in the installed metadata (`Provides-Extra`, each
+    member required under its own extra), and each member depends on the core alone
+    (`test_core_declares_the_capability_extras`); the root depends on exactly
+    `cluster-mcp[slurm,rcac]` (installed: `cluster-mcp[rcac,slurm]`), and the development
+    environment it syncs holds both members (`test_compat_root_installs_every_capability`).
+  - `tests/test_core_only.py` (`integration`): a real core-only install. A session fixture builds
+    an editable environment of the core alone with `uv sync --package cluster-mcp --no-dev --frozen
+    --offline` under `bin/sandbox.sh`, into a scratch directory (`UV_PROJECT_ENVIRONMENT`;
+    `VIRTUAL_ENV` dropped, so `.venv` is never touched; editable, so it runs this tree and never a
+    cached wheel). In it only `cluster-mcp` is installed, the capability group is empty, and after
+    the startup load `TOOL_REGISTRY` holds exactly the core's seven tools
+    (`test_core_only_registry_holds_exactly_the_core_tools`); its `cluster-mcp -e local`, listed over
+    stdio in the selected era, serves exactly those tools, `cluster_context` last, and only the
+    context resources (`test_core_only_install_serves_the_core`), with a base that is the core's text
+    alone and lists exactly the tools served (`test_core_only_instructions_name_exactly_its_tools`).
+    It needs the uv cache the development sync filled (offline), and `PYTHONPATH` passes through, so
+    a mutated copy of the core is the core it drives.
   - `tests/test_startup.py` (`unit`, `integration`): `startup_refusal_violations`,
     `raw_wire_violations`, `refused_violations`, `startup_failure_violations`, `bound_violations`. A
     failed SSH connect at startup is reported as `cannot connect to <host>: <cause>` once on stderr,
@@ -1165,8 +1191,8 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   `JWTVerifier` and `AuthExecutorMiddleware`, with no socket and no port; in FastMCP 4 the
   verifier's 401 arrives as an error from connect-time negotiation, so `call_http` reads it from a
   response recorder and reports a rejection only when the last answer was a 401. `stdio_tools`
-  and `url_tools` list the tools of a server in another process and report the era it negotiated
-  and the instructions it served (`Listed`): `stdio_tools` (like `stdio_refusal`) launches the server itself, inside FastMCP where
+  and `url_tools` list the tools and resource URIs of a server in another process and report the era
+  it negotiated and the instructions it served (`Listed`): `stdio_tools` (like `stdio_refusal`) launches the server itself, inside FastMCP where
   the static launch check cannot see it, so it refuses an argv whose first element is not this
   repo's `bin/sandbox.sh`, and closes the server when its client exits; `url_tools` reaches only a
   loopback host.
@@ -1269,16 +1295,28 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
 - **A uv workspace of three members plus a compat root.** `[tool.uv.workspace] members =
   ["packages/*"]` in the root `pyproject.toml`: `packages/cluster-mcp` (`cluster-mcp`, the core,
   `cluster_mcp.core`), `packages/cluster-mcp-slurm` (`cluster-mcp-slurm`, `cluster_mcp.slurm`) and
-  `packages/cluster-mcp-rcac` (`cluster-mcp-rcac`, `cluster_mcp.rcac`). The core depends on both
-  members (a default install serves every tool: each member registers through its entry point, § Invariants §7) and each member on
-  the core, every internal requirement a bare name with a `{ workspace = true }` source, so a git
-  install with `#subdirectory=packages/cluster-mcp` builds the siblings from the same commit. `uv
-  sync` installs every member, editable.
-- **The root is the compat distribution `rcac-mcp`.** It depends on `cluster-mcp` alone, ships no
-  code (wheel `bypass-selection`), installs only the deprecated `rcac-mcp` command
-  (`cluster_mcp.core:legacy_main`), and its sdist takes only `pyproject.toml` and `README.md`. It
-  keeps the install line from before the workspace (a git install of the repository root) running
-  `rcac-mcp` through the deprecation window. The core installs only `cluster-mcp`, so no two
+  `packages/cluster-mcp-rcac` (`cluster-mcp-rcac`, `cluster_mcp.rcac`).
+- **The capabilities are the core's extras.** The core depends on no member unconditionally: its
+  `[project.optional-dependencies]` are `slurm = ["cluster-mcp-slurm"]` and
+  `rcac = ["cluster-mcp-rcac"]`, and each member depends on the core alone (the RCAC member does not
+  require the Slurm member; the README says to install `[rcac]` with `[slurm]`). Every internal
+  requirement is a bare name with a `{ workspace = true }` source, so a git install of
+  `cluster-mcp[slurm,rcac]` with `#subdirectory=packages/cluster-mcp` builds the named members from
+  the same commit, and a bare `cluster-mcp` with that subdirectory installs the core alone, which
+  starts and serves the core's tools. An installed member registers through its entry point
+  (§ Invariants §7); one not installed is never imported. `tests/test_packaging.py` pins the
+  declarations and the installed metadata; `tests/test_core_only.py` builds a real core-only
+  environment and drives it.
+- **`uv sync` installs every member, editable, only through the root's extras.** uv syncs the root
+  and its dependency closure; the root's `cluster-mcp[slurm,rcac]` is what brings both members into
+  `.venv` (and into CI, `mutants.yml` and the Dockerfile's `uv pip install -e .`). A root on bare
+  `cluster-mcp` would make `uv sync` remove them.
+- **The root is the compat distribution `rcac-mcp`.** It depends on exactly
+  `cluster-mcp[slurm,rcac]`, ships no code (wheel `bypass-selection`), installs only the deprecated
+  `rcac-mcp` command (`cluster_mcp.core:legacy_main`), and its sdist takes only `pyproject.toml` and
+  `README.md`. It keeps the install line from before the workspace (a git install of the repository
+  root) running `rcac-mcp` with every tool, instruction and resource it served before, through the
+  deprecation window. The core installs only `cluster-mcp`, so no two
   distributions claim one script.
 - **`cluster_mcp` is a pure namespace: no member ships `cluster_mcp/__init__.py`** (invariant). One
   `__init__.py` in any member's `src/cluster_mcp/` hides every other member's portion, in the
@@ -1292,11 +1330,15 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
 - **Build every member: `uv build --all-packages --no-sources -o dist/`.** A plain `uv build` at the
   workspace root builds only the root. `--no-sources` resolves the build backend from the index;
   workspace sources never reach wheel metadata, so it changes no artifact.
-- **`uv.lock` is tracked.** This server is installed straight from `git+https://…`, so the lock is the
-  only thing pinning the transitive tree a user actually receives. A change to `[project.dependencies]`
-  or `[dependency-groups]` runs `uv lock` and commits the result **in the same commit**; the release
-  recipe's `bump.files` stages it alongside the version bump. `uv lock --check` exits nonzero when
-  the two have drifted.
+- **`uv.lock` is tracked, and pins what `uv sync` installs**: the development environment and CI
+  (`uv sync --locked`). It does **not** pin what a user receives: a `git+…` or `uvx --from` install
+  resolves fresh within the ranges the `pyproject.toml` files declare and never reads the lock, and
+  neither does the container image, whose Dockerfile copies the lock but installs with
+  `uv pip install`. A version the lock lifts reaches those installs only when a declared floor
+  requires it (`issues/unlocked-install-floors.md`). A change to `[project.dependencies]`,
+  `[project.optional-dependencies]` or `[dependency-groups]` runs `uv lock` and commits the result
+  **in the same commit**; the release recipe's `bump.files` stages it alongside the version bump.
+  `uv lock --check` exits nonzero when the two have drifted.
 - **The release gate audits the lock.** `bin/audit_lock.py` (stdlib; `uv audit` over the tree
   `uv.lock` resolves) fails the release recipe's `gate` when any locked package carries a known
   advisory, and when the advisory source cannot be reached (§ Factory → Release recipe, its `audit`
@@ -1312,7 +1354,8 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   and build checks for each push to any branch and each pull request into `develop` or `main`
   (§ Conventions binds the step lists). There is **no publish workflow and no published container
   image**, and the project is not on PyPI — users install with uv from
-  `git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp`, never with pip:
+  `cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp`
+  (naming the extras they need), never with pip:
   the internal requirements are bare names unregistered on PyPI (the release recipe's `pypi`
   caveat). The release recipe cuts a tag and a GitHub release and says so plainly.
 - A **container build does exist locally**: `Dockerfile` + `compose.yml` (+ `nginx-dev.conf` for the
@@ -1429,7 +1472,8 @@ release:
       push: [HEAD:develop, HEAD:main, "{v}"]   # each its own approval
       publish: gh release create {v} --verify-tag
   post_verify:
-    - bin/sandbox.sh uvx --from 'git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help
+    - bin/sandbox.sh uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help   # the README line
+    - bin/sandbox.sh uvx --from 'git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help   # the core alone
     - bin/sandbox.sh uvx --from 'git+https://github.com/PurdueRCAC/cluster-mcp@{v}' rcac-mcp --help   # the old install line runs the deprecated command
   caveats:
     main-fast-forward: >-
@@ -1442,7 +1486,8 @@ release:
       main starts CI runs; the tag push starts none. There is no publish workflow, no published
       container image, and no PyPI project. A release is a signed tag plus a GitHub release, and
       users install from
-      `git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`.
+      `cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`,
+      naming the extras they need (the bare form is the core alone).
     repo-rename: >-
       The repository was renamed from PurdueRCAC/rcac-mcp to PurdueRCAC/cluster-mcp on 2026-10-31,
       after release 0.1.5. GitHub redirects the old name, so every install line and clone that
@@ -1477,7 +1522,9 @@ release:
       verify never runs it: phase gates stay offline-capable and deterministic. CI runs it, as part
       of its mirror of this gate (ci-mirror-no-index), on a runner with network.
     lock: >-
-      uv.lock is tracked and pins the transitive tree a git+https install receives; a bump that
+      uv.lock is tracked and pins the tree uv sync installs (development, CI); a git+https install,
+      and the container image's uv pip install, resolve within the declared ranges and do not read
+      it. A bump that
       leaves it stale ships a version the lock disagrees with. If anything besides the four
       pyproject.toml files and uv.lock wants staging in the bump, STOP and look.
     versions: >-
@@ -1488,9 +1535,12 @@ release:
       release's notes start at the tag before it.
     install-probe: >-
       post_verify runs under bin/sandbox.sh so the probe cannot pick up the working tree or reach a
-      real cluster. Its first line installs the core with the #subdirectory= form, which builds the
-      Slurm and RCAC members from the same tag; its second installs the root compat distribution,
-      the old install line, and runs the deprecated rcac-mcp command.
+      real cluster. Its first line is the README's: the core with the extras [slurm,rcac] in the
+      #subdirectory= form, which builds the Slurm and RCAC members from the same tag; its second
+      installs the core alone, with no extra, which must install and run without either member; its third
+      installs the root compat distribution, the old install line, which carries every capability,
+      and runs the deprecated rcac-mcp command. --help proves install and import only: the
+      capabilities load when the server starts, not at --help.
     repo-rename-first: >-
       post_verify installs from PurdueRCAC/cluster-mcp, which resolves only once the GitHub
       repository has been renamed from rcac-mcp, a separate, human-approved action. At 0.2.0 the

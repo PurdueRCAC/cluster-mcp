@@ -54,8 +54,8 @@ post-connect check and reports what happened: the negotiated version, whether an
 exists, the instructions and tool names the client received, and the methods the server's
 `MethodLog` saw on that connection. A test then decides whether that is the era it asked for.
 
-**Servers in another process.** `stdio_tools` and `url_tools` list the tools of a real `cluster-mcp`
-process and report the era it negotiated (`Listed`); `stdio_refusal` connects to one that cannot
+**Servers in another process.** `stdio_tools` and `url_tools` list the tools and resources of a real
+`cluster-mcp` process and report the era it negotiated (`Listed`); `stdio_refusal` connects to one that cannot
 start and returns the error the client got (`Refused`), relying on a JSON-RPC error that answers the
 handshake reaching the caller as `MCPError`, with its `code` and its message as `str()`.
 `stdio_tools` and `stdio_refusal` launch the server themselves, inside FastMCP, where
@@ -510,23 +510,24 @@ async def negotiate(target: Any, era: str, token: str | None = None) -> Negotiat
 
 @dataclass(frozen=True)
 class Listed:
-    """What a client listed from a server in another process: the tools, the era and the instructions."""
+    """What a client listed from a server in another process: tools, era, instructions and resource URIs."""
 
     tools: tuple[str, ...]
     protocol_version: str | None
     has_initialize_result: bool
     instructions: str | None = None
+    resources: tuple[str, ...] = ()
 
 
 async def _listed(client: _EraClient) -> Listed:
     async with client:
         version, has_initialize_result = session_era(client)
         return Listed(tuple(tool.name for tool in await client.list_tools()), version, has_initialize_result,
-                      client.instructions)
+                      client.instructions, tuple(str(resource.uri) for resource in await client.list_resources()))
 
 
 def stdio_tools(argv: Sequence[str], era: str, env: Mapping[str, str] | None = None, timeout: float = 60) -> Listed:
-    """Launch `argv` as a stdio server, list its tools in `era`, and close it.
+    """Launch `argv` as a stdio server, list its tools and resources in `era`, and close it.
 
     `argv[0]` must be this repository's `bin/sandbox.sh`: FastMCP starts the process where the
     static launch check cannot see it, so the check is made here, before anything launches. The
@@ -574,7 +575,7 @@ def stdio_refusal(argv: Sequence[str], era: str, env: Mapping[str, str] | None =
 
 
 def url_tools(url: str, transport: str, era: str, timeout: float = 60) -> Listed:
-    """List the tools of the server listening at `url` (`transport` is `http` or `sse`) in `era`.
+    """List the tools and resources of the server listening at `url` (`transport` is `http` or `sse`) in `era`.
 
     Only a loopback host is reached: a test drives a server it started itself, never a real one. Not
     fenced: the server is another process, which the test started under the sandbox.

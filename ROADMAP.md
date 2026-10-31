@@ -435,6 +435,20 @@ vanish from CI without failing. Found by the landing-merge check of
 *Horizon: later · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
 **Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: unshaped*
 
+## A version the lock lifts never reaches a user who installs from git
+
+`uv.lock` pins what `uv sync` installs (development, CI). A `git+…` or `uvx --from` install, and the
+container image's `uv pip install`, resolve fresh within the declared ranges and never read it, so a
+fix that only lifts a locked version changes what the tests run and nothing a user receives. Where
+the newer version matters, the declared requirement needs a floor. Pre-existing. Found by
+`capability-extras` P4, whose install probe resolved a newer dependency than the lock pins,
+2026-10-31.
+
+It stays here because no release waits on it.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-extras/`](spec/capability-extras/) (TECH P4, PLAN §5); `AGENTS.md` § Packaging*
+**Seed:** [`issues/unlocked-install-floors.md`](issues/unlocked-install-floors.md) · *status: unshaped*
+
 ---
 
 # Settled questions

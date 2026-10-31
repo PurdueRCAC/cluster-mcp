@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -46,7 +46,7 @@ phases:
   verify: sh spec/capability-extras/verify/p3.sh
 - id: P4
   name: The extras, the core alone, and the compat root that keeps every tool
-  status: pending
+  status: done
   satisfies:
   - R1
   - R4
@@ -260,28 +260,53 @@ with it; the core's resources and open set are its context URIs; the core names 
 **Goal:** the members become the core's extras; a bare core install starts and serves the core;
 the root installs every capability; the docs name the extras.
 
-- [ ] `packages/cluster-mcp/pyproject.toml` extras; root `dependencies = ["cluster-mcp[slurm,rcac]"]`
+- [x] `packages/cluster-mcp/pyproject.toml` extras; root `dependencies = ["cluster-mcp[slurm,rcac]"]`
       (header comment, description); `uv lock`; `uv sync --locked` — one commit with the docs below.
-- [ ] `tests/test_core_only.py` (`integration`; session-scoped editable core-only environment under
+- [x] `tests/test_core_only.py` (`integration`; session-scoped editable core-only environment under
       the sandbox, `VIRTUAL_ENV` dropped, offline); `harness.py` gains a resources listing for stdio
       drives if the test needs it; `tests/test_packaging.py` pins (the extras, the workspace
       sources, the root's `cluster-mcp[rcac,slurm]`, `Provides-Extra`).
-- [ ] README.md: the intro, Quick Start (`cluster-mcp[slurm,rcac] @ git+…#subdirectory=packages/cluster-mcp`,
+- [x] README.md: the intro, Quick Start (`cluster-mcp[slurm,rcac] @ git+…#subdirectory=packages/cluster-mcp`,
       one `args` element), the install note, the inventory headings naming `[slurm]` and `[rcac]`
       (and that `[rcac]` goes with `[slurm]`), development `uv sync`; the three member READMEs;
       the Dockerfile comment.
-- [ ] AGENTS.md § Packaging, § Project and § Commands where they say the core carries the members,
+- [x] AGENTS.md § Packaging, § Project and § Commands where they say the core carries the members,
       the release recipe's `post_verify` and its `install-probe` and `ci-mirror-no-index` caveats
       (PLAN §2.4).
+- [x] *Amended at build (foreman's ruling, 2026-10-31):* `issues/unlocked-install-floors.md` and its
+      `ROADMAP.md` Part III entry; § Packaging's `uv.lock` bullet and the recipe's `lock` caveat
+      say what the lock pins (`uv sync`: development, CI) and what it does not (a `git+…` or
+      `uvx --from` install, and the container image's `uv pip install`, which resolve within the
+      declared ranges).
+- *Also amended at build:* the edits made true more text than the list above names, each in this
+  commit: AGENTS.md § Direction (the extras bullet says what has landed), the repository-map note,
+  § Testing's rows for `test_packaging.py`, `test_core_only.py` and the harness's `Listed`; the
+  README's upgrade-section compat sentence and the hosted section's install line; and
+  `tests/mutants.py`'s upgrade-section anchor, re-anchored on that sentence with its ids and `why`
+  kept. `test_core_only.py` carries a third test, the registry in the core-only environment.
 - **Verify:** `sh spec/capability-extras/verify/p4.sh`.
   *Attempt 1 (red, 2026-10-31):* every step green but `probe.sh`'s compare of the root install's
   surface with `BASE_REF`'s: `outputSchema` of `run_command`, `list_directory` and `storage_paths`
   carries a `description`. The probe's `uv pip install` ignores `uv.lock` and resolved a newer
-  pydantic from the cache than the lock pins, while `base.json` comes from a locked sync; the
-  `BASE_REF` root installed the same unlocked way differs from `base.json` identically, and this
-  tree's root installed with the lock as constraints equals it. Held for a ruling on the gate.
+  pydantic from the cache than the lock pins, while `base.json` comes from a locked sync. The
+  defect is the gate's: its compare mixed resolution modes. The evidence, each from one offline
+  run under the sandbox:
+
+  | Compared | Result |
+  |---|---|
+  | `BASE_REF`'s root, lock-free, vs this tree's root, lock-free | equal |
+  | `base.json` (locked sync) vs this tree's root with the exported lock as constraints | equal |
+  | `base.json` (locked sync) vs `BASE_REF`'s root, lock-free | differs exactly as the red |
+
+  *Gate amended at the foreman's ruling (2026-10-31); the original compare mixed resolution
+  modes.* `probe.sh` step 3 now makes two compares, both fatal: (a) lock-free, the root install
+  against `BASE_REF`'s root installed the same way from the same offline cache in the same run
+  (R9's reading: the old install line serves what it served before); (b) lock-pinned, the root
+  installed with the snapshot's `uv.lock` exported as constraints against `base.json`. Each was
+  seen red first under a description change planted into the probe's snapshot only. The attempt
+  stays recorded.
 - **Touches:** the four `pyproject.toml`, `uv.lock`, `README.md`, `packages/*/README.md`,
-  `Dockerfile`, `AGENTS.md`, `tests/`.
+  `Dockerfile`, `AGENTS.md`, `tests/`; at the ruling, `verify/probe.sh`, `issues/`, `ROADMAP.md`.
 
 ## Phase P5 — The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
 **Satisfies:** R6, R9, R10 · **Depends on:** P4
