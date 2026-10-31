@@ -449,6 +449,15 @@ It stays here because no release waits on it.
 *Horizon: later · Depends on: — · Refs: [`spec/capability-extras/`](spec/capability-extras/) (TECH P4, PLAN §5); `AGENTS.md` § Packaging*
 **Seed:** [`issues/unlocked-install-floors.md`](issues/unlocked-install-floors.md) · *status: unshaped*
 
+## A retried capability load after a failure registers nothing and blames the wrong distribution
+
+A failed load cuts the tool registry back but leaves the imported tools modules cached, so a second
+load in the same process registers nothing for a capability that had loaded cleanly, and the error
+names it instead of the broken one. The command line never retries, so only a library caller sees it.
+
+*Horizon: later · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
+**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
+
 ---
 
 # Settled questions
