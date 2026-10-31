@@ -104,3 +104,72 @@ comment, and one ROADMAP intro edit (F3).
 ## Optional completeness sub-pass
 
 Not run.
+
+## Review cycle 2 — changes-requested (2026-10-31)
+
+- **Reviewed commit:** `2c5ceda`  ·  **Base:** `ad70cc0` (`origin/develop`)
+- **Mode:** a fresh blind pass over the full spec-excluded diff (the default), debate variant: two
+  reviewers, ship and block, each in its own clone of `2c5ceda`, with the same inputs as cycle 1
+  (GOAL unchanged since `ec497ee`). Neither saw cycle 1's findings. Both left their clones clean and
+  no process of theirs running.
+
+### Verification run
+
+Both reviewers, independently: `uv sync --locked` and `uv lock --check` ok; `uv run pytest -q` and
+`CLUSTER_MCP_TEST_ERA=modern uv run pytest -q` 3043 passed, 14 skipped each (the bash 4.1 rows);
+`bin/sandbox.sh uv run cluster-mcp --help` exit 0. CI on `2c5ceda`: 3057 passed per era. Fresh
+environments from `git+file://` URLs of the clone: core alone, `[slurm]`, `[rcac]`, `[slurm,rcac]`,
+the compat root, an editable root. Live drives under `bin/sandbox.sh` over stdio, closed stdin, HTTP
+and SSE in both eras, with planted third-party capabilities, well-formed and malformed. With every
+member installed, the full ordered surface is byte-identical (`cmp`) to `ad70cc0`'s in both eras.
+
+### Requirement → evidence
+
+| R-ID | Status |
+|------|--------|
+| R1–R7, R9, R10 | ✅ both reviewers, on executed evidence (installs, imports, drives, byte comparison) |
+| R8 | ❌ F1, F2, F3: the refusal path holds for every capability that raises an `Exception`; the cycle-1 resource class is closed (each planted kind refused at load, exit 5, distribution named) |
+| Q1–Q5 | ✅, Q5 except as R8 |
+
+### Findings
+
+#### F1 [MEDIUM/CONFIRMED] A capability that exits while loading bypasses the refusal
+- **Where:** `packages/cluster-mcp/src/cluster_mcp/core/capabilities.py:206-213` (`except Exception`), `core/__init__.py:236-241`.
+- **Failure scenario:** a capability module calls `sys.exit(...)` at import (a platform guard, say). `SystemExit` is not an `Exception`, so neither the load nor the CLI turns it into the refusal: the server exits 0 (or 1 with the bare exit text), names no distribution, and answers nothing on stdio.
+- **Evidence (block reviewer):** planted `cap-sysexit` (`raise SystemExit(0)`) beside `[slurm,rcac]`: one `initialize` over stdio → exit 0, empty stdout and stderr; `-t http` → exit 0. `sys.exit("this capability needs Linux")` → exit 1, stderr only that text. Controls raising `RuntimeError` and `ModuleNotFoundError` take the refusal path, exit 5.
+- **Touches:** R8, Q5.
+
+#### F2 [MEDIUM/CONFIRMED] The stray-tool and non-tool guards depend on when the tools are imported
+- **Where:** `capabilities.py:210` (`before` is taken after `ep.load()`).
+- **Failure scenario:** a capability whose entry-point module imports its own tools module registers its tools during `ep.load()`, before `before` is taken. A tool its tools module's import registers outside the declared module is then neither refused nor served: the server starts with it silently missing, and `TOOL_REGISTRY` holds a tool the base does not name.
+- **Evidence (block reviewer):** two plants identical but for one import in `capability.py`. Without it, `cap-stray3` → exit 5, `importing cap_stray3.tools registered ['helper_tool'], which are outside it`. With it, `cap-stray2` → exit 0, `listed_2` served, `helper_tool` not. Confirmed by the foreman by reading the line order.
+- **Touches:** R8 (not silently missing), R5 (registry equals what the base names).
+
+#### F3 [LOW/CONFIRMED] Ordering the capabilities runs outside the refusal path
+- **Where:** `capabilities.py:192` (the `sorted(...)` call, before the `try`).
+- **Failure scenario:** an installed dist-info with no `Name` (corrupt metadata) and an entry point in the group: the sort raises `TypeError`, the server exits 6 with `'<' not supported between instances of 'NoneType' and 'str'`, no distribution named, no stdio answer. Alone in a core-only env it is refused but named `None`.
+- **Evidence:** both reviewers, independently, with a hand-made dist-info. The ship reviewer rated it MEDIUM on an edge path; it is LOW here, since no conformant installer writes it.
+- **Touches:** R8, Q5.
+
+#### F4 [LOW/CONFIRMED] Four behaviour-changing mutants survive
+- `capabilities.py:292`: `composed()` tie-broken by `capability.name` instead of `distribution` → 311 passed (the tie test's names and distributions sort alike). §9 documents "ties by distribution name".
+- `capabilities.py:284-285`: `installed()` caching a failed load as `()`, so a later call serves the core only → 317 passed. Its docstring says a failed load is not cached.
+- `core/__init__.py:180-190`: the capability load moved above the `--generate-token` branch → 354 passed. AGENTS places it right after that branch.
+- `core/tools/__init__.py:85`: `_OPENING` taken above the `transfer` import, so `upload_file` and `download_file` are served after every capability tool → 3043 passed, 14 skipped. The suite builds its expected order from `CORE_TOOLS`/`CLOSING_TOOLS` themselves, and the baseline compares dicts.
+- **Evidence:** block reviewer (first three), ship reviewer (fourth), each mutant reverted and the restore verified.
+- **Touches:** R5, R6 (served order), R8, §9.
+
+### Observations (not findings)
+
+- A capability whose text pushes the base past the budget is refused when the server is built (exit 2, distribution not named). §7 documents this as deliberate, per the foreman's cycle-1 ruling.
+- A third-party resource with a scheme other than `cluster://` is listed among the `rcac://` aliases (`cluster://context, cluster://storage, rcac://context, acme://hello, rcac://storage`). No R-ID orders third-party resources.
+- Both reviewers reproduced the seeded `capability-reload-after-failure` and `unlocked-install-floors` claims; both seeds are accurate.
+
+### Routing
+
+- **F1–F3 as one property:** every failure from discovering, ordering or loading a capability, of any kind a capability's own code can raise or exit with, is refused before the mode ladder, naming the distribution (or the entry point, when the distribution has no name). And whether a registration is checked never depends on when a capability's code imported its tools module: the guards see everything registered since that capability's load began. Pin each kind (an `Exception`, `SystemExit` with 0, an int, a string; a missing `Name`; tools imported from the entry-point module, from a sibling, at both times) on stdio, closed stdin and HTTP. `KeyboardInterrupt` keeps its meaning.
+- **F4 as a mutant sweep** over every decision in `core/capabilities.py`, the load's placement in `core/__init__.py` and the opening/closing partition in `core/tools/__init__.py`. Each decision is mutated to **every** alternative it could take, not one: each other sort key, each other cache value, each other placement. Run each mutant under every capability set and both eras, with equivalents recorded and why. Cycle 1's sweep killed one mutant per decision, and the siblings above survived.
+
+### Human-gate triggers
+
+- **Triggered:** F1 and F2 are CONFIRMED in `core/capabilities.py` and `core/__init__.py`, on § Invariants' high-blast-radius list. This verdict reaches the review bound (`review.cycle` 2 of ≤3), so the remediation route goes to Geoffrey.

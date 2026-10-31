@@ -3,7 +3,7 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/capability-extras
 base: develop
 current_phase: done
@@ -75,10 +75,10 @@ phases:
   attempts: 1
   verify: sh spec/capability-extras/verify/p5.sh phase && sh spec/capability-extras/verify/p5.sh recipe && sh spec/capability-extras/verify/p5.sh mutants && uv run --no-project python -I spec/capability-extras/remediation/P5-ledger-headings.py && sh spec/capability-extras/verify/p5.sh full && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
 review:
-  last_reviewed_commit: '4772784'
+  last_reviewed_commit: 2c5ceda
   verdict: changes-requested
-  blocked_reason: F1 resource rejection outside R8 path; F2 load-refusal mutants; F3 roadmap
-  cycle: 1
+  blocked_reason: F1 SystemExit and F2 import-timing escape R8; F3 sort outside refusal; F4 surviving mutants
+  cycle: 2
 ---
 
 # TECH.md — Capabilities you don't have shouldn't be tools you see
