@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:capability-extras
 kind: feature
 appetite: big
 lane: public

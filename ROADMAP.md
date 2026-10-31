@@ -75,15 +75,16 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Twelve cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP server
-for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename to
-`cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
+Thirteen cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP
+server for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename
+to `cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
-deprecation window. What remains makes capabilities optional, then builds each capability on that
-mechanism — Slurm first, then LMOD and xdu as the consumers that prove it generalizes — and finally
-the site extra that bundles them. Ahead of the tool families sit the executor fixes: stopping a
-timed-out command, once its measurement is approved, the four that `ssh-reconnect-loop` deferred on
-the SSH connection, and a reconnect test whose wall-clock bound measures load as well as behaviour.
+deprecation window. What remains makes capabilities optional, then lets an installed one with
+nothing behind it advertise nothing, then builds each capability on that mechanism — Slurm first,
+then LMOD and xdu as the consumers that prove it generalizes — and finally the site extra that
+bundles them. Ahead of the tool families sit the executor fixes: stopping a timed-out command, its
+measurement now approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a
+reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -112,8 +113,9 @@ and the window's own tests and README section go with it.
 Today every tool registers unconditionally: a site without Slurm still advertises `sbatch`, `squeue`
 and `sacct` to every connecting model, which is an invitation to hallucinate a workflow that cannot
 run. The shape is packaging extras — `cluster-mcp[slurm]` — where each extra installs a real
-distribution, registered through an entry-point group, with a runtime probe so an installed
-capability with nothing behind it advertises nothing, and instructions composed from what loaded.
+distribution, registered through an entry-point group, with instructions composed from what
+loaded. The runtime probe, so that an installed capability with nothing behind it advertises
+nothing, moved to its own seed, `capability-probe` (below), at this cycle's GOAL gate.
 
 This is the load-bearing cycle of Part I: it establishes the mechanism that Slurm, LMOD, xdu and the
 site extras plug into. It also collides directly with an existing invariant — registration is
@@ -122,7 +124,20 @@ currently an import-time side effect driven by a hardcoded list at the bottom of
 not work around it.
 
 *Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists; cleared: landed on `develop` 2026-10-30), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
-**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
+**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: adopted:capability-extras*
+
+## An installed capability with nothing behind it still advertises its tools
+
+After capability-extras, installation is the only switch, so one install that serves several
+clusters advertises the Slurm tools on a cluster with no Slurm. A runtime probe — ask the cluster
+whether `sinfo` exists — would let an installed capability with nothing behind it advertise
+nothing. It was split out of capability-extras because it is not cheap: a remote round trip on the
+startup path of a server whose SSH connection is established eagerly, a different failure mode in
+`local` mode, and no user to probe as in `delegate` mode over HTTP, where instructions are composed
+once per process.
+
+*Horizon: after capability-extras · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
+**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: unshaped*
 
 ## A timed-out command may keep running after its call returns
 
