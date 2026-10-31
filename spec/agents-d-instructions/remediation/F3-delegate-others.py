@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """F3 (review 1, GOAL C12): in `delegate` mode the server serves only what others can read.

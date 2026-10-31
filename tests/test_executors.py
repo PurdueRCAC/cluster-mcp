@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Every backend runs one launcher program under the pinned interpreter, and satisfies `Executor`.
@@ -29,7 +29,7 @@ A signal death keeps `-1`; the unit row answers from a recorded launch.
 The three backends (`SSHExecutor`, `LocalShellExecutor`, `DelegatingExecutor`) must each satisfy
 the runtime-checkable `Executor` protocol (§ Invariants §2), which checks member presence only.
 `SSHExecutor` connects in its constructor, so its row replaces the module global
-`rcac_mcp.executor.ssh.Connection` (an `rcac_mcp` internal, bound to Fabric) with a fake that
+`cluster_mcp.core.executor.ssh.Connection` (an `cluster_mcp.core` internal, bound to Fabric) with a fake that
 records it was built and opened for the host: no host is reached.
 """
 
@@ -45,13 +45,13 @@ from typing import Any, Callable, Sequence
 
 import pytest
 
-import rcac_mcp.executor.ssh
+import cluster_mcp.core.executor.ssh
 from harness import launched_script
-from rcac_mcp.executor import TIMEOUT_EXIT_CODE, CommandResult, Executor, UserPath
-from rcac_mcp.executor import launch
-from rcac_mcp.executor.delegate import DelegatingExecutor
-from rcac_mcp.executor.shell import LocalShellExecutor
-from rcac_mcp.executor.ssh import SSHExecutor
+from cluster_mcp.core.executor import TIMEOUT_EXIT_CODE, CommandResult, Executor, UserPath
+from cluster_mcp.core.executor import launch
+from cluster_mcp.core.executor.delegate import DelegatingExecutor
+from cluster_mcp.core.executor.shell import LocalShellExecutor
+from cluster_mcp.core.executor.ssh import SSHExecutor
 from test_launch import SEPARATION_CASES, STAGE_ARGV, chatty_home, launch_violations
 
 COMMAND = 'echo $HOME; ls *'
@@ -597,7 +597,7 @@ BACKENDS = {
 @pytest.mark.parametrize('backend', list(BACKENDS))
 def test_backend_satisfies_executor_protocol(backend: str, monkeypatch: pytest.MonkeyPatch, guard) -> None:
     made: list[FakeConnection] = []
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', type('FakeConnection', (FakeConnection,), {'made': made}))
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', type('FakeConnection', (FakeConnection,), {'made': made}))
     executor = BACKENDS[backend]()
     missing = [name for name in PROTOCOL_MEMBERS if not hasattr(executor, name)]
     assert isinstance(executor, Executor), f'{type(executor).__name__} does not satisfy Executor; missing {missing}'

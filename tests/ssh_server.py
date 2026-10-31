@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """An in-process SSH server on 127.0.0.1 that executes what it is sent, as sshd would. Not collected.
@@ -64,7 +64,7 @@ from typing import Any
 import paramiko
 from fabric import Config
 
-from rcac_mcp.executor.ssh import SSHExecutor
+from cluster_mcp.core.executor.ssh import SSHExecutor
 
 SANDBOX = Path(__file__).resolve().parent.parent / 'bin' / 'sandbox.sh'
 LOOPBACK = '127.0.0.1'

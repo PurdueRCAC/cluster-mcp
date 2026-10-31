@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Startup reads /etc/agents.d once, where the mode says, within its bound, and refuses a budget too small.
@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-import rcac_mcp
-import rcac_mcp.executor.ssh
-from rcac_mcp import MCPServerApp, site
-from rcac_mcp.server import SERVER_INSTRUCTIONS
+import cluster_mcp.core
+import cluster_mcp.core.executor.ssh
+from cluster_mcp.core import MCPServerApp, site
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS
 from test_cli import CLI, SANDBOX
 from test_executors import FakeConnection
 
@@ -52,17 +52,18 @@ def start(argv: list[str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capl
         time.sleep(hang)
         return SENTINEL
 
-    monkeypatch.setattr(rcac_mcp, 'create_mcp_server', create)
+    monkeypatch.setattr(cluster_mcp.core, 'create_mcp_server', create)
     monkeypatch.setattr(site, 'read_local', local)
     monkeypatch.setattr(site, 'read_remote', remote)
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', type('Fake', (FakeConnection,), {'made': []}))
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', type('Fake', (FakeConnection,), {'made': []}))
     (tmp_path / 'map').write_text('alice ualice\n')
-    monkeypatch.setenv('RCAC_USER_MAP', str(tmp_path / 'map'))
-    monkeypatch.delenv('RCAC_INSTRUCTIONS_BUDGET', raising=False)
+    monkeypatch.setenv('CLUSTER_MCP_USER_MAP', str(tmp_path / 'map'))
+    for var in ('RCAC_USER_MAP', 'CLUSTER_MCP_INSTRUCTIONS_BUDGET', 'RCAC_INSTRUCTIONS_BUDGET'):
+        monkeypatch.delenv(var, raising=False)
     for key, value in (env or {}).items():
         monkeypatch.setenv(key, value)
     began = time.monotonic()
-    with caplog.at_level(logging.INFO, logger='rcac_mcp'):
+    with caplog.at_level(logging.INFO, logger='cluster_mcp.core'):
         status = MCPServerApp.main(argv)
     return {'status': status, 'built': built, 'seconds': time.monotonic() - began,
             'errors': [r.getMessage() for r in caplog.records if r.levelno >= logging.CRITICAL]}
@@ -114,9 +115,18 @@ def test_a_hung_read_does_not_hold_startup(argv: list[str], budget: str | None, 
 @pytest.mark.parametrize(('flags', 'env', 'budget', 'status', 'reason'), [
     pytest.param([], {}, site.DEFAULT_BUDGET, 0, None, id='default'),
     pytest.param(['--instructions-budget', '9000'], {}, 9000, 0, None, id='flag'),
-    pytest.param([], {'RCAC_INSTRUCTIONS_BUDGET': '7000'}, 7000, 0, None, id='env'),
-    pytest.param(['--instructions-budget', '9000'], {'RCAC_INSTRUCTIONS_BUDGET': '7000'}, 9000, 0, None, id='flag-wins'),
-    pytest.param([], {'RCAC_INSTRUCTIONS_BUDGET': 'lots'}, None, 2, 'whole number', id='env-not-a-number'),
+    pytest.param([], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': '7000'}, 7000, 0, None, id='env'),
+    pytest.param([], {'RCAC_INSTRUCTIONS_BUDGET': '7100'}, 7100, 0, None, id='env-legacy'),
+    pytest.param([], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': '7000', 'RCAC_INSTRUCTIONS_BUDGET': '7100'}, 7000, 0, None,
+                 id='env-wins-over-legacy'),
+    pytest.param([], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': ' 7000 '}, 7000, 0, None, id='env-stripped'),
+    pytest.param([], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': '   '}, site.DEFAULT_BUDGET, 0, None, id='env-blank'),
+    pytest.param(['--instructions-budget', '9000'], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': '7000'}, 9000, 0, None,
+                 id='flag-wins'),
+    pytest.param([], {'CLUSTER_MCP_INSTRUCTIONS_BUDGET': 'lots'}, None, 2,
+                 'CLUSTER_MCP_INSTRUCTIONS_BUDGET must be a whole number', id='env-not-a-number'),
+    pytest.param([], {'RCAC_INSTRUCTIONS_BUDGET': 'lots'}, None, 2,
+                 'RCAC_INSTRUCTIONS_BUDGET must be a whole number', id='env-legacy-not-a-number'),
     pytest.param(['--instructions-budget', '0'], {}, None, 2, 'over 0', id='zero'),
     pytest.param(['--instructions-budget', '50'], {}, None, 2, 'at least', id='too-small'),
 ])
@@ -127,7 +137,8 @@ def test_budget_resolution(flags: list[str], env: dict, budget: int | None, stat
     observed = start(['-t', 'http', '-e', 'local', *flags], monkeypatch, tmp_path, caplog, reads, env=env)
     assert observed['status'] == status, observed['errors']
     if status == 0:
-        assert [b['budget'] for b in observed['built']] == [budget]
+        built = [b['budget'] for b in observed['built']]
+        assert built == [budget], f'built with budget {built}, expected {[budget]}'
     else:
         assert any(reason in e for e in observed['errors']), observed['errors']
     if reason == 'at least':
@@ -137,7 +148,7 @@ def test_budget_resolution(flags: list[str], env: dict, budget: int | None, stat
 
 @pytest.mark.integration
 def test_cli_refuses_a_budget_too_small(tmp_path: Path) -> None:
-    env = {k: v for k, v in os.environ.items() if k != 'RCAC_INSTRUCTIONS_BUDGET'}
+    env = {k: v for k, v in os.environ.items() if k not in ('CLUSTER_MCP_INSTRUCTIONS_BUDGET', 'RCAC_INSTRUCTIONS_BUDGET')}
     done = subprocess.run([str(SANDBOX), str(CLI), '-e', 'local', '-t', 'http', '-p', '9', '--instructions-budget', '100'],
                           capture_output=True, text=True, timeout=60, env=env, stdin=subprocess.DEVNULL)
     minimum = site.minimum_budget(SERVER_INSTRUCTIONS, site.read_local('this host'))

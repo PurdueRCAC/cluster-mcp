@@ -1,22 +1,23 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The site context a server was built with reaches every client the same way, and nothing reads it again.
 
-`cluster_context` and `rcac://context` return the text read at startup in every mode and both
-protocol eras, run nothing through any executor, and give two delegate users whose executors report
-the same hostname identical text. Each server serves the site it was built with, however many
-servers one process builds.
+`cluster_context` and `cluster://context`, and its deprecated alias `rcac://context`, return the
+text read at startup in every mode and both protocol eras, run nothing through any executor, and
+give two delegate users whose executors report the same hostname identical text. Each server serves
+the site it was built with, however many servers one process builds.
 
 In `delegate` mode the server serves only what every account can read: a file, the directory or a
 directory above it that not every class (owner, group, other) can read or search, or that carries
 an ACL entry, is served as unreadable, its one line and no site text. The tool reaches only a mapped
 user: the middleware refuses every tool call from an authenticated identity absent from the user
 map, before the body runs (§ Invariants §5), and the tool is no exception, while the instructions
-and `rcac://context` reach any client that can connect. That is intended: what is served there is
-text every account can read, so the difference discloses nothing. A `delegate`-mode read of
-`rcac://context` answers in both eras with no token, a token naming no identity, an unmapped and a
-mapped identity alike, and runs nothing.
+and the context resource reach any client that can connect. That is intended: what is served there
+is text every account can read, so the difference discloses nothing. A `delegate`-mode read of
+either context URI answers in both eras with no token, a token naming no identity, an unmapped and
+a mapped identity alike, and runs nothing. Every read here runs once per URI the context is served
+under (`harness.CONTEXT_URIS`).
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ from typing import Any
 
 import pytest
 
-from harness import (Outcome, RecordingExecutor, bare_server, call, delegate_server, drive, http_client, in_memory,
-                     mint, read_resource, serving, served_instructions, shared_server, user_map)
-from rcac_mcp import MCPServerApp, middleware, site
-from rcac_mcp.server import SERVER_INSTRUCTIONS, create_mcp_server
+from harness import (CONTEXT_URIS, Outcome, RecordingExecutor, bare_server, call, delegate_server, drive, http_client,
+                     in_memory, mint, read_resource, scheme, serving, served_instructions, shared_server, user_map)
+from cluster_mcp.core import MCPServerApp, middleware, site
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS, create_mcp_server
 
 SECRET = 'context-test-secret-0123456789abcdef0123'
 USER_MAP = 'alice ualice\nbob ubob\n'
@@ -69,17 +70,18 @@ def context_violations(seen: dict[str, Outcome], expected: str, calls: list[Any]
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
 @pytest.mark.parametrize('case', sorted(SITES))
 @pytest.mark.parametrize('mode', ['bare', 'shared'])
-def test_tool_and_resource_serve_the_startup_text(mode: str, case: str, era: str, guard) -> None:
+def test_tool_and_resource_serve_the_startup_text(uri: str, mode: str, case: str, era: str, guard) -> None:
     executor = RecordingExecutor('installed')
 
     async def scenario() -> dict[str, Outcome]:
         server = bare_server(site=SITES[case]) if mode == 'bare' else shared_server(executor, site=SITES[case])
         async with in_memory(server, era=era) as client:
             return {'tool': await call(client, 'cluster_context', {}),
-                    'resource': await read_resource(client, 'rcac://context'),
+                    'resource': await read_resource(client, uri),
                     'tool-again': await call(client, 'cluster_context', {})}
 
     assert context_violations(drive(scenario()), EXPECTED[case], executor.calls) == []
@@ -87,8 +89,9 @@ def test_tool_and_resource_serve_the_startup_text(mode: str, case: str, era: str
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_delegate_users_get_identical_text(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_delegate_users_get_identical_text(uri: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                            launches: list[list[str]], guard) -> None:
     made: list[StubDelegate] = []
     monkeypatch.setattr(middleware, 'DelegatingExecutor', lambda i, m: made.append(StubDelegate(i, m)) or made[-1])
@@ -102,7 +105,7 @@ def test_delegate_users_get_identical_text(era: str, tmp_path: Path, monkeypatch
             for user in ('alice', 'bob'):
                 async with http_client(app, mint(SECRET, sub=user), era=era) as client:
                     seen[f'{user}-tool'] = await call(client, 'cluster_context', {})
-                    seen[f'{user}-resource'] = await read_resource(client, 'rcac://context')
+                    seen[f'{user}-resource'] = await read_resource(client, uri)
                     seen[f'{user}-instructions'] = Outcome(False, client.instructions or '')
         return seen
 
@@ -125,7 +128,8 @@ def test_served_instructions_are_composed_from_the_site(case: str) -> None:
 
 
 @pytest.mark.unit
-def test_nothing_reads_the_site_after_construction(monkeypatch: pytest.MonkeyPatch, guard) -> None:
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
+def test_nothing_reads_the_site_after_construction(uri: str, monkeypatch: pytest.MonkeyPatch, guard) -> None:
     def refuse(*args: Any, **kwargs: Any) -> None:
         raise AssertionError('the site was read after startup')
 
@@ -135,14 +139,16 @@ def test_nothing_reads_the_site_after_construction(monkeypatch: pytest.MonkeyPat
     async def scenario() -> list[Outcome]:
         server = bare_server(site=SITES['files'])
         async with in_memory(server) as client:
-            return [await call(client, 'cluster_context', {}), await read_resource(client, 'rcac://context')] * 3
+            return [await call(client, 'cluster_context', {}), await read_resource(client, uri)] * 3
 
     assert all(o.text == EXPECTED['files'] and not o.is_error for o in drive(scenario()))
     assert guard.refused == []
 
 
 @pytest.mark.unit
-def test_a_changed_directory_changes_nothing_served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, guard) -> None:
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
+def test_a_changed_directory_changes_nothing_served(uri: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                    guard) -> None:
     root = tmp_path / 'agents.d'
     root.mkdir()
     (root / 'a.md').write_text('Alpha.\n')
@@ -154,14 +160,14 @@ def test_a_changed_directory_changes_nothing_served(tmp_path: Path, monkeypatch:
         seen = []
         async with in_memory(server) as client:
             seen.append(((await call(client, 'cluster_context', {})).text,
-                         (await read_resource(client, 'rcac://context')).text, client.instructions))
+                         (await read_resource(client, uri)).text, client.instructions))
             (root / 'a.md').write_text('Changed.\n')
             (root / 'b.md').write_text('Added.\n')
             seen.append(((await call(client, 'cluster_context', {})).text,
-                         (await read_resource(client, 'rcac://context')).text, client.instructions))
+                         (await read_resource(client, uri)).text, client.instructions))
         async with in_memory(server) as client:
             seen.append(((await call(client, 'cluster_context', {})).text,
-                         (await read_resource(client, 'rcac://context')).text, client.instructions))
+                         (await read_resource(client, uri)).text, client.instructions))
         return seen
 
     seen = drive(scenario())
@@ -170,10 +176,11 @@ def test_a_changed_directory_changes_nothing_served(tmp_path: Path, monkeypatch:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 def test_an_unmapped_user_reads_the_resource_and_is_refused_the_tool(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launches: list[list[str]], guard) -> None:
+        uri: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, launches: list[list[str]], guard) -> None:
     # Intended, not provisional: the user map gates tool calls in `delegate` mode, this one included,
-    # while the instructions and `rcac://context` reach any client that can connect; what is served
+    # while the instructions and the context resource reach any client that can connect; what is served
     # there is text every account can read, so the difference discloses nothing.
     monkeypatch.setenv('JWT_SECRET', SECRET)
     map_path = user_map(tmp_path, USER_MAP)
@@ -183,7 +190,7 @@ def test_an_unmapped_user_reads_the_resource_and_is_refused_the_tool(
         async with serving(delegate_server(map_path, site=context)) as app:
             async with http_client(app, mint(SECRET, sub='mallory')) as client:
                 return {'tool': await call(client, 'cluster_context', {}),
-                        'resource': await read_resource(client, 'rcac://context'),
+                        'resource': await read_resource(client, uri),
                         'instructions': Outcome(False, client.instructions or '')}
 
     seen = drive(scenario())
@@ -194,8 +201,9 @@ def test_an_unmapped_user_reads_the_resource_and_is_refused_the_tool(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_each_server_keeps_its_own_site(era: str, guard) -> None:
+def test_each_server_keeps_its_own_site(uri: str, era: str, guard) -> None:
     cases = ['files', 'unreadable', 'missing']
 
     async def scenario() -> dict[str, tuple[str, str, str]]:
@@ -205,7 +213,7 @@ def test_each_server_keeps_its_own_site(era: str, guard) -> None:
         for case in [*cases, *reversed(cases)]:
             async with in_memory(servers[case], era=era) as client:
                 seen[case] = ((await call(client, 'cluster_context', {})).text,
-                              (await read_resource(client, 'rcac://context')).text, client.instructions or '')
+                              (await read_resource(client, uri)).text, client.instructions or '')
         return seen
 
     seen = drive(scenario())
@@ -234,9 +242,10 @@ EVERY_ACCOUNT = {
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
 @pytest.mark.parametrize('row', sorted(EVERY_ACCOUNT))
-def test_delegate_serves_only_what_every_account_can_read(row: str, era: str, tmp_path: Path, open_tmp: Path,
+def test_delegate_serves_only_what_every_account_can_read(uri: str, row: str, era: str, tmp_path: Path, open_tmp: Path,
                                                           monkeypatch: pytest.MonkeyPatch, launches: list[list[str]],
                                                           guard) -> None:
     private, mode, read, reason = EVERY_ACCOUNT[row]
@@ -261,7 +270,7 @@ def test_delegate_serves_only_what_every_account_can_read(row: str, era: str, tm
         async with serving(delegate_server(map_path, site=delegated)) as app:
             async with http_client(app, mint(SECRET, sub='alice'), era=era) as client:
                 return {'tool': await call(client, 'cluster_context', {}),
-                        'resource': await read_resource(client, 'rcac://context'),
+                        'resource': await read_resource(client, uri),
                         'instructions': Outcome(False, client.instructions or '')}
 
     seen = drive(scenario())
@@ -284,9 +293,10 @@ CONTEXT_READERS = {
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
 @pytest.mark.parametrize('who', list(CONTEXT_READERS))
-def test_any_client_reads_the_context_in_delegate_mode(who: str, era: str, tmp_path: Path,
+def test_any_client_reads_the_context_in_delegate_mode(uri: str, who: str, era: str, tmp_path: Path,
                                                        monkeypatch: pytest.MonkeyPatch,
                                                        launches: list[list[str]], guard) -> None:
     claims = CONTEXT_READERS[who]
@@ -297,10 +307,10 @@ def test_any_client_reads_the_context_in_delegate_mode(who: str, era: str, tmp_p
         server = delegate_server(map_path, site=SITES['files'])
         if claims is None:
             async with in_memory(server, era=era) as client:
-                return await read_resource(client, 'rcac://context')
+                return await read_resource(client, uri)
         async with serving(server) as app:
             async with http_client(app, mint(SECRET, **claims), era=era) as client:
-                return await read_resource(client, 'rcac://context')
+                return await read_resource(client, uri)
 
     violations = context_violations({who: drive(scenario())}, EXPECTED['files'], launches)
     assert violations == [], violations

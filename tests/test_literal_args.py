@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Every string parameter of every tool, in all three modes, passes exactly the value it was given.
@@ -64,11 +64,11 @@ import pytest
 
 import argv_echo
 from harness import SITE, Outcome, call, drive, in_memory, served_surface, shared_server
-from rcac_mcp.executor import CommandResult, Executor
-from rcac_mcp.executor.delegate import DelegatingExecutor
-from rcac_mcp.executor.shell import LocalShellExecutor
-from rcac_mcp.scripts import script_of
-from rcac_mcp.server import create_mcp_server
+from cluster_mcp.core.executor import CommandResult, Executor
+from cluster_mcp.core.executor.delegate import DelegatingExecutor
+from cluster_mcp.core.executor.shell import LocalShellExecutor
+from cluster_mcp.core.scripts import script_of
+from cluster_mcp.core.server import create_mcp_server
 from ssh_server import LoopbackSSH
 from test_tools import SHELLS
 

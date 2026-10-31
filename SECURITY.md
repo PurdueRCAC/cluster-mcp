@@ -1,6 +1,6 @@
 # Security Architecture
 
-This document describes the security model for the RCAC MCP Server, including how
+This document describes the security model for cluster-mcp, including how
 command execution is isolated across different deployment modes.
 
 ## Execution Modes Overview
@@ -20,7 +20,7 @@ remote HPC clusters.
 
 ```
 ┌─────────────────┐      stdio       ┌─────────────────┐      SSH       ┌─────────────┐
-│   MCP Client    │ ◄──────────────► │  rcac-mcp       │ ◄────────────► │ HPC Cluster │
+│   MCP Client    │ ◄──────────────► │  cluster-mcp    │ ◄────────────► │ HPC Cluster │
 │ (Claude, etc.)  │                  │  (local)        │                │             │
 └─────────────────┘                  └─────────────────┘                └─────────────┘
 ```
@@ -34,10 +34,10 @@ remote HPC clusters.
 
 **Configuration:**
 ```bash
-rcac-mcp --ssh-host cluster.example.edu
+cluster-mcp --ssh-host cluster.example.edu
 # or
-export RCAC_SSH_HOST=cluster.example.edu
-rcac-mcp
+export CLUSTER_MCP_SSH_HOST=cluster.example.edu
+cluster-mcp
 ```
 
 **Trust assumptions:**
@@ -51,7 +51,7 @@ rcac-mcp
 
 ```
 ┌─────────────────┐      HTTP        ┌─────────────────┐
-│   MCP Client    │ ◄──────────────► │  rcac-mcp       │ ──► local bash
+│   MCP Client    │ ◄──────────────► │  cluster-mcp    │ ──► local bash
 │                 │                  │  (http server)  │
 └─────────────────┘                  └─────────────────┘
 ```
@@ -63,7 +63,7 @@ rcac-mcp
 
 **Configuration:**
 ```bash
-rcac-mcp -t http -e local
+cluster-mcp -t http -e local
 ```
 
 **⚠️ WARNING:** This mode should only be used for local development. Never expose
@@ -78,7 +78,7 @@ and delegates commands to authenticated users.
 ┌─────────────────┐                  ┌─────────────────┐
 │  User A         │ ──► JWT/OIDC ──► │                 │ ──► sudo -u alice ...
 │  (sub: alice)   │                  │                 │
-└─────────────────┘                  │  rcac-mcp       │
+└─────────────────┘                  │  cluster-mcp    │
                                      │  (runs as root) │
 ┌─────────────────┐                  │                 │
 │  User B         │ ──► JWT/OIDC ──► │                 │ ──► sudo -u bob ...
@@ -99,11 +99,11 @@ and delegates commands to authenticated users.
 **Configuration:**
 ```bash
 export JWT_SECRET="your-secret-key-at-least-32-characters"
-export RCAC_USER_MAP=/etc/rcac-mcp/users.map
-rcac-mcp -t http -a jwt -e delegate
+export CLUSTER_MCP_USER_MAP=/etc/cluster-mcp/users.map
+cluster-mcp -t http -a jwt -e delegate
 ```
 
-**User map file format** (`/etc/rcac-mcp/users.map`):
+**User map file format** (`/etc/cluster-mcp/users.map`):
 ```
 # Identity claim → local Unix user
 # Lines starting with # are comments
@@ -122,7 +122,7 @@ made. FastMCP 4 treats the client secret as optional; this server requires it.
 
 The proxy is held at the posture it had on FastMCP 2.x, pending a deliberate decision: it does
 **not** fetch client-supplied metadata documents (CIMD) and does **not** forward the `resource`
-parameter to the upstream provider. FastMCP 4 turns both on by default; `rcac-mcp` passes both off.
+parameter to the upstream provider. FastMCP 4 turns both on by default; `cluster-mcp` passes both off.
 
 Upgrading from a release on FastMCP 2 drops the proxy's client registrations. FastMCP 2 kept them in
 an encrypted `DiskStore` at `<home>/oauth-proxy/cache.db`; FastMCP 4 keeps them in an encrypted
@@ -167,12 +167,14 @@ sudo -u alice <command>              sudo -u bob <command>
 
 The middleware sets the executor in the same way for a tool call (`on_call_tool`) and for a
 resource read (`on_read_resource`), through one code path. A read that runs commands
-(`rcac://storage`) therefore runs as the mapped user of the request that read it, and a request
+(`cluster://storage`) therefore runs as the mapped user of the request that read it, and a request
 whose token names no identity, or an identity absent from the user map, is refused the read before
 its handler runs, with the reason its tool call would get. Reads of the resources that run nothing
-(`OPEN_RESOURCES`, today `rcac://context`, matched as the exact URI string sent) are let through
+(`OPEN_RESOURCES`, today `cluster://context`, matched as the exact URI string sent) are let through
 without resolving an identity: they serve the same text, readable by every account, to every
-client.
+client. Each resource is also served under its deprecated URI in the old `rcac` scheme, through
+the deprecation window. That alias is a copy of its registry entry with only the URI changed, so
+it is open, or resolved and refused, exactly as its target is.
 
 **Why this is safe:**
 
@@ -209,14 +211,14 @@ For delegate mode to work, the server process must be able to run commands as
 mapped users without a password prompt. Example sudoers configuration:
 
 ```sudoers
-# /etc/sudoers.d/rcac-mcp
+# /etc/sudoers.d/cluster-mcp
 
-# Allow rcac-mcp (running as root or rcac-mcp user) to run commands as any user
+# Allow cluster-mcp (running as root or a cluster-mcp user) to run commands as any user
 # NOPASSWD is required since there's no TTY for password prompts
-rcac-mcp ALL=(ALL) NOPASSWD: ALL
+cluster-mcp ALL=(ALL) NOPASSWD: ALL
 
 # Or more restrictively, only allow specific users:
-rcac-mcp ALL=(alice,bob,svc_batch) NOPASSWD: ALL
+cluster-mcp ALL=(alice,bob,svc_batch) NOPASSWD: ALL
 ```
 
 **Recommended restrictions:**

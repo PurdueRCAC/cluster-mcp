@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Planted violations: each contract test must go red against a copy of the package that breaks it.
@@ -7,9 +7,13 @@ Usage, from the repository root:
 
     uv run python tests/mutants.py [--self-check] CASE_ID...
 
-Each `Case` copies the imported `rcac_mcp` package (never `src/` itself), applies exact source
-edits that break one contract, and runs the named target tests against the copy in a child pytest
-under `bin/sandbox.sh`. A case is caught only when every target fails (a JUnit `<failure>`, not an
+Each `Case` copies the imported `cluster_mcp` namespace, every member's portion of it (never a
+member's `src/` itself, and with no `cluster_mcp/__init__.py`), applies exact source edits that
+break one contract, and runs the named target tests against the copy in a child pytest
+under `bin/sandbox.sh`. A case may also plant into a repository file a test reads (one of
+`REPO_FILES`: the README, the served-surface fixture); its child then runs in a copy of the
+repository's tests, `bin/` and top-level files holding that plant, still under this
+repository's `bin/sandbox.sh`. A case is caught only when every target fails (a JUnit `<failure>`, not an
 `<error>` or a skip) and the failure carries the case's `why`: the fragment of the violation
 message that names the broken contract. A mutant that merely breaks an import fails for the wrong
 reason and counts as surviving.
@@ -19,7 +23,8 @@ recorded with the change. `test_mutations.py` keeps the fast parts in the suite:
 applies, and `mutation_violations` rejects each way a child can fail to prove a kill.
 
 `--self-check` also runs the runner's own controls: a docstring-only edit must be reported as
-surviving, and a child that does not import the mutated copy must be reported as a wrong origin.
+surviving, and a child that does not import the mutated copy, or imports one member from outside
+it, must be reported as a wrong origin.
 """
 
 from __future__ import annotations
@@ -35,7 +40,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-import rcac_mcp
+import cluster_mcp.core
+import cluster_mcp.rcac
+import cluster_mcp.slurm
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
@@ -43,16 +50,26 @@ SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
 # Exit status of the child when the mutated copy is not what it imports.
 WRONG_ORIGIN = 97
 
-# The child steps back into the repository (the sandbox starts elsewhere) so pytest reads
-# pyproject.toml, refuses to run unless `rcac_mcp` resolves under the mutated copy, then runs the
-# targets with a JUnit report.
+# Every member's portion of the `cluster_mcp` namespace, by subpackage name. A case's `file` names
+# its member first (`core/middleware.py`, `slurm/tools.py`, `rcac/tools.py`).
+MEMBERS = {'core': cluster_mcp.core, 'slurm': cluster_mcp.slurm, 'rcac': cluster_mcp.rcac}
+
+# The repository files outside the namespace a case may plant into (`repo_edits`), and what a
+# repository copy for such a case holds besides `tests/` and `bin/`.
+REPO_FILES = ('README.md', 'tests/fixtures/served_surface.json')
+REPO_TOP = ('README.md', 'AGENTS.md', 'pyproject.toml')
+
+# The child steps back into the repository, or a case's copy of it (the sandbox starts elsewhere), so
+# pytest reads pyproject.toml, refuses to run unless every member of the `cluster_mcp` namespace
+# resolves under the mutated copy (a portion missing from the copy would load, silently, from the
+# editable install), then runs the targets with a JUnit report.
 CHILD = """\
-cd "$CLUSTER_MCP_REPO" || exit 96
 py=$1
 root=$2
 junit=$3
-shift 3
-"$py" -c 'import os, sys, rcac_mcp; sys.exit(0 if os.path.realpath(rcac_mcp.__file__).startswith(os.path.realpath(sys.argv[1]) + os.sep) else 97)' "$root" || exit 97
+cd "$4" || exit 96
+shift 4
+"$py" -c 'import os, sys, importlib; root = os.path.realpath(sys.argv[1]) + os.sep; sys.exit(0 if all(os.path.realpath(importlib.import_module(f"cluster_mcp.{m}").__file__).startswith(root) for m in ("core", "slurm", "rcac")) else 97)' "$root" || exit 97
 exec "$py" -m pytest -q -rA -p no:cacheprovider --junitxml="$junit" "$@"
 """
 
@@ -61,9 +78,11 @@ exec "$py" -m pytest -q -rA -p no:cacheprovider --junitxml="$junit" "$@"
 class Case:
     """One planted violation.
 
-    `file` is relative to the package directory; `edits` are exact `(old, new)` replacements, each
+    `file` is relative to the `cluster_mcp` namespace directory, its member first (`core/auth.py`); `edits` are exact `(old, new)` replacements, each
     `old` occurring once; `targets` are `tests/`-relative test ids that must fail; `why` is the
-    fragment each target's failure must carry.
+    fragment each target's failure must carry. `repo_edits` are `(path, old, new)` replacements in
+    repository files, each path one of `REPO_FILES`, each `old` occurring once; a case that plants
+    only there has an empty `file` and no `edits`.
     """
 
     id: str
@@ -71,6 +90,7 @@ class Case:
     edits: tuple[tuple[str, str], ...]
     targets: tuple[str, ...]
     why: str
+    repo_edits: tuple[tuple[str, str, str], ...] = ()
 
 
 PROCESS_GLOBAL = '''class _ProcessGlobal:
@@ -104,18 +124,33 @@ BOUNDARY_ROWS = tuple(f'test_protocol.py::test_middleware_refusal_is_a_tool_erro
 
 STORAGE = 'test_storage_resource.py'
 
+# The renamed environment variables, as the resolver's tests parametrize them.
+ENV_NAMES = ('CLUSTER_MCP_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'CLUSTER_MCP_INSTRUCTIONS_BUDGET')
+
 ERAS = ('legacy', 'modern')
 
-CONCURRENT_READS = tuple(f'{STORAGE}::test_concurrent_storage_reads_stay_isolated[{era}]' for era in ERAS)
-
-TOKENLESS_READS = tuple(f'{STORAGE}::test_storage_read_without_token_{name}[{era}]'
-                        for name in ('after_an_authenticated_read_fails', 'while_an_authenticated_read_is_in_flight')
-                        for era in ERAS)
+# The schemes every resource read runs under: each test that reads a resource runs once per URI the
+# resource is served under, its row id ending in the scheme.
+SCHEMES = ('cluster', 'rcac')
 
 
-def refused_reads(*rows: str, eras: Sequence[str] = ERAS) -> tuple[str, ...]:
-    """The storage read refusal rows `rows`, in `eras`."""
-    return tuple(f'{STORAGE}::test_storage_read_refused[{row}-{era}]' for row in rows for era in eras)
+def per_scheme(*ids: str, schemes: Sequence[str] = SCHEMES) -> tuple[str, ...]:
+    """Each test id in `ids` (`file::test[params]`, or `file::test` for none), once per scheme in `schemes`."""
+    return tuple(f'{i[:-1]}-{s}]' if i.endswith(']') else f'{i}[{s}]' for i in ids for s in schemes)
+
+
+CONCURRENT_READS = per_scheme(*(f'{STORAGE}::test_concurrent_storage_reads_stay_isolated[{era}]' for era in ERAS))
+
+TOKENLESS_READS = per_scheme(*(f'{STORAGE}::test_storage_read_without_token_{name}[{era}]'
+                               for name in ('after_an_authenticated_read_fails',
+                                            'while_an_authenticated_read_is_in_flight')
+                               for era in ERAS))
+
+
+def refused_reads(*rows: str, eras: Sequence[str] = ERAS, schemes: Sequence[str] = SCHEMES) -> tuple[str, ...]:
+    """The storage read refusal rows `rows`, in `eras`, under `schemes`."""
+    return per_scheme(*(f'{STORAGE}::test_storage_read_refused[{row}-{era}]' for row in rows for era in eras),
+                      schemes=schemes)
 
 
 # Every refusal the delegate middleware itself raises (not the tokenless row, which fails in the handler).
@@ -127,15 +162,25 @@ UNKNOWN_REFUSED = tuple(f'{STORAGE}::test_unknown_uri_read_is_refused[{row}-{era
 # The generated neighbourhood of every served URI, read by an unmapped caller in the selected era (the
 # sweeps run each case in both): the row a URI normaliser in the read hook's membership test fails,
 # whatever shape it lets through.
-NEAR_REFUSED = (f'{STORAGE}::test_near_open_read_is_refused[unmapped]',)
+def near_refused(uri: str) -> tuple[str, ...]:
+    """The row reading the neighbourhood of the served `uri` as an unmapped caller."""
+    return (f"{STORAGE}::test_near_open_read_is_refused[unmapped-{uri.replace('://', '-')}]",)
+
+
+NEAR_REFUSED = near_refused('rcac://context')
 
 NOT_FOUND = (*(f'{STORAGE}::test_unknown_uri_is_not_found[{era}]' for era in ERAS),
              *(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[{who}-{era}]'
                for who in ('mapped', 'no-token') for era in ERAS))
 
-MAPPED_READS = tuple(f'{STORAGE}::test_storage_read_runs_as_the_mapped_user[{era}]' for era in ERAS)
+# The alias rows: each resource's alias read after its target, in every mode and both eras.
+ALIAS_READS = tuple(f'{STORAGE}::test_alias_read_returns_target_content[{resource}-{mode}-{era}]'
+                    for resource in ('context', 'storage') for mode in ('bare', 'shared', 'delegate') for era in ERAS)
 
-SEQUENTIAL_READS = tuple(f'{STORAGE}::test_sequential_storage_reads_each_get_their_executor[{era}]' for era in ERAS)
+MAPPED_READS = per_scheme(*(f'{STORAGE}::test_storage_read_runs_as_the_mapped_user[{era}]' for era in ERAS))
+
+SEQUENTIAL_READS = per_scheme(*(f'{STORAGE}::test_sequential_storage_reads_each_get_their_executor[{era}]'
+                                for era in ERAS))
 
 DELEGATE_NOT_FOUND = tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[{who}-{era}]'
                            for who in ('mapped', 'no-token') for era in ERAS)
@@ -144,6 +189,12 @@ DELEGATE_NOT_FOUND = tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegat
 OPEN_TEST = '        if context.message.uri not in OPEN_RESOURCES:\n'
 
 URLLIB = "__import__('urllib.parse', fromlist=['urlsplit', 'unquote'])"
+
+# The registry's alias derivation and the open set's, which the alias cases plant against.
+DERIVATION = ("RESOURCE_REGISTRY += [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1)}\n"
+              "                      for entry in list(RESOURCE_REGISTRY)]\n")
+OPEN_SET = ("OPEN_RESOURCES: Final[frozenset[str]] = frozenset(\n"
+            "    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])\n")
 
 
 def resolves_if(condition: str) -> tuple[tuple[str, str], ...]:
@@ -156,13 +207,19 @@ def let_through(uri: str) -> str:
     return f'reading {uri!r} ('
 
 
-OPEN_TO_REFUSED = tuple(f'test_context.py::test_any_client_reads_the_context_in_delegate_mode[{who}-{era}]'
-                        for who in ('no-claim', 'unmapped') for era in ERAS)
+def open_to_refused(schemes: Sequence[str] = SCHEMES) -> tuple[str, ...]:
+    """The context reads in `delegate` mode by a caller a tool call refuses, under `schemes`."""
+    return per_scheme(*(f'test_context.py::test_any_client_reads_the_context_in_delegate_mode[{who}-{era}]'
+                        for who in ('no-claim', 'unmapped') for era in ERAS), schemes=schemes)
+
+
+OPEN_TO_REFUSED = open_to_refused()
 
 
 def read_boundary_rows(*rows: str) -> tuple[str, ...]:
     """The read boundary rows `rows` of `test_protocol.py`, in both eras."""
-    return tuple(f'test_protocol.py::test_middleware_refusal_is_a_read_error[{row}-{era}]' for row in rows for era in ERAS)
+    return per_scheme(*(f'test_protocol.py::test_middleware_refusal_is_a_read_error[{row}-{era}]'
+                        for row in rows for era in ERAS))
 
 
 # The read boundary rows whose exception is not already an MCPError, so a read hook that lets it
@@ -187,14 +244,102 @@ OIDC_ROWS = tuple(f'test_auth_modes.py::test_oidc_requires_all_four[{variable}-{
                   for variable in ('OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
                   for how in ('unset', 'empty'))
 
+# Every test that reads the deprecation window from a warning, each comparing it with the window
+# written out: the command's (each argv, and on stdio), each variable's, honoured or ignored.
+COMMAND_WARNED = tuple(f'test_cli.py::test_legacy_command_warns_then_runs_cluster_mcp[{argv}]'
+                       for argv in ('none', 'help', 'version', 'bogus'))
+VARIABLE_WARNED = {shape: tuple(f'test_env.py::test_warning_names_replacement_and_window[{name}-{shape}]'
+                                for name in ENV_NAMES) for shape in ('honoured', 'ignored')}
+
+README_TEST = 'test_deprecation_window.py::test_readme_states_each_deprecation_and_the_window'
+
+# README's upgrade section, whole, and its table's rows.
+UPGRADING_SECTION = (
+    '## Upgrading from rcac-mcp\n\nIn 0.2.0 the server was renamed from `rcac-mcp` to `cluster-mcp`. Each old name is\n'
+    'deprecated in 0.2.0, removed no earlier than 0.4.0, and keeps working until it is removed:\n\n'
+    '| Deprecated | Replacement |\n|---|---|\n'
+    '| the `rcac-mcp` command | `cluster-mcp` |\n'
+    '| `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_INSTRUCTIONS_BUDGET` | `CLUSTER_MCP_SSH_HOST`, `CLUSTER_MCP_USER_MAP`, '
+    '`CLUSTER_MCP_INSTRUCTIONS_BUDGET` |\n'
+    '| the `rcac://context` and `rcac://storage` resources | `cluster://context` and `cluster://storage` |\n\n'
+    'The command and each old variable print a warning on stderr naming the replacement and the window.\n'
+    'When an old and a new variable are both set, the new one wins, and the warning says the old one is\n'
+    'ignored. An `rcac://` URI returns the same content as its `cluster://` replacement. The install\n'
+    'line earlier releases documented keeps working through the window too: it installs a compatibility\n'
+    'distribution that runs the deprecated `rcac-mcp` command. Update your MCP client\n'
+    'configuration to the Quick Start form above.\n\n')
+COMMAND_ROW = '| the `rcac-mcp` command | `cluster-mcp` |\n'
+VARIABLES_ROW = ('| `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_INSTRUCTIONS_BUDGET` | `CLUSTER_MCP_SSH_HOST`, '
+                 '`CLUSTER_MCP_USER_MAP`, `CLUSTER_MCP_INSTRUCTIONS_BUDGET` |\n')
+RESOURCES_ROW = '| the `rcac://context` and `rcac://storage` resources | `cluster://context` and `cluster://storage` |\n'
+
+
+# A row giving `RCAC_SSH_HOST` a replacement the server never reads; the window sentence's words.
+CONTRADICTING_ROW = '| `RCAC_SSH_HOST` | `CLUSTER_SSH_HOST` |\n'
+WINDOWED = 'removed no earlier than 0.4.0, and keeps'
+
+# The same contradicting pairing in each other form a reader sees as a table row, and the upgrade
+# section's last line, after which a plant adds a paragraph or a sentence.
+UNREAD_ROWS = {
+    'plain': '| RCAC_SSH_HOST | CLUSTER_SSH_HOST |\n',
+    'bold': '| **RCAC_SSH_HOST** | **CLUSTER_SSH_HOST** |\n',
+    'escaped': '| RCAC\\_SSH\\_HOST | CLUSTER\\_SSH\\_HOST |\n',
+    'html-code': '| <code>RCAC_SSH_HOST</code> | <code>CLUSTER_SSH_HOST</code> |\n',
+    'three-cells': '| `RCAC_SSH_HOST` | `CLUSTER_SSH_HOST` | |\n',
+    'no-leading-pipe': '`RCAC_SSH_HOST` | `CLUSTER_SSH_HOST`\n',
+}
+UPGRADING_END = 'configuration to the Quick Start form above.\n'
+
+
+def upgrading_paragraph(text: str) -> tuple[tuple[str, str, str], ...]:
+    """A README plant adding the paragraph `text` at the upgrade section's end."""
+    return readme(UPGRADING_END, f'{UPGRADING_END}\n{text}\n')
+
+
+def upgrading_sentence(text: str) -> tuple[tuple[str, str, str], ...]:
+    """A README plant adding the sentence `text` to the upgrade section's last paragraph."""
+    return readme(UPGRADING_END, f'{UPGRADING_END[:-1]} {text}\n')
+
+
+def readme(old: str, new: str) -> tuple[tuple[str, str, str], ...]:
+    """One README plant."""
+    return (('README.md', old, new),)
+
+
+# Tool annotations: the decorator's registration line, a `ToolAnnotations` built where it is planted,
+# and the served-surface fixture's `run_command` entry, where a plant records annotations as if 0.1.4
+# had served them.
+REGISTER = '    tool = Tool.from_function(func, description=inspect.getdoc(func))\n'
+ANNOTATIONS = "__import__('mcp.types', fromlist=['ToolAnnotations']).ToolAnnotations"
+SURFACE = 'tests/fixtures/served_surface.json'
+RUN_COMMAND_ENTRY = '  "run_command": {\n   "description":'
+SURFACE_TEST = ('test_surface.py::test_served_surface_matches_baseline',)
+
+
+def titled(title: str) -> tuple[tuple[str, str], ...]:
+    """The decorator registering each tool with top-level title `title` (an expression over `func`)."""
+    return ((REGISTER, f'    tool = Tool.from_function(func, description=inspect.getdoc(func), title={title})\n'),)
+
+
+def annotate(condition: str, hints: str) -> tuple[tuple[str, str], ...]:
+    """The decorator registering each tool for which `condition` holds with annotations `hints`."""
+    return ((REGISTER, f'    tool = Tool.from_function(func, description=inspect.getdoc(func), '
+                       f'annotations={ANNOTATIONS}({hints}) if {condition} else None)\n'),)
+
+
+def recorded(hints: str) -> tuple[tuple[str, str, str], ...]:
+    """The fixture recording `run_command` as served with annotations `hints` (JSON)."""
+    return ((SURFACE, RUN_COMMAND_ENTRY, f'  "run_command": {{\n   "annotations": {hints},\n   "description":'),)
+
+
 CASES: tuple[Case, ...] = (
     # Per-request isolation: the executor lives in a ContextVar and is built per call.
-    Case('isolation-module-global', 'context.py',
+    Case('isolation-module-global', 'core/context.py',
          ((CONTEXT_VAR, PROCESS_GLOBAL),),
          ('test_isolation.py::test_concurrent_delegate_calls_stay_isolated',
           'test_isolation.py::test_concurrent_shared_servers_stay_isolated', *CONCURRENT_READS),
          'ran as'),
-    Case('isolation-executor-cached', 'middleware.py',
+    Case('isolation-executor-cached', 'core/middleware.py',
          (('        executor = DelegatingExecutor(identity, self._user_map)\n',
            "        executor = getattr(self, '_cached', None) or DelegatingExecutor(identity, self._user_map)\n"
            '        self._cached = executor\n'),),
@@ -202,7 +347,7 @@ CASES: tuple[Case, ...] = (
          'ran as'),
     # Each executor middleware sets the executor on every call; set once, the later calls of the
     # same server find none.
-    Case('shared-middleware-sets-first-call-only', 'middleware.py',
+    Case('shared-middleware-sets-first-call-only', 'core/middleware.py',
          (('        set_executor(self._executor)\n',
            "        if not getattr(self, '_set_once', False):\n"
            '            set_executor(self._executor)\n'
@@ -211,22 +356,23 @@ CASES: tuple[Case, ...] = (
          'ran 0 times'),
     # A resource read gets its request's executor as a tool call does: the shared middleware sets it
     # for each read too, and the handler reaches it through the undecorated storage helper.
-    Case('shared-read-sets-no-executor', 'middleware.py',
+    Case('shared-read-sets-no-executor', 'core/middleware.py',
          (('    async def on_read_resource(self, context: MiddlewareContext, call_next):\n'
            '        """Set the shared executor for this resource read, then run the rest of the chain."""\n'
            '        self._install()\n',
            '    async def on_read_resource(self, context: MiddlewareContext, call_next):\n'
            '        """Set the shared executor for this resource read, then run the rest of the chain."""\n'),),
-         tuple(f'test_storage_resource.py::test_storage_read_{name}[{era}]'
-               for name in ('runs_on_the_shared_executor', 'runs_the_local_executor') for era in ('legacy', 'modern')),
+         per_scheme(*(f'test_storage_resource.py::test_storage_read_{name}[{era}]'
+                      for name in ('runs_on_the_shared_executor', 'runs_the_local_executor')
+                      for era in ('legacy', 'modern'))),
          'No executor configured'),
-    Case('resource-calls-decorated-tool', 'resources.py',
-         (('    from rcac_mcp.tools.rcac import resolve_storage_paths\n\n    paths = resolve_storage_paths()\n',
-           '    from rcac_mcp.tools.rcac import storage_paths\n\n    paths = storage_paths()\n'),),
-         ('test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[legacy]',
-          'test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[modern]'),
+    Case('resource-calls-decorated-tool', 'core/resources.py',
+         (('    from cluster_mcp.rcac.tools import resolve_storage_paths\n\n    paths = resolve_storage_paths()\n',
+           '    from cluster_mcp.rcac.tools import storage_paths\n\n    paths = storage_paths()\n'),),
+         per_scheme('test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[legacy]',
+                    'test_storage_resource.py::test_storage_read_runs_on_the_shared_executor[modern]'),
          'not callable'),
-    Case('auth-middleware-sets-first-call-only', 'middleware.py',
+    Case('auth-middleware-sets-first-call-only', 'core/middleware.py',
          (('        executor = DelegatingExecutor(identity, self._user_map)\n        set_executor(executor)\n',
            '        executor = DelegatingExecutor(identity, self._user_map)\n'
            "        if not getattr(self, '_set_once', False):\n"
@@ -237,26 +383,31 @@ CASES: tuple[Case, ...] = (
     # A delegate-mode read is resolved and refused by the path a tool call takes, except a read of a
     # resource that runs nothing, which answers any client; a tokenless read finds no executor, never
     # one an earlier read installed.
-    Case('auth-read-sets-no-executor', 'middleware.py',
+    Case('auth-read-sets-no-executor', 'core/middleware.py',
          (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n', ''),),
          (*MAPPED_READS, *refused_reads('unmapped')),
          'No executor configured'),
     # The read hook refuses by default: every URI outside OPEN_RESOURCES is resolved, an unknown one
     # included, and only the open set skips it; the hook resolves before the handler runs and
     # returns what the handler returned.
-    Case('read-hook-resolves-storage-only', 'middleware.py',
-         (('        if context.message.uri not in OPEN_RESOURCES:\n', "        if context.message.uri == 'rcac://storage':\n"),),
+    Case('read-hook-resolves-storage-only', 'core/middleware.py',
+         (('        if context.message.uri not in OPEN_RESOURCES:\n', "        if context.message.uri == 'cluster://storage':\n"),),
          UNKNOWN_REFUSED,
          'refused read: error'),
-    Case('read-hook-ignores-open-set', 'middleware.py',
+    Case('read-hook-ignores-open-set', 'core/middleware.py',
          (('        if context.message.uri not in OPEN_RESOURCES:\n', '        if True:\n'),),
          OPEN_TO_REFUSED,
          '(error=True)'),
-    Case('read-hook-open-set-inverted', 'middleware.py',
+    # The open set holds both context URIs, so a test of equality with one of them refuses the other.
+    Case('read-hook-open-by-equality', 'core/middleware.py',
+         ((OPEN_TEST, "        if context.message.uri != 'cluster://context':\n"),),
+         open_to_refused(('rcac',)),
+         '(error=True)'),
+    Case('read-hook-open-set-inverted', 'core/middleware.py',
          (('        if context.message.uri not in OPEN_RESOURCES:\n', '        if context.message.uri in OPEN_RESOURCES:\n'),),
          MAPPED_READS,
          'No executor configured'),
-    Case('read-hook-installs-after-handler', 'middleware.py',
+    Case('read-hook-installs-after-handler', 'core/middleware.py',
          (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n'
            '        return await call_next(context)\n',
            '        result = await call_next(context)\n'
@@ -264,7 +415,7 @@ CASES: tuple[Case, ...] = (
            '        return result\n'),),
          MAPPED_READS,
          'No executor configured'),
-    Case('read-hook-drops-result', 'middleware.py',
+    Case('read-hook-drops-result', 'core/middleware.py',
          (('            await self._install(context)\n        return await call_next(context)\n',
            '            await self._install(context)\n        await call_next(context)\n'),),
          MAPPED_READS,
@@ -272,87 +423,91 @@ CASES: tuple[Case, ...] = (
     # The read hook's membership test is the exact string the client sent: a URI that only looks like
     # an open one (a prefix, suffix or substring of it, a case, slash, space, query, encoding or scheme
     # variant) is resolved like any read that may run commands, so a refused caller is refused.
-    Case('read-hook-open-by-prefix', 'middleware.py',
+    Case('read-hook-open-by-prefix', 'core/middleware.py',
          ((OPEN_TEST, '        if not context.message.uri.startswith(tuple(OPEN_RESOURCES)):\n'),),
          UNKNOWN_REFUSED,
          let_through('rcac://contextual')),
-    Case('read-hook-rcac-scheme-only', 'middleware.py',
+    Case('read-hook-rcac-scheme-only', 'core/middleware.py',
          ((OPEN_TEST, "        if context.message.uri.startswith('rcac://') and context.message.uri not in OPEN_RESOURCES:\n"),),
          UNKNOWN_REFUSED,
          let_through('file:///nope')),
-    Case('read-hook-open-by-suffix', 'middleware.py',
+    Case('read-hook-cluster-scheme-only', 'core/middleware.py',
+         ((OPEN_TEST, "        if context.message.uri.startswith('cluster://') and context.message.uri not in OPEN_RESOURCES:\n"),),
+         UNKNOWN_REFUSED,
+         let_through('rcac://nope')),
+    Case('read-hook-open-by-suffix', 'core/middleware.py',
          resolves_if('not u.endswith(tuple(OPEN_RESOURCES))'),
          UNKNOWN_REFUSED,
          let_through('xrcac://context')),
-    Case('read-hook-open-by-substring', 'middleware.py',
+    Case('read-hook-open-by-substring', 'core/middleware.py',
          resolves_if('not any(o in u for o in OPEN_RESOURCES)'),
          UNKNOWN_REFUSED,
          let_through(' rcac://context')),
-    Case('read-hook-open-within-open-uri', 'middleware.py',
+    Case('read-hook-open-within-open-uri', 'core/middleware.py',
          resolves_if('not any(u in o for o in OPEN_RESOURCES)'),
          UNKNOWN_REFUSED,
          let_through('rcac://contex')),
-    Case('read-hook-open-if-prefix-of-open', 'middleware.py',
+    Case('read-hook-open-if-prefix-of-open', 'core/middleware.py',
          resolves_if('not any(o.startswith(u) for o in OPEN_RESOURCES)'),
          UNKNOWN_REFUSED,
          let_through('rcac://contex')),
-    Case('read-hook-open-by-host', 'middleware.py',
+    Case('read-hook-open-by-host', 'core/middleware.py',
          resolves_if(f'{URLLIB}.urlsplit(u).netloc not in {{{URLLIB}.urlsplit(o).netloc for o in OPEN_RESOURCES}}'),
          UNKNOWN_REFUSED,
          let_through('rcac://context/x')),
-    Case('read-hook-case-folded', 'middleware.py',
+    Case('read-hook-case-folded', 'core/middleware.py',
          resolves_if('u.lower() not in OPEN_RESOURCES'),
          UNKNOWN_REFUSED,
          let_through('rcac://CONTEXT')),
-    Case('read-hook-casefolded', 'middleware.py',
+    Case('read-hook-casefolded', 'core/middleware.py',
          resolves_if('u.casefold() not in OPEN_RESOURCES'),
          UNKNOWN_REFUSED,
          let_through('RCAC://context')),
-    Case('read-hook-scheme-case-folded', 'middleware.py',
+    Case('read-hook-scheme-case-folded', 'core/middleware.py',
          resolves_if("u.partition(':')[0].lower() + ''.join(u.partition(':')[1:]) not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('RCAC://context')),
-    Case('read-hook-strips-trailing-slash', 'middleware.py',
+    Case('read-hook-strips-trailing-slash', 'core/middleware.py',
          resolves_if("u.rstrip('/') not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('rcac://context/')),
-    Case('read-hook-strips-space', 'middleware.py',
+    Case('read-hook-strips-space', 'core/middleware.py',
          resolves_if('u.strip() not in OPEN_RESOURCES'),
          UNKNOWN_REFUSED,
          let_through('rcac://context ')),
-    Case('read-hook-strips-leading-space', 'middleware.py',
+    Case('read-hook-strips-leading-space', 'core/middleware.py',
          resolves_if('u.lstrip() not in OPEN_RESOURCES'),
          UNKNOWN_REFUSED,
          let_through(' rcac://context')),
-    Case('read-hook-drops-query-and-fragment', 'middleware.py',
+    Case('read-hook-drops-query-and-fragment', 'core/middleware.py',
          resolves_if("u.split('#')[0].split('?')[0] not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('rcac://context?x=1')),
-    Case('read-hook-authority-only', 'middleware.py',
+    Case('read-hook-authority-only', 'core/middleware.py',
          resolves_if(f"'{{0}}://{{1}}'.format(*{URLLIB}.urlsplit(u)) not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('rcac://context#f')),
-    Case('read-hook-ignores-scheme', 'middleware.py',
+    Case('read-hook-ignores-scheme', 'core/middleware.py',
          resolves_if("u.partition('://')[2] not in {o.partition('://')[2] for o in OPEN_RESOURCES}"),
          UNKNOWN_REFUSED,
          let_through('xrcac://context')),
-    Case('read-hook-defaults-scheme', 'middleware.py',
+    Case('read-hook-defaults-scheme', 'core/middleware.py',
          resolves_if("(u if '://' in u else 'rcac://' + u) not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('context')),
-    Case('read-hook-adds-authority-slashes', 'middleware.py',
+    Case('read-hook-adds-authority-slashes', 'core/middleware.py',
          resolves_if("(u if '://' in u else u.replace(':', '://', 1)) not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          let_through('rcac:context')),
-    Case('read-hook-unquotes', 'middleware.py',
+    Case('read-hook-unquotes', 'core/middleware.py',
          resolves_if(f'{URLLIB}.unquote(u) not in OPEN_RESOURCES'),
          UNKNOWN_REFUSED,
          let_through('rcac://%63ontext')),
-    Case('read-hook-nfkc-normalised', 'middleware.py',
+    Case('read-hook-nfkc-normalised', 'core/middleware.py',
          resolves_if("__import__('unicodedata').normalize('NFKC', u) not in OPEN_RESOURCES"),
          UNKNOWN_REFUSED,
          '(the open URI, a letter full-width)'),
-    Case('open-set-holds-slash-variants', 'resources.py',
+    Case('open-set-holds-slash-variants', 'core/resources.py',
          (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
            "    uri for entry in RESOURCE_REGISTRY if not entry['executor'] for uri in (entry['uri'], entry['uri'] + '/'))"),),
          UNKNOWN_REFUSED,
@@ -360,47 +515,47 @@ CASES: tuple[Case, ...] = (
     # URI normalisers that change only shapes one edit, a wrapper or a suffix away from a served URI:
     # each maps such a shape onto the open URI, so a refused caller's read of it is let through, and
     # only the generated neighbourhood (`NEAR_OPEN`) reaches it.
-    Case('read-hook-strips-crlf', 'middleware.py',
+    Case('read-hook-strips-crlf', 'core/middleware.py',
          resolves_if("u.strip('\\r\\n') not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://context\n')),
-    Case('read-hook-strips-trailing-query-or-fragment-mark', 'middleware.py',
+    Case('read-hook-strips-trailing-query-or-fragment-mark', 'core/middleware.py',
          resolves_if("u.rstrip('?#') not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://context?')),
-    Case('read-hook-drops-port', 'middleware.py',
+    Case('read-hook-drops-port', 'core/middleware.py',
          resolves_if("__import__('re').sub(r':[0-9]*$', '', u) not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://context:80')),
-    Case('read-hook-drops-userinfo', 'middleware.py',
+    Case('read-hook-drops-userinfo', 'core/middleware.py',
          resolves_if("__import__('re').sub(r'(?<=://)[^/@]*@', '', u, count=1) not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://u@context')),
-    Case('read-hook-strips-trailing-dot', 'middleware.py',
+    Case('read-hook-strips-trailing-dot', 'core/middleware.py',
          resolves_if("u.rstrip('.') not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://context.')),
-    Case('read-hook-removes-tab-and-newline', 'middleware.py',
+    Case('read-hook-removes-tab-and-newline', 'core/middleware.py',
          resolves_if('u.translate({9: None, 10: None, 13: None}) not in OPEN_RESOURCES'),
          NEAR_REFUSED,
          let_through('rcac://con\ttext')),
-    Case('read-hook-strips-leading-slash', 'middleware.py',
+    Case('read-hook-strips-leading-slash', 'core/middleware.py',
          resolves_if("u.lstrip('/') not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('/rcac://context')),
-    Case('read-hook-strips-quotes-and-brackets', 'middleware.py',
+    Case('read-hook-strips-quotes-and-brackets', 'core/middleware.py',
          resolves_if("u.strip('<>' + chr(34) + chr(39)) not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('<rcac://context>')),
-    Case('read-hook-strips-trailing-nul', 'middleware.py',
+    Case('read-hook-strips-trailing-nul', 'core/middleware.py',
          resolves_if('u.rstrip(chr(0)) not in OPEN_RESOURCES'),
          NEAR_REFUSED,
          let_through('rcac://context\x00')),
-    Case('read-hook-drops-dot-segment', 'middleware.py',
+    Case('read-hook-drops-dot-segment', 'core/middleware.py',
          resolves_if("__import__('re').sub(r'/\\.(?=/|$)', '', u) not in OPEN_RESOURCES"),
          NEAR_REFUSED,
          let_through('rcac://context/.')),
-    Case('read-hook-any-normaliser', 'middleware.py',
+    Case('read-hook-any-normaliser', 'core/middleware.py',
          resolves_if("all(f(u) not in OPEN_RESOURCES for f in (lambda v: v, lambda v: v.strip('\\r\\n'), "
                      "lambda v: v.rstrip('?#'), lambda v: __import__('re').sub(r':[0-9]*$', '', v), "
                      "lambda v: __import__('re').sub(r'(?<=://)[^/@]*@', '', v, count=1), lambda v: v.rstrip('.'), "
@@ -409,67 +564,95 @@ CASES: tuple[Case, ...] = (
                      "lambda v: __import__('re').sub(r'/\\.(?=/|$)', '', v)))"),
          NEAR_REFUSED,
          let_through('rcac://context#')),
-    Case('open-set-holds-query-variants', 'resources.py',
+    Case('open-set-holds-query-variants', 'core/resources.py',
          (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
            "    uri for entry in RESOURCE_REGISTRY if not entry['executor'] for uri in (entry['uri'], entry['uri'] + '?'))"),),
          NEAR_REFUSED,
          let_through('rcac://context?')),
     # The other side: a caller the hook does not refuse still gets the protocol's not-found for every
     # such shape, so the hook refuses by identity, never by what the URI looks like.
-    Case('read-hook-refuses-unserved', 'middleware.py',
+    Case('read-hook-refuses-unserved', 'core/middleware.py',
          ((OPEN_TEST,
-           "        if context.message.uri not in {e['uri'] for e in __import__('rcac_mcp.resources', "
+           "        if context.message.uri not in {e['uri'] for e in __import__('cluster_mcp.core.resources', "
            "fromlist=['RESOURCE_REGISTRY']).RESOURCE_REGISTRY}:\n"
            "            raise PermissionError('Unknown resource.')\n" + OPEN_TEST),),
          DELEGATE_NOT_FOUND,
          let_through('RCAC://storage')),
     # A tokenless request is let through with nothing set, never refused in the middleware: a read of
     # a URI the server does not serve is still not found.
-    Case('no-token-refused-in-middleware', 'middleware.py',
+    Case('no-token-refused-in-middleware', 'core/middleware.py',
          (("            # No auth - this shouldn't happen in delegate mode\n"
            '            # but let the request proceed (will fail at executor access)\n'
            '            return\n',
            "            raise RuntimeError('No executor configured. Set executor via set_executor() first.')\n"),),
          tuple(f'{STORAGE}::test_unknown_uri_is_not_found_in_delegate_mode[no-token-{era}]' for era in ERAS),
          'expected -32602'),
-    Case('storage-read-left-open', 'resources.py',
+    Case('storage-read-left-open', 'core/resources.py',
          (("    'handler': _storage_paths_resource,\n    'executor': True,\n",
            "    'handler': _storage_paths_resource,\n    'executor': False,\n"),),
          refused_reads('unmapped', 'first-claim-unmapped'),
          'not authorized'),
-    Case('context-read-closed', 'resources.py',
+    Case('context-read-closed', 'core/resources.py',
          (("    entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])",
            "    entry['uri'] for entry in RESOURCE_REGISTRY if False)"),),
-         tuple(f'test_context.py::test_any_client_reads_the_context_in_delegate_mode[{who}-{era}]'
-               for who in ('no-claim', 'unmapped') for era in ERAS),
+         OPEN_TO_REFUSED,
          '(error=True)'),
-    Case('read-no-token-reuses-last-executor', 'middleware.py',
+    # Each deprecated rcac:// alias is derived from its cluster:// target before the open set is: it
+    # keeps the target's executor flag and handler, it exists, and the open set holds it when it
+    # holds its target.
+    Case('alias-flag-hand-set-open', 'core/resources.py',
+         ((DERIVATION, DERIVATION.replace("1)}", "1), 'executor': False}")),),
+         refused_reads('unmapped', 'first-claim-unmapped', schemes=('rcac',)),
+         'not authorized'),
+    Case('alias-flag-hand-set-closed', 'core/resources.py',
+         ((DERIVATION, DERIVATION.replace("1)}", "1), 'executor': True}")),),
+         open_to_refused(('rcac',)),
+         '(error=True)'),
+    Case('open-set-before-aliases', 'core/resources.py',
+         ((DERIVATION, ''), (OPEN_SET, OPEN_SET + DERIVATION)),
+         open_to_refused(('rcac',)),
+         '(error=True)'),
+    Case('open-set-target-scheme-only', 'core/resources.py',
+         ((OPEN_SET, OPEN_SET.replace("if not entry['executor'])", "if not entry['executor'] and entry['uri'].startswith('cluster://'))")),),
+         open_to_refused(('rcac',)),
+         '(error=True)'),
+    Case('alias-handler-differs', 'core/resources.py',
+         ((DERIVATION,
+           "RESOURCE_REGISTRY += [{**entry, 'uri': entry['uri'].replace('cluster://', 'rcac://', 1), 'handler': other['handler']}\n"
+           "                      for entry, other in zip(list(RESOURCE_REGISTRY), list(RESOURCE_REGISTRY)[::-1])]\n"),),
+         ALIAS_READS,
+         'reading the alias'),
+    Case('alias-missing', 'core/resources.py',
+         ((DERIVATION, ''),),
+         ALIAS_READS,
+         'code=-32602'),
+    Case('read-no-token-reuses-last-executor', 'core/middleware.py',
          (('        if context.message.uri not in OPEN_RESOURCES:\n            await self._install(context)\n',
            '        if context.message.uri not in OPEN_RESOURCES:\n'
            "            if get_access_token() is None and getattr(self, '_last', None) is not None:\n"
            '                set_executor(self._last)\n'
            '            else:\n'
            '                await self._install(context)\n'
-           "                self._last = __import__('rcac_mcp.context', fromlist=['executor_var']).executor_var.get()\n"),),
+           "                self._last = __import__('cluster_mcp.core.context', fromlist=['executor_var']).executor_var.get()\n"),),
          TOKENLESS_READS,
          'not an error'),
     # The tool surface: tools reach the cluster only through get_executor(), never an executor of
     # their own.
-    Case('tool-builds-local-executor', 'tools/slurm.py',
+    Case('tool-builds-local-executor', 'slurm/tools.py',
          (("    executor = get_executor()\n\n    argv = ['sinfo']\n",
-           "    executor = __import__('rcac_mcp.executor.shell', fromlist=['LocalShellExecutor']).LocalShellExecutor()\n\n"
+           "    executor = __import__('cluster_mcp.core.executor.shell', fromlist=['LocalShellExecutor']).LocalShellExecutor()\n\n"
            "    argv = ['sinfo']\n"),),
          ('test_tools.py::test_tool_reaches_only_the_installed_executor[sinfo]',),
          'launched outside the executor'),
-    Case('tool-builds-ssh-executor', 'tools/rcac.py',
+    Case('tool-builds-ssh-executor', 'rcac/tools.py',
          (("    executor = get_executor()\n    result = executor.run(['myquota'])",
-           "    executor = __import__('rcac_mcp.executor.ssh', fromlist=['SSHExecutor']).SSHExecutor('cluster.invalid')\n"
+           "    executor = __import__('cluster_mcp.core.executor.ssh', fromlist=['SSHExecutor']).SSHExecutor('cluster.invalid')\n"
            "    result = executor.run(['myquota'])"),),
          ('test_tools.py::test_tool_reaches_only_the_installed_executor[myquota]',),
          'launched outside the executor'),
     # No executor set: get_executor() raises, with no fallback, and nothing set at construction or
     # by another request reaches this one.
-    Case('no-executor-module-global', 'context.py',
+    Case('no-executor-module-global', 'core/context.py',
          ((CONTEXT_VAR, PROCESS_GLOBAL),),
          ('test_no_executor.py::test_no_executor_after_earlier_request',
           'test_no_executor.py::test_no_executor_while_other_request_in_flight',
@@ -477,13 +660,13 @@ CASES: tuple[Case, ...] = (
           'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight',
           *TOKENLESS_READS),
          'not an error'),
-    Case('no-executor-default-fallback', 'context.py',
+    Case('no-executor-default-fallback', 'core/context.py',
          (("        raise RuntimeError('No executor configured. Set executor via set_executor() first.')",
-           '        from rcac_mcp.executor.shell import LocalShellExecutor\n        return LocalShellExecutor()'),),
+           '        from cluster_mcp.core.executor.shell import LocalShellExecutor\n        return LocalShellExecutor()'),),
          ('test_no_executor.py::test_tool_without_executor_middleware_fails[run_command]',
           'test_no_executor.py::test_no_executor_after_earlier_request'),
          'not an error'),
-    Case('no-token-fallback-identity', 'middleware.py',
+    Case('no-token-fallback-identity', 'core/middleware.py',
          (("            # No auth - this shouldn't happen in delegate mode\n"
            '            # but let the request proceed (will fail at executor access)\n'
            '            return\n',
@@ -491,7 +674,7 @@ CASES: tuple[Case, ...] = (
            '            return\n'),),
          ('test_no_executor.py::test_delegate_without_token_fails', *refused_reads('no-token')),
          'not an error'),
-    Case('auth-middleware-sets-at-construction', 'middleware.py',
+    Case('auth-middleware-sets-at-construction', 'core/middleware.py',
          (('        self._user_map = load_user_map(user_map_path)\n',
            '        self._user_map = load_user_map(user_map_path)\n'
            '        set_executor(DelegatingExecutor(next(iter(self._user_map)), self._user_map))\n'),),
@@ -500,7 +683,7 @@ CASES: tuple[Case, ...] = (
           'test_no_executor.py::test_delegate_without_token_while_authenticated_request_in_flight',
           *refused_reads('no-token'), *TOKENLESS_READS),
          'not an error'),
-    Case('shared-middleware-sets-at-construction', 'middleware.py',
+    Case('shared-middleware-sets-at-construction', 'core/middleware.py',
          (('        super().__init__()\n        self._executor = executor\n',
            '        super().__init__()\n        self._executor = executor\n        set_executor(executor)\n'),),
          ('test_no_executor.py::test_no_executor_after_earlier_request',
@@ -508,35 +691,35 @@ CASES: tuple[Case, ...] = (
          'not an error'),
     # A tool that falls back to a local executor fails on the missing file with a local error, not
     # the refusal; only the stated reason tells the two apart.
-    Case('transfer-local-fallback', 'tools/transfer.py',
+    Case('transfer-local-fallback', 'core/tools/transfer.py',
          (("    executor = get_executor()\n    return executor.get(_path('remote_path', remote_path), "
            "_path('local_path', local_path))",
            "    try:\n        executor = get_executor()\n    except RuntimeError:\n"
-           "        from rcac_mcp.executor.shell import LocalShellExecutor\n"
+           "        from cluster_mcp.core.executor.shell import LocalShellExecutor\n"
            "        executor = LocalShellExecutor()\n    return executor.get(_path('remote_path', remote_path), "
            "_path('local_path', local_path))"),),
          ('test_no_executor.py::test_tool_without_executor_middleware_fails[download_file]',),
          'error lacks reason'),
     # Identity claims: sub, then email, then preferred_username, the first non-empty one wins, and
     # a token with none of them is refused rather than given an identity.
-    Case('precedence-reordered', 'middleware.py',
+    Case('precedence-reordered', 'core/middleware.py',
          ((CLAIM_ORDER, "for claim in ('email', 'sub', 'preferred_username'):"),),
          ('test_identity.py::test_identity_claim_precedence[all-three]',),
          'ran as'),
-    Case('precedence-username-before-email', 'middleware.py',
+    Case('precedence-username-before-email', 'core/middleware.py',
          ((CLAIM_ORDER, "for claim in ('sub', 'preferred_username', 'email'):"),),
          ('test_identity.py::test_identity_claim_precedence[sub-absent]',),
          'ran as'),
-    Case('precedence-username-dropped', 'middleware.py',
+    Case('precedence-username-dropped', 'core/middleware.py',
          ((CLAIM_ORDER, "for claim in ('sub', 'email'):"),),
          ('test_identity.py::test_identity_claim_precedence[email-empty]',
           'test_identity.py::test_identity_claim_precedence[username-only]'),
          'error result'),
-    Case('precedence-empty-claim-accepted', 'middleware.py',
+    Case('precedence-empty-claim-accepted', 'core/middleware.py',
          (('if claim in claims and claims[claim]:', 'if claim in claims:'),),
          ('test_identity.py::test_identity_claim_precedence[sub-empty]',),
          'error result'),
-    Case('no-claim-fallback-identity', 'middleware.py',
+    Case('no-claim-fallback-identity', 'core/middleware.py',
          (('                return str(claims[claim])\n        return None\n',
            '                return str(claims[claim])\n        return next(iter(self._user_map))\n'),),
          ('test_identity.py::test_token_without_identity_fails[no-claims]',
@@ -545,7 +728,7 @@ CASES: tuple[Case, ...] = (
          'not an error'),
     # The middleware's own check: a token naming no identity is refused for what it lacks, not looked
     # up in the map as None.
-    Case('no-claim-not-refused', 'middleware.py',
+    Case('no-claim-not-refused', 'core/middleware.py',
          (('        if identity is None:\n', '        if False:\n'),),
          (*refused_reads('no-claims', 'all-empty'),
           *(f'{STORAGE}::test_unknown_uri_read_is_refused[{row}-{era}]' for row in ('no-claims', 'all-empty')
@@ -553,7 +736,7 @@ CASES: tuple[Case, ...] = (
          'error lacks reason'),
     # The user map: an unmapped identity is refused by the middleware and by the executor, never
     # given a default user; a malformed line fails naming its line; comments load as nothing.
-    Case('unmapped-gets-default-user', 'middleware.py',
+    Case('unmapped-gets-default-user', 'core/middleware.py',
          (('        if identity not in self._user_map:\n            raise PermissionError(',
            '        if identity not in self._user_map:\n            identity = next(iter(self._user_map))\n'
            '        if False:\n            raise PermissionError('),),
@@ -561,59 +744,59 @@ CASES: tuple[Case, ...] = (
           'test_identity.py::test_first_claim_unmapped_does_not_fall_through',
           *refused_reads('unmapped', 'first-claim-unmapped')),
          'not an error'),
-    Case('executor-unmapped-default', 'executor/delegate.py',
+    Case('executor-unmapped-default', 'core/executor/delegate.py',
          (("        if identity not in user_map:\n            raise KeyError(f'Identity {identity!r} not found in user map')\n",
            ''),
           ('        self._local_user = user_map[identity]', "        self._local_user = user_map.get(identity, 'nobody')")),
          ('test_identity.py::test_executor_rejects_unmapped_identity',),
          'DID NOT RAISE'),
-    Case('map-malformed-line-skipped', 'executor/delegate.py',
+    Case('map-malformed-line-skipped', 'core/executor/delegate.py',
          (('            if len(parts) != 2:\n                raise ValueError(',
            '            if len(parts) != 2:\n                continue\n                raise ValueError('),),
          ('test_identity.py::test_user_map_rejects_line_without_local_user',),
          'DID NOT RAISE'),
-    Case('map-line-number-dropped', 'executor/delegate.py',
+    Case('map-line-number-dropped', 'core/executor/delegate.py',
          (('''f'Invalid user map format at line {line_num}: expected "<id> <local-user>"\'''',
            '''f'Invalid user map format: expected "<id> <local-user>"\''''),),
          ('test_identity.py::test_user_map_rejects_line_without_local_user',),
          'does not name line 5'),
     # Numbering by entries, not file lines, names the wrong line once comments or blanks precede it.
-    Case('map-line-counts-entries', 'executor/delegate.py',
+    Case('map-line-counts-entries', 'core/executor/delegate.py',
          (('Invalid user map format at line {line_num}:', 'Invalid user map format at line {len(user_map) + 1}:'),),
          ('test_identity.py::test_user_map_rejects_line_without_local_user',),
          'does not name line 5'),
-    Case('map-comments-loaded', 'executor/delegate.py',
+    Case('map-comments-loaded', 'core/executor/delegate.py',
          (("if not line or line.startswith('#'):", 'if not line:'),),
          ('test_identity.py::test_user_map_skips_comments_and_blanks',),
          'map differs'),
     # The delegated launch: exactly sudo -n -H -u <user>, then the launcher's stage and one program
     # that runs the script as one word, with the cwd quoted as one word.
-    Case('sudo-n-dropped', 'executor/delegate.py',
+    Case('sudo-n-dropped', 'core/executor/delegate.py',
          ((SUDO_PREFIX, "SUDO: Final = ('sudo', '-H', '-u')"),),
          ('test_executors.py::test_sudo_argv[no-cwd]',),
          'argv differs'),
-    Case('sudo-H-dropped', 'executor/delegate.py',
+    Case('sudo-H-dropped', 'core/executor/delegate.py',
          ((SUDO_PREFIX, "SUDO: Final = ('sudo', '-n', '-u')"),),
          ('test_executors.py::test_sudo_argv[no-cwd]',),
          'argv differs'),
-    Case('cwd-unquoted', 'executor/launch.py',
+    Case('cwd-unquoted', 'core/executor/launch.py',
          (("lines.append(CD_LINE.format(word=word(UserPath(cwd))))", "lines.append(CD_LINE.format(word=cwd))"),),
          ('test_executors.py::test_sudo_argv[cwd-spaces]', 'test_executors.py::test_sudo_argv[cwd-metacharacters]'),
          'argv differs'),
-    Case('command-quoted', 'executor/launch.py',
+    Case('command-quoted', 'core/executor/launch.py',
          (("lines.append(SCRIPT.format(script=shlex.quote(_checked(command, 'command'))))",
            "lines.append(SCRIPT.format(script=shlex.quote(shlex.quote(_checked(command, 'command')))))"),),
          ('test_executors.py::test_sudo_argv[no-cwd]',),
          'argv differs'),
     # The interpreter is the constant /bin/bash in every backend, never the server's $SHELL.
-    Case('interpreter-from-shell-env', 'executor/launch.py',
+    Case('interpreter-from-shell-env', 'core/executor/launch.py',
          (("    return [*POSIX_STAGE, '-c', STAGE, 'cluster-mcp', prog]",
            "    return [os.environ.get('SHELL', BASH), NORC, '--posix', '-c', STAGE, 'cluster-mcp', prog]"),),
          ('test_executors.py::test_interpreter_is_pinned[local]', 'test_executors.py::test_interpreter_is_pinned[delegate]'),
          'argv differs'),
     # Delegate mode: the program starts in the mapped user's $HOME, `~` resolves there inside the
     # program, and transfers run as the mapped user through the same launch.
-    Case('delegate-tilde-server-home', 'executor/delegate.py',
+    Case('delegate-tilde-server-home', 'core/executor/delegate.py',
          ((DELEGATE_PROGRAM,
            "        prog, marks = launch.program(command, __import__('os').path.expanduser(cwd) if cwd else cwd,"
            " start='home')\n"),),
@@ -621,22 +804,22 @@ CASES: tuple[Case, ...] = (
           'test_executors.py::test_delegate_cwd_resolves_in_the_mapped_home[tilde-sub-dir]',
           'test_literal_args.py::test_literal_argument[delegate-run_command-cwd]'),
          'not the mapped home'),
-    Case('delegate-server-cwd', 'executor/delegate.py',
+    Case('delegate-server-cwd', 'core/executor/delegate.py',
          ((DELEGATE_PROGRAM, '        prog, marks = launch.program(command, cwd)\n'),),
          ('test_executors.py::test_delegate_starts_in_the_mapped_home',),
          'not the mapped home'),
-    Case('transfer-as-server', 'executor/delegate.py',
+    Case('transfer-as-server', 'core/executor/delegate.py',
          (('        return self._copy(local_path, remote_path)\n',
            "        return __import__('shutil').copy2(launch.expand_local(local_path), launch.expand_local(remote_path))\n"),),
          ('test_executors.py::test_delegate_transfers_land_in_the_mapped_home[put]',),
          'not the mapped home'),
     # One timeout contract: every backend returns the captured output and a marker no completed or
     # signal-killed command can produce, and the ssh backend never raises.
-    Case('timeout-sentinel-minus-one', 'executor/base.py',
+    Case('timeout-sentinel-minus-one', 'core/executor/base.py',
          (('TIMEOUT_EXIT_CODE: Final = -1001\n', 'TIMEOUT_EXIT_CODE: Final = -1\n'),),
          TIMEOUT_ROWS,
          'indistinguishable'),
-    Case('ssh-timeout-raises', 'executor/ssh.py',
+    Case('ssh-timeout-raises', 'core/executor/ssh.py',
          (("            return bytes(out), bytes(err), TIMEOUT_EXIT_CODE, b''\n",
            "            raise TimeoutError(f'timed out after {timeout} s')\n"),),
          ('test_ssh_exec.py::test_timeout_returns_the_captured_output[bash]',),
@@ -644,31 +827,31 @@ CASES: tuple[Case, ...] = (
     # The ssh wire: the program travels behind the bootstrap, stdin carries nothing and its end goes
     # at once, the output loop waits rather than spins, and the login shell's startup output is cut
     # away.
-    Case('ssh-bootstrap-dropped', 'executor/ssh.py',
+    Case('ssh-bootstrap-dropped', 'core/executor/ssh.py',
          (('        wire = launch.ssh_command(prog)\n', '        wire = prog\n'),),
          ('test_ssh_exec.py::test_bash_runs_whatever_the_login_shell[zsh]',),
          'pinned interpreter'),
-    Case('ssh-stdin-not-closed', 'executor/ssh.py',
+    Case('ssh-stdin-not-closed', 'core/executor/ssh.py',
          (('                chan.shutdown_write()\n', '                pass\n'),),
          ('test_ssh_exec.py::test_stdin_is_empty_and_ends_at_once[bash]',),
          'EOF'),
-    Case('ssh-drain-spins', 'executor/ssh.py',
+    Case('ssh-drain-spins', 'core/executor/ssh.py',
          (('        time.sleep(wait)\n', '        pass\n'),),
          ('test_ssh_exec.py::test_drain_waits_instead_of_spinning',),
          'busy-waited'),
-    Case('backend-separation-skipped', 'executor/ssh.py',
+    Case('backend-separation-skipped', 'core/executor/ssh.py',
          (('        out, err, code = launch.separate(out, err, code, marks, note)\n', ''),),
          ('test_ssh_exec.py::test_startup_output_is_separated[bash]',),
          'differs from the quiet home'),
     # No startup file moves where an ssh command starts, reads a write's content, or holds the call;
     # a timeout reads what the command prints as it stops; the one separation exception is stated.
-    Case('ssh-start-not-home', 'executor/ssh.py',
+    Case('ssh-start-not-home', 'core/executor/ssh.py',
          (("        prog, marks = launch.program(command, cwd, start='home')\n",
            '        prog, marks = launch.program(command, cwd)\n'),),
          ('test_ssh_exec.py::test_a_startup_cd_does_not_move_the_start[bash-profile]',
           'test_ssh_exec.py::test_a_startup_cd_does_not_move_the_start[zshenv]'),
          'a startup cd moved'),
-    Case('content-on-stdin-over-ssh', 'executor/ssh.py',
+    Case('content-on-stdin-over-ssh', 'core/executor/ssh.py',
          (("                chan.shutdown_write()\n",
            "                chan.sendall(SSHExecutor.content)\n                SSHExecutor.content = b''\n"
            "                chan.shutdown_write()\n"),
@@ -680,13 +863,13 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_remote_rc_never_reads_a_writes_content[zshenv]',
           'test_ssh_exec.py::test_a_remote_rc_never_reads_a_writes_content[bashrc]'),
          "content rode a command's stdin"),
-    Case('ssh-timeout-no-drain', 'executor/ssh.py',
+    Case('ssh-timeout-no-drain', 'core/executor/ssh.py',
          (('            _stopped(chan, out, err)\n', ''),),
          ('test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term',),
          'lost what followed the TERM'),
     # Over ssh the exit status comes ahead of output still queued on a slow link: the read goes on to
     # both end records however slowly they come, and a timeout before them names the status.
-    Case('ssh-returns-at-exit-status', 'executor/ssh.py',
+    Case('ssh-returns-at-exit-status', 'core/executor/ssh.py',
          (('        _drain(chan, out, err)\n        if end is not None:\n',
            '        _drain(chan, out, err)\n'
            "        if chan.exit_status_ready():\n"
@@ -699,17 +882,17 @@ CASES: tuple[Case, ...] = (
           'test_ssh_exec.py::test_a_late_sentinel_still_counts_as_started[bashrc]',
           'test_ssh_exec.py::test_a_job_that_ran_is_never_reported_as_not_started'),
          'cut before its end records'),
-    Case('ssh-one-record-is-the-end', 'executor/ssh.py',
+    Case('ssh-one-record-is-the-end', 'core/executor/ssh.py',
          (('            if scanned == [-1, -1]:\n', '            if -1 in scanned:\n'),),
          ('test_ssh_exec.py::test_one_record_is_not_the_end',),
          'TIMEOUT_EXIT_CODE'),
-    Case('ssh-late-stop-silent', 'executor/ssh.py',
+    Case('ssh-late-stop-silent', 'core/executor/ssh.py',
          (("                note = launch.LATE_NOTE.format(code=chan.recv_exit_status()).encode()\n",
            "                note = b''\n"),),
          ('test_ssh_exec.py::test_a_command_whose_records_have_not_come_by_the_deadline_is_a_timeout',
           'test_ssh_exec.py::test_a_timeout_before_the_records_names_the_status'),
          'LATE_NOTE'),
-    Case('separation-exception-unstated', 'tools/shell.py',
+    Case('separation-exception-unstated', 'core/tools/shell.py',
          (("    are available whatever the user's login shell). Nothing the initialisation prints is returned,\n"
            "    with one exception: over ssh, a background job started by the remote login shell's own rc file\n"
            "    (zsh's .zshenv, say) can write into the result while the command runs. The result holds all of\n",
@@ -717,7 +900,7 @@ CASES: tuple[Case, ...] = (
            "    The result holds all of\n"),),
          ('test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception',),
          'does not state the exception'),
-    Case('content-route-unstated', 'executor/base.py',
+    Case('content-route-unstated', 'core/executor/base.py',
          (("        in place; over `ssh` they never ride a command's stdin, but go by SFTP to a private\n"
            "        temporary file (mode 0600, in a fresh directory of mode 0700) beside the target, every\n",
            "        in place; over `ssh` they never ride a command's stdin, but go to a private\n"
@@ -725,118 +908,118 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_content_texts_state_the_sftp_route',),
          'does not state its route'),
     # SFTP: `~//x` stays in the login home, and a local name is taken literally.
-    Case('sftp-tilde-root', 'executor/ssh.py',
+    Case('sftp-tilde-root', 'core/executor/ssh.py',
          (("        return path[2:].lstrip('/') or '.'\n", "        return path[2:] or '.'\n"),),
          ('test_ssh_exec.py::test_transfers_land_where_named[put-tilde-double-slash]',
           'test_ssh_exec.py::test_transfers_land_where_named[get-tilde-double-slash]'),
          'did not land at'),
-    Case('sftp-path-formatted', 'executor/ssh.py',
+    Case('sftp-path-formatted', 'core/executor/ssh.py',
          (('            sftp.get(remote, local)\n', '            self._conn.get(remote_path, local_path)\n'),),
          ('test_ssh_exec.py::test_transfers_land_where_named[get-brace-local-name]',),
          'did not land at'),
     # A write over ssh: the content staged by SFTP privately beside the target, moved into place whole
     # with the target's mode, a link followed, and the staging removed on every path.
-    Case('staging-not-cleaned', 'executor/ssh.py',
+    Case('staging-not-cleaned', 'core/executor/ssh.py',
          (('    for remove, target in (*((sftp.remove, path) for path in staged), (sftp.rmdir, directory)):\n',
            '    for remove, target in ():\n'),),
          ('test_ssh_exec.py::test_an_ssh_write_replaces_the_file_whole_and_keeps_its_mode',
           'test_ssh_exec.py::test_a_failed_ssh_write_leaves_nothing_behind'),
          'left its staging behind'),
-    Case('move-not-atomic', 'executor/ssh.py',
+    Case('move-not-atomic', 'core/executor/ssh.py',
          (("""PLACE: Final = 'chmod -- "$3" "$1" && mv -f -- "$1" "$2"'""", """PLACE: Final = 'cat -- "$1" >"$2"'"""),),
          ('test_ssh_exec.py::test_an_ssh_write_replaces_the_file_whole_and_keeps_its_mode',),
          'not replaced whole'),
-    Case('mode-not-kept', 'executor/ssh.py',
+    Case('mode-not-kept', 'core/executor/ssh.py',
          (("""PLACE: Final = 'chmod -- "$3" "$1" && mv -f -- "$1" "$2"'""", """PLACE: Final = 'mv -f -- "$1" "$2"'"""),),
          ('test_ssh_exec.py::test_an_ssh_write_replaces_the_file_whole_and_keeps_its_mode',),
          'lost its mode'),
-    Case('staging-not-private', 'executor/ssh.py',
+    Case('staging-not-private', 'core/executor/ssh.py',
          (('    sftp.mkdir(directory, 0o700)\n', '    sftp.mkdir(directory, 0o755)\n'),),
          ('test_ssh_exec.py::test_an_ssh_write_stages_its_content_privately',),
          'not staged privately'),
-    Case('staged-file-not-private', 'executor/ssh.py',
+    Case('staged-file-not-private', 'core/executor/ssh.py',
          (('            sftp.chmod(staged, 0o600)\n', ''),),
          ('test_ssh_exec.py::test_an_ssh_write_stages_its_content_privately',),
          'not staged privately'),
-    Case('staging-not-beside-target', 'executor/ssh.py',
+    Case('staging-not-beside-target', 'core/executor/ssh.py',
          (("            near = '.' if through else posixpath.dirname(target) or '.'\n", "            near = '.'\n"),),
          ('test_ssh_exec.py::test_an_ssh_write_stages_its_content_privately',),
          'not staged privately beside the target'),
-    Case('link-replaced', 'executor/ssh.py',
+    Case('link-replaced', 'core/executor/ssh.py',
          (('    if link:\n        try:\n            resolved = sftp.normalize(path)\n',
            '    if False:\n        try:\n            resolved = sftp.normalize(path)\n'),),
          ('test_ssh_exec.py::test_an_ssh_write_follows_a_link',),
          'replaced the link'),
-    Case('ssh-append-overwrites', 'executor/ssh.py',
+    Case('ssh-append-overwrites', 'core/executor/ssh.py',
          (('                if append:\n                    script = PLACE_APPEND\n',
            '                if False:\n                    script = PLACE_APPEND\n'),),
          ('test_writes.py::test_writes_are_byte_exact[ssh-append]',),
          'differs from the bytes sent'),
     # A transfer that fails is never a write: every write's reply and the close are checked, then the
     # staged file's size and checksum, before the move; the remote filesystem names the cause.
-    Case('sftp-writes-pipelined', 'executor/ssh.py',
+    Case('sftp-writes-pipelined', 'core/executor/ssh.py',
          (('            handle.set_pipelined(False)\n', '            handle.set_pipelined(True)\n'),),
          ('test_ssh_exec.py::test_a_write_that_runs_out_of_room_keeps_the_file[edquot]',),
          'does not name its cause'),
-    Case('sftp-close-unchecked', 'executor/ssh.py',
+    Case('sftp-close-unchecked', 'core/executor/ssh.py',
          (('        _close(sftp, handle)\n', '        handle.close()\n'),),
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[close-fails]',),
          'was not refused for its staged file'),
-    Case('staged-size-unchecked', 'executor/ssh.py',
+    Case('staged-size-unchecked', 'core/executor/ssh.py',
          (('    if size != len(data):\n', '    if False:\n'),),
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short]',),
          'was not refused for its staged file'),
-    Case('staged-checksum-unchecked', 'executor/ssh.py',
+    Case('staged-checksum-unchecked', 'core/executor/ssh.py',
          (('                return self._run(launch.fixed_argv(VERIFY + script,', '                return self._run(launch.fixed_argv(script,'),),
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[changed]',),
          'was not refused for its staged file'),
-    Case('transfer-cause-unnamed', 'executor/ssh.py',
+    Case('transfer-cause-unnamed', 'core/executor/ssh.py',
          (("                                f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None\n",
            "                                f'{exc}; the file is unchanged') from None\n"),),
          ('test_ssh_exec.py::test_a_write_that_runs_out_of_room_keeps_the_file[8k-free]',),
          'does not name its cause'),
     # Over ssh a write refuses what `cat >` refuses and leaves what it leaves.
-    Case('unwritable-target-replaced', 'executor/ssh.py',
+    Case('unwritable-target-replaced', 'core/executor/ssh.py',
          (('                    script = WRITABLE + PLACE\n', '                    script = PLACE\n'),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh]',
           'test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]'),
          'read-only target was not refused'),
-    Case('dangling-link-replaced', 'executor/ssh.py',
+    Case('dangling-link-replaced', 'core/executor/ssh.py',
          (('        except FileNotFoundError:\n            resolved = None\n',
            '        except FileNotFoundError:\n            return path, None, False\n'),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]',),
          'did not stay a link'),
-    Case('link-loop-named-missing', 'executor/ssh.py',
+    Case('link-loop-named-missing', 'core/executor/ssh.py',
          (('                if _loops(sftp, remote):\n', '                if False:\n'),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh]',
           'test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]'),
          'loop of links'),
-    Case('set-id-bits-kept', 'executor/ssh.py',
+    Case('set-id-bits-kept', 'core/executor/ssh.py',
          (("    return path, f'{stat.S_IMODE(mode) & ~SET_ID:o}', not stat.S_ISREG(mode)\n",
            "    return path, f'{stat.S_IMODE(mode):o}', not stat.S_ISREG(mode)\n"),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh]',),
          'kept or lost the wrong bits'),
     # A lost connection is never a command that did not start, nor a failed submission.
-    Case('lost-link-read-as-ended', 'executor/ssh.py',
+    Case('lost-link-read-as-ended', 'core/executor/ssh.py',
          (('            if _lost(chan) and not (', '            if False and not ('),),
          ('test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[after-the-command]',),
          'connection was lost after it ran'),
-    Case('lost-link-at-exec-raised', 'executor/ssh.py',
+    Case('lost-link-at-exec-raised', 'core/executor/ssh.py',
          (('                if transport.is_active():\n                    raise\n',
            '                raise\n'),),
          ('test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[before-the-reply]',),
          'instead of returning'),
-    Case('lost-link-at-exec-unsettled', 'executor/ssh.py',
+    Case('lost-link-at-exec-unsettled', 'core/executor/ssh.py',
          (('                transport.join(SETTLE)\n', ''),),
          ('test_ssh_exec.py::test_a_lost_link_at_exec_is_lost_while_the_transport_unwinds',),
          'instead of returning'),
-    Case('lost-link-not-started', 'executor/launch.py',
+    Case('lost-link-not-started', 'core/executor/launch.py',
          (('        if code in (TIMEOUT_EXIT_CODE, CONNECTION_LOST_EXIT_CODE):\n            return b\'\', note, code\n',
            '        if code == TIMEOUT_EXIT_CODE:\n            return b\'\', note, code\n'),),
          ('test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[after-the-command]',
           'test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[before-the-reply]'),
          'reported as not started'),
-    Case('lost-submission-failed', 'tools/slurm.py',
+    Case('lost-submission-failed', 'slurm/tools.py',
          (('    if result.exit_code == CONNECTION_LOST_EXIT_CODE:\n', '    if False:\n'),),
          ('test_ssh_exec.py::test_a_lost_connection_is_never_did_not_start[after-the-command]',),
          'never that it failed'),
@@ -845,7 +1028,7 @@ CASES: tuple[Case, ...] = (
     # lost connection), gives up at once on a refused authentication, publishes a success no call
     # waits for, joins the one attempt in flight rather than start its own, and frees that attempt's
     # slot when its worker cannot start.
-    Case('ssh-reconnect-unbounded-poll', 'executor/ssh.py',
+    Case('ssh-reconnect-unbounded-poll', 'core/executor/ssh.py',
          (('            while not _await(pending.done, max(0.0, min(ATTEMPT_POLL, deadline - time.monotonic()))):\n'
            '                if time.monotonic() >= deadline and self._leave(pending):\n'
            '                    return connect_failure_message(self._host, cause)\n',
@@ -853,33 +1036,33 @@ CASES: tuple[Case, ...] = (
            '                pass\n'),),
          ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
          'still reconnecting'),
-    Case('ssh-reconnect-unbounded-retry', 'executor/ssh.py',
+    Case('ssh-reconnect-unbounded-retry', 'core/executor/ssh.py',
          (('            if now >= deadline - FINAL_ATTEMPT_LEAD:\n'
            '                return connect_failure_message(self._host, cause)\n'
            '            time.sleep(min(delay, deadline - FINAL_ATTEMPT_LEAD - now))\n',
            '            time.sleep(delay)\n'),),
          ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[refused]',),
          'still reconnecting'),
-    Case('ssh-reconnect-reads-as-lost', 'executor/ssh.py',
+    Case('ssh-reconnect-reads-as-lost', 'core/executor/ssh.py',
          (("', NOT_STARTED_EXIT_CODE,\n                             self._host)\n",
            "', CONNECTION_LOST_EXIT_CODE,\n                             self._host)\n"),),
          ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[refused]',),
          'read as a lost connection'),
-    Case('ssh-reconnect-retries-refused-auth', 'executor/ssh.py',
+    Case('ssh-reconnect-retries-refused-auth', 'core/executor/ssh.py',
          (("            if _auth_ending(cause) == 'refused':\n", '            if False:\n'),),
          ('test_ssh_exec.py::test_a_reconnect_refused_authentication_fails_at_once',),
          'was retried'),
-    Case('ssh-reconnect-late-success-leaks', 'executor/ssh.py',
+    Case('ssh-reconnect-late-success-leaks', 'core/executor/ssh.py',
          (('                pending.transport, dropped = self._publish(conn)\n',
            '                pending.transport, dropped = self._publish(conn) if pending.waiters else (None, None)\n'),),
          ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
          'leaked'),
-    Case('ssh-reconnect-attempt-per-call', 'executor/ssh.py',
+    Case('ssh-reconnect-attempt-per-call', 'core/executor/ssh.py',
          (('                pending = self._inflight\n', '                pending = None\n'),),
          ('test_ssh_exec.py::test_concurrent_calls_during_a_stall_start_one_attempt[hang]',
           'test_ssh_exec.py::test_concurrent_calls_during_a_stall_start_one_attempt[canonicalisation]'),
          'not one'),
-    Case('ssh-reconnect-unstarted-worker-holds-slot', 'executor/ssh.py',
+    Case('ssh-reconnect-unstarted-worker-holds-slot', 'core/executor/ssh.py',
          (('                        self._inflight = None\n                        pending.error = exc\n',
            '                        pending.error = exc\n'),),
          ('test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt',),
@@ -890,35 +1073,35 @@ CASES: tuple[Case, ...] = (
     # is never published; a call at its deadline takes an outcome that has just come; a connection
     # published meanwhile stays published; a shorter connect timeout never lowers the bound; and each
     # of a write's own commands shares the write's deadline.
-    Case('ssh-reconnect-auth-class-not-cause', 'executor/ssh.py',
+    Case('ssh-reconnect-auth-class-not-cause', 'core/executor/ssh.py',
          (("            if _auth_ending(cause) == 'refused':\n",
            '            if isinstance(cause, AuthenticationException):\n'),),
          ('test_ssh_exec.py::test_an_authentication_cut_short_is_retried[closed]',
           'test_ssh_exec.py::test_an_authentication_cut_short_is_retried[timed-out]'),
          'taken for a refusal'),
-    Case('ssh-reconnect-joiner-inherits-abort', 'executor/ssh.py',
+    Case('ssh-reconnect-joiner-inherits-abort', 'core/executor/ssh.py',
          (('            if pending.aborted:\n                continue\n',
            '            if False:\n                continue\n'),),
          ('test_ssh_exec.py::test_a_call_never_inherits_an_aborted_attempt',),
          'as its own'),
-    Case('ssh-reconnect-abort-unchecked', 'executor/ssh.py',
+    Case('ssh-reconnect-abort-unchecked', 'core/executor/ssh.py',
          (('            if pending.done.is_set() or pending.waiters:\n', '            if pending.waiters:\n'),),
          ('test_ssh_exec.py::test_an_abort_and_a_publish_never_cross[published-first]',),
          'closed a published connection'),
-    Case('ssh-reconnect-publishes-aborted', 'executor/ssh.py',
+    Case('ssh-reconnect-publishes-aborted', 'core/executor/ssh.py',
          (('            if pending.aborted:\n                pending.error = ConnectionAbortedError(',
            '            if False:\n                pending.error = ConnectionAbortedError('),),
          ('test_ssh_exec.py::test_an_abort_and_a_publish_never_cross[opened-first]',),
          'published a connection the abort closed'),
-    Case('ssh-reconnect-leave-ignores-outcome', 'executor/ssh.py',
+    Case('ssh-reconnect-leave-ignores-outcome', 'core/executor/ssh.py',
          (('            if pending.done.is_set():\n                return False\n', ''),),
          ('test_ssh_exec.py::test_a_call_at_its_deadline_takes_an_outcome_that_has_come',),
          'reported a failure'),
-    Case('ssh-reconnect-publish-replaces-live', 'executor/ssh.py',
+    Case('ssh-reconnect-publish-replaces-live', 'core/executor/ssh.py',
          (('        if current is not None:\n            return current, conn\n', ''),),
          ('test_ssh_exec.py::test_a_reconnect_keeps_a_connection_published_meanwhile',),
          'closed or replaced'),
-    Case('ssh-reconnect-bound-unfloored', 'executor/ssh.py',
+    Case('ssh-reconnect-bound-unfloored', 'core/executor/ssh.py',
          (("    return max(CONNECT_TIMEOUT, getattr(conn, 'connect_timeout', None) or 0, explicit or 0)\n",
            "    return max(0, getattr(conn, 'connect_timeout', None) or 0, explicit or 0)\n"),),
          tuple(f'test_ssh_exec.py::test_a_reconnect_bound_never_falls_below_the_default[{given}]'
@@ -928,47 +1111,47 @@ CASES: tuple[Case, ...] = (
     # source was refused; the declared Paramiko floor is the classifier's. No attempt starts or is
     # joined after a call's last start; an abort spares an attempt another call has joined since;
     # and a failed attempt releases its connection.
-    Case('ssh-auth-strategy-read-as-refusal', 'executor/ssh.py',
+    Case('ssh-auth-strategy-read-as-refusal', 'core/executor/ssh.py',
          (("        return 'refused' if cause is exc else _auth_ending(cause)\n", "        return 'refused'\n"),),
          ('test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[auth-failure-closed]',
           'test_ssh_exec.py::test_a_reconnect_that_cannot_succeed_fails_within_the_bound[auth-failure-agent]'),
          'never retried'),
-    Case('ssh-auth-subclass-not-refusal', 'executor/ssh.py',
+    Case('ssh-auth-subclass-not-refusal', 'core/executor/ssh.py',
          (("    if isinstance(exc, REFUSALS):\n        return 'refused'\n",
            "    if isinstance(exc, REFUSALS):\n        return None\n"),),
          tuple(f'test_ssh_exec.py::test_every_refusal_ends_the_reconnect_at_once[{refusal}]'
                for refusal in ('bad-type', 'partial', 'password-required', 'auth-failure')),
          'was retried'),
-    Case('ssh-paramiko-floor-disagrees', 'executor/ssh.py',
+    Case('ssh-paramiko-floor-disagrees', 'core/executor/ssh.py',
          (('PARAMIKO_FLOOR: Final = (3, 2)\n', 'PARAMIKO_FLOOR: Final = (3, 1)\n'),),
          ('test_ssh_exec.py::test_the_declared_paramiko_floor_matches_the_classifier',),
          'disagree'),
-    Case('ssh-reconnect-starts-past-last-start', 'executor/ssh.py',
+    Case('ssh-reconnect-starts-past-last-start', 'core/executor/ssh.py',
          (('                if not scheduled and time.monotonic() >= deadline - FINAL_ATTEMPT_LEAD:\n',
            '                if False:\n'),),
          ('test_ssh_exec.py::test_a_call_past_its_last_start_starts_no_attempt[none-in-flight]',
           'test_ssh_exec.py::test_a_call_past_its_last_start_starts_no_attempt[one-in-flight]',
           'test_ssh_exec.py::test_a_write_command_past_its_last_start_starts_no_attempt'),
          'past its last start'),
-    Case('ssh-reconnect-abort-spares-no-joiner', 'executor/ssh.py',
+    Case('ssh-reconnect-abort-spares-no-joiner', 'core/executor/ssh.py',
          (('            if pending.done.is_set() or pending.waiters:\n', '            if pending.done.is_set():\n'),),
          ('test_ssh_exec.py::test_an_abort_spares_an_attempt_another_call_joined_since',),
          'joined since'),
-    Case('ssh-reconnect-failed-attempt-unreleased', 'executor/ssh.py',
+    Case('ssh-reconnect-failed-attempt-unreleased', 'core/executor/ssh.py',
          (('            if conn is not None:\n                _release(conn)\n            raise\n', '            raise\n'),),
          ('test_ssh_exec.py::test_a_failed_attempt_releases_its_connection',),
          'left its connection open'),
-    Case('ssh-write-parent-own-deadline', 'executor/ssh.py',
+    Case('ssh-write-parent-own-deadline', 'core/executor/ssh.py',
          (("UserPath(parent)),\n                                 deadline=deadline)",
            "UserPath(parent)),\n                                 deadline=time.monotonic() + self._window)"),),
          ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[parent]',),
          'took a deadline of its own'),
-    Case('ssh-write-place-own-deadline', 'executor/ssh.py',
+    Case('ssh-write-place-own-deadline', 'core/executor/ssh.py',
          (("UserPath(expected)),\n                                 deadline=deadline)",
            "UserPath(expected)),\n                                 deadline=time.monotonic() + self._window)"),),
          ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[place]',),
          'took a deadline of its own'),
-    Case('ssh-write-probe-own-deadline', 'executor/ssh.py',
+    Case('ssh-write-probe-own-deadline', 'core/executor/ssh.py',
          (("timeout=60,\n                              deadline=deadline)",
            "timeout=60,\n                              deadline=time.monotonic() + self._window)"),),
          ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[probe]',),
@@ -976,7 +1159,7 @@ CASES: tuple[Case, ...] = (
     # A host that returns is used: a failed reconnect is never remembered, so the next call tries
     # again. A reconnect that gives up reads as nothing run at every tool: sbatch says nothing was
     # submitted, sacct stops at its failed whoami, and the cluster context is never cached from it.
-    Case('ssh-reconnect-gives-up-for-good', 'executor/ssh.py',
+    Case('ssh-reconnect-gives-up-for-good', 'core/executor/ssh.py',
          (('        transport = self._ensure_connected(deadline)\n'
            '        if isinstance(transport, str):\n'
            '            return self._not_run(transport)\n'
@@ -988,65 +1171,65 @@ CASES: tuple[Case, ...] = (
            '        out, err, code, note'),),
          ('test_ssh_exec.py::test_a_failed_reconnect_leaves_the_server_serving',),
          'after the host returned'),
-    Case('sbatch-not-started-reads-as-failed', 'tools/slurm.py',
+    Case('sbatch-not-started-reads-as-failed', 'slurm/tools.py',
          (('        if written.exit_code == NOT_STARTED_EXIT_CODE:\n', '        if False:\n'),
           ('    if result.exit_code == NOT_STARTED_EXIT_CODE:\n', '    if False:\n')),
          ('test_ssh_exec.py::test_a_reconnect_failure_reaches_each_tool_as_not_run[sbatch-script-path]',
           'test_ssh_exec.py::test_a_reconnect_failure_reaches_each_tool_as_not_run[sbatch-script-content]'),
          'must say the job was not submitted'),
-    Case('sacct-whoami-unchecked', 'tools/slurm.py',
+    Case('sacct-whoami-unchecked', 'slurm/tools.py',
          (('        if user_result.exit_code != 0:\n', '        if False:\n'),),
          ('test_ssh_exec.py::test_sacct_spends_one_reconnect_window',),
          'more than one reconnect window'),
     # The cluster context is the startup read, so a reconnect that gives up never reaches it: served
     # from a read through the executor instead, the failed read's line replaces the site text.
-    Case('context-served-from-a-failed-read', 'tools/context.py',
+    Case('context-served-from-a-failed-read', 'core/tools/context.py',
          (("    return site_of(get_server()).text\n",
-           "    from rcac_mcp.context import get_executor\n"
-           "    from rcac_mcp.site import read_remote\n"
+           "    from cluster_mcp.core.context import get_executor\n"
+           "    from cluster_mcp.core.site import read_remote\n"
            "    return read_remote(get_executor()).text\n"),),
-         ('test_ssh_exec.py::test_a_reconnect_failure_never_changes_the_cluster_context',),
+         per_scheme('test_ssh_exec.py::test_a_reconnect_failure_never_changes_the_cluster_context'),
          'not the startup read'),
     # An end record split across reads is found, at its full stop, while something holds the streams.
-    Case('ssh-record-scan-from-end', 'executor/ssh.py',
+    Case('ssh-record-scan-from-end', 'core/executor/ssh.py',
          (('                    scanned[i] = -1 if found else max(0, len(buf) - len(end) - 5)\n',
            '                    scanned[i] = -1 if found else len(buf)\n'),),
          ('test_ssh_exec.py::test_an_end_record_split_across_reads_is_found',),
          'split across reads'),
-    Case('local-record-scan-from-end', 'executor/launch.py',
+    Case('local-record-scan-from-end', 'core/executor/launch.py',
          (('                self.scanned[stream] = max(0, len(buf) - len(self.end) - 5)\n',
            '                self.scanned[stream] = len(buf)\n'),),
          ('test_launch.py::test_a_local_end_record_split_across_reads_is_found',),
          'split across reads'),
-    Case('record-without-full-stop', 'executor/launch.py',
+    Case('record-without-full-stop', 'core/executor/launch.py',
          (("RECORD_TAIL: Final = re.compile(rb'([xs])([0-9]{1,3})\\.')\n",
            "RECORD_TAIL: Final = re.compile(rb'([xs])([0-9]{1,3})')\n"),),
          ('test_ssh_exec.py::test_an_end_record_split_across_reads_is_found',
           'test_launch.py::test_a_local_end_record_split_across_reads_is_found'),
          'split across reads'),
     # The Executor protocol: every backend carries all nine members; a renamed one drops out.
-    Case('local-put-renamed', 'executor/shell.py',
+    Case('local-put-renamed', 'core/executor/shell.py',
          (('    def put(self, local_path: str, remote_path: str) -> str:',
            '    def put_file(self, local_path: str, remote_path: str) -> str:'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[local]',),
          'does not satisfy Executor'),
-    Case('delegate-hostname-renamed', 'executor/delegate.py',
+    Case('delegate-hostname-renamed', 'core/executor/delegate.py',
          (('    def hostname(self) -> str:', '    def host_name(self) -> str:'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[delegate]',),
          'does not satisfy Executor'),
-    Case('ssh-close-renamed', 'executor/ssh.py',
+    Case('ssh-close-renamed', 'core/executor/ssh.py',
          (('    def close(self) -> None:\n        """Close the SSH connection."""',
            '    def disconnect(self) -> None:\n        """Close the SSH connection."""'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[ssh]',),
          'does not satisfy Executor'),
-    Case('ssh-write-renamed', 'executor/ssh.py',
+    Case('ssh-write-renamed', 'core/executor/ssh.py',
          (('    def write(self, path: str, data: bytes, append: bool = False, parent: str | None = None,\n',
            '    def write_file(self, path: str, data: bytes, append: bool = False, parent: str | None = None,\n'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[ssh]',),
          'does not satisfy Executor'),
     # The execution-mode ladder: explicit -e, then stdio, then an SSH host from the flag or the
     # environment, then auth none, then delegate; delegate alone gets the auth middleware.
-    Case('ladder-rungs-1-2-swapped', '__init__.py',
+    Case('ladder-rungs-1-2-swapped', 'core/__init__.py',
          (("        if self.exec_mode:\n            return self.exec_mode\n\n"
            "        # Auto-select based on transport, auth, and ssh-host\n"
            "        if self.transport == 'stdio':\n            return 'ssh'\n",
@@ -1056,49 +1239,49 @@ CASES: tuple[Case, ...] = (
            "        if False:\n            return 'ssh'\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-stdio]',),
          'mode:'),
-    Case('ladder-rungs-3-4-swapped', '__init__.py',
-         (("        elif self.ssh_host or os.environ.get('RCAC_SSH_HOST'):\n"
+    Case('ladder-rungs-3-4-swapped', 'core/__init__.py',
+         (("        elif self.ssh_host or env_setting('CLUSTER_MCP_SSH_HOST')[0]:\n"
            '            # If SSH host is specified, use ssh mode regardless of transport\n'
            "            return 'ssh'\n"
            "        elif self.auth == 'none':\n            return 'local'\n",
            "        elif self.auth == 'none':\n            return 'local'\n"
-           "        elif self.ssh_host or os.environ.get('RCAC_SSH_HOST'):\n"
+           "        elif self.ssh_host or env_setting('CLUSTER_MCP_SSH_HOST')[0]:\n"
            "            return 'ssh'\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[host-flag-over-auth-none]',
           'test_exec_mode.py::test_exec_mode_ladder[env-host-over-auth-none]'),
          'mode:'),
     # Each value of an explicit -e wins on its own; ignoring one lets the later rungs decide.
-    Case('ladder-explicit-local-ignored', '__init__.py',
+    Case('ladder-explicit-local-ignored', 'core/__init__.py',
          ((EXPLICIT_MODE, "        if self.exec_mode and self.exec_mode != 'local':\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-stdio]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-host]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-auth]'),
          'mode:'),
-    Case('ladder-explicit-ssh-ignored', '__init__.py',
+    Case('ladder-explicit-ssh-ignored', 'core/__init__.py',
          ((EXPLICIT_MODE, "        if self.exec_mode and self.exec_mode != 'ssh':\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-ssh-over-auth-none]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-ssh-over-auth]'),
          'mode:'),
-    Case('ladder-explicit-delegate-ignored', '__init__.py',
+    Case('ladder-explicit-delegate-ignored', 'core/__init__.py',
          ((EXPLICIT_MODE, "        if self.exec_mode and self.exec_mode != 'delegate':\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-delegate-over-stdio]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-delegate-over-host]'),
          'mode:'),
     # An explicit -e that yields to one later-rung input: auth none (delegate falls to an
-    # unauthenticated local shell), RCAC_SSH_HOST, or auth oidc.
-    Case('ladder-explicit-delegate-yields-to-auth-none', '__init__.py',
+    # unauthenticated local shell), CLUSTER_MCP_SSH_HOST, or auth oidc.
+    Case('ladder-explicit-delegate-yields-to-auth-none', 'core/__init__.py',
          ((EXPLICIT_MODE, "        if self.exec_mode and not (self.exec_mode == 'delegate' and self.auth == 'none'):\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-delegate-over-auth-none]',
           'test_exec_mode.py::test_explicit_mode_decides_alone[delegate]'),
          'mode: resolved local, expected delegate'),
-    Case('ladder-explicit-yields-to-env-host', '__init__.py',
-         ((EXPLICIT_MODE, "        if self.exec_mode and not os.environ.get('RCAC_SSH_HOST'):\n"),),
+    Case('ladder-explicit-yields-to-env-host', 'core/__init__.py',
+         ((EXPLICIT_MODE, "        if self.exec_mode and not env_setting('CLUSTER_MCP_SSH_HOST')[0]:\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-env-host]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-delegate-over-env-host]',
           'test_exec_mode.py::test_explicit_mode_decides_alone[local]',
           'test_exec_mode.py::test_explicit_mode_decides_alone[delegate]'),
          'mode: resolved ssh'),
-    Case('ladder-explicit-yields-to-oidc', '__init__.py',
+    Case('ladder-explicit-yields-to-oidc', 'core/__init__.py',
          ((EXPLICIT_MODE, "        if self.exec_mode and self.auth != 'oidc':\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[explicit-local-over-oidc]',
           'test_exec_mode.py::test_exec_mode_ladder[explicit-ssh-over-oidc]',
@@ -1107,7 +1290,7 @@ CASES: tuple[Case, ...] = (
          'mode: resolved delegate'),
     # Rung 1 decides, but to the wrong mode: every explicit row, including those whose later rungs
     # agree with the explicit value, reads the mode it resolved.
-    Case('ladder-explicit-misrouted', '__init__.py',
+    Case('ladder-explicit-misrouted', 'core/__init__.py',
          (("        if self.exec_mode:\n            return self.exec_mode\n",
            "        if self.exec_mode:\n"
            "            return {'local': 'delegate', 'delegate': 'ssh', 'ssh': 'local'}[self.exec_mode]\n"),),
@@ -1116,31 +1299,31 @@ CASES: tuple[Case, ...] = (
                for later in ('stdio', 'host', 'env-host', 'auth-none', 'auth', 'oidc'))
          + tuple(f'test_exec_mode.py::test_explicit_mode_decides_alone[{mode}]' for mode in ('local', 'ssh', 'delegate')),
          'mode: resolved'),
-    Case('ladder-env-host-ignored', '__init__.py',
-         (("        elif self.ssh_host or os.environ.get('RCAC_SSH_HOST'):\n", '        elif self.ssh_host:\n'),),
+    Case('ladder-env-host-ignored', 'core/__init__.py',
+         (("        elif self.ssh_host or env_setting('CLUSTER_MCP_SSH_HOST')[0]:\n", '        elif self.ssh_host:\n'),),
          ('test_exec_mode.py::test_exec_mode_ladder[env-host-over-auth-none]',),
          'mode:'),
-    Case('ladder-local-widened', '__init__.py',
+    Case('ladder-local-widened', 'core/__init__.py',
          (("        elif self.auth == 'none':\n            return 'local'\n        else:\n            return 'delegate'",
            "        else:\n            return 'local'"),),
          ('test_exec_mode.py::test_exec_mode_ladder[jwt-without-host]',
           'test_exec_mode.py::test_exec_mode_ladder[oidc-without-host]'),
          'mode:'),
-    Case('delegate-gets-shared-middleware', '__init__.py',
+    Case('delegate-gets-shared-middleware', 'core/__init__.py',
          (("        if exec_mode == 'delegate':\n", "        if exec_mode == 'delegate' and False:\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[jwt-without-host]',),
          'middleware:'),
     # The secret floor: create_jwt_auth() and --generate-token each refuse an unset, empty or
     # 31-character JWT_SECRET on their own, so each floor is lowered separately.
-    Case('floor-auth-31', 'auth.py',
+    Case('floor-auth-31', 'core/auth.py',
          (('    if len(secret) < 32:\n', '    if len(secret) < 31:\n'),),
          ('test_tokens.py::test_jwt_auth_refuses_short_secret[31-chars]',),
          'DID NOT RAISE'),
-    Case('floor-cli-31', '__init__.py',
+    Case('floor-cli-31', 'core/__init__.py',
          (('            if len(secret) < 32:\n', '            if len(secret) < 31:\n'),),
          ('test_tokens.py::test_generate_token_refuses_short_secret[31-chars]',),
          'status'),
-    Case('auth-unset-secret-defaulted', 'auth.py',
+    Case('auth-unset-secret-defaulted', 'core/auth.py',
          (("        raise ValueError('JWT_SECRET environment variable required for jwt auth mode')",
            "        secret = 'x' * 32"),),
          ('test_tokens.py::test_jwt_auth_refuses_short_secret[unset]',
@@ -1148,76 +1331,76 @@ CASES: tuple[Case, ...] = (
          'DID NOT RAISE'),
     # Signer and verifier agree on issuer, audience, algorithm and lifetime: drifting either side
     # rejects the tokens the other mints.
-    Case('verifier-audience-changed', 'auth.py',
+    Case('verifier-audience-changed', 'core/auth.py',
          (('        audience=AUDIENCE,\n', "        audience=AUDIENCE + '-other',\n"),),
          ('test_tokens.py::test_minted_token_is_accepted', 'test_tokens.py::test_cli_minted_token_is_accepted'),
          'error result'),
-    Case('verifier-issuer-changed', 'auth.py',
+    Case('verifier-issuer-changed', 'core/auth.py',
          (('        issuer=ISSUER,\n', "        issuer=ISSUER + '-other',\n"),),
          ('test_tokens.py::test_minted_token_is_accepted',),
          'error result'),
-    Case('verifier-algorithm-changed', 'auth.py',
+    Case('verifier-algorithm-changed', 'core/auth.py',
          (('        algorithm=ALGORITHM,\n', "        algorithm='HS512',\n"),),
          ('test_tokens.py::test_minted_token_is_accepted',),
          'error result'),
-    Case('signer-audience-changed', 'token.py',
+    Case('signer-audience-changed', 'core/token.py',
          (("        'aud': AUDIENCE,\n", "        'aud': AUDIENCE + '-other',\n"),),
          ('test_tokens.py::test_minted_token_is_accepted', 'test_tokens.py::test_cli_minted_token_is_accepted'),
          'error result'),
-    Case('signer-token-expired', 'token.py',
+    Case('signer-token-expired', 'core/token.py',
          (("        'exp': now + timedelta(seconds=lifetime),\n", "        'exp': now - timedelta(seconds=lifetime),\n"),),
          ('test_tokens.py::test_minted_token_is_accepted',),
          'error result'),
     # The rejection half: a verifier that stops checking a claim accepts a token minted for
     # another audience or issuer.
-    Case('verifier-audience-unchecked', 'auth.py',
+    Case('verifier-audience-unchecked', 'core/auth.py',
          (('        audience=AUDIENCE,\n', '        audience=None,\n'),),
          ('test_tokens.py::test_mismatched_token_is_rejected[audience]',),
          'expected 401'),
-    Case('verifier-issuer-unchecked', 'auth.py',
+    Case('verifier-issuer-unchecked', 'core/auth.py',
          (('        issuer=ISSUER,\n', '        issuer=None,\n'),),
          ('test_tokens.py::test_mismatched_token_is_rejected[issuer]',),
          'expected 401'),
     # The error boundary: an exception an executor middleware raises around a tool call reaches the
     # client as a tool error result whose text is exactly str(exc); cancellation passes through.
-    Case('tool-error-boundary-dropped', 'server.py',
+    Case('tool-error-boundary-dropped', 'core/server.py',
          (('    server.add_middleware(ToolErrorMiddleware())\n', ''),),
          BOUNDARY_ROWS,
          'protocol error instead of a tool error result'),
-    Case('boundary-leaks-traceback', 'middleware.py',
+    Case('boundary-leaks-traceback', 'core/middleware.py',
          (('raise error(str(exc)) from exc', "raise error(str(exc) + __import__('traceback').format_exc()) from exc"),),
          (*BOUNDARY_ROWS, *read_boundary_rows('permission-memory', 'mcp-error-memory'),
           *refused_reads(*MIDDLEWARE_REFUSALS)),
          'error text differs'),
-    Case('boundary-type-name', 'middleware.py',
+    Case('boundary-type-name', 'core/middleware.py',
          (('raise error(str(exc)) from exc', "raise error(f'{type(exc).__name__}: {exc}') from exc"),),
          (*BOUNDARY_ROWS, *read_boundary_rows('permission-memory', 'mcp-error-memory'),
           *refused_reads(*MIDDLEWARE_REFUSALS)),
          'error text differs'),
-    Case('boundary-catches-base-exception', 'middleware.py',
+    Case('boundary-catches-base-exception', 'core/middleware.py',
          (('    except Exception as exc:\n        raise error(', '    except BaseException as exc:\n        raise error('),),
          ('test_protocol.py::test_boundary_lets_cancellation_through[on_call_tool]',
           'test_protocol.py::test_boundary_lets_cancellation_through[on_read_resource]'),
          'swallowed cancellation'),
-    Case('boundary-catches-named-only', 'middleware.py',
+    Case('boundary-catches-named-only', 'core/middleware.py',
          (('    except Exception as exc:\n        raise error(', '    except (PermissionError, RuntimeError) as exc:\n        raise error('),),
          read_boundary_rows('other-memory'),
          'refused read: error'),
     # Re-raised unconverted around a tool call, the refusal is a protocol error that aborts a test's
     # tool call before its read is checked, so the read rows here are the ones that read alone.
-    Case('boundary-reraises-original', 'middleware.py',
+    Case('boundary-reraises-original', 'core/middleware.py',
          (('raise error(str(exc)) from exc', 'raise'),),
          CONVERTED_READS,
          'refused read: error'),
-    Case('boundary-passes-nothing', 'middleware.py',
+    Case('boundary-passes-nothing', 'core/middleware.py',
          (('    except passes:\n        raise\n', ''),),
          NOT_FOUND,
          'expected -32602'),
-    Case('boundary-drops-result', 'middleware.py',
+    Case('boundary-drops-result', 'core/middleware.py',
          (('    try:\n        return await call_next(context)\n', '    try:\n        await call_next(context)\n'),),
-         tuple(f'{STORAGE}::test_storage_read_runs_the_local_executor[{era}]' for era in ERAS),
+         per_scheme(*(f'{STORAGE}::test_storage_read_runs_the_local_executor[{era}]' for era in ERAS)),
          'the read failed'),
-    Case('boundary-reraises-mcp-error', 'middleware.py',
+    Case('boundary-reraises-mcp-error', 'core/middleware.py',
          (('    except passes:\n        raise\n',
            "    except (*passes, __import__('mcp').MCPError):\n        raise\n"),),
          ('test_protocol.py::test_middleware_refusal_is_a_tool_error_result[mcp-error-memory]',),
@@ -1226,21 +1409,21 @@ CASES: tuple[Case, ...] = (
     # text is exactly str(exc), in both eras (unbounded, the modern era masks the text and the
     # handshake era sends code 0), while the not-found error FastMCP raises for a URI it does not
     # serve passes through as the protocol's own.
-    Case('read-boundary-dropped', 'middleware.py',
+    Case('read-boundary-dropped', 'core/middleware.py',
          ((READ_HOOK, '        return await call_next(context)\n'),),
          (*CONVERTED_READS, *refused_reads(*MIDDLEWARE_REFUSALS)),
          'refused read: error'),
-    Case('read-boundary-leaks-traceback', 'middleware.py',
+    Case('read-boundary-leaks-traceback', 'core/middleware.py',
          ((READ_HOOK, read_hook_raising("str(exc) + __import__('traceback').format_exc()")),),
          (*read_boundary_rows('permission-memory', 'mcp-error-memory', 'other-memory'),
           *refused_reads(*MIDDLEWARE_REFUSALS)),
          'error text differs'),
-    Case('read-boundary-type-name', 'middleware.py',
+    Case('read-boundary-type-name', 'core/middleware.py',
          ((READ_HOOK, read_hook_raising("f'{type(exc).__name__}: {exc}'")),),
          (*read_boundary_rows('permission-memory', 'mcp-error-memory', 'other-memory'),
           *refused_reads(*MIDDLEWARE_REFUSALS)),
          'error text differs'),
-    Case('read-boundary-wraps-not-found', 'middleware.py',
+    Case('read-boundary-wraps-not-found', 'core/middleware.py',
          (('ResourceError, (FastMCPError, NotFoundError, DisabledError))', 'ResourceError, (FastMCPError,))'),),
          NOT_FOUND,
          'expected -32602'),
@@ -1248,102 +1431,102 @@ CASES: tuple[Case, ...] = (
     # reaches the session store, where a later request on the same session would read it. Only the
     # handshake era has a session to leak into: under revision 2026-07-28 FastMCP keys each request's
     # state afresh, so the modern row holds whatever the scope and cannot catch this plant.
-    Case('delegate-state-session-scoped', 'middleware.py',
+    Case('delegate-state-session-scoped', 'core/middleware.py',
          (("set_state('rcac_user', identity, serializable=False)", "set_state('rcac_user', identity)"),
           ("set_state('rcac_local_user', executor.local_user, serializable=False)",
            "set_state('rcac_local_user', executor.local_user)")),
          ('test_protocol.py::test_delegate_state_is_request_scoped[legacy]',
-          'test_protocol.py::test_delegate_read_state_is_request_scoped[legacy]'),
+          *per_scheme('test_protocol.py::test_delegate_read_state_is_request_scoped[legacy]')),
          'state outlived its request'),
-    Case('delegate-state-not-set', 'middleware.py',
+    Case('delegate-state-not-set', 'core/middleware.py',
          (("        await context.fastmcp_context.set_state('rcac_user', identity, serializable=False)\n"
            "        await context.fastmcp_context.set_state('rcac_local_user', executor.local_user, serializable=False)\n",
            ''),),
-         tuple(f'test_protocol.py::test_delegate_{what}state_is_request_scoped[{era}]'
-               for what in ('', 'read_') for era in ERAS),
+         (*(f'test_protocol.py::test_delegate_state_is_request_scoped[{era}]' for era in ERAS),
+          *per_scheme(*(f'test_protocol.py::test_delegate_read_state_is_request_scoped[{era}]' for era in ERAS))),
          'no state was set'),
     # The server's instructions reach a client in both protocol eras: in the InitializeResult of a
     # handshake and in the DiscoverResult of revision 2026-07-28.
-    Case('instructions-dropped', 'server.py',
+    Case('instructions-dropped', 'core/server.py',
          (('        instructions=compose(SERVER_INSTRUCTIONS, site, budget),\n', '        instructions=None,\n'),),
          ('test_protocol.py::test_client_era_is_served[legacy-memory]',
           'test_protocol.py::test_client_era_is_served[modern-memory]'),
          'instructions differ'),
     # The site read skips the assembled AGENTS.md, which repeats the topic files.
-    Case('site-agents-md-included', 'site.py',
+    Case('site-agents-md-included', 'core/site.py',
          (("    return fnmatch.fnmatchcase(name, '*.md') and name != EXCLUDED\n",
            "    return fnmatch.fnmatchcase(name, '*.md')\n"),),
          ('test_site.py::test_local_read_takes_the_eligible_files_in_byte_order',),
          'files:'),
     # The files are ordered by the bytes of their names, whatever the locale.
-    Case('site-byte-order', 'site.py',
+    Case('site-byte-order', 'core/site.py',
          (("key=lambda f: f.raw)", "key=lambda f: f.name.lower())"),),
          ('test_site.py::test_local_read_takes_the_eligible_files_in_byte_order',),
          'files:'),
     # The composed instructions never exceed the budget.
-    Case('site-budget-overflow', 'site.py',
+    Case('site-budget-overflow', 'core/site.py',
          (("        if units(_render(base, trial, rest)) <= budget:\n",
            "        if units(_render(base, trial, rest)) <= budget + 40:\n"),),
          ('test_site.py::test_compose_keeps_its_contract_at_every_budget[sizes0]',),
          'over the budget'),
     # A read that has not finished is abandoned at its bound, not at twice it.
-    Case('site-read-unbounded', 'site.py',
+    Case('site-read-unbounded', 'core/site.py',
          (("        return box.get(timeout=timeout)\n", "        return box.get(timeout=timeout * 2)\n"),),
          ('test_site.py::test_bounded_read_times_out_and_contains_errors',),
          'past its 0.3 s bound'),
     # In ssh mode the startup read is bounded too, not only the local one.
-    Case('startup-ssh-unbounded', '__init__.py',
+    Case('startup-ssh-unbounded', 'core/__init__.py',
          (("            return site_context.read_bounded(lambda: site_context.read_remote(executor), 'the cluster')\n",
            "            return site_context.read_remote(executor)\n"),),
          ('test_site_startup.py::test_a_hung_read_does_not_hold_startup[ssh]',),
          'a hung read held startup'),
     # What a server serves is the text read at startup, whatever the directory holds later.
-    Case('context-rereads', 'site.py',
+    Case('context-rereads', 'core/site.py',
          (("    return _SITES[server]\n", "    return read_local() if _SITES[server].files else _SITES[server]\n"),),
-         ('test_context.py::test_a_changed_directory_changes_nothing_served',),
+         per_scheme('test_context.py::test_a_changed_directory_changes_nothing_served'),
          'what is served changed after startup'),
     # The tool answers from the startup text and runs nothing through the request's executor.
-    Case('context-through-executor', 'tools/context.py',
+    Case('context-through-executor', 'core/tools/context.py',
          (("    return site_of(get_server()).text\n",
-           "    from rcac_mcp.context import get_executor\n"
+           "    from cluster_mcp.core.context import get_executor\n"
            "    get_executor().run(['cat', '--', '/etc/agents.d/a.md'])\n"
            "    return site_of(get_server()).text\n"),),
-         ('test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-legacy]',
-          'test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-modern]'),
+         per_scheme('test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-legacy]',
+                    'test_context.py::test_tool_and_resource_serve_the_startup_text[shared-files-modern]'),
          'an executor ran'),
     # Each server serves the site it was built with: the holder is keyed by the server, never one
     # module value that the last server built overwrites.
-    Case('site-holder-global', 'site.py',
+    Case('site-holder-global', 'core/site.py',
          (("    _SITES[server] = site\n", "    global _ONE\n    _ONE = site\n"),
           ("    return _SITES[server]\n", "    return _ONE\n")),
-         ('test_context.py::test_each_server_keeps_its_own_site[legacy]',
-          'test_context.py::test_each_server_keeps_its_own_site[modern]'),
+         per_scheme('test_context.py::test_each_server_keeps_its_own_site[legacy]',
+                    'test_context.py::test_each_server_keeps_its_own_site[modern]'),
          "another server's site"),
     # A reason's detail is cut in UTF-16 code units, the budget's unit, not in code points.
-    Case('site-detail-code-points', 'site.py',
+    Case('site-detail-code-points', 'core/site.py',
          (("    if units(text) <= limit:\n        return text\n", "    if len(text) <= limit:\n        return text\n"),
           ("        room -= units(char)\n", "        room -= 1\n")),
          ('test_site.py::test_astral_names_and_reasons_keep_the_budget[unreadable-local]',
           'test_site.py::test_astral_names_and_reasons_keep_the_budget[unreadable-remote]'),
          "needs more than a good read's minimum"),
     # With no files, the minimum holds the site's own reason, so that path never serves past the budget.
-    Case('site-reason-unchecked', 'site.py',
+    Case('site-reason-unchecked', 'core/site.py',
          (("        return max(floor, units(_head(base) + site.reason))\n", "        return floor\n"),),
          ('test_site.py::test_every_reason_fits_the_room_kept_for_it',),
          'over the budget'),
     # A name's control characters are shown escaped, so no name breaks a served line.
-    Case('site-name-unescaped', 'site.py',
+    Case('site-name-unescaped', 'core/site.py',
          (("    return ''.join(_escape(c) if _escaped(c) else c for c in text)\n", "    return text\n"),),
          ('test_site.py::test_a_name_cannot_break_a_served_line[files-local]',
           'test_site.py::test_a_name_cannot_break_a_served_line[unreadable-remote]'),
          'is not one line'),
     # A read for others keeps only the files every account can read.
-    Case('site-others-unchecked', 'site.py',
+    Case('site-others-unchecked', 'core/site.py',
          (("                    if not _everyone_may(fd, READ):\n", "                    if False:\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[private-file-for-others]',),
          'files:'),
     # Every account means every class: the owner's and the group's bits count, not only others'.
-    Case('site-group-unchecked', 'site.py',
+    Case('site-group-unchecked', 'core/site.py',
          (("SEARCH: Final = 0o111\nLIST: Final = 0o555\nREAD: Final = 0o444\n",
            "SEARCH: Final = 0o001\nLIST: Final = 0o005\nREAD: Final = 0o004\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[groupless-file-for-others]',
@@ -1352,7 +1535,7 @@ CASES: tuple[Case, ...] = (
          'files:'),
     # Every directory a lookup of the path passes must be searchable by every account, a symlink's
     # way included, not only the directory reached.
-    Case('site-ancestors-unchecked', 'site.py',
+    Case('site-ancestors-unchecked', 'core/site.py',
          (("            everyone = everyone and _everyone_may(directory, SEARCH)\n", "            pass\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[private-ancestor-for-others]',
           'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
@@ -1360,7 +1543,7 @@ CASES: tuple[Case, ...] = (
           'test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[link-in-private-dir-for-others]'),
          'files:'),
     # A path carrying an ACL entry is not every account's to read, whatever its mode bits.
-    Case('site-acl-unchecked', 'site.py',
+    Case('site-acl-unchecked', 'core/site.py',
          (("    return os.stat(target).st_mode & need == need and not _extended(target)\n",
            "    return os.stat(target).st_mode & need == need\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[acl-file-for-others]',
@@ -1369,26 +1552,26 @@ CASES: tuple[Case, ...] = (
           'test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[ancestor]'),
          'files:'),
     # The probe sees a real ACL entry, the way this platform stores one.
-    Case('site-acl-probe-blind', 'site.py',
+    Case('site-acl-probe-blind', 'core/site.py',
          (("        return _darwin_acl(target)\n", "        return False\n"),
           ("        return any(_acl_attribute(name) for name in _attributes(target))\n", "        return False\n")),
          ('test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[file]',
           'test_site.py::test_an_acl_entry_makes_a_path_unreadable_for_others[directory]'),
          'the probe missed it'),
     # The route is checked from `/`: the root is a directory every lookup searches.
-    Case('site-root-unsearched', 'site.py',
+    Case('site-root-unsearched', 'core/site.py',
          (("    searched: set[int] = set()\n", "    searched: set[int] = {root}\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[acl-root-for-others]',),
          'files:'),
     # A relative symlink's target is looked up from the directory holding the link, not from `/`.
-    Case('site-link-from-root', 'site.py',
+    Case('site-link-from-root', 'core/site.py',
          (("                route = walk([root] if target.startswith('/') else route, target)\n",
            "                route = walk([root], target)\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
           '[open-through-relative-link-for-others]',),
          'files:'),
     # A `..` step is a lookup in the directory it leaves, which every account must be able to search.
-    Case('site-dotdot-unsearched', 'site.py',
+    Case('site-dotdot-unsearched', 'core/site.py',
          (("            search(route[-1])\n            if part == '..':\n                route = route[:-1] or route\n"
            "                continue\n",
            "            if part == '..':\n                route = route[:-1] or route\n                continue\n"
@@ -1397,82 +1580,82 @@ CASES: tuple[Case, ...] = (
           '[dotdot-out-of-private-dir-for-others]',),
          'files:'),
     # An abandoned read never holds the process open at exit.
-    Case('site-read-thread-kept', 'site.py',
+    Case('site-read-thread-kept', 'core/site.py',
          (("name='cluster-mcp-site-read', daemon=True", "name='cluster-mcp-site-read', daemon=False"),),
          ('test_site.py::test_an_abandoned_read_does_not_hold_the_process',),
          'would hold the process open'),
     # An acl(3) failure other than "no ACL" counts as an entry: the probe fails closed on macOS.
-    Case('site-acl-error-open', 'site.py',
+    Case('site-acl-error-open', 'core/site.py',
          (("        return ctypes.get_errno() != errno.ENOENT\n", "        return False\n"),),
          ('test_site.py::test_an_acl_the_system_cannot_answer_counts_as_one[eacces]',
           'test_site.py::test_an_acl_the_system_cannot_answer_counts_as_one[eio]'),
          'must count as an ACL entry'),
     # What the read for every account checks is what it reads: no file is read again by its path, so a
     # swap of the file or of the route after the check changes nothing served.
-    Case('site-file-reread-by-path', 'site.py',
+    Case('site-file-reread-by-path', 'core/site.py',
          (("                    data = stream.read()\n",
            "                    data = open(os.path.join(directory, entry.name), 'rb').read()\n"),),
          ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[route]',
           'test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[file]'),
          'served text no ordinary account could read'),
-    Case('site-listed-by-path', 'site.py',
+    Case('site-listed-by-path', 'core/site.py',
          (("            listing = os.open('.', _LISTING, dir_fd=reached)\n",
            "            listing = os.open(directory, _LISTING)\n"),),
          ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[route]',),
          'served text no ordinary account could read'),
     # A directory on the route is opened for search only, so one every account may search but the
     # server may not list is passed, as a lookup passes it.
-    Case('site-route-opened-for-read', 'site.py',
+    Case('site-route-opened-for-read', 'core/site.py',
          (("_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY", "_STEP: Final = os.O_RDONLY | os.O_DIRECTORY"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read[search-only-ancestor-for-others]',),
          'files:'),
     # A symlink is never followed where a file is expected, nor on the route without its check.
-    Case('site-file-follows-links', 'site.py',
+    Case('site-file-follows-links', 'core/site.py',
          (("_FILE: Final = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC\n",
            "_FILE: Final = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC\n"),),
          ('test_site.py::test_a_swap_after_a_check_changes_nothing_read_for_others[listed-then-linked]',),
          'served text no ordinary account could read'),
-    Case('site-route-follows-links', 'site.py',
+    Case('site-route-follows-links', 'core/site.py',
          (("_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC\n",
            "_STEP: Final = _SEARCH_ONLY | os.O_DIRECTORY | os.O_CLOEXEC\n"),),
          ('test_site.py::test_a_read_for_others_keeps_only_what_every_account_can_read'
           '[private-ancestor-through-link-for-others]',),
          'files:'),
     # In delegate mode the startup read is a read for others.
-    Case('delegate-reads-for-itself', '__init__.py',
+    Case('delegate-reads-for-itself', 'core/__init__.py',
          (("        for_others = exec_mode == 'delegate'\n", "        for_others = False\n"),),
          ('test_site_startup.py::test_startup_reads_once_where_the_mode_says[delegate]',),
          'the read for others was False'),
     # On Linux every ACL the system lists counts, not only a POSIX one.
-    Case('site-acl-posix-only', 'site.py',
+    Case('site-acl-posix-only', 'core/site.py',
          (("    return name.startswith(ACL_NAMESPACE) and 'acl' in name[len(ACL_NAMESPACE):]\n",
            "    return name in ('system.posix_acl_access', 'system.posix_acl_default')\n"),),
          ('test_site.py::test_a_listed_acl_makes_a_path_unreadable_for_others[nfs4_acl-file]',
           'test_site.py::test_a_listed_acl_makes_a_path_unreadable_for_others[richacl-ancestor]'),
          'files:'),
     # The remote read undoes the functions a login profile exports over the commands it runs.
-    Case('site-reset-dropped', 'site.py',
+    Case('site-reset-dropped', 'core/site.py',
          (("    'unset -f base64 shopt tr test\\n'\n", ""),),
          ('test_site.py::test_a_profile_cannot_change_the_remote_read[local]',
           'test_site.py::test_a_profile_cannot_change_the_remote_read[ssh]'),
          'a profile function changed what the remote read found'),
     # A file is its name's bytes: two names that decode alike stay two files, in the order of their
     # bytes, and each is served or named; a shown name reads back as itself.
-    Case('site-names-by-text', 'site.py',
+    Case('site-names-by-text', 'core/site.py',
          (("key=lambda f: f.raw)", "key=lambda f: f.name.encode('utf-8'))"),),
          ('test_site.py::test_two_names_that_decode_alike_are_two_files[remote]',),
          'not as two files in byte order'),
-    Case('site-omitted-by-name', 'site.py',
+    Case('site-omitted-by-name', 'core/site.py',
          (("    omitted = [f.name for i, f in enumerate(files) if i not in taken]\n",
            "    omitted = [f.name for f in files if f.name not in {g.name for g in included}]\n"),),
          ('test_site.py::test_two_names_that_decode_alike_are_two_files[remote]',),
          'served and 0 named'),
-    Case('site-backslash-unescaped', 'site.py',
+    Case('site-backslash-unescaped', 'core/site.py',
          (("    return _breaks(char) or char == '\\\\'\n", "    return _breaks(char)\n"),),
          ('test_site.py::test_a_shown_name_reads_back_as_itself',),
          'does not read back as itself'),
     # The remote read resets the glob state a login profile can leave its bash.
-    Case('site-glob-state-inherited', 'site.py',
+    Case('site-glob-state-inherited', 'core/site.py',
          (("    'unset GLOBIGNORE\\n'\n    'set +f\\n'\n", ""),
           ("    'for o in dotglob nullglob failglob nocaseglob globstar extglob; do shopt -u \"$o\" 2>/dev/null; done\\n'\n",
            "")),
@@ -1482,71 +1665,71 @@ CASES: tuple[Case, ...] = (
          'the glob state changed what the remote read found'),
     # Every tool's served description is its full docstring, as FastMCP 2.x served it; FastMCP 4
     # alone serves only the summary paragraph.
-    Case('tool-description-summary-only', 'tools/__init__.py',
+    Case('tool-description-summary-only', 'core/tools/__init__.py',
          (('    tool = Tool.from_function(func, description=inspect.getdoc(func))\n',
            '    tool = Tool.from_function(func)\n'),),
          ('test_surface.py::test_served_surface_matches_baseline',),
          'description differs'),
     # The ssh executor maps the remote exit status into its CommandResult.
-    Case('ssh-exit-status-dropped', 'executor/ssh.py',
+    Case('ssh-exit-status-dropped', 'core/executor/ssh.py',
          (("            return bytes(out), bytes(err), chan.recv_exit_status(), b''\n",
            "            return bytes(out), bytes(err), 0, b''\n"),),
          ('test_ssh_exec.py::test_a_profile_that_exits_is_not_started',),
          "the channel's status"),
     # `-t sse` serves: the CLI dispatches it to FastMCP's SSE transport and the server listens. The
     # target runs the installed console script, which imports this copy through PYTHONPATH.
-    Case('sse-transport-unserved', '__init__.py',
+    Case('sse-transport-unserved', 'core/__init__.py',
          (("                mcp.run(transport='sse', host=self.host, port=self.port)\n",
            '                pass\n'),),
          ('test_transports.py::test_transport_lists_expected_tools[sse-legacy]',),
          'did not start'),
     # OIDC is all-or-nothing: a configuration missing any of the four variables is refused, naming
     # all four, before a provider is built. The proxy keeps the FastMCP 2.x posture.
-    Case('oidc-check-dropped', 'auth.py',
+    Case('oidc-check-dropped', 'core/auth.py',
          (('    if not all([config_url, client_id, client_secret, base_url]):\n', '    if False:\n'),),
          OIDC_ROWS,
          'raised no ValueError'),
-    Case('oidc-secret-not-required', 'auth.py',
+    Case('oidc-secret-not-required', 'core/auth.py',
          (('    if not all([config_url, client_id, client_secret, base_url]):\n',
            '    if not all([config_url, client_id, base_url]):\n'),),
          tuple(row for row in OIDC_ROWS if '[OIDC_CLIENT_SECRET-' in row),
          'raised no ValueError'),
-    Case('oidc-message-incomplete', 'auth.py',
+    Case('oidc-message-incomplete', 'core/auth.py',
          (("            'OIDC_CLIENT_SECRET, MCP_BASE_URL'\n", "            'OIDC_CLIENT_SECRET'\n"),),
          tuple(row for row in OIDC_ROWS if '[MCP_BASE_URL-' in row),
          'does not name MCP_BASE_URL'),
-    Case('oidc-cimd-enabled', 'auth.py',
+    Case('oidc-cimd-enabled', 'core/auth.py',
          (('        enable_cimd=False,\n', ''),),
          ('test_auth_modes.py::test_oidc_proxy_keeps_the_2x_posture',),
          'enable_cimd=True'),
     # `none` installs no provider.
-    Case('none-mode-installs-provider', 'auth.py',
+    Case('none-mode-installs-provider', 'core/auth.py',
          (("    'none': lambda: None,\n",
            "    'none': lambda: JWTVerifier(public_key='x' * 32, issuer=ISSUER, audience=AUDIENCE, algorithm=ALGORITHM),\n"),),
          ('test_auth_modes.py::test_none_mode_installs_no_provider',),
          'none mode installed a provider'),
     # The registry's annotation resolves to a provider-factory map; the stray `:` made it a slice.
-    Case('auth-modes-annotation-slice', 'auth.py',
+    Case('auth-modes-annotation-slice', 'core/auth.py',
          (('AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider | None]]] = {',
            'AUTH_MODES: Final[Dict[str, Callable[[], AuthProvider | None]]:] = {'),),
          ('test_auth_modes.py::test_auth_modes_annotation_is_a_provider_factory_map',),
          'slice'),
     # The launcher: every argument one literal word; a UserPath's leading ~ through the guarded
     # $HOME and nothing else expanded; a relative path or cwd anchored with ./.
-    Case('launcher-arg-unquoted', 'executor/launch.py',
+    Case('launcher-arg-unquoted', 'core/executor/launch.py',
          (('    return shlex.quote(str(arg))\n', '    return str(arg)\n'),),
          ('test_launch.py::test_program_quotes_each_argument_as_one_word[hostile]',
           'test_launch.py::test_values_arrive_literally[local]',
           'test_literal_args.py::test_literal_argument[local-squeue-user]'),
          'reaches the command as'),
-    Case('launcher-tilde-user-expanded', 'executor/launch.py',
+    Case('launcher-tilde-user-expanded', 'core/executor/launch.py',
          (("        if arg == '~':\n            return HOME_WORD\n", "        if arg == '~':\n            return '~'\n"),
           ("return f'{HOME_WORD}/{shlex.quote(rest)}' if rest else HOME_WORD",
            "return f'~/{shlex.quote(rest)}' if rest else '~'")),
          ('test_launch.py::test_program_quotes_each_argument_as_one_word[user-paths]',
           'test_launch.py::test_an_empty_home_fails_a_tilde_path[local]'),
          'does not resolve through $HOME'),
-    Case('launcher-tilde-name-expanded', 'executor/launch.py',
+    Case('launcher-tilde-name-expanded', 'core/executor/launch.py',
          (("        if arg and not arg.startswith('/'):\n",
            "        if arg.startswith('~'):\n"
            "            user, _, rest = arg[1:].partition('/')\n"
@@ -1554,88 +1737,88 @@ CASES: tuple[Case, ...] = (
            "        if arg and not arg.startswith('/'):\n"),),
          ('test_launch.py::test_program_quotes_each_argument_as_one_word[user-paths]',),
          'leaves ~name for bash to expand'),
-    Case('launcher-cwd-cdpath', 'executor/launch.py',
+    Case('launcher-cwd-cdpath', 'core/executor/launch.py',
          (("lines.append(CD_LINE.format(word=word(UserPath(cwd))))", "lines.append(CD_LINE.format(word=shlex.quote(cwd)))"),),
          ('test_launch.py::test_program_renders_the_cwd[sub]',
           'test_launch.py::test_cwd_resolves_in_the_running_users_home[local]'),
          'reaches cd as'),
-    Case('launcher-relative-dash', 'executor/launch.py',
+    Case('launcher-relative-dash', 'core/executor/launch.py',
          (("            return shlex.quote('./' + arg)\n", '            return shlex.quote(arg)\n'),),
          ('test_launch.py::test_program_quotes_each_argument_as_one_word[user-paths]',
           'test_launch.py::test_user_paths_resolve_only_a_leading_tilde[local]'),
          'reaches the command as'),
     # The SSH wire: the program travels as one base64 word behind a fixed bootstrap that keeps its
     # trailing newlines and runs nothing when decoding fails.
-    Case('bootstrap-raw-program', 'executor/launch.py',
+    Case('bootstrap-raw-program', 'core/executor/launch.py',
          (("    wire = BOOTSTRAP + base64.b64encode(prog.encode('utf-8')).decode('ascii')\n",
            '    wire = BOOTSTRAP + shlex.quote(prog)\n'),),
          ('test_launch.py::test_bootstrap_is_inert_text[hostile]',),
          'not base64'),
-    Case('bootstrap-newlines-stripped', 'executor/launch.py',
+    Case('bootstrap-newlines-stripped', 'core/executor/launch.py',
          (('base64 -d && printf .)', 'base64 -d)'), (r'-c -- \"${{p%.}}\"', r'-c -- \"$p\"')),
          ('test_launch.py::test_bootstrap_delivers_the_program_exactly[ssh-bash]',),
          'not the program sent'),
-    Case('bootstrap-decode-unchecked', 'executor/launch.py',
+    Case('bootstrap-decode-unchecked', 'core/executor/launch.py',
          (('base64 -d && printf .)', 'base64 -d; printf .)'),),
          ('test_launch.py::test_bootstrap_fails_without_base64[ssh-bash]',),
          'without base64'),
     # The login initialisation runs with the caller's streams parked and none of its output, traps
     # or exits reaching a result.
-    Case('stdin-not-parked', 'executor/launch.py',
+    Case('stdin-not-parked', 'core/executor/launch.py',
          (("PARK: Final = 'exec 57<&0 58>&1 59>&2 47<&0 48>&1 49>&2 </dev/null >/dev/null 2>&1'",
            "PARK: Final = 'exec 57<&0 58>&1 59>&2 47<&0 48>&1 49>&2 >/dev/null 2>&1'"),),
          ('test_launch.py::test_profile_cannot_read_stdin_or_shadow_cd[local]',
           'test_executors.py::test_a_profile_cannot_read_a_writes_content[local]',
           'test_executors.py::test_a_profile_cannot_read_a_writes_content[delegate]'),
          'the profile read'),
-    Case('startup-not-parked', 'executor/launch.py',
+    Case('startup-not-parked', 'core/executor/launch.py',
          (("PARK: Final = 'exec 57<&0 58>&1 59>&2 47<&0 48>&1 49>&2 </dev/null >/dev/null 2>&1'",
            "PARK: Final = 'exec 57<&0 58>&1 59>&2 47<&0 48>&1 49>&2 </dev/null'"),),
          ('test_launch.py::test_startup_output_is_separated[local-slow]',),
          'differs from the quiet home'),
     # A startup file that took a parked descriptor leaves the command not run, and the result says so.
-    Case('parked-descriptor-unchecked', 'executor/launch.py',
+    Case('parked-descriptor-unchecked', 'core/executor/launch.py',
          (("PARKED_SAME: Final = '[[ /dev/fd/57 -ef /dev/fd/47 && /dev/fd/58 -ef /dev/fd/48 && /dev/fd/59 -ef /dev/fd/49 ]]'",
            "PARKED_SAME: Final = 'true'"),),
          ('test_launch.py::test_a_taken_parked_descriptor_runs_nothing[57]',
           'test_launch.py::test_a_taken_parked_descriptor_runs_nothing[58]'),
          'taken: the result is'),
-    Case('parked-descriptor-unnoted', 'executor/launch.py',
+    Case('parked-descriptor-unnoted', 'core/executor/launch.py',
          (('        if TAKEN_MARK in err:\n', '        if False:\n'),),
          ('test_launch.py::test_a_taken_parked_descriptor_runs_nothing[58]',
           'test_launch.py::test_a_taken_parked_descriptor_runs_nothing[49]'),
          'taken: the result is'),
-    Case('startup-traps-kept', 'executor/launch.py',
+    Case('startup-traps-kept', 'core/executor/launch.py',
          (("'set +euxvTkP +o errtrace +o posix; trap - EXIT ERR DEBUG RETURN; '",
            "'set +euxvTkP +o errtrace +o posix; '"),),
          ('test_launch.py::test_startup_output_is_separated[local-argv]',),
          'differs from the quiet home'),
-    Case('prologue-unalias-shared-line', 'executor/launch.py',
+    Case('prologue-unalias-shared-line', 'core/executor/launch.py',
          ((r"PROLOGUE: Final = ('\\unalias -a\n'" + "\n                   'unset -f builtin",
            "PROLOGUE: Final = ('unalias -a; '\n                   'unset -f builtin"),),
          ('test_launch.py::test_profile_cannot_hijack_the_prologue[local-alias]',),
          'differs from the quiet home'),
-    Case('prologue-read-function-kept', 'executor/launch.py',
+    Case('prologue-read-function-kept', 'core/executor/launch.py',
          (("export declare compgen read kill ulimit exit; '", "export declare compgen kill ulimit exit; '"),),
          ('test_launch.py::test_profile_cannot_hijack_the_prologue[local-read-function]',),
          'differs from the quiet home'),
-    Case('stage-reads-bash-env', 'executor/launch.py',
+    Case('stage-reads-bash-env', 'core/executor/launch.py',
          (("    return [*POSIX_STAGE, '-c', STAGE, 'cluster-mcp', prog]",
            "    return [BASH, NORC, '-c', STAGE, 'cluster-mcp', prog]"),),
          ('test_launch.py::test_startup_output_is_separated[local-stdin]',),
          'differs from the quiet home'),
-    Case('script-in-login-shell', 'executor/launch.py',
+    Case('script-in-login-shell', 'core/executor/launch.py',
          (("lines.append(SCRIPT.format(script=shlex.quote(_checked(command, 'command'))))",
            "lines.append(_checked(command, 'command'))"),),
          ('test_launch.py::test_a_signal_death_is_reported_and_reraised[local-script-kill]',
           'test_launch.py::test_a_signal_death_is_reported_and_reraised[ssh-bash-script-kill]'),
          'not exit code'),
-    Case('startup-output-kept', 'executor/launch.py',
+    Case('startup-output-kept', 'core/executor/launch.py',
          (('    kept_out, kept_err = _after(out, marks.start), _after(err, marks.start)\n',
            '    kept_out, kept_err = out, err\n'),),
          ('test_launch.py::test_separate_keeps_only_the_commands_output[chatty-prefix]',),
          'kept output from before the sentinel'),
-    Case('not-started-exit-zero', 'executor/launch.py',
+    Case('not-started-exit-zero', 'core/executor/launch.py',
          (("        return b'', NOT_STARTED_NOTE.format(code=code).encode() + note, NOT_STARTED_EXIT_CODE\n",
            "        return b'', NOT_STARTED_NOTE.format(code=code).encode() + note, code\n"),),
          ('test_launch.py::test_separate_keeps_only_the_commands_output[not-started]',
@@ -1643,32 +1826,32 @@ CASES: tuple[Case, ...] = (
          'did not start, but'),
     # Timeouts: the whole group is stopped, the captured output kept, and a launch that already
     # exited keeps its own status.
-    Case('timeout-group-not-killed', 'executor/launch.py',
+    Case('timeout-group-not-killed', 'core/executor/launch.py',
          (('            os.killpg(proc.pid, sig)\n', '            os.kill(proc.pid, sig)\n'),),
          ('test_launch.py::test_timeout_kills_the_process_group',),
          'still running'),
-    Case('timeout-partial-output-dropped', 'executor/launch.py',
+    Case('timeout-partial-output-dropped', 'core/executor/launch.py',
          (("        return pipes.out, pipes.err, TIMEOUT_EXIT_CODE, b''\n", "        return b'', b'', TIMEOUT_EXIT_CODE, b''\n"),),
          ('test_launch.py::test_timeout_keeps_partial_output',),
          'lost the output'),
-    Case('timeout-completed-misreported', 'executor/launch.py',
+    Case('timeout-completed-misreported', 'core/executor/launch.py',
          (("                return pipes.out, pipes.err, proc.returncode, b''\n",
            "                return pipes.out, pipes.err, TIMEOUT_EXIT_CODE, b''\n"),),
          ('test_launch.py::test_a_raw_launch_is_complete_at_its_exit',),
          'not its own 3'),
     # A launch that has exited is complete at its exit, whatever it left running.
-    Case('exit-not-noticed', 'executor/launch.py',
+    Case('exit-not-noticed', 'core/executor/launch.py',
          (('            if proc.poll() is not None:\n', '            if False:\n'),),
          ('test_launch.py::test_a_raw_launch_is_complete_at_its_exit',),
          'held an exited launch'),
     # Where a local command starts: the server's working directory, written into the program text,
     # never carried by a positional parameter (bash 4 and later let a startup file rewrite those).
-    Case('local-start-dropped', 'executor/shell.py',
+    Case('local-start-dropped', 'core/executor/shell.py',
          (('        prog, marks = launch.program(command, cwd, start=os.getcwd())\n',
            '        prog, marks = launch.program(command, cwd)\n'),),
          ('test_executors.py::test_a_profile_cd_does_not_move_the_start[local]',),
          'a profile cd moved'),
-    Case('local-start-positional', 'executor/launch.py',
+    Case('local-start-positional', 'core/executor/launch.py',
          (("""-c -- "$1"'\n""", """-c -- "$1" cluster-mcp "$PWD"'\n"""),
           ("        lines.append(CD_LINE.format(word=shlex.quote(start)))\n",
            """        lines.append(CD_LINE.format(word='"${1:?the start directory is not set}"'))\n""")),
@@ -1678,49 +1861,49 @@ CASES: tuple[Case, ...] = (
     # A result is complete exactly when both end records have arrived: the command runs as a child,
     # the program prints a record carrying a per-call nonce and the status on both streams after it,
     # re-raises a signal death, and the result's status is the record's.
-    Case('command-exec-in-place', 'executor/launch.py',
+    Case('command-exec-in-place', 'core/executor/launch.py',
          (("                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RERAISE])\n",
            "                      *lines, STATUS, record_line(end_nonce), RERAISE])\n"),),
          ('test_launch.py::test_the_call_ends_at_its_records[local]',
           'test_launch.py::test_the_call_ends_at_its_records[ssh-zsh]'),
          "not the command's own output"),
-    Case('end-record-one-stream', 'executor/launch.py',
+    Case('end-record-one-stream', 'core/executor/launch.py',
          (("""            f'printf %s%s%s. {_halves(end)} "$cluster_mcp_r" >&59')\n""",
            """            f'true')\n"""),),
          ('test_launch.py::test_the_call_ends_at_its_records[local]',
           'test_launch.py::test_the_call_ends_at_its_records[ssh-bash]'),
          "not the command's own output"),
-    Case('end-record-without-nonce', 'executor/launch.py',
+    Case('end-record-without-nonce', 'core/executor/launch.py',
          (('    start_nonce, end_nonce = secrets.token_hex(16), secrets.token_hex(16)\n',
            "    start_nonce, end_nonce = secrets.token_hex(16), '0' * 32\n"),),
          ('test_launch.py::test_a_command_printing_record_lookalikes_keeps_them[local]',
           'test_launch.py::test_a_command_printing_record_lookalikes_keeps_them[ssh-zsh]'),
          'cut the result'),
-    Case('signal-death-not-reraised', 'executor/launch.py',
+    Case('signal-death-not-reraised', 'core/executor/launch.py',
          (("""RERAISE: Final = ('[[ -z $cluster_mcp_k ]] || { ulimit -c 0; trap - "$cluster_mcp_k"; kill -s "$cluster_mcp_k" "$$"; }\\n'\n""",
            """RERAISE: Final = ('\\n'\n"""),),
          ('test_launch.py::test_a_signal_death_is_reported_and_reraised[local-hup]',
           'test_launch.py::test_a_signal_death_is_reported_and_reraised[ssh-bash-term]'),
          'the signal was not re-raised'),
-    Case('signal-death-unreported', 'executor/launch.py',
+    Case('signal-death-unreported', 'core/executor/launch.py',
          (("cluster_mcp_r=s$((cluster_mcp_s - 128)) ;; '", "cluster_mcp_r=x$cluster_mcp_s ;; '"),),
          ('test_launch.py::test_a_signal_death_is_reported_and_reraised[local-term]',
           'test_launch.py::test_a_signal_death_is_reported_and_reraised[ssh-zsh-hup]'),
          'not exit code'),
-    Case('record-status-ignored', 'executor/launch.py',
+    Case('record-status-ignored', 'core/executor/launch.py',
          (('        if reported:\n            code = reported[0]\n', ''),),
          ('test_ssh_exec.py::test_a_signal_death_is_reported[/bin/bash]',),
          'not reported as one'),
-    Case('separate-note-dropped', 'executor/launch.py',
+    Case('separate-note-dropped', 'core/executor/launch.py',
          (("    return streams[0], streams[1] + notes + note, code\n", "    return streams[0], streams[1] + notes, code\n"),),
          ('test_ssh_exec.py::test_a_timeout_before_the_records_names_the_status',),
          'does not name the status'),
     # Every step of the timeout sequence: SIGTERM first, what follows it kept, then SIGKILL.
-    Case('timeout-sigkill-dropped', 'executor/launch.py',
+    Case('timeout-sigkill-dropped', 'core/executor/launch.py',
          (('    for sig in (signal.SIGTERM, signal.SIGKILL):\n', '    for sig in (signal.SIGTERM,):\n'),),
          ('test_launch.py::test_a_timeout_escalates_to_sigkill',),
          'no SIGKILL followed'),
-    Case('timeout-sigterm-dropped', 'executor/launch.py',
+    Case('timeout-sigterm-dropped', 'core/executor/launch.py',
          (('    for sig in (signal.SIGTERM, signal.SIGKILL):\n', '    for sig in (signal.SIGKILL,):\n'),),
          ('test_launch.py::test_a_timeout_sends_term_first_and_keeps_what_follows',
           'test_launch.py::test_a_timeout_signals_the_whole_group_term_first'),
@@ -1728,60 +1911,60 @@ CASES: tuple[Case, ...] = (
     # Nothing after the startup files depends on shell state they can change: the function export
     # neither splits nor globs, the prologue resets `set -k` and `set -P`, and a fixed script undoes
     # the functions and options a profile exported to it.
-    Case('function-export-split', 'executor/launch.py',
+    Case('function-export-split', 'core/executor/launch.py',
          (("""SCRIPT: Final = ('while IFS= read -r cluster_mcp_fn; do export -f -- "$cluster_mcp_fn"; '\n"""
            """                 'done < <(compgen -A function); unset cluster_mcp_fn; '\n""",
            """SCRIPT: Final = ('fns=$(compgen -A function); [ -z "$fns" ] || export -f $fns; '\n"""),),
          ('test_launch.py::test_profile_state_does_not_reach_the_launcher[local-glob-options]',
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-zsh-glob-options]'),
          'reached the launcher'),
-    Case('prologue-keyword-kept', 'executor/launch.py',
+    Case('prologue-keyword-kept', 'core/executor/launch.py',
          (("'set +euxvTkP +o errtrace", "'set +euxvTP +o errtrace"),),
          ('test_launch.py::test_profile_state_does_not_reach_the_launcher[local-keyword]',
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-bash-keyword]'),
          'reached the launcher'),
-    Case('prologue-physical-kept', 'executor/launch.py',
+    Case('prologue-physical-kept', 'core/executor/launch.py',
          (("'set +euxvTkP +o errtrace", "'set +euxvTk +o errtrace"),),
          ('test_launch.py::test_profile_state_does_not_reach_the_launcher[local-physical]',
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-zsh-physical]'),
          'reached the launcher'),
-    Case('fixed-reset-dropped', 'executor/launch.py',
+    Case('fixed-reset-dropped', 'core/executor/launch.py',
          (("    return [*POSIX_STAGE, '-c', FIXED_RESET + script, name, *values]\n",
            "    return [*POSIX_STAGE, '-c', script, name, *values]\n"),),
          ('test_writes.py::test_a_profile_cannot_change_a_fixed_script[local]',
           'test_writes.py::test_a_profile_cannot_change_a_fixed_script[ssh]'),
          'changed what a fixed script does'),
     # No bash the launcher starts but the login bash reads a startup file, whatever sshd sets.
-    Case('stage-reads-bashrc', 'executor/launch.py',
+    Case('stage-reads-bashrc', 'core/executor/launch.py',
          (("    return [*POSIX_STAGE, '-c', STAGE, 'cluster-mcp', prog]",
            "    return [BASH, '--posix', '-c', STAGE, 'cluster-mcp', prog]"),),
          ('test_launch.py::test_no_stage_reads_a_startup_file_under_sshd[local-argv]',),
          'a stage read a startup file'),
-    Case('bootstrap-reads-bashrc', 'executor/launch.py',
+    Case('bootstrap-reads-bashrc', 'core/executor/launch.py',
          (('''BOOTSTRAP: Final = (f"exec {' '.join(POSIX_STAGE)} -c ''', '''BOOTSTRAP: Final = (f"exec {BASH} --posix -c '''),),
          ('test_launch.py::test_no_stage_reads_a_startup_file_under_sshd[ssh-zsh-argv]',
           'test_launch.py::test_no_stage_reads_a_startup_file_under_sshd[ssh-sh-argv]'),
          'a stage read a startup file'),
-    Case('script-reads-bashrc', 'executor/launch.py',
+    Case('script-reads-bashrc', 'core/executor/launch.py',
          (("f'BASH_ENV= ENV= exec {BASH} {NORC} -c -- {{script}}')", "f'BASH_ENV= ENV= exec {BASH} -c -- {{script}}')"),),
          ('test_launch.py::test_no_stage_reads_a_startup_file_under_sshd[local-script]',),
          'a stage read a startup file'),
-    Case('fixed-script-reads-bashrc', 'executor/launch.py',
+    Case('fixed-script-reads-bashrc', 'core/executor/launch.py',
          (("    return [*POSIX_STAGE, '-c', FIXED_RESET + script, name, *values]\n",
            "    return [BASH, '--posix', '-c', FIXED_RESET + script, name, *values]\n"),),
          ('test_launch.py::test_no_stage_reads_a_startup_file_under_sshd[local-fixed-script]',),
          'a stage read a startup file'),
     # Feature-scoped spec ids stay out of the package.
-    Case('spec-id-in-source', 'executor/base.py',
+    Case('spec-id-in-source', 'core/executor/base.py',
          (('# The exit code of a command stopped at its timeout.', '# The exit code of a command stopped at its timeout (R' + '8).'),),
          ('test_hygiene.py::test_no_spec_ids_in_the_package_or_the_suite',),
          'a spec id names'),
     # Every size limit is checked against the bytes that cross it.
-    Case('local-size-unchecked', 'executor/launch.py',
+    Case('local-size-unchecked', 'core/executor/launch.py',
          (("    _fits(prog, 'its program')\n", ''),),
          ('test_launch.py::test_local_launch_limit_is_the_per_argument_limit',),
          'over the per-argument limit'),
-    Case('ssh-size-ignores-bootstrap', 'executor/launch.py',
+    Case('ssh-size-ignores-bootstrap', 'core/executor/launch.py',
          (("    return _fits(wire, 'its SSH exec string')\n", "    _fits(prog, 'its SSH exec string')\n    return wire\n"),),
          ('test_launch.py::test_ssh_wire_limit_counts_the_bootstrap',
           'test_ssh_exec.py::test_an_oversize_program_is_refused_before_connecting'),
@@ -1789,32 +1972,32 @@ CASES: tuple[Case, ...] = (
     # A failed SSH connect at startup is answered: every request until EOF (a 2026-07-28 client
     # retries with `initialize` after its `server/discover` is refused), naming the host, on stdout
     # nothing but the answers, then a nonzero exit; and the connect itself is bounded.
-    Case('startup-answers-first-only', 'startup.py',
+    Case('startup-answers-first-only', 'core/startup.py',
          (('            stdout.write(refusal(request_id, message))\n            stdout.flush()\n',
            '            stdout.write(refusal(request_id, message))\n            stdout.flush()\n            return\n'),),
          ('test_startup.py::test_responder_answers_every_request',
           'test_startup.py::test_raw_wire_answers_every_request',
           'test_startup.py::test_startup_failure_is_answered[modern]'),
          'not answered'),
-    Case('startup-host-unnamed', 'executor/ssh.py',
+    Case('startup-host-unnamed', 'core/executor/ssh.py',
          (('    cause = _cause_class(exc)\n', "    cause = _cause_class(exc)\n    host = 'the SSH host'\n"),),
          ('test_startup.py::test_raw_wire_answers_every_request',
           'test_startup.py::test_connect_failure_names_host_and_cause[unknown-host]',
           'test_startup.py::test_connect_failure_names_host_and_cause[other]'),
          'does not name the host'),
-    Case('startup-exit-zero', '__init__.py',
+    Case('startup-exit-zero', 'core/__init__.py',
          (('        StartupFailure: partial(exit_reported, status=exit_status.runtime_error),\n',
            '        StartupFailure: partial(exit_reported, status=exit_status.success),\n'),),
          ('test_startup.py::test_raw_wire_answers_every_request',
           'test_startup.py::test_connect_failure_names_host_and_cause[refused]'),
          'exit status 0'),
-    Case('startup-stdout-noise', 'startup.py',
+    Case('startup-stdout-noise', 'core/startup.py',
          (('    if stdin.isatty():\n        return\n',
            "    if stdin.isatty():\n        return\n    stdout.write(message + '\\n')\n"),),
          ('test_startup.py::test_responder_answers_every_request',
           'test_startup.py::test_raw_wire_answers_every_request'),
          'is not an error response'),
-    Case('startup-no-connect-timeout', 'executor/ssh.py',
+    Case('startup-no-connect-timeout', 'core/executor/ssh.py',
          (('        return Connection(self._host, **_bounded(self._connect_kwargs))\n',
            '        return Connection(self._host, **self._connect_kwargs)\n'),),
          ('test_startup.py::test_connect_is_bounded[default]',
@@ -1823,53 +2006,53 @@ CASES: tuple[Case, ...] = (
     # The filesystem tools hand the executor argvs (a shell only for a registered fixed script, with
     # values as its positional parameters), and write_file writes exactly the bytes sent, through the
     # executor's write, after validating them.
-    Case('tool-command-string', 'tools/filesystem.py',
+    Case('tool-command-string', 'core/tools/filesystem.py',
          (("        result = executor.run(['cat', '--', UserPath(path)])\n",
            "        result = executor.run(f'cat {path}')\n"),),
          ('test_tools.py::test_tool_reaches_only_the_installed_executor[read_file]',
           'test_literal_args.py::test_literal_argument[local-read_file-path]'),
          'passed a command string'),
-    Case('fixed-script-interpolated', 'tools/filesystem.py',
+    Case('fixed-script-interpolated', 'core/tools/filesystem.py',
          (("    result = executor.run(script_argv(LIST, 'list_directory', UserPath(path), *options))\n",
            "    result = executor.run(script_argv(LIST.replace('\"$1\"', __import__('shlex').quote(path)),"
            " 'list_directory', *options))\n"),),
          ('test_tools.py::test_tool_reaches_only_the_installed_executor[list_directory]',),
          'unregistered script'),
-    Case('read-file-no-dashdash', 'tools/filesystem.py',
+    Case('read-file-no-dashdash', 'core/tools/filesystem.py',
          (("        result = executor.run(['cat', '--', UserPath(path)])\n",
            "        result = executor.run(['cat', UserPath(path)])\n"),),
          ('test_tools.py::test_filesystem_argvs[read-cat]',),
          'argv differs'),
-    Case('write-final-newline', 'tools/filesystem.py',
+    Case('write-final-newline', 'core/tools/filesystem.py',
          (('        result = executor.write(path, data, append=append, parent=parent or None)\n',
            "        result = executor.write(path, data + b'\\n', append=append, parent=parent or None)\n"),),
          ('test_writes.py::test_writes_are_byte_exact[local-overwrite]',
           'test_writes.py::test_writes_are_byte_exact[delegate-overwrite]',
           'test_writes.py::test_writes_are_byte_exact[ssh-overwrite]'),
          'differs from the bytes sent'),
-    Case('content-in-argv', 'tools/filesystem.py',
+    Case('content-in-argv', 'core/tools/filesystem.py',
          (('        result = executor.write(path, data, append=append, parent=parent or None)\n',
            "        result = executor.run(['/bin/sh', '-c', 'printf %s \"$1\" >\"$2\"', 'w', content, path])\n"),),
          ('test_writes.py::test_content_never_travels_in_argv[overwrite]',),
          'content in argv'),
-    Case('append-overwrites', 'tools/filesystem.py',
+    Case('append-overwrites', 'core/tools/filesystem.py',
          (('        result = executor.write(path, data, append=append, parent=parent or None)\n',
            '        result = executor.write(path, data, append=False, parent=parent or None)\n'),),
          ('test_writes.py::test_writes_are_byte_exact[local-append]',
           'test_writes.py::test_writes_are_byte_exact[delegate-append]',
           'test_writes.py::test_writes_are_byte_exact[ssh-append]'),
          'differs from the bytes sent'),
-    Case('create-dirs-dirname-subst', 'executor/launch.py',
+    Case('create-dirs-dirname-subst', 'core/executor/launch.py',
          (("""WRITE_MKDIR: Final = 'mkdir -p -- "$2" && '""", """WRITE_MKDIR: Final = 'mkdir -p -- "$(dirname -- "$1")" && '"""),),
          ('test_writes.py::test_create_dirs_makes_the_exact_parent[local]',
           'test_writes.py::test_create_dirs_makes_the_exact_parent[delegate]'),
          'not written'),
-    Case('base64-unvalidated', 'tools/filesystem.py',
+    Case('base64-unvalidated', 'core/tools/filesystem.py',
          (('validate=True', 'validate=False'),),
          ('test_writes.py::test_invalid_write_leaves_the_target_untouched[local]',
           'test_writes.py::test_refused_writes_never_reach_the_executor[vertical-tab]'),
          'was accepted'),
-    Case('write-before-validate', 'tools/filesystem.py',
+    Case('write-before-validate', 'core/tools/filesystem.py',
          (('    data = _content_bytes(content, encoding)\n    executor = get_executor()\n',
            "    executor = get_executor()\n    executor.write(path, b'')\n"
            '    data = _content_bytes(content, encoding)\n'),),
@@ -1879,13 +2062,13 @@ CASES: tuple[Case, ...] = (
     # The Slurm tools hand the executor argvs: each option value its own element after its option, a
     # positional after `--`, the job script's arguments after its path, the extra options as a list
     # of single arguments, and script_content written exactly, through the executor's write.
-    Case('sbatch-args-joined', 'tools/slurm.py',
+    Case('sbatch-args-joined', 'slurm/tools.py',
          (("    argv += [*options, '--', path, *(args or [])]\n",
            "    argv += [*options, '--', path, *([' '.join(args)] if args else [])]\n"),),
          ('test_sbatch.py::test_args_follow_the_script_and_extra_args_precede_dashdash',
           'test_sbatch.py::test_sbatch_receives_each_value_as_one_argument[local]'),
          'does not end with the extra options'),
-    Case('extra-args-accepts-str', 'tools/slurm.py',
+    Case('extra-args-accepts-str', 'slurm/tools.py',
          (('    error: Optional[str] = None,\n    extra_args: Optional[List[str]] = None,\n',
            '    error: Optional[str] = None,\n    extra_args: Optional[List[str] | str] = None,\n'),
           ('    me: bool = True,\n    extra_args: Optional[List[str]] = None,\n) -> str:\n    """\n    View the Slurm job queue.',
@@ -1897,12 +2080,12 @@ CASES: tuple[Case, ...] = (
           'test_extra_args.py::test_a_string_extra_args_is_refused_by_the_schema[squeue-legacy]',
           'test_extra_args.py::test_a_string_extra_args_is_refused_by_the_schema[squeue-modern]'),
          'as a string was accepted'),
-    Case('extra-args-swallow-dashdash', 'tools/slurm.py',
+    Case('extra-args-swallow-dashdash', 'slurm/tools.py',
          (('        path = UserPath(script_path)\n', '        path = script_path\n'),),
          ('test_sbatch.py::test_sbatch_receives_each_value_as_one_argument[local]',
           'test_sbatch.py::test_sbatch_receives_each_value_as_one_argument[delegate]'),
          'readable as an option'),
-    Case('option-value-joined', 'tools/slurm.py',
+    Case('option-value-joined', 'slurm/tools.py',
          (('            argv += [option, value]\n', "            argv.append(f'{option}{value}')\n"),),
          ('test_tools.py::test_slurm_and_site_argvs[squeue]',
           'test_tools.py::test_slurm_and_site_argvs[sinfo]',
@@ -1910,7 +2093,7 @@ CASES: tuple[Case, ...] = (
           'test_literal_args.py::test_literal_argument[delegate-sinfo-format]',
           'test_literal_args.py::test_literal_argument[ssh-sbatch-mem]'),
          'argv differs'),
-    Case('script-content-newline', 'tools/slurm.py',
+    Case('script-content-newline', 'slurm/tools.py',
          (('            written = executor.write(path, data, parent=DEFAULT_JOBS_DIR, executable=True)\n',
            "            written = executor.write(path, data + b'\\n', parent=DEFAULT_JOBS_DIR, executable=True)\n"),),
          ('test_writes.py::test_job_scripts_are_byte_exact[local]',
@@ -1919,51 +2102,51 @@ CASES: tuple[Case, ...] = (
          'differs from the bytes sent'),
     # A job script's name carries a token drawn per call from the entropy source, so no two calls
     # share one: not in one second, and not across server processes alike in clock, pid and host.
-    Case('script-name-per-second', 'tools/slurm.py',
+    Case('script-name-per-second', 'slurm/tools.py',
          (("    return UserPath(f'{DEFAULT_JOBS_DIR}/{name}_{timestamp}_{token}.sh')\n",
            "    return UserPath(f'{DEFAULT_JOBS_DIR}/{name}_{timestamp}.sh')\n"),),
          ('test_sbatch.py::test_same_second_scripts_get_their_own_paths[same-name]',
           'test_writes.py::test_same_second_scripts_keep_their_own_bytes[local]',
           'test_sbatch.py::test_overlapping_submissions_each_submit_their_own_script[local-one-server]'),
          'share a script path'),
-    Case('script-name-process-counter', 'tools/slurm.py',
+    Case('script-name-process-counter', 'slurm/tools.py',
          (('import secrets\n', 'import itertools\nimport secrets\n_SCRIPT_COUNTER = itertools.count()\n'),
           ('    token = secrets.token_hex(8)\n', "    token = f'{next(_SCRIPT_COUNTER):016x}'\n")),
          ('test_sbatch.py::test_separate_server_processes_name_scripts_apart',),
          'share a script path'),
     # The sbatch docstring states the token's width, so a narrower token is a served falsehood.
-    Case('script-token-short', 'tools/slurm.py',
+    Case('script-token-short', 'slurm/tools.py',
          (('    token = secrets.token_hex(8)\n', '    token = secrets.token_hex(4)\n'),),
          ('test_sbatch.py::test_the_docstring_states_the_script_path_the_tool_writes',),
          'does not match the docstring'),
     # The sbatch docstring states the name an empty job name falls back to, so another is a served
     # falsehood.
-    Case('script-fallback-renamed', 'tools/slurm.py',
+    Case('script-fallback-renamed', 'slurm/tools.py',
          (("    name = UNSAFE_NAME.sub('_', job_name or '').lstrip('.-') or 'job'\n",
            "    name = UNSAFE_NAME.sub('_', job_name or '').lstrip('.-') or 'script'\n"),),
          ('test_sbatch.py::test_the_docstring_states_the_script_path_the_tool_writes',),
          'does not match the docstring'),
-    Case('empty-optional-passed-literally', 'tools/slurm.py',
+    Case('empty-optional-passed-literally', 'slurm/tools.py',
          (('        if value:\n            argv += [option, value]\n',
            '        if value is not None:\n            argv += [option, value]\n'),),
          tuple(f'test_tools.py::test_empty_optional_scalars_mean_not_given[{row}]'
                for row in ('squeue-user', 'squeue', 'scancel', 'sacct', 'sinfo', 'sbatch'))
          + ('test_literal_args.py::test_literal_argument[local-squeue-state]',),
          'argv differs'),
-    Case('scontrol-node-positional', 'tools/slurm.py',
+    Case('scontrol-node-positional', 'slurm/tools.py',
          (("        argv += ['--', node]\n", '        argv += [node]\n'),),
          ('test_tools.py::test_slurm_and_site_argvs[scontrol-node]',
           'test_literal_args.py::test_literal_argument[local-scontrol_show_node-node]'),
          'argv differs'),
     # The site's `average_wait` passes options it does not know to `sacct`, whose partition option is
     # `--partition` (`-p` there is `--parsable`, which takes no value).
-    Case('average-wait-short-partition', 'tools/rcac.py',
+    Case('average-wait-short-partition', 'rcac/tools.py',
          (("        argv += ['--partition', partition]\n", "        argv += ['-p', partition]\n"),),
          ('test_tools.py::test_slurm_and_site_argvs[average-wait]',),
          'argv differs'),
     # An empty optional positional was not given: `scontrol show node` shows every node, and an
     # empty script path leaves sbatch nothing to submit.
-    Case('empty-positional-passed-literally', 'tools/slurm.py',
+    Case('empty-positional-passed-literally', 'slurm/tools.py',
          (('    if not script_path and script_content is None:\n',
            '    if script_path is None and script_content is None:\n'),
           ('    if script_path and script_content is not None:\n',
@@ -1976,45 +2159,334 @@ CASES: tuple[Case, ...] = (
          'argv differs'),
     # An empty directory to list, or an empty cwd, was not given. (Bash runs `cd ''` as staying
     # put, so no matrix row can see either: the exact calls pin them.)
-    Case('empty-list-path-passed-literally', 'tools/filesystem.py',
+    Case('empty-list-path-passed-literally', 'core/tools/filesystem.py',
          (("    path = path or '.'\n", ''),),
          ('test_tools.py::test_empty_optional_scalars_mean_not_given[list-directory]',),
          'argv differs'),
-    Case('empty-cwd-passed-literally', 'tools/shell.py',
+    Case('empty-cwd-passed-literally', 'core/tools/shell.py',
          (('cwd=cwd or None', 'cwd=cwd'),),
          ('test_tools.py::test_empty_optional_scalars_mean_not_given[run-command-cwd]',),
          'argv differs'),
     # An empty transfer path names no file: refused, naming the parameter, before anything runs. The
     # row's calls run concurrently, so under this mutant the empty path's upload races another into
     # the same file and the call's own failure varies; its reaching the executor does not.
-    Case('transfer-empty-path-passed', 'tools/transfer.py',
+    Case('transfer-empty-path-passed', 'core/tools/transfer.py',
          (("    if not path:\n        raise ValueError(f'{name} is empty: an empty path names no file')\n", ''),),
          ('test_literal_args.py::test_literal_argument[ssh-upload_file-remote_path]',),
          'reaches the executor as an empty path'),
     # Every string argument with a lone surrogate is refused naming its parameter, in every mode.
-    Case('surrogate-unnamed', 'tools/__init__.py',
+    Case('surrogate-unnamed', 'core/tools/__init__.py',
          (('    func = _literal_text(func)\n', ''),),
          ('test_literal_args.py::test_literal_argument[local-squeue-user]',
           'test_literal_args.py::test_literal_argument[ssh-upload_file-local_path]'),
          'does not name'),
+    # The deprecated rcac-mcp command warns once on stderr, then is cluster-mcp: same exit status,
+    # same stdout, and nothing of its own on stdout, which carries the stdio transport.
+    Case('legacy-command-silent', 'core/__init__.py',
+         (("    legacy_warning('the rcac-mcp command', 'cluster-mcp')\n", ''),),
+         tuple(f'test_cli.py::test_legacy_command_warns_then_runs_cluster_mcp[{argv}]'
+               for argv in ('none', 'help', 'version', 'bogus')),
+         'not the deprecation warning'),
+    Case('legacy-command-exit-swallowed', 'core/__init__.py',
+         (('    return main(argv)\n', '    main(argv)\n    return 0\n'),),
+         ('test_cli.py::test_legacy_command_warns_then_runs_cluster_mcp[none]',
+          'test_cli.py::test_legacy_command_warns_then_runs_cluster_mcp[bogus]'),
+         'under rcac-mcp, 2 under cluster-mcp'),
+    Case('legacy-warning-to-stdout', 'core/deprecation.py',
+         (("    log.warning(f'{old} is {WINDOW}: use {new} instead')\n",
+           "    print(f'{old} is {WINDOW}: use {new} instead')\n"),),
+         ('test_cli.py::test_legacy_command_keeps_stdout_clean_on_stdio',),
+         'not JSON-RPC'),
+    # Each renamed variable: the replacement is read and wins over its legacy name; a legacy name
+    # alone is honoured, with one warning on stderr naming the replacement and the window; nothing
+    # is stripped. Every read site asks the resolver, so a site reading the replacement directly
+    # drops the legacy name.
+    Case('env-legacy-wins', 'core/deprecation.py',
+         (('    value = os.environ.get(name)\n', '    value = os.environ.get(legacy) or os.environ.get(name)\n'),),
+         tuple(f'test_env.py::test_replacement_wins_over_legacy[{name}]' for name in ENV_NAMES),
+         'both set: resolved'),
+    Case('env-legacy-ignored', 'core/deprecation.py',
+         (('    value = os.environ.get(legacy)\n', '    value = None\n'),),
+         tuple(f'test_env.py::test_legacy_is_honoured_with_a_warning[{name}]' for name in ENV_NAMES),
+         'alone: resolved'),
+    Case('env-replacement-ignored', 'core/deprecation.py',
+         (('    value = os.environ.get(name)\n', '    value = None\n'),),
+         tuple(f'test_env.py::test_replacement_is_read[{name}]' for name in ENV_NAMES),
+         'alone: resolved'),
+    Case('env-no-warning', 'core/deprecation.py',
+         (('        legacy_warning(legacy, name)\n', '        pass\n'),),
+         tuple(f'test_env.py::test_legacy_is_honoured_with_a_warning[{name}]' for name in ENV_NAMES)
+         + tuple(f'test_env.py::test_warning_names_replacement_and_window[{name}-honoured]' for name in ENV_NAMES),
+         'deprecation warnings on stderr, expected one'),
+    Case('env-warning-to-stdout', 'core/deprecation.py',
+         (('        legacy_warning(legacy, name)\n', "        print(f'{legacy} is {WINDOW}: use {name} instead')\n"),),
+         tuple(f'test_env.py::test_warning_names_replacement_and_window[{name}-honoured]' for name in ENV_NAMES),
+         'went to stdout'),
+    Case('env-host-stripped', 'core/deprecation.py',
+         (('    value = os.environ.get(name)\n', "    value = (os.environ.get(name) or '').strip()\n"),),
+         ('test_env.py::test_whitespace_host_is_not_stripped[CLUSTER_MCP_SSH_HOST-space-replacement]',
+          'test_exec_mode.py::test_env_host_selects_ssh[whitespace]'),
+         'resolved'),
+    Case('user-map-legacy-ignored', 'core/middleware.py',
+         (("env_setting('CLUSTER_MCP_USER_MAP')[0]", "__import__('os').environ.get('CLUSTER_MCP_USER_MAP')"),),
+         ('test_identity.py::test_user_map_is_read_from_either_name[legacy]',),
+         'User map path required'),
+    Case('budget-legacy-ignored', 'core/__init__.py',
+         (("            value, variable = env_setting('CLUSTER_MCP_INSTRUCTIONS_BUDGET')\n",
+           "            value, variable = os.environ.get('CLUSTER_MCP_INSTRUCTIONS_BUDGET'), 'CLUSTER_MCP_INSTRUCTIONS_BUDGET'\n"),),
+         ('test_site_startup.py::test_budget_resolution[env-legacy]',),
+         'expected [7100]'),
+    # The served base is the generic core, the Slurm snippet and the RCAC-specific overlay, in that
+    # order; the core names no site and no tool of the RCAC member; the server is named cluster-mcp in
+    # both protocol eras.
+    Case('overlay-dropped', 'core/server.py',
+         (('SLURM_INSTRUCTIONS, RCAC_INSTRUCTIONS))', 'SLURM_INSTRUCTIONS))'),),
+         ('test_instructions.py::test_base_is_core_slurm_then_overlay',),
+         'not core, Slurm then overlay'),
+    Case('core-names-rcac-tool', 'core/instructions.py',
+         (('- download_file: Copy a file from the cluster\n',
+           '- download_file: Copy a file from the cluster\n- myquota: Storage spaces, usage and quotas\n'),),
+         ('test_instructions.py::test_core_instructions_are_generic',),
+         "the core names the RCAC tool 'myquota'"),
+    Case('server-name-rcac', 'core/server.py',
+         (("name='cluster-mcp',", "name='RCAC',"),),
+         ('test_protocol.py::test_server_identifies_as_cluster_mcp[legacy]',
+          'test_protocol.py::test_server_identifies_as_cluster_mcp[modern]'),
+         "serverInfo name is 'RCAC'"),
+    # The deprecation window is one string, deprecated in 0.2.0, removed no earlier than 0.4.0, wherever
+    # a user reads it: the constant, every warning (each emitter, and each call site that emits one),
+    # and README's upgrade section, which states it once and pairs each deprecated name with its
+    # replacement. Each test compares with the window written out, never with the constant.
+    Case('deprecation-window-altered', 'core/deprecation.py',
+         (("WINDOW: Final[str] = 'deprecated in 0.2.0, removed no earlier than 0.4.0'",
+           "WINDOW: Final[str] = 'deprecated in 0.2.0, removed no earlier than 0.3.0'"),),
+         ('test_deprecation_window.py::test_window_is_the_published_one', *COMMAND_WARNED,
+          'test_cli.py::test_legacy_command_keeps_stdout_clean_on_stdio', *VARIABLE_WARNED['honoured'],
+          *VARIABLE_WARNED['ignored']),
+         'not the published window'),
+    Case('legacy-warning-omits-window', 'core/deprecation.py',
+         (("    log.warning(f'{old} is {WINDOW}: use {new} instead')\n",
+           "    log.warning(f'{old} is deprecated: use {new} instead')\n"),),
+         (*COMMAND_WARNED, *VARIABLE_WARNED['honoured']),
+         'not the published window'),
+    Case('ignored-warning-omits-window', 'core/deprecation.py',
+         (("    log.warning(f'{old} is {WINDOW}, and ignored: {new} is set')\n",
+           "    log.warning(f'{old} is deprecated, and ignored: {new} is set')\n"),),
+         VARIABLE_WARNED['ignored'],
+         'not the published window'),
+    Case('legacy-command-own-window', 'core/__init__.py',
+         (("    legacy_warning('the rcac-mcp command', 'cluster-mcp')\n",
+           "    __import__('cluster_mcp.core.deprecation', fromlist=['log']).log.warning("
+           "'the rcac-mcp command is deprecated in 0.2.0, removed no earlier than 0.3.0: use cluster-mcp instead')\n"),),
+         COMMAND_WARNED,
+         'not the published window'),
+    Case('env-legacy-own-warning', 'core/deprecation.py',
+         (('        legacy_warning(legacy, name)\n', "        log.warning(f'{legacy} is deprecated: use {name} instead')\n"),),
+         VARIABLE_WARNED['honoured'],
+         'not the published window'),
+    Case('env-ignored-own-warning', 'core/deprecation.py',
+         (('            ignored_warning(legacy, name)\n',
+           "            log.warning(f'{legacy} is deprecated, and ignored: {name} is set')\n"),),
+         VARIABLE_WARNED['ignored'],
+         'not the published window'),
+    Case('readme-window-altered', '', (), (README_TEST,), 'does not state the published window',
+         readme('removed no earlier than 0.4.0, and keeps', 'removed no earlier than 0.3.0, and keeps')),
+    Case('readme-upgrading-deleted', '', (), (README_TEST,), "has no '## Upgrading from rcac-mcp' section",
+         readme(UPGRADING_SECTION, '')),
+    Case('readme-command-row-dropped', '', (), (README_TEST,), "does not list 'rcac-mcp' as deprecated",
+         readme(COMMAND_ROW, '')),
+    Case('readme-variables-row-dropped', '', (), (README_TEST,), "does not list 'RCAC_SSH_HOST' as deprecated",
+         readme(VARIABLES_ROW, '')),
+    Case('readme-resources-row-dropped', '', (), (README_TEST,), "does not list 'rcac://context' as deprecated",
+         readme(RESOURCES_ROW, '')),
+    Case('readme-replacement-dropped', '', (), (README_TEST,), 'pairs deprecated names and replacements unevenly',
+         readme('`CLUSTER_MCP_SSH_HOST`, `CLUSTER_MCP_USER_MAP`, ', '`CLUSTER_MCP_SSH_HOST`, ')),
+    Case('readme-replacements-swapped', '', (), (README_TEST,),
+         "gives 'rcac://context' the replacement 'cluster://storage'",
+         readme('`cluster://context` and `cluster://storage` |', '`cluster://storage` and `cluster://context` |')),
+    # Every tool's annotations, each hint's presence and value, are 0.1.4's: none. A tool served with
+    # annotations, or a hint added, dropped or changed against what the fixture records, fails the
+    # served-surface comparison. 0.1.4 served no annotations, so a hint can only be dropped or changed
+    # against a fixture planted to record some.
+    Case('annotations-on-every-tool', 'core/tools/__init__.py', annotate('True', 'readOnlyHint=True'),
+         SURFACE_TEST, "tool entry gained 'annotations'"),
+    Case('empty-annotations-on-every-tool', 'core/tools/__init__.py', annotate('True', ''),
+         SURFACE_TEST, "tool entry gained 'annotations'"),
+    Case('annotations-on-one-tool', 'core/tools/__init__.py', annotate("func.__name__ == 'sacct'", 'readOnlyHint=True'),
+         SURFACE_TEST, "sacct: tool entry gained 'annotations'"),
+    Case('annotations-removed', '', (), SURFACE_TEST, "run_command: tool entry lost 'annotations'",
+         recorded('{"readOnlyHint": true}')),
+    Case('annotation-hint-flipped', 'core/tools/__init__.py',
+         annotate("func.__name__ == 'run_command'", 'readOnlyHint=True, destructiveHint=False'),
+         SURFACE_TEST, 'run_command: annotation readOnlyHint differs: False -> True',
+         recorded('{"destructiveHint": false, "readOnlyHint": false}')),
+    Case('annotation-hint-dropped', 'core/tools/__init__.py',
+         annotate("func.__name__ == 'run_command'", 'readOnlyHint=True'),
+         SURFACE_TEST, "run_command: annotations lost hint 'destructiveHint'",
+         recorded('{"destructiveHint": false, "readOnlyHint": true}')),
+    Case('annotation-hint-added', 'core/tools/__init__.py',
+         annotate("func.__name__ == 'run_command'", 'readOnlyHint=True, idempotentHint=True'),
+         SURFACE_TEST, "run_command: annotations gained hint 'idempotentHint'",
+         recorded('{"readOnlyHint": true}')),
+    # README's upgrade section pairs each deprecated name with exactly one replacement, whatever the
+    # order of its rows; names no version but the window's two ends; and states the window as the
+    # whole published phrase.
+    Case('readme-contradicting-row-before', '', (), (README_TEST,), "pairs 'RCAC_SSH_HOST' 2 times",
+         readme(VARIABLES_ROW, CONTRADICTING_ROW + VARIABLES_ROW)),
+    Case('readme-contradicting-row-after', '', (), (README_TEST,), "pairs 'RCAC_SSH_HOST' 2 times",
+         readme(VARIABLES_ROW, VARIABLES_ROW + CONTRADICTING_ROW)),
+    Case('readme-row-repeated', '', (), (README_TEST,), "pairs 'rcac-mcp' 2 times",
+         readme(COMMAND_ROW, COMMAND_ROW + COMMAND_ROW)),
+    Case('readme-removed-in-other-words', '', (), (README_TEST,), "names the version '0.3.0'",
+         readme('configuration to the Quick Start form above.\n',
+                'configuration to the Quick Start form above. The old names will be removed in 0.3.0.\n')),
+    Case('readme-kept-until-other-version', '', (), (README_TEST,), "names the version '0.3.0'",
+         readme('and keeps working until it is removed:', 'and keeps working until 0.3.0:')),
+    Case('readme-window-suffixed', '', (), (README_TEST,), "names the version '0.4.0-alpha'",
+         readme(WINDOWED, 'removed no earlier than 0.4.0-alpha, and keeps')),
+    Case('readme-window-extra-component', '', (), (README_TEST,), "names the version '0.4.0.1'",
+         readme(WINDOWED, 'removed no earlier than 0.4.0.1, and keeps')),
+    Case('readme-window-parenthetical', '', (), (README_TEST,), "names the version '0.3.0'",
+         readme(WINDOWED, 'removed no earlier than 0.4.0 (0.3.0 for the command), and keeps')),
+    Case('readme-upgrading-commented', '', (), (README_TEST,), "has no '## Upgrading from rcac-mcp' section",
+         readme(UPGRADING_SECTION, f'<!--\n{UPGRADING_SECTION}-->\n\n')),
+    # The command's warning is a whole stderr line: nothing but the level and the logger's name before
+    # the message, so a contradicting prefix fails.
+    Case('legacy-command-prefixed-warning', 'core/__init__.py',
+         (("    legacy_warning('the rcac-mcp command', 'cluster-mcp')\n",
+           "    legacy_warning('removed in 0.3.0; the rcac-mcp command', 'cluster-mcp')\n"),),
+         (*COMMAND_WARNED, 'test_cli.py::test_legacy_command_keeps_stdout_clean_on_stdio'),
+         'the deprecation warning'),
+    # Every tool's top-level title is 0.1.4's: the one FastMCP 4 derives from its name. A title set on
+    # one tool, on every tool, or where the server adds each tool fails the served-surface comparison.
+    Case('title-on-one-tool', 'core/tools/__init__.py',
+         titled("'Run a command' if func.__name__ == 'run_command' else None"),
+         SURFACE_TEST, "run_command: tool entry gained the title 'Run a command'"),
+    Case('title-on-every-tool', 'core/tools/__init__.py', titled('func.__name__'),
+         SURFACE_TEST, "run_command: tool entry gained the title 'run_command'"),
+    Case('title-at-add-tool', 'core/server.py',
+         (('        server.add_tool(tool)\n', "        server.add_tool(tool.model_copy(update={'title': tool.name}))\n"),),
+         SURFACE_TEST, "run_command: tool entry gained the title 'run_command'"),
+    # README's upgrade section, read from its source: every `|` line is the header, the delimiter or a
+    # two-cell row of code spans; each variable and URI is named once, markup removed; versions are read
+    # with markup removed, and outside the window only the rename's 0.2.0 appears, once; and the
+    # section holds no HTML comment marker, wherever a reader would see one.
+    *(Case(f'readme-{form}-row-{"before" if before else "after"}', '', (), (README_TEST,),
+           'a table line the pairing does not read',
+           readme(VARIABLES_ROW, row + VARIABLES_ROW if before else VARIABLES_ROW + row))
+      for form, row in UNREAD_ROWS.items() for before in (True, False)),
+    Case('readme-bullet-mapping', '', (), (README_TEST,), "names 'RCAC_SSH_HOST' 2 times",
+         upgrading_paragraph('- `RCAC_SSH_HOST` is now `CLUSTER_SSH_HOST`.')),
+    Case('readme-prose-mapping', '', (), (README_TEST,), "names 'RCAC_SSH_HOST' 2 times",
+         upgrading_sentence('Set `CLUSTER_SSH_HOST` in place of `RCAC_SSH_HOST`.')),
+    Case('readme-comment-in-code-spans', '', (), (README_TEST,), 'holds the HTML comment marker',
+         upgrading_sentence('An HTML comment opens with `<!--`. The old names will be removed in 0.3.0. '
+                            'A comment closes with `-->`.')),
+    Case('readme-comment-fenced', '', (), (README_TEST,), 'holds the HTML comment marker',
+         upgrading_paragraph('```\n<!-- removed in 0.3.0 -->\n```')),
+    Case('readme-comment-across-paragraphs', '', (), (README_TEST,), 'holds the HTML comment marker',
+         upgrading_paragraph('Notes open with <!-- and\n\nthe old names will be removed in 0.3.0; notes close with -->.')),
+    Case('readme-version-escaped-dots', '', (), (README_TEST,), "names the version '0.3.0'",
+         upgrading_sentence('The old names will be removed in 0\\.3\\.0.')),
+    Case('readme-version-entity-dots', '', (), (README_TEST,), "names the version '0.3.0'",
+         upgrading_sentence('The old names will be removed in 0&#46;3&#46;0.')),
+    Case('readme-version-bold-component', '', (), (README_TEST,), "names the version '0.3.0'",
+         upgrading_sentence('The old names will be removed in 0.**3**.0.')),
+    Case('readme-removed-in-the-rename', '', (), (README_TEST,), "names ['0.2.0', '0.2.0'] outside the window",
+         upgrading_sentence('The `rcac-mcp` command is removed in 0.2.0.')),
+    # A comment in the section fails even where a reader would not see it, so a contradiction inside one
+    # is caught: the check reads the section's source, not a rendering of it.
+    Case('readme-contradiction-in-a-comment', '', (), (README_TEST,), 'holds the HTML comment marker',
+         upgrading_sentence('<!-- The old names will be removed in 0.3.0. -->')),
+    # The command's warning is the one stderr line naming rcac-mcp: a second warning, printed only when
+    # the command serves (`-e`), fails the stdio session.
+    Case('legacy-command-second-warning-when-serving', 'core/__init__.py',
+         (("    legacy_warning('the rcac-mcp command', 'cluster-mcp')\n",
+           "    legacy_warning('the rcac-mcp command', 'cluster-mcp')\n"
+           "    if '-e' in (sys.argv if argv is None else argv):\n"
+           "        __import__('cluster_mcp.core.deprecation', fromlist=['log']).log.warning("
+           "'the rcac-mcp command is removed in 0.3.0: use cluster-mcp instead')\n"),),
+         ('test_cli.py::test_legacy_command_keeps_stdout_clean_on_stdio',),
+         '2 stderr lines name rcac-mcp'),
 )
+
+# The cluster:// twin of each case whose failure names an rcac:// shape it lets through, or whose
+# plant defaults to the rcac scheme: the same plant (defaulting to cluster:// instead), killed by
+# naming that shape's twin, so each scheme's neighbourhood is held by a kill of its own.
+CLUSTER_TWINS = {
+    'read-hook-open-by-prefix': 'cluster://contextual',
+    'read-hook-open-by-suffix': 'xcluster://context',
+    'read-hook-open-by-substring': ' cluster://context',
+    'read-hook-open-within-open-uri': 'cluster://contex',
+    'read-hook-open-if-prefix-of-open': 'cluster://contex',
+    'read-hook-open-by-host': 'cluster://context/x',
+    'read-hook-case-folded': 'cluster://CONTEXT',
+    'read-hook-casefolded': 'CLUSTER://context',
+    'read-hook-scheme-case-folded': 'CLUSTER://context',
+    'read-hook-strips-trailing-slash': 'cluster://context/',
+    'read-hook-strips-space': 'cluster://context ',
+    'read-hook-strips-leading-space': ' cluster://context',
+    'read-hook-drops-query-and-fragment': 'cluster://context?x=1',
+    'read-hook-authority-only': 'cluster://context#f',
+    'read-hook-ignores-scheme': 'xcluster://context',
+    'read-hook-defaults-scheme': 'context',
+    'read-hook-adds-authority-slashes': 'cluster:context',
+    'read-hook-unquotes': 'cluster://%63ontext',
+    'read-hook-nfkc-normalised': 'cluster://\uff43ontext',
+    'open-set-holds-slash-variants': 'cluster://context/',
+    'read-hook-strips-crlf': 'cluster://context\n',
+    'read-hook-strips-trailing-query-or-fragment-mark': 'cluster://context?',
+    'read-hook-drops-port': 'cluster://context:80',
+    'read-hook-drops-userinfo': 'cluster://u@context',
+    'read-hook-strips-trailing-dot': 'cluster://context.',
+    'read-hook-removes-tab-and-newline': 'cluster://con\ttext',
+    'read-hook-strips-leading-slash': '/cluster://context',
+    'read-hook-strips-quotes-and-brackets': '<cluster://context>',
+    'read-hook-strips-trailing-nul': 'cluster://context\x00',
+    'read-hook-drops-dot-segment': 'cluster://context/.',
+    'read-hook-any-normaliser': 'cluster://context#',
+    'open-set-holds-query-variants': 'cluster://context?',
+    'read-hook-refuses-unserved': 'CLUSTER://storage',
+}
+
+
+def cluster_twin(case: Case, shape: str) -> Case:
+    """`case` planted for the cluster scheme, its failure naming `shape`; the near rows read cluster://context."""
+    targets = near_refused('cluster://context') if case.targets == NEAR_REFUSED else case.targets
+    edits = tuple((old, new.replace("'rcac://'", "'cluster://'")) for old, new in case.edits)
+    return Case(f'{case.id}-cluster', case.file, edits, targets, let_through(shape))
+
+
+CASES += tuple(cluster_twin(case, CLUSTER_TWINS[case.id]) for case in CASES if case.id in CLUSTER_TWINS)
+if len(CASES) != len({case.id for case in CASES}):
+    raise RuntimeError('two mutation cases share an id')
 
 # The runner's own controls (--self-check). A docstring edit changes no behaviour, so its target
 # passes and the runner must call it a survivor; this proves the child really runs the targets.
 SURVIVOR_CONTROL = Case(
-    'control-docstring-only', 'context.py',
+    'control-docstring-only', 'core/context.py',
     (('"""Context management for request-scoped state."""',
       '"""Context management for request-scoped state (unchanged behaviour)."""'),),
     ('test_isolation.py::test_concurrent_delegate_calls_stay_isolated',),
     'ran as')
 
 
-def apply(case: Case, dest: Path) -> Path:
-    """Copy the imported package under `dest/src`, apply the case's edits, and return `dest/src`."""
+def apply(case: Case, dest: Path, omit: str | None = None) -> Path:
+    """Copy every imported member under `dest/src/cluster_mcp`, apply the case's edits, return `dest/src`.
+
+    A case that plants only into repository files (`file` empty) gets the copy unchanged.
+
+    No `cluster_mcp/__init__.py` is written: the copy is a namespace portion like each member's own.
+    `omit` leaves one member out of the copy (the runner's origin control).
+    """
     src_root = dest / 'src'
-    package = src_root / 'rcac_mcp'
-    shutil.copytree(Path(rcac_mcp.__file__).parent, package, ignore=shutil.ignore_patterns('__pycache__'))
-    path = package / case.file
+    namespace = src_root / 'cluster_mcp'
+    for name, member in MEMBERS.items():
+        if name != omit:
+            shutil.copytree(Path(member.__file__).parent, namespace / name, ignore=shutil.ignore_patterns('__pycache__'))
+    if not case.file:
+        return src_root
+    path = namespace / case.file
     text = path.read_text()
     for old, new in case.edits:
         count = text.count(old)
@@ -2026,11 +2498,37 @@ def apply(case: Case, dest: Path) -> Path:
     return src_root
 
 
-def run_child(src_root: Path, targets: Sequence[str], junit: Path) -> subprocess.CompletedProcess[str]:
-    """Run `targets` against the package under `src_root` in a sandboxed child pytest."""
+def apply_repo(case: Case, dest: Path) -> Path | None:
+    """For a case with `repo_edits`, copy the repository's tests, `bin/` and top-level files to `dest/repo`, plant them, return the copy.
+
+    A case without `repo_edits` gets None: its child runs in the repository itself.
+    """
+    if not case.repo_edits:
+        return None
+    root, repo = TESTS.parent, dest / 'repo'
+    for name in ('tests', 'bin'):
+        shutil.copytree(root / name, repo / name, ignore=shutil.ignore_patterns('__pycache__'))
+    for name in REPO_TOP:
+        shutil.copy2(root / name, repo / name)
+    for name, old, new in case.repo_edits:
+        if name not in REPO_FILES:
+            raise ValueError(f'{case.id}: plants into {name}, which is not one of {REPO_FILES}')
+        path = repo / name
+        text = path.read_text()
+        count = text.count(old)
+        if count != 1:
+            raise ValueError(f'{case.id}: the anchor occurs {count} times in {name}, expected once; '
+                             f'the text this case plants against has moved: {old[:80]!r}')
+        path.write_text(text.replace(old, new))
+    return repo
+
+
+def run_child(src_root: Path, targets: Sequence[str], junit: Path,
+              repo: Path | None = None) -> subprocess.CompletedProcess[str]:
+    """Run `targets` against the package under `src_root` in a sandboxed child pytest, in `repo` (default: this one)."""
     env = {**os.environ, 'PYTHONPATH': str(src_root), 'PYTHONDONTWRITEBYTECODE': '1'}
     return subprocess.run(
-        [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit),
+        [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit), str(repo or TESTS.parent),
          *[f'tests/{target}' for target in targets]],
         env=env, capture_output=True, text=True, timeout=300)
 
@@ -2082,13 +2580,14 @@ def mutation_violations(returncode: int, junit_xml: str | None, targets: Sequenc
     return violations
 
 
-def run_case(case: Case, src_override: Path | None = None) -> list[str]:
+def run_case(case: Case, src_override: Path | None = None, omit: str | None = None) -> list[str]:
     """Plant `case` in a scratch copy, run its targets, and return `mutation_violations`."""
     with tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-') as scratch:
         dest = Path(scratch)
-        src_root = apply(case, dest)
+        src_root = apply(case, dest, omit)
+        repo = apply_repo(case, dest)
         junit = dest / 'junit.xml'
-        child = run_child(src_override or src_root, case.targets, junit)
+        child = run_child(src_override or src_root, case.targets, junit, repo)
         report = junit.read_text() if junit.exists() else None
         violations = mutation_violations(child.returncode, report, case.targets, case.why)
         if violations and child.returncode not in (0, 1):
@@ -2106,6 +2605,10 @@ def self_check() -> list[str]:
         origin = run_case(SURVIVOR_CONTROL, src_override=Path(elsewhere))
     ok = any('wrong import origin' in v for v in origin)
     lines.append(f'{"control" if ok else "FAILED"}  wrong origin reported: {origin[:1]}')
+    # A copy missing one member: that member loads from the editable install, not the copy.
+    partial = run_case(SURVIVOR_CONTROL, omit='rcac')
+    ok = any('wrong import origin' in v for v in partial)
+    lines.append(f'{"control" if ok else "FAILED"}  member missing from the copy reported: {partial[:1]}')
     return lines
 
 

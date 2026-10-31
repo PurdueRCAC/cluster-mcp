@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The auth registry: OIDC is all-or-nothing, `none` installs nothing, and `AUTH_MODES` says what it holds.
@@ -6,7 +6,7 @@
 `create_auth_oidc()` refuses a configuration missing any of `OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`,
 `OIDC_CLIENT_SECRET` or `MCP_BASE_URL` (unset or empty) with a `ValueError` naming all four, before
 any provider is built and before any request leaves the process (§ Invariants §6). Each row
-replaces `rcac_mcp.auth.OIDCProxy` with a recorder, so "nothing built" is observed rather than
+replaces `cluster_mcp.core.auth.OIDCProxy` with a recorder, so "nothing built" is observed rather than
 assumed, and the unit guard records any network reach (the real proxy fetches its discovery
 document when it is built). With all four set the recorder is reached, so the refusal rows cannot
 pass vacuously; the keywords it receives are bound against the real `OIDCProxy` signature, so a
@@ -16,13 +16,13 @@ the FastMCP 2.x posture: client-metadata (CIMD) fetches and `resource` forwardin
 `none` installs no provider: its factory returns None, a server built in that mode holds none, and a
 tokenless HTTP call to it is answered.
 
-`typing.get_type_hints(rcac_mcp.auth)['AUTH_MODES']` resolves to `Final` of a mapping from `str` to a
+`typing.get_type_hints(cluster_mcp.core.auth)['AUTH_MODES']` resolves to `Final` of a mapping from `str` to a
 zero-argument factory returning an `AuthProvider` (or None). The annotation once carried a stray
 `:` that made the `Final` argument a `slice`; evaluation succeeded all the same, so the check reads
 the resolved shape, not merely that it resolves.
 
 No module here imports the stack: the real `OIDCProxy` and `AuthProvider` are read from
-`rcac_mcp.auth`, which is what the code under test uses.
+`cluster_mcp.core.auth`, which is what the code under test uses.
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from typing import Any, Callable, Dict, Final, Mapping, Sequence
 
 import pytest
 
-import rcac_mcp.auth
+import cluster_mcp.core.auth
 from harness import Outcome, RecordingExecutor, call_http, drive, installed_auth, serving, shared_server
-from rcac_mcp.auth import AUTH_MODES, AuthProvider, create_auth_oidc
+from cluster_mcp.core.auth import AUTH_MODES, AuthProvider, create_auth_oidc
 
 OIDC_VARIABLES = ('OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
 
@@ -56,7 +56,7 @@ OIDC_KEYWORDS = {'OIDC_CONFIG_URL': 'config_url', 'OIDC_CLIENT_ID': 'client_id',
 POSTURE = ('enable_cimd', 'forward_resource')
 
 # Read at import, before any test replaces it.
-PROXY_SIGNATURE = inspect.signature(rcac_mcp.auth.OIDCProxy)
+PROXY_SIGNATURE = inspect.signature(cluster_mcp.core.auth.OIDCProxy)
 
 
 def oidc_violations(raised: BaseException | None, message: str, built: Sequence[Any],
@@ -126,7 +126,7 @@ class ProxyRecorder:
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> ProxyRecorder:
     rec = ProxyRecorder()
-    monkeypatch.setattr(rcac_mcp.auth, 'OIDCProxy', rec)
+    monkeypatch.setattr(cluster_mcp.core.auth, 'OIDCProxy', rec)
     return rec
 
 
@@ -277,7 +277,7 @@ def annotation_violations(hint: Any) -> list[str]:
 
 @pytest.mark.unit
 def test_auth_modes_annotation_is_a_provider_factory_map() -> None:
-    hint = typing.get_type_hints(rcac_mcp.auth)['AUTH_MODES']
+    hint = typing.get_type_hints(cluster_mcp.core.auth)['AUTH_MODES']
     violations = annotation_violations(hint)
     assert violations == [], '\n'.join(violations)
     assert set(AUTH_MODES) == {'none', 'jwt', 'oidc'}, AUTH_MODES

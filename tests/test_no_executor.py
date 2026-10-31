@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """A tool call with no executor set for its own request fails where the client sees it, and nothing runs.
@@ -28,7 +28,7 @@ import pytest
 
 from harness import (Outcome, RecordingExecutor, Rendezvous, bare_server, call, delegate_server, drive,
                      http_client, in_memory, launched_script, mint, serving, shared_server, user_map)
-from rcac_mcp.executor import launch
+from cluster_mcp.core.executor import launch
 from test_registry import EXPECTED_TOOLS
 from test_tools import EXECUTORLESS, TOOL_CASES
 

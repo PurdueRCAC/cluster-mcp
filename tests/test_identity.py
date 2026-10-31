@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """A delegate-mode call runs as the local user its token's identity maps to, and as no one else.
@@ -14,6 +14,8 @@ Every call here carries a real JWT over the in-process HTTP route, so the real `
 loader (`load_user_map`) is driven directly: a malformed line must fail naming its line number in
 the file (comments and blank lines counted), because a partial map is worse than none, and comments
 and blank lines must load as nothing.
+The middleware takes the map's path from `CLUSTER_MCP_USER_MAP`, or from its legacy name
+`RCAC_USER_MAP` when that alone is set, and refuses to start with neither.
 """
 
 from __future__ import annotations
@@ -25,8 +27,9 @@ from typing import Any, Sequence
 import pytest
 
 from harness import Outcome, call_http, delegate_server, drive, launched_script, mint, serving, user_map
-from rcac_mcp.executor import launch
-from rcac_mcp.executor.delegate import DelegatingExecutor, load_user_map
+from cluster_mcp.core.executor import launch
+from cluster_mcp.core.executor.delegate import DelegatingExecutor, load_user_map
+from cluster_mcp.core.middleware import AuthExecutorMiddleware
 from test_no_executor import refusal_violations, report
 
 SECRET = 'identity-test-secret-0123456789abcdef'
@@ -156,6 +159,34 @@ def test_user_map_skips_comments_and_blanks(tmp_path: Path) -> None:
     loaded = load_user_map(path)
     expected = {'alice': 'ualice', 'bob': 'ubob'}
     assert loaded == expected, f'map differs: {loaded!r}, expected {expected!r}'
+
+
+# The middleware reads the user map's path from CLUSTER_MCP_USER_MAP, or from its legacy name
+# RCAC_USER_MAP when the replacement is unset; with both set, the replacement's map is the one loaded.
+@pytest.mark.unit
+@pytest.mark.parametrize(('names', 'loaded'), [
+    pytest.param(('CLUSTER_MCP_USER_MAP',), 'new', id='replacement'),
+    pytest.param(('RCAC_USER_MAP',), 'legacy', id='legacy'),
+    pytest.param(('CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP'), 'new', id='both'),
+])
+def test_user_map_is_read_from_either_name(names: tuple[str, ...], loaded: str, tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    maps = {'new': tmp_path / 'new.map', 'legacy': tmp_path / 'legacy.map'}
+    maps['new'].write_text('alice unew\n')
+    maps['legacy'].write_text('alice ulegacy\n')
+    for name in ('CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP'):
+        monkeypatch.delenv(name, raising=False)
+    for name in names:
+        monkeypatch.setenv(name, str(maps['new' if name.startswith('CLUSTER_MCP_') else 'legacy']))
+    middleware = AuthExecutorMiddleware('jwt')
+    expected = {'alice': f'u{loaded}'}
+    assert middleware._user_map == expected, f'loaded {middleware._user_map!r}, expected {expected!r}'
+
+
+@pytest.mark.unit
+def test_user_map_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValueError, match='User map path required: provide user_map_path or set CLUSTER_MCP_USER_MAP'):
+        AuthExecutorMiddleware('jwt')
 
 
 def argv(user: str, command: str) -> list[str]:

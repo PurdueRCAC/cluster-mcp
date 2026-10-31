@@ -1,6 +1,8 @@
-# RCAC MCP Server
+# cluster-mcp
 
-Purdue RCAC MCP Server: Enables agentic development with HPC clusters and storage services.
+An MCP server for HPC clusters: shell, files, jobs and storage for AI agents. It runs commands on a
+cluster over SSH for one user, or serves many users from a shared host, and carries the Slurm tools
+and the Purdue RCAC-specific tools beside its core.
 
 ## Quick Start (Desktop Clients)
 
@@ -10,9 +12,10 @@ to your MCP configuration with an SSH host pointing at your cluster:
 ```json
 {
   "mcpServers": {
-    "rcac": {
+    "cluster": {
       "command": "uvx",
-      "args": ["git+https://github.com/purduercac/rcac-mcp", "--ssh-host", "cluster.rcac.purdue.edu"]
+      "args": ["--from", "git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp",
+               "cluster-mcp", "--ssh-host", "cluster.rcac.purdue.edu"]
     }
   }
 }
@@ -21,7 +24,13 @@ to your MCP configuration with an SSH host pointing at your cluster:
 This runs the server locally in `stdio` mode, executing commands on the cluster over SSH
 using your existing `~/.ssh/config` and keys.
 
-Alternatively, set `RCAC_SSH_HOST` in your environment and omit `--ssh-host` from the args.
+Install with uv, from git, as above. The server is a uv workspace: `cluster-mcp` depends on its
+Slurm and RCAC members, `cluster-mcp-slurm` and `cluster-mcp-rcac`, by bare name, and none of the
+three is registered on PyPI. uv builds them from the same git commit; pip, or any install that skips
+uv's workspace sources, would look for them on the package index instead, where anyone could
+register those names.
+
+Alternatively, set `CLUSTER_MCP_SSH_HOST` in your environment and omit `--ssh-host` from the args.
 
 If the server cannot connect, your client shows the reason as the error to its first request:
 `cannot connect to <host>: <cause>` (unknown host or SSH alias, connection refused, authentication
@@ -53,15 +62,33 @@ file system decides.
 
 The instructions stay within 4,096 characters by default, because Claude Code cuts server
 instructions there. Whatever does not fit is named, and the `cluster_context` tool (and the
-`rcac://context` resource) returns all of it. To serve everything to Claude Code, raise both
+`cluster://context` resource) returns all of it. To serve everything to Claude Code, raise both
 limits, the server's and Claude Code's:
 
 - add `"--instructions-budget", "16384"` to the server's `args` (or set
-  `RCAC_INSTRUCTIONS_BUDGET=16384`);
+  `CLUSTER_MCP_INSTRUCTIONS_BUDGET=16384`);
 - set `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=16384` in the shell that starts Claude Code, or in
   the `env` block of its `settings.json`. It raises Claude Code's limits on server instructions and
   on tool descriptions together (the variable needs Claude Code 2.1.280 or later; before 2.1.296 the
   default cut is 2,048 characters). `/context` shows what was loaded.
+
+## Upgrading from rcac-mcp
+
+In 0.2.0 the server was renamed from `rcac-mcp` to `cluster-mcp`. Each old name is
+deprecated in 0.2.0, removed no earlier than 0.4.0, and keeps working until it is removed:
+
+| Deprecated | Replacement |
+|---|---|
+| the `rcac-mcp` command | `cluster-mcp` |
+| `RCAC_SSH_HOST`, `RCAC_USER_MAP`, `RCAC_INSTRUCTIONS_BUDGET` | `CLUSTER_MCP_SSH_HOST`, `CLUSTER_MCP_USER_MAP`, `CLUSTER_MCP_INSTRUCTIONS_BUDGET` |
+| the `rcac://context` and `rcac://storage` resources | `cluster://context` and `cluster://storage` |
+
+The command and each old variable print a warning on stderr naming the replacement and the window.
+When an old and a new variable are both set, the new one wins, and the warning says the old one is
+ignored. An `rcac://` URI returns the same content as its `cluster://` replacement. The install
+line earlier releases documented keeps working through the window too: it installs a compatibility
+distribution that runs the deprecated `rcac-mcp` command. Update your MCP client
+configuration to the Quick Start form above.
 
 ## Execution Modes
 
@@ -100,17 +127,17 @@ For a shared hosted instance with authentication:
 ### Basic HTTP Server
 
 ```bash
-rcac-mcp -t http --ssh-host cluster.rcac.purdue.edu
+cluster-mcp -t http --ssh-host cluster.rcac.purdue.edu
 ```
 
 ### With JWT Authentication
 
 ```bash
 export JWT_SECRET="your-secret-key-at-least-32-characters"
-rcac-mcp -t http -a jwt -e delegate
+cluster-mcp -t http -a jwt -e delegate
 
 # Generate a token for clients
-rcac-mcp --generate-token --lifetime 86400
+cluster-mcp --generate-token --lifetime 86400
 ```
 
 ### Docker Compose with TLS
@@ -142,7 +169,12 @@ This server does not search RCAC documentation. The separate `rcac-docs-mcp` ser
 
 ## Available Tools
 
-### Shell & Filesystem
+The tools come in three groups, as the server's instructions list them: the core, which any
+cluster has; the Slurm tools; and the RCAC-specific tools.
+
+### Core
+
+Shell and files:
 
 - `run_command(command, cwd, timeout)` — Execute a shell command on the remote system
 - `list_directory(path, show_hidden)` — List contents of a directory
@@ -151,11 +183,23 @@ This server does not search RCAC documentation. The separate `rcac-docs-mcp` ser
 - `upload_file(local_path, remote_path)` — Upload a file to the remote system
 - `download_file(remote_path, local_path)` — Download a file from the remote system
 
-### Site context
+Site context:
 
 - `cluster_context()` — The cluster's rules from `/etc/agents.d`, in full, as read at startup
 
-### RCAC Cluster
+### Slurm
+
+- `sbatch(...)` — Submit a batch job (from script path or inline content, written byte for byte); `args` are the job script's arguments, `extra_args` more sbatch options, each a list with one argument per element
+- `squeue(...)` — View the job queue
+- `scancel(...)` — Cancel jobs
+- `sacct(...)` — Query job accounting history
+- `sinfo(...)` — Cluster and partition status
+- `scontrol_show_job(job_id)` — Detailed Slurm job info
+- `scontrol_show_node(node)` — Detailed node info
+
+The `extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` is a list of options, one argument per element (`extra_args=["--long"]`); a string is refused.
+
+### RCAC-specific
 
 - `myquota()` — Show storage usage and quota limits
 - `storage_paths()` — Get resolved paths for home, scratch, and depot
@@ -165,26 +209,14 @@ This server does not search RCAC documentation. The separate `rcac-docs-mcp` ser
 - `jobscript(job_id)` — Full submission script for a job
 - `showpartitions()` — Available partitions and their status
 - `average_wait(partition, account)` — Queue wait time statistics
-
-### Slurm
-
-- `sbatch(...)` — Submit a batch job (from script path or inline content, written byte for byte); `args` are the job script's arguments, `extra_args` more sbatch options, each a list with one argument per element
-- `squeue(...)` — View the job queue
-- `scancel(...)` — Cancel jobs
-- `sacct(...)` — Query job accounting history
-- `sinfo(...)` — Cluster and partition status
-
-The `extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` is a list of options, one argument per element (`extra_args=["--long"]`); a string is refused.
-- `scontrol_show_job(job_id)` — Detailed Slurm job info
-- `scontrol_show_node(node)` — Detailed node info
-- `slist()` — Slurm accounts and usage (RCAC-specific)
-- `sfeatures()` — Node hardware features and constraints (RCAC-specific)
+- `slist()` — Slurm accounts and usage
+- `sfeatures()` — Node hardware features and constraints
 
 ## Development
 
 ```bash
 uv sync
-rcac-mcp -e local
+cluster-mcp -e local
 ```
 
 Run the test suite:

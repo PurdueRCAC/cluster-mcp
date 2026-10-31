@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Collection rules shared by every test module, and the guards every test runs under.
@@ -32,8 +32,8 @@ from typing import Any, Callable, Iterator
 import _posixsubprocess
 import pytest
 
-import rcac_mcp.context
-from rcac_mcp.executor import launch
+import cluster_mcp.core.context
+from cluster_mcp.core.executor import launch
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
@@ -53,9 +53,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 # Environment the unit guard blanks, as bin/sandbox.sh does: no real cluster, identity map or
-# signing secret can reach a unit test.
-BLANKED_ENV = ('RCAC_SSH_HOST', 'RCAC_USER_MAP', 'JWT_SECRET', 'OIDC_CONFIG_URL', 'OIDC_CLIENT_ID',
-               'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
+# signing secret can reach a unit test, under either name of a renamed variable.
+BLANKED_ENV = ('CLUSTER_MCP_SSH_HOST', 'RCAC_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP', 'JWT_SECRET',
+               'OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL')
 
 # Every way a unit test could start a process or reach a host, as (owner, attribute name).
 PROCESS_ENTRY_POINTS = (
@@ -410,7 +410,7 @@ class Executions:
 def executes(guard: UnitGuard, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Executions:
     """Run the local and delegate backends for real, fenced: only bash, only inside bin/sandbox.sh.
 
-    It replaces `Popen` in `rcac_mcp.executor.launch` with the fenced launcher. Each launch runs
+    It replaces `Popen` in `cluster_mcp.core.executor.launch` with the fenced launcher. Each launch runs
     under `env -i` with an environment shaped like the real one (HOME, USER, LOGNAME, a
     secure_path-like PATH with the shim first, the shim's BASH_ENV, SHELL). A delegated launch must
     start exactly `sudo -n -H -u <mapped user>`; those five words are replaced by a relaying
@@ -464,7 +464,7 @@ def open_tmp() -> Iterator[Path]:
     `tmp_path` cannot: pytest keeps it under a per-user directory of mode 700. Every mode below it
     is opened again, and its ACL entries go with the files, before it is removed.
     """
-    from rcac_mcp import site
+    from cluster_mcp.core import site
     root = Path(tempfile.mkdtemp(prefix='cluster-mcp-open-', dir=SHARED_TMP))
     root.chmod(0o755)
     try:
@@ -487,7 +487,7 @@ def main_context_holds_no_executor() -> Iterator[None]:
     reach every later drive (asyncio.run copies the main context) and hide a missing executor there.
     """
     yield
-    leaked = rcac_mcp.context.executor_var.get()
+    leaked = cluster_mcp.core.context.executor_var.get()
     if leaked is not None:
-        rcac_mcp.context.executor_var.set(None)
+        cluster_mcp.core.context.executor_var.set(None)
         pytest.fail(f'an executor leaked into the main context: {leaked!r}', pytrace=False)

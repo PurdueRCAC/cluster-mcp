@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The shared secret has a 32-character floor, and the signer and the verifier agree on every claim.
 
-`create_jwt_auth()` and `rcac-mcp --generate-token` each enforce the floor on their own (§ Invariants
+`create_jwt_auth()` and `cluster-mcp --generate-token` each enforce the floor on their own (§ Invariants
 §6), so each is pinned on its own: an unset, empty or 31-character `JWT_SECRET` is refused, and 32
 characters is accepted. The CLI refuses with `exit_status.bad_argument`, nothing on stdout, and a
 reason naming `JWT_SECRET`, because a removed `--generate-token` flag also exits 2.
@@ -34,8 +34,8 @@ import pytest
 from cmdkit.app import exit_status
 
 from harness import JWTVerifier, Outcome, call_http, delegate_server, drive, mint, serving, user_map
-from rcac_mcp.auth import create_jwt_auth
-from rcac_mcp.token import ALGORITHM, AUDIENCE, ISSUER, generate_token
+from cluster_mcp.core.auth import create_jwt_auth
+from cluster_mcp.core.token import ALGORITHM, AUDIENCE, ISSUER, generate_token
 from test_identity import delegation_violations
 from test_no_executor import report
 
@@ -43,7 +43,7 @@ TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
 
 # The installed console script, which the editable install points at this tree.
-CLI = Path(sys.executable).with_name('rcac-mcp')
+CLI = Path(sys.executable).with_name('cluster-mcp')
 
 SECRET = 's' * 32
 OTHER_SECRET = 'z' * 32
@@ -93,7 +93,7 @@ def token_cli_violations(returncode: int, stdout: str, stderr: str, accept: bool
 
 
 def generate(secret: str | None, sub: str = 'alice') -> subprocess.CompletedProcess[str]:
-    """Run `rcac-mcp --generate-token --sub <sub>` in the sandbox with `JWT_SECRET` set to `secret`."""
+    """Run `cluster-mcp --generate-token --sub <sub>` in the sandbox with `JWT_SECRET` set to `secret`."""
     env = [] if secret is None else ['env', f'JWT_SECRET={secret}']
     return subprocess.run([str(SANDBOX), *env, str(CLI), '--generate-token', '--sub', sub],
                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
@@ -197,7 +197,7 @@ def test_mismatched_token_is_rejected(mismatch: dict[str, Any], tmp_path: Path, 
 
 # Module-level tokens outlive any suite run: they are decoded only when the drift rows run.
 TOKEN = generate_token(SECRET, 3600, 'alice')
-REFUSED = 'CRITICAL [rcac_mcp] JWT_SECRET must be at least 32 characters'
+REFUSED = 'CRITICAL [cluster_mcp.core] JWT_SECRET must be at least 32 characters'
 
 
 @pytest.mark.unit
@@ -205,7 +205,7 @@ REFUSED = 'CRITICAL [rcac_mcp] JWT_SECRET must be at least 32 characters'
     pytest.param((0, TOKEN + '\n', ''), False, 'exit status 0', id='accepted-short-secret'),
     pytest.param((2, TOKEN + '\n', REFUSED), False, 'stdout', id='token-on-refusal'),
     pytest.param((1, '', REFUSED), False, 'exit status 1', id='wrong-status'),
-    pytest.param((2, '', 'CRITICAL [rcac_mcp] unrecognized arguments: --generate-token'), False, 'reason',
+    pytest.param((2, '', 'CRITICAL [cluster_mcp.core] unrecognized arguments: --generate-token'), False, 'reason',
                  id='refused-for-another-reason'),
     pytest.param((0, '', ''), True, 'no token', id='no-token'),
     pytest.param((0, TOKEN + '\n' + TOKEN + '\n', ''), True, 'stdout holds 2 lines', id='two-lines'),

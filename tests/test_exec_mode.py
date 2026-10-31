@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The server app resolves its execution mode by the posture ladder, and installs the middleware
@@ -6,21 +6,23 @@ that mode needs.
 
 The ladder (§ Invariants §4) decides who runs a command and where, so its order is the contract:
 an explicit `-e/--exec-mode` wins; `stdio` means `ssh`; an SSH host from `--ssh-host` or
-`RCAC_SSH_HOST` means `ssh`; `auth == 'none'` means `local`; anything else means `delegate`. In
+`CLUSTER_MCP_SSH_HOST` (or its legacy name, `RCAC_SSH_HOST`, which it wins over) means `ssh`;
+`auth == 'none'` means `local`; anything else means `delegate`. In
 particular a configured auth mode with no SSH host and no `-e` is `delegate`, never `local`, which
 runs as the server's owner with no authentication. `delegate` installs `AuthExecutorMiddleware`,
 every other mode `SharedExecutorMiddleware`, and the `ssh` rung with no host fails closed with
 `exit_status.bad_argument` before any server is built. An explicit `-e` is decided at rung 1 whatever
 every later-rung input says: the rows cross each `-e` value with each such input, and
-`test_explicit_mode_decides_alone` crosses it with every value of all of them.
+`test_explicit_mode_decides_alone` crosses it with every value of all of them. The environment's
+host selects `ssh` by either name, whitespace-only included (`test_env_host_selects_ssh`).
 
-Each row drives `MCPServerApp.main(argv)` in-process (never `rcac_mcp.main`, which falls back to
+Each row drives `MCPServerApp.main(argv)` in-process (never `cluster_mcp.core.main`, which falls back to
 pytest's own argv on an empty list) and observes the exit status, the `Execution mode: …` record
-the app logs on the `rcac_mcp` logger, the middleware classes the server would be built with, the
+the app logs on the `cluster_mcp.core` logger, the middleware classes the server would be built with, the
 hosts an SSH connection was made for, and whether the server was started. No server, port or SSH
-connection is ever made. That leans on three `rcac_mcp` seams, not FastMCP's: the module-level
-name `rcac_mcp.create_mcp_server` is replaced by a stub that records its `middlewares` and whose
-`run` returns at once; `rcac_mcp.executor.ssh.Connection` (bound to Fabric) is replaced by a fake
+connection is ever made. That leans on three `cluster_mcp.core` seams, not FastMCP's: the module-level
+name `cluster_mcp.core.create_mcp_server` is replaced by a stub that records its `middlewares` and whose
+`run` returns at once; `cluster_mcp.core.executor.ssh.Connection` (bound to Fabric) is replaced by a fake
 that records its host and reaches nothing; and the log text `Execution mode: <mode>` is read from
 `caplog`. All three survive a FastMCP upgrade unless it moves server construction out of
 `MCPServerApp.run`, so the `stack-upgrade` seed rewrites this stub only if it does.
@@ -34,14 +36,19 @@ from typing import Any
 
 import pytest
 
-import rcac_mcp
-import rcac_mcp.executor.ssh
-from rcac_mcp import MCPServerApp
+import cluster_mcp.core
+import cluster_mcp.core.executor.ssh
+from cluster_mcp.core import MCPServerApp
 from test_executors import FakeConnection
 
 # Unresolvable by design: even without the fake, no name here reaches a real cluster.
 FLAG_HOST = 'flag-host.invalid'
 ENV_HOST = 'env-host.invalid'
+LEGACY_HOST = 'legacy-host.invalid'
+
+# The SSH-host variable, and the legacy name it is read in place of.
+HOST_VAR = 'CLUSTER_MCP_SSH_HOST'
+LEGACY_HOST_VAR = 'RCAC_SSH_HOST'
 
 AUTH = 'AuthExecutorMiddleware'
 SHARED = 'SharedExecutorMiddleware'
@@ -49,7 +56,7 @@ SSH_HOST_REQUIRED = 'SSH host required'
 
 
 def row(id: str, argv: list[str], *, mode: str, middleware: str | None = None, ssh_host: str | None = None,
-        env_host: str | None = None, status: int = 0, reason: str | None = None) -> Any:
+        env_host: str | dict[str, str] | None = None, status: int = 0, reason: str | None = None) -> Any:
     expected = {'status': status, 'mode': mode, 'middleware': [middleware] if middleware else None,
                 'ssh_host': ssh_host, 'started': status == 0}
     if reason:
@@ -58,7 +65,7 @@ def row(id: str, argv: list[str], *, mode: str, middleware: str | None = None, s
 
 
 # Rung 1 against every later rung: each value an explicit `-e` takes (`local`, `ssh`, `delegate`)
-# meets each input a later rung reads (a `stdio` transport, `--ssh-host`, `RCAC_SSH_HOST`, and the
+# meets each input a later rung reads (a `stdio` transport, `--ssh-host`, `CLUSTER_MCP_SSH_HOST`, and the
 # auth modes `none`, `jwt` and `oidc`) in a row of its own, and resolves to itself. A rung 1 that
 # yields to any one of those inputs, for any one value, turns at least one row red; an `-e ssh`
 # with no host fails closed instead of falling through. `-e delegate` with auth `none` builds the
@@ -102,6 +109,10 @@ LADDER_CASES = EXPLICIT_CASES + [
     row('host-flag-over-auth-none', ['-t', 'http', '--ssh-host', FLAG_HOST],
         mode='ssh', middleware=SHARED, ssh_host=FLAG_HOST),
     row('env-host-over-auth-none', ['-t', 'sse'], env_host=ENV_HOST, mode='ssh', middleware=SHARED, ssh_host=ENV_HOST),
+    row('legacy-env-host-over-auth-none', ['-t', 'sse'], env_host={LEGACY_HOST_VAR: LEGACY_HOST},
+        mode='ssh', middleware=SHARED, ssh_host=LEGACY_HOST),
+    row('env-host-over-legacy', ['-t', 'http'], env_host={HOST_VAR: ENV_HOST, LEGACY_HOST_VAR: LEGACY_HOST},
+        mode='ssh', middleware=SHARED, ssh_host=ENV_HOST),
     row('host-over-jwt', ['-t', 'http', '-a', 'jwt', '--ssh-host', FLAG_HOST],
         mode='ssh', middleware=SHARED, ssh_host=FLAG_HOST),
     row('auth-none-http', ['-t', 'http'], mode='local', middleware=SHARED),
@@ -153,9 +164,13 @@ class StubServer:
         self.record['run'] = kwargs
 
 
-def resolve(argv: list[str], env_host: str | None, monkeypatch: pytest.MonkeyPatch,
+def resolve(argv: list[str], env_host: str | dict[str, str] | None, monkeypatch: pytest.MonkeyPatch,
             caplog: pytest.LogCaptureFixture, tmp_path: Path) -> dict:
-    """Drive the app once with server construction stubbed and SSH faked; return what it did."""
+    """Drive the app once with server construction stubbed and SSH faked; return what it did.
+
+    `env_host` is the `CLUSTER_MCP_SSH_HOST` value, or a mapping of SSH-host variables (either name)
+    to values; every SSH-host variable it does not set is unset.
+    """
     built: list[dict] = []
 
     def create_mcp_server(auth_mode: str | None = None, middlewares: list | None = None, **kwargs: Any) -> StubServer:
@@ -164,20 +179,23 @@ def resolve(argv: list[str], env_host: str | None, monkeypatch: pytest.MonkeyPat
         return StubServer(record)
 
     made: list[FakeConnection] = []
-    monkeypatch.setattr(rcac_mcp, 'create_mcp_server', create_mcp_server)
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', type('FakeConnection', (FakeConnection,), {'made': made}))
+    monkeypatch.setattr(cluster_mcp.core, 'create_mcp_server', create_mcp_server)
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', type('FakeConnection', (FakeConnection,), {'made': made}))
     user_map = tmp_path / 'user-map'
     user_map.write_text('alice ualice\n')
-    monkeypatch.setenv('RCAC_USER_MAP', str(user_map))
-    if env_host:
-        monkeypatch.setenv('RCAC_SSH_HOST', env_host)
-    else:
-        monkeypatch.delenv('RCAC_SSH_HOST', raising=False)
+    monkeypatch.setenv('CLUSTER_MCP_USER_MAP', str(user_map))
+    monkeypatch.delenv('RCAC_USER_MAP', raising=False)
+    hosts = env_host if isinstance(env_host, dict) else {HOST_VAR: env_host} if env_host else {}
+    for var in (HOST_VAR, LEGACY_HOST_VAR):
+        if var in hosts:
+            monkeypatch.setenv(var, hosts[var])
+        else:
+            monkeypatch.delenv(var, raising=False)
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger='rcac_mcp'):
+    with caplog.at_level(logging.INFO, logger='cluster_mcp.core'):
         status = MCPServerApp.main(argv)
-    records = [r for r in caplog.records if r.name == 'rcac_mcp']
+    records = [r for r in caplog.records if r.name == 'cluster_mcp.core']
     modes = [r.getMessage().removeprefix('Execution mode: ') for r in records
              if r.getMessage().startswith('Execution mode: ')]
     assert len(built) <= 1, f'the server was built {len(built)} times'
@@ -235,7 +253,7 @@ def test_explicit_mode_decides_alone(mode: str, monkeypatch: pytest.MonkeyPatch,
                     argv = ['-t', transport, '-a', auth, '-e', mode] + (['--ssh-host', flag_host] if flag_host else [])
                     observed = resolve(argv, env_host, monkeypatch, caplog, tmp_path)
                     expected = explicit_expectation(mode, flag_host, env_host)
-                    label = ' '.join(argv) + (' with RCAC_SSH_HOST' if env_host else '')
+                    label = ' '.join(argv) + (f' with {HOST_VAR}' if env_host else '')
                     violations += [f'{label}: {v}' for v in ladder_violations(observed, expected)]
                     combinations += 1
     assert combinations == len(TRANSPORTS) * len(AUTHS) * len(FLAG_HOSTS) * len(ENV_HOSTS) == 36
@@ -243,10 +261,34 @@ def test_explicit_mode_decides_alone(mode: str, monkeypatch: pytest.MonkeyPatch,
     assert guard.refused == []
 
 
+# The environment's SSH host selects `ssh` at rung 3 by either name, the replacement winning when
+# both are set. The value is never stripped: a whitespace-only host is a host, as it was before the
+# rename, so it still selects `ssh` (and fails to connect) instead of falling through to `local`.
+ENV_HOST_CASES = [
+    pytest.param({HOST_VAR: ENV_HOST}, ENV_HOST, id='replacement'),
+    pytest.param({LEGACY_HOST_VAR: LEGACY_HOST}, LEGACY_HOST, id='legacy'),
+    pytest.param({HOST_VAR: ENV_HOST, LEGACY_HOST_VAR: LEGACY_HOST}, ENV_HOST, id='both'),
+    pytest.param({HOST_VAR: '', LEGACY_HOST_VAR: LEGACY_HOST}, LEGACY_HOST, id='empty-replacement'),
+    pytest.param({HOST_VAR: ' '}, ' ', id='whitespace'),
+    pytest.param({LEGACY_HOST_VAR: ' '}, ' ', id='legacy-whitespace'),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('hosts', 'host'), ENV_HOST_CASES)
+def test_env_host_selects_ssh(hosts: dict[str, str], host: str, monkeypatch: pytest.MonkeyPatch,
+                              caplog: pytest.LogCaptureFixture, tmp_path: Path, guard) -> None:
+    observed = resolve(['-t', 'sse'], hosts, monkeypatch, caplog, tmp_path)
+    expected = {'status': 0, 'mode': 'ssh', 'middleware': [SHARED], 'ssh_host': host, 'started': True}
+    violations = ladder_violations(observed, expected)
+    assert violations == [], '\n'.join(violations)
+    assert guard.refused == []
+
+
 DELEGATE ={'status': 0, 'mode': 'delegate', 'middleware': [AUTH], 'ssh_hosts': [], 'started': True}
 DELEGATE_ROW = {'status': 0, 'mode': 'delegate', 'middleware': [AUTH], 'ssh_host': None, 'started': True}
 FAILED_CLOSED = {'status': 2, 'mode': 'ssh', 'middleware': None, 'ssh_hosts': [], 'started': False,
-                 'errors': [f'{SSH_HOST_REQUIRED}: use --ssh-host or set RCAC_SSH_HOST']}
+                 'errors': [f'{SSH_HOST_REQUIRED}: use --ssh-host or set CLUSTER_MCP_SSH_HOST']}
 FAILED_CLOSED_ROW = {'status': 2, 'mode': 'ssh', 'middleware': None, 'ssh_host': None, 'started': False,
                      'reason': SSH_HOST_REQUIRED}
 

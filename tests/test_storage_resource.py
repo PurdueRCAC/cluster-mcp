@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""Reading `rcac://storage` runs on the executor of the request that read it, as `storage_paths` does.
+"""Reading `cluster://storage` runs on the executor of the request that read it, as `storage_paths` does.
 
 The resource's handler and the `storage_paths` tool both call the undecorated
 `resolve_storage_paths()`: a decorated tool is not callable (§ Invariants §7). It runs
@@ -11,7 +11,10 @@ request's own context (§1). A read on a server whose `SharedExecutorMiddleware`
 executor returns the summary in its text format, built from that executor's answers and naming the
 same home, scratch and depot paths the tool returns there, in both protocol eras; through a
 `LocalShellExecutor` it launches as the server's own account, never through `sudo`. A read on a
-server with no executor middleware fails naming `No executor configured`, and nothing runs.
+server with no executor middleware fails naming `No executor configured`, and nothing runs. Every
+read here runs once per URI the resource is served under (`harness.STORAGE_URIS`): its deprecated
+alias `rcac://storage` is its target but for the URI, so it is resolved, refused and run exactly
+alike, and an alias of either resource returns its target's text in every mode and both eras.
 
 In `delegate` mode a read is resolved by the same path as a tool call (§5): a token whose identity
 is in the user map reads as the local user it maps to, through `sudo -n -H -u`, and two reads under
@@ -29,8 +32,10 @@ still get the protocol's `Resource not found` (-32602) for it, as every caller d
 Membership is the exact string the client sent, so this holds for every shape in `NOT_OPEN`: a path
 below an open URI, a prefix of one or a URI it prefixes, a trailing slash, a case, percent-encoded or
 full-width variant, surrounding space, a query or fragment, a missing scheme or authority, a variant
-of the URI that runs commands, another scheme. Each is sent on the wire as written. The table names
-shapes; `NEAR_OPEN` covers the neighbourhood of every served URI structurally: every one-character
+of the URI that runs commands, another scheme, a URI of one scheme inside or joined to the other. The
+table holds each shape under both schemes, so the neighbourhood of an alias is no less covered than
+its target's. Each is sent on the wire as written. The table names shapes; `NEAR_OPEN` covers the
+neighbourhood of every served URI structurally, read one served URI per row: every one-character
 insertion, deletion and substitution over printable ASCII and the control characters, at every
 position, every wrapper, suffix and userinfo a URI normaliser undoes, so a membership test that
 normalises the URI in any of those ways lets some refused caller's read through and is caught.
@@ -47,17 +52,17 @@ from typing import Any, Mapping, Sequence
 import pytest
 
 from conftest import LOCAL_OWNER, launch_user
-from harness import (Outcome, RecordingExecutor, Rendezvous, bare_server, call, delegate_server, drive,
-                     http_client, in_memory, launched_script, mint, read_resource, read_verbatim, serving,
-                     shared_server, user_map)
-from rcac_mcp.executor.shell import LocalShellExecutor
-from rcac_mcp.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
+from harness import (CONTEXT_URIS, STORAGE_URIS, Outcome, RecordingExecutor, Rendezvous, bare_server, call,
+                     delegate_server, drive, http_client, in_memory, launched_script, mint, read_resource,
+                     read_verbatim, scheme, serving, shared_server, user_map)
+from cluster_mcp.core.executor.shell import LocalShellExecutor
+from cluster_mcp.core.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
+from cluster_mcp.core.site import SiteContext, SiteFile
 from test_identity import NO_IDENTITY, NOT_AUTHORIZED
 from test_no_executor import NO_EXECUTOR, refusal_violations, report
 from test_protocol import read_boundary_violations
 from test_tools import quota_and_scratch
 
-URI = 'rcac://storage'
 ERAS = ['legacy', 'modern']
 
 # The commands a storage read runs, in order: the scratch path, then the quota table.
@@ -68,15 +73,18 @@ USER_MAP = 'alice ualice\nal@example.org uemail\nbob ubob\n'
 
 # The prefix FastMCP puts before the reason when a tool's body fails, and when a resource handler does.
 TOOL_PREFIX = "Error calling tool 'storage_paths': "
-READ_PREFIX = f'Error reading resource {URI!r}: '
 
-# The open URI and the URI that runs commands the shapes below are built from.
-OPEN_URI = 'rcac://context'
+
+def read_prefix(uri: str) -> str:
+    """The prefix FastMCP puts before the reason when the handler of a read of `uri` fails."""
+    return f'Error reading resource {uri!r}: '
+
 
 # Every shape of URI the server does not serve, each sent on the wire exactly as written
-# (`harness.read_verbatim`), with what it is. None is exactly a URI in OPEN_RESOURCES, so in
-# `delegate` mode each is resolved like a read that runs commands. FastMCP's own client would send
-# some of them normalised (`RCAC://context` as the open `rcac://context`), hence verbatim.
+# (`harness.read_verbatim`), with what it is: built from an open URI and a URI that runs commands,
+# under each scheme. None is exactly a URI in OPEN_RESOURCES, so in `delegate` mode each is resolved
+# like a read that runs commands. FastMCP's own client would send some of them normalised
+# (`RCAC://context` as the open `rcac://context`), hence verbatim.
 NOT_OPEN = {
     'rcac://nope': 'an rcac URI the server does not serve',
     'rcac://context/x': 'a path below the open URI',
@@ -97,6 +105,29 @@ NOT_OPEN = {
     'rcac://storage/': 'the URI that runs commands, with a trailing slash',
     'RCAC://storage': 'the URI that runs commands, its scheme upper-cased',
     'rcac://STORAGE': 'the URI that runs commands, its host upper-cased',
+    'cluster://nope': 'a cluster URI the server does not serve',
+    'cluster://context/x': 'a path below the open URI',
+    'cluster://context/': 'the open URI with a trailing slash',
+    'cluster://contextual': 'a URI the open URI is a prefix of',
+    'cluster://contex': 'a prefix of the open URI',
+    'xcluster://context': 'a URI ending in the open URI',
+    'cluster://CONTEXT': 'the open URI, its host upper-cased',
+    'CLUSTER://context': 'the open URI, its scheme upper-cased',
+    'cluster://%63ontext': 'the open URI, a letter percent-encoded',
+    'cluster://\uff43ontext': 'the open URI, a letter full-width',
+    ' cluster://context': 'the open URI after a space',
+    'cluster://context ': 'the open URI before a space',
+    'cluster://context?x=1': 'the open URI with a query',
+    'cluster://context#f': 'the open URI with a fragment',
+    'cluster:context': 'the open URI without its authority slashes',
+    'cluster://storage/': 'the URI that runs commands, with a trailing slash',
+    'CLUSTER://storage': 'the URI that runs commands, its scheme upper-cased',
+    'cluster://STORAGE': 'the URI that runs commands, its host upper-cased',
+    'cluster://rcac://context': 'the open rcac URI inside a cluster URI',
+    'rcac://cluster://context': 'the open cluster URI inside an rcac URI',
+    'rcac+cluster://context': 'the open URI under both schemes joined',
+    'cluster+rcac://context': 'the open URI under both schemes joined, the other way round',
+    'cluster://rcac': 'the old scheme as a cluster URI',
     'file:///nope': 'a file URI',
     'https://example.org/x': 'an https URL',
 }
@@ -127,9 +158,9 @@ def near(uri: str) -> dict[str, str]:
         shapes.setdefault(before + uri + after, f'{uri!r} wrapped in {before!r} and {after!r}')
     for suffix in SUFFIXES:
         shapes.setdefault(uri + suffix, f'{uri!r} followed by {suffix!r}')
-    scheme, separator, rest = uri.partition('://')
+    head, separator, rest = uri.partition('://')
     for info in USERINFO if separator else ():
-        shapes.setdefault(f'{scheme}://{info}{rest}', f'{uri!r} with userinfo {info!r}')
+        shapes.setdefault(f'{head}://{info}{rest}', f'{uri!r} with userinfo {info!r}')
     return shapes
 
 
@@ -143,17 +174,30 @@ def neighbourhood(uris: Sequence[str], open_uris: frozenset[str]) -> dict[str, s
     return shapes
 
 
-# The neighbourhood of every served URI, the open ones and those that run commands: about 2,900
-# shapes each. It leaves out the URIs the registry marks as running nothing, not whatever
-# OPEN_RESOURCES holds, so an open set grown past the registry's open entries is read here too. None
-# is exactly open, so in `delegate` mode a refused caller is refused for each.
-NEAR_OPEN = neighbourhood([entry['uri'] for entry in RESOURCE_REGISTRY],
-                          frozenset(entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor']))
+# Every URI the server serves, as `harness` writes them out: each resource under both schemes.
+SERVED_URIS = (*CONTEXT_URIS, *STORAGE_URIS)
 
-# Shapes a common URI normaliser maps onto the open URI; the neighbourhood must hold each of them.
+# The URIs the registry marks as running nothing. The neighbourhoods leave out these, not whatever
+# OPEN_RESOURCES holds, so an open set grown past the registry's open entries is read here too.
+REGISTRY_OPEN = frozenset(entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])
+
+# The neighbourhood of each served URI, the open ones and those that run commands: about 2,900
+# shapes each, read one served URI per row. None is exactly open, so in `delegate` mode a refused
+# caller is refused for each.
+NEAR = {uri: neighbourhood([uri], REGISTRY_OPEN) for uri in SERVED_URIS}
+
+# Every served URI's neighbourhood together, each shape with how it was first made.
+NEAR_OPEN = {shape: how for shapes in NEAR.values() for shape, how in shapes.items()}
+
+# Shapes a common URI normaliser maps onto an open URI, under each scheme; the neighbourhood must hold
+# each of them.
 NORMALISED = ('rcac://context?', 'rcac://context#', 'rcac://context:', 'rcac://context:80', 'rcac://u@context',
               'rcac://context.', 'rcac://context\n', 'rcac://con\ttext', 'rcac://context\x00', '/rcac://context',
-              '<rcac://context>', '"rcac://context"', 'rcac://context/.', 'rcac://context\r\n', ' rcac://context')
+              '<rcac://context>', '"rcac://context"', 'rcac://context/.', 'rcac://context\r\n', ' rcac://context',
+              'cluster://context?', 'cluster://context#', 'cluster://context:', 'cluster://context:80',
+              'cluster://u@context', 'cluster://context.', 'cluster://context\n', 'cluster://con\ttext',
+              'cluster://context\x00', '/cluster://context', '<cluster://context>', '"cluster://context"',
+              'cluster://context/.', 'cluster://context\r\n', ' cluster://context')
 
 # Reads held in flight together when a test reads the whole neighbourhood on one session.
 READ_BATCH = 128
@@ -214,13 +258,14 @@ def tool_path_violations(text: str, tool: Outcome) -> list[str]:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_runs_on_the_shared_executor(era: str, launches: list[list[str]], guard) -> None:
+def test_storage_read_runs_on_the_shared_executor(uri: str, era: str, launches: list[list[str]], guard) -> None:
     executor = RecordingExecutor('shared', responder=quota_and_scratch)
 
     async def scenario() -> tuple[Outcome, list[tuple[Any, ...]], Outcome]:
         async with in_memory(shared_server(executor), era=era) as client:
-            read = await read_resource(client, URI)
+            read = await read_resource(client, uri)
             ran = list(executor.calls)
             return read, ran, await call(client, 'storage_paths', {})
 
@@ -235,11 +280,12 @@ def test_storage_read_runs_on_the_shared_executor(era: str, launches: list[list[
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_runs_the_local_executor(era: str, storage_launches: list[list[str]], guard) -> None:
+def test_storage_read_runs_the_local_executor(uri: str, era: str, storage_launches: list[list[str]], guard) -> None:
     async def scenario() -> Outcome:
         async with in_memory(shared_server(LocalShellExecutor()), era=era) as client:
-            return await read_resource(client, URI)
+            return await read_resource(client, uri)
 
     read = drive(scenario())
     ran = [(launch_user(argv) or LOCAL_OWNER, launched_script(argv)[0]) for argv in storage_launches]
@@ -250,13 +296,103 @@ def test_storage_read_runs_the_local_executor(era: str, storage_launches: list[l
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_without_executor_middleware_fails(era: str, launches: list[list[str]], guard) -> None:
+def test_storage_read_without_executor_middleware_fails(uri: str, era: str, launches: list[list[str]], guard) -> None:
     async def scenario() -> Outcome:
         async with in_memory(bare_server(), era=era) as client:
-            return await read_resource(client, URI)
+            return await read_resource(client, uri)
 
     violations = refusal_violations(drive(scenario()), [], launches, NO_EXECUTOR)
+    assert violations == [], report(violations)
+    assert guard.refused == []
+
+
+# Each resource as its `cluster://` target and its deprecated `rcac://` alias.
+ALIASES = [pytest.param(target, alias, id=target.partition('://')[2]) for target, alias in (CONTEXT_URIS, STORAGE_URIS)]
+
+
+@pytest.mark.unit
+def test_aliases_are_derived_from_their_targets() -> None:
+    # Each alias is its target with only the URI changed: the same handler object, so it runs what
+    # its target runs, and the same `executor` flag, so it is resolved exactly when its target is.
+    uris = [entry['uri'] for entry in RESOURCE_REGISTRY]
+    violations = [] if sorted(uris) == sorted((*CONTEXT_URIS, *STORAGE_URIS)) and len(uris) == 4 else \
+        [f'the registry serves {uris!r}, expected exactly {[*CONTEXT_URIS, *STORAGE_URIS]!r}']
+    entries = {entry['uri']: entry for entry in RESOURCE_REGISTRY}
+    for target, alias in (CONTEXT_URIS, STORAGE_URIS):
+        if target not in entries or alias not in entries:
+            continue
+        if entries[alias]['handler'] is not entries[target]['handler']:
+            violations.append(f'the alias {alias!r} does not share the handler of {target!r}')
+        if {**entries[alias], 'uri': target} != entries[target]:
+            violations.append(f'the alias {alias!r} differs from {target!r} beyond its URI: '
+                              f'{entries[alias]!r} against {entries[target]!r}')
+    assert violations == [], report(violations)
+
+
+@pytest.mark.unit
+def test_open_resources_are_the_context_uris() -> None:
+    assert OPEN_RESOURCES == frozenset(CONTEXT_URIS), f'the open set is {sorted(OPEN_RESOURCES)!r}'
+
+
+# The site every server in the alias rows is built with, so the context reads return text.
+ALIAS_SITE = SiteContext(files=(SiteFile('a.md', 'Alpha rule.'),))
+
+
+def expected_read(target: str, mode: str) -> Outcome:
+    """What reading `target` must return on a server in `mode`, built with `ALIAS_SITE`."""
+    if target in CONTEXT_URIS:
+        return Outcome(False, ALIAS_SITE.text)
+    if mode == 'bare':
+        return Outcome(True, read_prefix(target) + NO_EXECUTOR_REASON, code=-32603)
+    return Outcome(False, summary(*(SHARED_PATHS if mode == 'shared' else owner_paths('ualice'))))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('era', ERAS)
+@pytest.mark.parametrize('mode', ['bare', 'shared', 'delegate'])
+@pytest.mark.parametrize(('target', 'alias'), ALIASES)
+def test_alias_read_returns_target_content(target: str, alias: str, mode: str, era: str, tmp_path: Path,
+                                           monkeypatch: pytest.MonkeyPatch, storage_launches: list[list[str]],
+                                           guard) -> None:
+    # The three ways a server installs executors: none, one shared executor for every request (`local`
+    # and `ssh`), one per request from its token (`delegate`, read by a mapped user). The alias is
+    # read right after its target, on the same client: it must answer as the target did (a failure's
+    # prefix naming the URI read), and run what the target ran, as the same user.
+    monkeypatch.setenv('JWT_SECRET', SECRET)
+    map_path = user_map(tmp_path, USER_MAP)
+    executor = RecordingExecutor('shared', responder=quota_and_scratch)
+
+    async def read_both(client: Any, ran: Any) -> dict[str, tuple[Outcome, list[Any]]]:
+        reads = {}
+        for uri in (target, alias):
+            before = list(ran())
+            reads[uri] = (await read_resource(client, uri), list(ran())[len(before):])
+        return reads
+
+    async def scenario() -> dict[str, tuple[Outcome, list[Any]]]:
+        if mode == 'delegate':
+            async with serving(delegate_server(map_path, site=ALIAS_SITE)) as app:
+                async with http_client(app, mint(SECRET, sub='alice'), era=era) as client:
+                    return await read_both(client, lambda: ran_by(storage_launches))
+        server = bare_server(site=ALIAS_SITE) if mode == 'bare' else shared_server(executor, site=ALIAS_SITE)
+        async with in_memory(server, era=era) as client:
+            return await read_both(client, lambda: [('shared', c[1]) for c in executor.calls])
+
+    reads = drive(scenario())
+    (got, ran), (alias_got, alias_ran) = reads[target], reads[alias]
+    violations = []
+    wanted = expected_read(target, mode)
+    if (got.is_error, got.text, got.code if got.is_error else None) != (wanted.is_error, wanted.text, wanted.code):
+        violations.append(f'reading the target {target!r} gave {got!r}, expected {wanted!r}')
+    as_target = Outcome(alias_got.is_error, alias_got.text.replace(repr(alias), repr(target)), code=alias_got.code)
+    if as_target != got:
+        violations.append(f'reading the alias {alias!r} gave {alias_got!r}, its target {target!r} gave {got!r}')
+    if alias_ran != ran:
+        violations.append(f'reading the alias {alias!r} ran {alias_ran!r}, its target {target!r} ran {ran!r}')
+    if target in STORAGE_URIS and mode != 'bare' and len(ran) != len(STORAGE_ARGVS):
+        violations.append(f'reading the target {target!r} ran {ran!r}, expected {STORAGE_ARGVS!r}')
     assert violations == [], report(violations)
     assert guard.refused == []
 
@@ -293,8 +429,9 @@ def storage_isolation_violations(reads: Mapping[str, Outcome], ran: Sequence[tup
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_runs_as_the_mapped_user(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_storage_read_runs_as_the_mapped_user(uri: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                               storage_launches: list[list[str]], guard) -> None:
     monkeypatch.setenv('JWT_SECRET', SECRET)
     map_path = user_map(tmp_path, USER_MAP)
@@ -302,7 +439,7 @@ def test_storage_read_runs_as_the_mapped_user(era: str, tmp_path: Path, monkeypa
     async def scenario() -> Outcome:
         async with serving(delegate_server(map_path)) as app:
             async with http_client(app, mint(SECRET, sub='alice'), era=era) as client:
-                return await read_resource(client, URI)
+                return await read_resource(client, uri)
 
     read = drive(scenario())
     violations = read_violations(read, summary(*owner_paths('ualice')), ran_by(storage_launches), 'ualice')
@@ -313,8 +450,9 @@ def test_storage_read_runs_as_the_mapped_user(era: str, tmp_path: Path, monkeypa
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_concurrent_storage_reads_stay_isolated(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_concurrent_storage_reads_stay_isolated(uri: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                 storage_launches: list[list[str]], guard) -> None:
     # Both reads are held at one rendezvous inside the executor middleware, so each has set its
     # executor before either handler runs; a module global or a cached executor crosses them.
@@ -325,7 +463,7 @@ def test_concurrent_storage_reads_stay_isolated(era: str, tmp_path: Path, monkey
         async with serving(delegate_server(map_path, Rendezvous(2))) as app:
             async with (http_client(app, mint(SECRET, sub='alice'), era=era) as alice,
                         http_client(app, mint(SECRET, sub='bob'), era=era) as bob):
-                return await asyncio.gather(read_resource(alice, URI), read_resource(bob, URI))
+                return await asyncio.gather(read_resource(alice, uri), read_resource(bob, uri))
 
     for_alice, for_bob = drive(scenario())
     violations = storage_isolation_violations({'ualice': for_alice, 'ubob': for_bob}, ran_by(storage_launches))
@@ -336,8 +474,9 @@ def test_concurrent_storage_reads_stay_isolated(era: str, tmp_path: Path, monkey
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_sequential_storage_reads_each_get_their_executor(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_sequential_storage_reads_each_get_their_executor(uri: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                           storage_launches: list[list[str]], guard) -> None:
     # Alternating identities on one server, one read at a time: every read builds and sets the
     # executor for its own token, so none runs with no executor or with the previous reader's.
@@ -353,7 +492,7 @@ def test_sequential_storage_reads_each_get_their_executor(era: str, tmp_path: Pa
                         http_client(app, mint(SECRET, sub='bob'), era=era) as bob):
                 clients = {'alice': alice, 'bob': bob}
                 for who in sequence:
-                    reads.append(await read_resource(clients[who], URI))
+                    reads.append(await read_resource(clients[who], uri))
                     marks.append(len(storage_launches))
         return reads, marks
 
@@ -416,9 +555,10 @@ REFUSED = {
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
 @pytest.mark.parametrize('row', list(REFUSED))
-def test_storage_read_refused(row: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_storage_read_refused(uri: str, row: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                               storage_launches: list[list[str]], guard) -> None:
     # The same request is built twice: one calls `storage_paths`, the other reads the resource. Each
     # must be refused with exactly the row's reason, whatever prefix FastMCP puts before it.
@@ -430,17 +570,17 @@ def test_storage_read_refused(row: str, era: str, tmp_path: Path, monkeypatch: p
         server = delegate_server(map_path)
         if claims is None:
             async with in_memory(server, era=era) as caller, in_memory(server, era=era) as reader:
-                return await call(caller, 'storage_paths', {}), await read_resource(reader, URI)
+                return await call(caller, 'storage_paths', {}), await read_resource(reader, uri)
         token = mint(SECRET, **claims)
         async with serving(server) as app:
             async with http_client(app, token, era=era) as caller, http_client(app, token, era=era) as reader:
-                return await call(caller, 'storage_paths', {}), await read_resource(reader, URI)
+                return await call(caller, 'storage_paths', {}), await read_resource(reader, uri)
 
     tool, read = drive(scenario())
     violations = refusal_violations(read, [], storage_launches, fragment)
     # A tokenless request is let through and fails in the handler, which FastMCP prefixes; every
     # other row is refused by the middleware, with its reason alone.
-    violations += read_boundary_violations(read, READ_PREFIX + reason if claims is None else reason)
+    violations += read_boundary_violations(read, read_prefix(uri) + reason if claims is None else reason)
     violations += tool_refusal_violations(tool, TOOL_PREFIX + reason if claims is None else reason)
     assert violations == [], report(violations)
     assert guard.refused == []
@@ -456,11 +596,20 @@ def tool_refusal_violations(tool: Outcome, expected: str) -> list[str]:
 @pytest.mark.unit
 def test_not_open_shapes_are_neither_open_nor_served() -> None:
     # The shapes are variants of a served open URI and a served URI that runs commands; none of them
-    # may itself be served or open, or the tests below would test nothing about it.
+    # may itself be served or open, or the tests below would test nothing about it. Each shape built
+    # on an rcac URI has its twin on the cluster URI, so neither scheme's neighbourhood is thinner.
     served = {entry['uri'] for entry in RESOURCE_REGISTRY}
     violations = [f'{uri!r} is served or open' for uri in NOT_OPEN if uri in served | OPEN_RESOURCES]
-    if OPEN_URI not in OPEN_RESOURCES or URI not in served - OPEN_RESOURCES:
-        violations.append(f'{OPEN_URI!r} must be open and {URI!r} served and not open: {sorted(OPEN_RESOURCES)!r}')
+    for uri in CONTEXT_URIS:
+        if uri not in OPEN_RESOURCES:
+            violations.append(f'{uri!r} must be open: {sorted(OPEN_RESOURCES)!r}')
+    for uri in STORAGE_URIS:
+        if uri not in served - OPEN_RESOURCES:
+            violations.append(f'{uri!r} must be served and not open: {sorted(OPEN_RESOURCES)!r}')
+    for uri in NOT_OPEN:
+        twin = uri.replace('rcac', 'cluster').replace('RCAC', 'CLUSTER')
+        if 'cluster' not in uri.lower() and twin != uri and twin not in NOT_OPEN:
+            violations.append(f'{uri!r} has no cluster twin {twin!r}')
     assert violations == [], report(violations)
 
 
@@ -513,7 +662,7 @@ def test_near_open_shapes_cover_every_served_uri() -> None:
     # deletions and its control-character and printable insertions at both ends, and the shapes common
     # normalisers map onto the open URI.
     violations = [f'{uri!r} is open' for uri in NEAR_OPEN if uri in OPEN_RESOURCES]
-    served = [entry['uri'] for entry in RESOURCE_REGISTRY]
+    served = list(dict.fromkeys([*SERVED_URIS, *(entry['uri'] for entry in RESOURCE_REGISTRY)]))
     for uri in served:
         wanted = [uri[:at] + uri[at + 1:] for at in range(len(uri))]
         wanted += [f'{char}{uri}' for char in '\x00\t\n\r\x7f' + string.punctuation + string.whitespace]
@@ -522,44 +671,48 @@ def test_near_open_shapes_cover_every_served_uri() -> None:
     violations += [f'the neighbourhood lacks {shape!r}' for shape in NORMALISED if shape not in NEAR_OPEN]
     if len(NEAR_OPEN) < 2500 * len(served):
         violations.append(f'the neighbourhood holds {len(NEAR_OPEN)} shapes, expected at least {2500 * len(served)}')
-    if OPEN_URI not in OPEN_RESOURCES or OPEN_URI not in served:
-        violations.append(f'{OPEN_URI!r} must be served and open: {sorted(OPEN_RESOURCES)!r}')
+    for uri in CONTEXT_URIS:
+        if uri not in OPEN_RESOURCES or uri not in served:
+            violations.append(f'{uri!r} must be served and open: {sorted(OPEN_RESOURCES)!r}')
     assert violations == [], report(violations)
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', SERVED_URIS, ids=lambda uri: uri.replace('://', '-'))
 @pytest.mark.parametrize('row', ['no-claims', 'unmapped'])
-def test_near_open_read_is_refused(row: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_near_open_read_is_refused(uri: str, row: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                    storage_launches: list[list[str]], guard) -> None:
-    # Every shape near a served URI and not exactly open, read on one session: a membership test that
-    # normalises the URI (drops a port, a query mark, userinfo, a dot segment, surrounding quotes or
-    # control characters) maps some shape onto the open URI and lets this refused caller through.
-    # About 5,700 reads, so the client speaks the selected era, not each era on every run: the
-    # profile's gate runs the suite once per era.
+    # Every shape near one served URI and not exactly open, read on one session: a membership test
+    # that normalises the URI (drops a port, a query mark, userinfo, a dot segment, surrounding quotes
+    # or control characters) maps some shape onto an open URI and lets this refused caller through.
+    # About 2,900 reads, one served URI per row so each row keeps its timeout, and the client speaks
+    # the selected era, not each era on every run: the profile's gate runs the suite once per era.
     claims, fragment, reason = REFUSED[row]
+    shapes = NEAR[uri]
     monkeypatch.setenv('JWT_SECRET', SECRET)
     map_path = user_map(tmp_path, USER_MAP)
 
     async def scenario() -> dict[str, Outcome]:
         async with serving(delegate_server(map_path)) as app:
             async with http_client(app, mint(SECRET, **claims)) as reader:
-                return await read_each(reader, list(NEAR_OPEN))
+                return await read_each(reader, list(shapes))
 
     reads = drive(scenario(), timeout=120)
     violations: list[str] = []
-    if len(reads) != len(NEAR_OPEN) or not reads:
-        violations.append(f'{len(reads)} reads, expected {len(NEAR_OPEN)}')
-    for uri, read in reads.items():
-        violations += shape_violations(uri, refusal_violations(read, [], [], fragment)
-                                       + read_boundary_violations(read, reason), NEAR_OPEN)
+    if len(reads) != len(shapes) or not reads:
+        violations.append(f'{len(reads)} reads, expected {len(shapes)}')
+    for shape, read in reads.items():
+        violations += shape_violations(shape, refusal_violations(read, [], [], fragment)
+                                       + read_boundary_violations(read, reason), shapes)
     violations += [f'process launched: {argv!r}' for argv in storage_launches]
     assert violations == [], report(violations)
     assert guard.refused == []
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_without_token_after_an_authenticated_read_fails(
+def test_storage_read_without_token_after_an_authenticated_read_fails(uri: str, 
         era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage_launches: list[list[str]],
         guard) -> None:
     monkeypatch.setenv('JWT_SECRET', SECRET)
@@ -569,9 +722,9 @@ def test_storage_read_without_token_after_an_authenticated_read_fails(
         server = delegate_server(map_path)
         async with serving(server) as app:
             async with http_client(app, mint(SECRET, sub='alice'), era=era) as alice:
-                first = await read_resource(alice, URI)
+                first = await read_resource(alice, uri)
             async with in_memory(server, era=era) as client:
-                return first, await read_resource(client, URI)
+                return first, await read_resource(client, uri)
 
     first, anon = drive(scenario())
     ran = ran_by(storage_launches)
@@ -583,8 +736,9 @@ def test_storage_read_without_token_after_an_authenticated_read_fails(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ERAS)
-def test_storage_read_without_token_while_an_authenticated_read_is_in_flight(
+def test_storage_read_without_token_while_an_authenticated_read_is_in_flight(uri: str, 
         era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, storage_launches: list[list[str]],
         guard) -> None:
     # The authenticated read is held at the rendezvous, its executor set, before the tokenless read
@@ -600,11 +754,11 @@ def test_storage_read_without_token_while_an_authenticated_read_is_in_flight(
             async with asyncio.timeout(5):
                 while rendezvous.waiting < 1:
                     await asyncio.sleep(0.01)
-            return await read_resource(client, URI)
+            return await read_resource(client, uri)
 
         async with serving(server) as app:
             async with http_client(app, mint(SECRET, sub='alice'), era=era) as alice, in_memory(server, era=era) as client:
-                return await asyncio.gather(read_resource(alice, URI), tokenless(client))
+                return await asyncio.gather(read_resource(alice, uri), tokenless(client))
 
     first, anon = drive(scenario())
     ran = ran_by(storage_launches)

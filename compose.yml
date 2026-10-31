@@ -14,7 +14,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: rcac-mcp
+    container_name: cluster-mcp
     environment:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-at-least-32-characters-long}
       MCP_BASE_URL: ${MCP_BASE_URL:-https://mcp.rcac.dev:8443}

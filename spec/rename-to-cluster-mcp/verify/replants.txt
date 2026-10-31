@@ -1,0 +1,8 @@
+# Mutation cases a phase may re-plant beyond the module move: id, the phase from which it may differ, why.
+# Tab-separated. A builder who must re-plant another case adds its line here in the same commit and
+# names it, with its reason, in the commit body; the review reads every line.
+ladder-rungs-3-4-swapped	p2	rung 3 reads the replacement through env_setting, not RCAC_SSH_HOST
+ladder-explicit-yields-to-env-host	p2	rung 3 reads the replacement through env_setting, not RCAC_SSH_HOST
+ladder-env-host-ignored	p2	rung 3 reads the replacement through env_setting, not RCAC_SSH_HOST
+read-hook-resolves-storage-only	p3	its literal names the storage URI, now cluster://storage
+read-hook-defaults-scheme	p3	the default scheme it plants may name cluster:// now that both are served

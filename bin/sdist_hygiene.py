@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Fail when a built sdist ships repository furniture, or when there is no sdist to check.
@@ -10,11 +10,12 @@ Usage, from the repository root:
 
 This file is the one definition of what an sdist must not contain. The release recipe's `gate`
 (AGENTS.md § Factory) and the CI workflow both run it, so the two cannot drift apart.
-`[tool.hatch.build.targets.sdist]` in pyproject.toml excludes the same directories; this check
-backs that list up, because the list only covers the directories that exist today.
+Each workspace member's `[tool.hatch.build.targets.sdist]` excludes the same directories, and the
+root's `only-include` keeps everything but its two files out; this check backs those lists up,
+because a list only covers the directories that exist today.
 
 Every member of an sdist sits under one root directory named after the tarball
-(`rcac_mcp-0.1.0/`). A member outside that root is reported too: its path cannot be read
+(`cluster_mcp-0.1.0/`). A member outside that root is reported too: its path cannot be read
 relative to the root, so it cannot be cleared.
 
 A tarball is read in full before it is judged: every member header, every byte of member data,

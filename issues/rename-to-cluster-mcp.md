@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:rename-to-cluster-mcp
 kind: refactor
 appetite: big
 lane: public

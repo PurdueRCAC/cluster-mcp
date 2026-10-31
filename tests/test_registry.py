@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The tool registry holds exactly the expected tools, and the server serves exactly those."""
@@ -25,8 +25,8 @@ import pytest
 
 from conftest import need_git
 from harness import SITE, served_tools
-from rcac_mcp.server import create_mcp_server
-from rcac_mcp.tools import TOOL_REGISTRY
+from cluster_mcp.core.server import create_mcp_server
+from cluster_mcp.core.tools import TOOL_REGISTRY
 
 
 # Every tool change edits this set in the same commit as SERVER_INSTRUCTIONS and the README.
@@ -361,8 +361,11 @@ def test_registry_check_catches_drift(names: list[str], expected: str) -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize('name', [
-    pytest.param('rcac_mcp.docs', id='rcac_mcp.docs'),
-    pytest.param('rcac_mcp.tools.docs', id='rcac_mcp.tools.docs'),
+    pytest.param('cluster_mcp.core.docs', id='cluster_mcp.core.docs'),
+    pytest.param('cluster_mcp.core.tools.docs', id='cluster_mcp.core.tools.docs'),
+    # The package's old name: a leftover src/rcac_mcp/__pycache__/ from before the workspace move
+    # imports as an empty namespace package, the leftover class absence_violations explains.
+    pytest.param('rcac_mcp', id='rcac_mcp'),
 ])
 def test_docs_modules_absent(name: str) -> None:
     assert module_absent(name), '\n'.join(absence_violations(name))

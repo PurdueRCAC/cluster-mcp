@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Every supported transport starts under `bin/sandbox.sh` and a client lists the tools from it.
 
-Each row starts the installed `rcac-mcp -e local` on one transport inside the sandbox, lists its
+Each row starts the installed `cluster-mcp -e local` on one transport inside the sandbox, lists its
 tools from a client in one protocol era, and stops it. stdio and http serve both eras; sse serves
 only the handshake era (revision 2026-07-28 deprecates it), so it has a legacy row only. HTTP and SSE
 servers bind loopback on a free port and are stopped by process group: `bin/sandbox.sh` does not
@@ -27,8 +27,8 @@ import pytest
 from harness import Listed, era_mismatch, stdio_tools, url_tools
 from test_cli import CLI, SANDBOX
 from test_registry import EXPECTED_TOOLS
-from rcac_mcp.server import SERVER_INSTRUCTIONS
-from rcac_mcp.site import compose, read_local
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS
+from cluster_mcp.core.site import compose, read_local
 
 # What a server started here serves: the base and this host's own /etc/agents.d, at the default budget.
 HOST_INSTRUCTIONS = compose(SERVER_INSTRUCTIONS, read_local('this host'))
@@ -100,7 +100,7 @@ def group_alive(pgid: int) -> bool:
 
 
 def serve_and_list(transport: str, era: str, tmp_path: Path) -> tuple[Listed, list[str]]:
-    """Start `rcac-mcp -e local -t <transport>` under the sandbox, list its tools in `era`, stop it.
+    """Start `cluster-mcp -e local -t <transport>` under the sandbox, list its tools in `era`, stop it.
 
     Returns the listing and every way the stop left something behind.
     """
@@ -136,7 +136,7 @@ def serve_and_list(transport: str, era: str, tmp_path: Path) -> tuple[Listed, li
 
 
 def stdio_and_list(era: str, tmp_path: Path) -> tuple[Listed, list[str]]:
-    """Run `rcac-mcp -e local -t stdio` under the sandbox as the client's child, list, and close it."""
+    """Run `cluster-mcp -e local -t stdio` under the sandbox as the client's child, list, and close it."""
     env = {**os.environ, 'TMPDIR': str(tmp_path)}
     listed = stdio_tools([str(SANDBOX), str(CLI), '-e', 'local', '-t', 'stdio'], era, env=env)
     leftovers: list[str] = []

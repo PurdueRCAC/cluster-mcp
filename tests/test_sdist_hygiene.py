@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The sdist hygiene check (`bin/sdist_hygiene.py`) names every piece of furniture and passes nothing else.
@@ -28,11 +28,11 @@ assert _spec and _spec.loader
 hygiene = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hygiene)
 
-ROOT = 'rcac_mcp-0.1.0'
+ROOT = 'cluster_mcp-0.1.0'
 # Written out, not read from the script: a test parametrised over the script's own tuple loses
 # the case for any entry the script drops, and passes.
 RECORDED = ('.security', 'spec', 'issues', 'tests/fixtures', 'bin', '.agents')
-CLEAN = [f'{ROOT}/PKG-INFO', f'{ROOT}/pyproject.toml', f'{ROOT}/src/rcac_mcp/__init__.py', f'{ROOT}/tests/test_cli.py']
+CLEAN = [f'{ROOT}/PKG-INFO', f'{ROOT}/pyproject.toml', f'{ROOT}/src/cluster_mcp/core/__init__.py', f'{ROOT}/tests/test_cli.py']
 
 
 def tar_bytes(members: list[str], big: int = 0, fmt: int = tarfile.PAX_FORMAT) -> bytes:
@@ -49,7 +49,7 @@ def tar_bytes(members: list[str], big: int = 0, fmt: int = tarfile.PAX_FORMAT) -
             archive.addfile(info, io.BytesIO(b'x\n'))
         if big:
             data = random.Random(0).randbytes(big)
-            info = tarfile.TarInfo(f'{ROOT}/src/rcac_mcp/big.bin')
+            info = tarfile.TarInfo(f'{ROOT}/src/cluster_mcp/core/big.bin')
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
@@ -200,7 +200,7 @@ def test_dot_slash_prefix_is_read(tmp_path: Path) -> None:
 
 @mark.unit
 def test_no_sdist_fails(tmp_path: Path) -> None:
-    (tmp_path / 'rcac_mcp-0.1.0-py3-none-any.whl').write_bytes(b'')
+    (tmp_path / 'cluster_mcp-0.1.0-py3-none-any.whl').write_bytes(b'')
     found = hygiene.sdist_violations(tmp_path)
     assert len(found) == 1 and 'no sdist' in found[0]
 

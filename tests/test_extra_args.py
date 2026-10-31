@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """`extra_args` on `squeue`, `scancel`, `sacct` and `sinfo` is a list: one argument per element.
@@ -23,7 +23,7 @@ import pytest
 
 import argv_echo
 from harness import ERAS, Outcome, RecordingExecutor, call, drive, in_memory, shared_server
-from rcac_mcp.executor.shell import LocalShellExecutor
+from cluster_mcp.core.executor.shell import LocalShellExecutor
 
 TOOLS = ('squeue', 'scancel', 'sacct', 'sinfo')
 

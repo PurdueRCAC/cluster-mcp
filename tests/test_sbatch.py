@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """`sbatch` passes its script path, the job's arguments and the extra options each as one argument.
@@ -38,12 +38,11 @@ from typing import Any, Callable, Sequence
 import pytest
 
 import argv_echo
-import rcac_mcp
 from harness import ERAS, SANDBOX, Outcome, RecordingExecutor, Rendezvous, call, drive, in_memory, shared_server
-from rcac_mcp.executor import CommandResult, Executor, UserPath
-from rcac_mcp.tools import slurm
-from rcac_mcp.executor.delegate import DelegatingExecutor
-from rcac_mcp.executor.shell import LocalShellExecutor
+from cluster_mcp.core.executor import CommandResult, Executor, UserPath
+from cluster_mcp.slurm import tools as slurm
+from cluster_mcp.core.executor.delegate import DelegatingExecutor
+from cluster_mcp.core.executor.shell import LocalShellExecutor
 
 # Values that a shell would split, expand or read as an option.
 HOSTILE_ARGS = ['two words', '-v', '--', '$HOME', '*', 'line\nbreak', "it's", '']
@@ -469,8 +468,8 @@ os.getppid = lambda: 1
 socket.gethostname = lambda: 'login-node'
 platform.node = lambda: 'login-node'
 
-import rcac_mcp
-from rcac_mcp.tools import slurm
+import cluster_mcp.core
+from cluster_mcp.slurm import tools as slurm
 
 
 class Frozen(datetime):
@@ -480,14 +479,14 @@ class Frozen(datetime):
 
 
 slurm.datetime = Frozen
-print(os.path.dirname(os.path.realpath(rcac_mcp.__file__)))
+print(os.path.dirname(os.path.realpath(slurm.__file__)))
 print(slurm._job_script_path('sweep'))
 '''
 
 
 @pytest.mark.integration
 def test_separate_server_processes_name_scripts_apart() -> None:
-    package = str(Path(rcac_mcp.__file__).resolve().parent)
+    package = str(Path(slurm.__file__).resolve().parent)
     paths, violations = [], []
     for i in range(2):
         child = subprocess.run([str(SANDBOX), sys.executable, '-c', PROCESS_CHILD, FROZEN.isoformat()],
@@ -498,7 +497,7 @@ def test_separate_server_processes_name_scripts_apart() -> None:
             continue
         origin, path = lines
         if origin != package:
-            violations.append(f'process {i} imported rcac_mcp from {origin!r}, not {package!r}')
+            violations.append(f'process {i} imported cluster_mcp.slurm from {origin!r}, not {package!r}')
         if not re.fullmatch(script_name('sweep'), path):
             violations.append(f'process {i}: {path!r} is not ~/jobs/sweep_{FROZEN_STAMP}_<16 hex digits>.sh')
         paths.append(path)

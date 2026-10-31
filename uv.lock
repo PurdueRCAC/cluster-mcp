@@ -6,6 +6,14 @@ resolution-markers = [
     "python_full_version < '3.15'",
 ]
 
+[manifest]
+members = [
+    "cluster-mcp",
+    "cluster-mcp-rcac",
+    "cluster-mcp-slurm",
+    "rcac-mcp",
+]
+
 [[package]]
 name = "aiofile"
 version = "3.12.3"
@@ -270,6 +278,53 @@ sdist = { url = "https://files.pythonhosted.org/packages/3d/fa/656b739db8587d7b5
 wheels = [
     { url = "https://files.pythonhosted.org/packages/98/78/01c019cdb5d6498122777c1a43056ebb3ebfeef2076d9d026bfe15583b2b/click-8.3.1-py3-none-any.whl", hash = "sha256:981153a64e25f12d547d3426c367a4857371575ee7ad18df2a6183ab0545b2a6", size = 108274, upload-time = "2025-11-15T20:45:41.139Z" },
 ]
+
+[[package]]
+name = "cluster-mcp"
+version = "0.1.5"
+source = { editable = "packages/cluster-mcp" }
+dependencies = [
+    { name = "cluster-mcp-rcac" },
+    { name = "cluster-mcp-slurm" },
+    { name = "cmdkit" },
+    { name = "fabric" },
+    { name = "fastmcp" },
+    { name = "paramiko" },
+    { name = "pyjwt" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cluster-mcp-rcac", editable = "packages/cluster-mcp-rcac" },
+    { name = "cluster-mcp-slurm", editable = "packages/cluster-mcp-slurm" },
+    { name = "cmdkit", specifier = ">=2.7.7" },
+    { name = "fabric", specifier = ">=3.0" },
+    { name = "fastmcp", specifier = ">=4,<5" },
+    { name = "paramiko", specifier = ">=3.2" },
+    { name = "pyjwt", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "cluster-mcp-rcac"
+version = "0.1.5"
+source = { editable = "packages/cluster-mcp-rcac" }
+dependencies = [
+    { name = "cluster-mcp" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cluster-mcp", editable = "packages/cluster-mcp" }]
+
+[[package]]
+name = "cluster-mcp-slurm"
+version = "0.1.5"
+source = { editable = "packages/cluster-mcp-slurm" }
+dependencies = [
+    { name = "cluster-mcp" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cluster-mcp", editable = "packages/cluster-mcp" }]
 
 [[package]]
 name = "cmdkit"
@@ -1062,11 +1117,7 @@ name = "rcac-mcp"
 version = "0.1.5"
 source = { editable = "." }
 dependencies = [
-    { name = "cmdkit" },
-    { name = "fabric" },
-    { name = "fastmcp" },
-    { name = "paramiko" },
-    { name = "pyjwt" },
+    { name = "cluster-mcp" },
 ]
 
 [package.dev-dependencies]
@@ -1076,13 +1127,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "cmdkit", specifier = ">=2.7.7" },
-    { name = "fabric", specifier = ">=3.0" },
-    { name = "fastmcp", specifier = ">=4,<5" },
-    { name = "paramiko", specifier = ">=3.2" },
-    { name = "pyjwt", specifier = ">=2.0" },
-]
+requires-dist = [{ name = "cluster-mcp", editable = "packages/cluster-mcp" }]
 
 [package.metadata.requires-dev]
 dev = [

@@ -1,0 +1,49 @@
+[project]
+name = "cluster-mcp"
+version = "0.1.5"
+description = "An MCP server for HPC clusters: shell, files, jobs and storage for AI agents"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=4,<5",
+    "cmdkit>=2.7.7",
+    "pyjwt>=2.0",
+    "fabric>=3.0",
+    # Direct for its floor: from 3.2 Paramiko names a link closed during authentication apart from a
+    # refused one, which `executor/ssh.py` (`PARAMIKO_FLOOR`) relies on; Fabric allows older.
+    "paramiko>=3.2",
+    # The capability members a default install carries: the core's tool registry imports them.
+    "cluster-mcp-slurm",
+    "cluster-mcp-rcac",
+]
+
+[project.scripts]
+cluster-mcp = "cluster_mcp.core:main"
+
+[tool.uv.sources]
+cluster-mcp-slurm = { workspace = true }
+cluster-mcp-rcac = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Only this member's portion of the cluster_mcp namespace: no cluster_mcp/__init__.py ever ships.
+only-include = ["src/cluster_mcp/core"]
+sources = ["src"]
+
+[tool.hatch.build.targets.sdist]
+# The sandbox helper, the design records, the backlog, and the hidden security lane are
+# repository furniture, not distribution content. A member sdist is rooted at its own directory,
+# so none of them sits inside it today; the list is defence in depth, and the release recipe's
+# gate re-checks every built tarball (bin/sdist_hygiene.py).
+exclude = [
+    "/bin",
+    "/.security",
+    "/.local",
+    "/spec",
+    "/issues",
+    "/tests/fixtures",
+    "/certs",
+]

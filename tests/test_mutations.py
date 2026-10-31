@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The fast half of the planted-violation runner (`mutants.py`), kept in the suite.
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from mutants import CASES, Case, apply, mutation_violations
+from mutants import CASES, MEMBERS, REPO_FILES, SURVIVOR_CONTROL, Case, apply, apply_repo, mutation_violations
 
 TARGETS = ['test_isolation.py::test_a', 'test_isolation.py::test_b']
 WHY = 'ran as'
@@ -39,9 +39,33 @@ KILLED = junit(('test_a', 'failure', 'AssertionError: echo A ran as ubob, expect
 @pytest.mark.parametrize('case', CASES, ids=[c.id for c in CASES])
 def test_mutation_anchor_applies(case: Case, tmp_path: Path) -> None:
     src_root = apply(case, tmp_path)
-    mutated = src_root / 'rcac_mcp' / case.file
-    compile(mutated.read_text(), str(mutated), 'exec')
-    assert case.targets and case.why
+    if case.file:
+        mutated = src_root / 'cluster_mcp' / case.file
+        compile(mutated.read_text(), str(mutated), 'exec')
+    repo = apply_repo(case, tmp_path)
+    if repo is not None:
+        root = Path(__file__).resolve().parents[1]
+        changed = [name for name in REPO_FILES if (repo / name).read_text() != (root / name).read_text()]
+        assert changed == sorted({name for name, _, _ in case.repo_edits}), changed
+    assert case.targets and case.why and (case.edits or case.repo_edits)
+
+
+@pytest.mark.unit
+def test_mutation_case_files_name_a_member(tmp_path: Path) -> None:
+    # A case file is relative to the namespace, its member first, so it names the same file in the
+    # copy and in any install; the copy holds every member and, like each member, no __init__.py.
+    # A case planting only into repository files has no file, and plants only into `REPO_FILES`.
+    repo_only = [c for c in CASES if not c.file and not c.edits and c.repo_edits]
+    strays = [f'{c.id}: {c.file}' for c in (*CASES, SURVIVOR_CONTROL)
+              if c.file.split('/')[0] not in MEMBERS and c not in repo_only]
+    strays += [f'{c.id}: {name}' for c in CASES for name, _, _ in c.repo_edits if name not in REPO_FILES]
+    assert strays == [], strays
+    assert sorted(MEMBERS) == ['core', 'rcac', 'slurm']
+    namespace = apply(SURVIVOR_CONTROL, tmp_path) / 'cluster_mcp'
+    assert sorted(p.name for p in namespace.iterdir()) == ['core', 'rcac', 'slurm']
+    assert not (namespace / '__init__.py').exists()
+    partial = apply(SURVIVOR_CONTROL, tmp_path / 'partial', omit='rcac') / 'cluster_mcp'
+    assert sorted(p.name for p in partial.iterdir()) == ['core', 'slurm']
 
 
 @pytest.mark.unit

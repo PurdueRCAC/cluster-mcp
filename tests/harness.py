@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Drive the server through its public MCP surface: the only test module that imports FastMCP, mcp or httpx2.
@@ -44,16 +44,17 @@ pass ran in its era. A connect in an era chosen with `era=` is not logged: it do
 selector.
 
 **The served surface.** `served_surface` reads what a client in the selected era is served (every
-tool's description and input and output schemas, every resource's name, description and MIME type,
-and the instructions) in the shape of `tests/fixtures/served_surface.json`, the snapshot taken from
-the server before the stack move, so a test compares the two directly.
+tool's description, input and output schemas and, when it has them, annotations and title, every
+resource's name, description and MIME type, and the instructions) in the shape of
+`tests/fixtures/served_surface.json`, the snapshot taken from the server before the stack move, so
+a test compares the two directly.
 
 **Both eras, observed from both ends.** `negotiate` connects in a given era without the
 post-connect check and reports what happened: the negotiated version, whether an `InitializeResult`
 exists, the instructions and tool names the client received, and the methods the server's
 `MethodLog` saw on that connection. A test then decides whether that is the era it asked for.
 
-**Servers in another process.** `stdio_tools` and `url_tools` list the tools of a real `rcac-mcp`
+**Servers in another process.** `stdio_tools` and `url_tools` list the tools of a real `cluster-mcp`
 process and report the era it negotiated (`Listed`); `stdio_refusal` connects to one that cannot
 start and returns the error the client got (`Refused`), relying on a JSON-RPC error that answers the
 handshake reaching the caller as `MCPError`, with its `code` and its message as `str()`.
@@ -105,12 +106,12 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from mcp import MCPError
 
-from rcac_mcp.executor import launch
-from rcac_mcp.executor.base import CommandResult, Executor
-from rcac_mcp.middleware import AuthExecutorMiddleware, SharedExecutorMiddleware
-from rcac_mcp.server import create_mcp_server
-from rcac_mcp.site import SiteContext
-from rcac_mcp.token import ALGORITHM, AUDIENCE, ISSUER
+from cluster_mcp.core.executor import launch
+from cluster_mcp.core.executor.base import CommandResult, Executor
+from cluster_mcp.core.middleware import AuthExecutorMiddleware, SharedExecutorMiddleware
+from cluster_mcp.core.server import create_mcp_server
+from cluster_mcp.core.site import SiteContext
+from cluster_mcp.core.token import ALGORITHM, AUDIENCE, ISSUER
 
 __all__ = ['Outcome', 'drive', 'serving', 'http_client', 'in_memory', 'call', 'call_http', 'mint',
            'user_map', 'RecordingExecutor', 'Rendezvous', 'Raises', 'MethodLog', 'delegate_server',
@@ -118,7 +119,7 @@ __all__ = ['Outcome', 'drive', 'serving', 'http_client', 'in_memory', 'call', 'c
            'select_era', 'era_mismatch', 'session_era', 'rejection_status', 'served_tools',
            'served_instructions', 'served_surface', 'protocol_error', 'Negotiated', 'negotiate', 'Listed',
            'stdio_tools', 'url_tools', 'Refused', 'stdio_refusal', 'SANDBOX', 'LOOPBACK', 'installed_auth', 'StateProbe', 'tool_names',
-           'launched_script', 'read_resource', 'read_verbatim', 'SITE']
+           'launched_script', 'read_resource', 'read_verbatim', 'SITE', 'DEPRECATION_WINDOW']
 
 T = TypeVar('T')
 
@@ -131,6 +132,22 @@ ERA_VARIABLE = 'CLUSTER_MCP_TEST_ERA'
 ERA_LOG_VARIABLE = 'CLUSTER_MCP_ERA_LOG'
 ERAS = ('legacy', 'modern')
 MODERN_VERSION = '2026-07-28'
+
+# The URIs each resource is served under: `cluster://` and its deprecated `rcac://` alias, in that
+# order. Written out here, never read from the registry, so a dropped or an extra entry fails a
+# test instead of quietly shrinking or growing its rows.
+CONTEXT_URIS = ('cluster://context', 'rcac://context')
+STORAGE_URIS = ('cluster://storage', 'rcac://storage')
+
+# The deprecation window of the server's old names, as the 0.2.0 release published it. Written out
+# here, never read from `cluster_mcp.core.deprecation.WINDOW`, so a test comparing a warning or the
+# README with it fails when the window changes anywhere, the constant included.
+DEPRECATION_WINDOW = 'deprecated in 0.2.0, removed no earlier than 0.4.0'
+
+
+def scheme(uri: str) -> str:
+    """The scheme of `uri`, a row's id when a test runs once per URI a resource is served under."""
+    return uri.partition('://')[0]
 
 
 def select_era(environ: Mapping[str, str]) -> str:
@@ -407,6 +424,21 @@ def served_instructions(server: FastMCP) -> str | None:
     return drive(_served(server))[1]
 
 
+def _tool_entry(tool: Any) -> dict[str, Any]:
+    entry = {'description': tool.description, 'inputSchema': tool.input_schema, 'outputSchema': tool.output_schema}
+    # A tool served with annotations records them, each hint the server sent with its value and no
+    # other: a tool served without them keeps the snapshot's shape, and a hint added, dropped or
+    # changed shows as a difference.
+    if tool.annotations is not None:
+        entry['annotations'] = tool.annotations.model_dump(mode='json', by_alias=True, exclude_unset=True)
+    # Its top-level display title, which a client shows in place of the name, whenever one is served
+    # (FastMCP 4 serves one derived from the name when the tool sets none), so a title gained, lost or
+    # changed shows as a difference.
+    if tool.title is not None:
+        entry['title'] = tool.title
+    return entry
+
+
 async def _surface(server: FastMCP) -> dict[str, Any]:
     async with in_memory(server) as client:
         tools = await client.list_tools()
@@ -414,8 +446,7 @@ async def _surface(server: FastMCP) -> dict[str, Any]:
         instructions = client.instructions
     surface = {
         'instructions': instructions,
-        'tools': {tool.name: {'description': tool.description, 'inputSchema': tool.input_schema,
-                              'outputSchema': tool.output_schema} for tool in tools},
+        'tools': {tool.name: _tool_entry(tool) for tool in tools},
         'resources': {str(resource.uri): {'name': resource.name, 'description': resource.description,
                                           'mimeType': resource.mime_type} for resource in resources},
     }
@@ -426,9 +457,11 @@ async def _surface(server: FastMCP) -> dict[str, Any]:
 def served_surface(server: FastMCP) -> dict[str, Any]:
     """What a client in the selected era is served by `server`, in the snapshot's shape.
 
-    `{'instructions': …, 'tools': {name: {'description', 'inputSchema', 'outputSchema'}},
+    `{'instructions': …, 'tools': {name: {'description', 'inputSchema', 'outputSchema'[, 'annotations'][, 'title']}},
     'resources': {uri: {'name', 'description', 'mimeType'}}}`, the shape of
-    `tests/fixtures/served_surface.json`.
+    `tests/fixtures/served_surface.json`. A tool's `annotations` key is there only when the server
+    sends annotations for it, holding exactly the hints it sent; its `title` key whenever the server
+    sends a title for it.
     """
     return drive(_surface(server))
 

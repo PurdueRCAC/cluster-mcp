@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The served surface matches the snapshot taken from the server before the stack move.
@@ -15,16 +15,34 @@ of the named deltas only, in the snapshot's shape, listed in AGENTS.md § Testin
 each of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` (`safe-execution`); `instructions`, the
 base composed with the harness's site context, `tools.cluster_context`, the new tool in `myquota`'s
 schema shape with its docstring as the description, and `resources.rcac://context.description`
-(`agents-d-instructions`).
+(`agents-d-instructions`); `resources.cluster://context` and `resources.cluster://storage`, each a
+copy of its `rcac://` entry, which stays as it was: the `rcac://` URIs are served on as deprecated
+aliases; and `instructions`, the base (now the generic core, the Slurm snippet and the RCAC-specific
+overlay) composed with the harness's site context (`rename-to-cluster-mcp`). The server's name is
+not in the snapshot's shape; `test_protocol.py` pins it.
+
+No tool entry in the snapshot has an `annotations` key: neither `3d010ec` nor 0.1.4 served tool
+annotations, and `served_surface` records the key only for a tool served with them. So the
+comparison covers annotations with no fixture change: a tool that gains them shows as an entry with
+a key the snapshot's lacks. Nor has any a `title` key, the snapshot's shape having none. FastMCP 4,
+the stack 0.1.4 already ran on, serves every tool without a title of its own a display title
+derived from its name (`run_command` is "Run Command"); `served_surface` records a tool's title
+whenever one is served, so that derived title is the one tolerated difference in titles, and the
+fixture needs no change.
 
 `surface_violations` compares what a client in the selected era is served now (`served_surface`)
 with the snapshot. No tool, argument, required argument, argument type or default, description,
-resource or instruction may differ. Four kinds of generated schema metadata differ on FastMCP 4,
-each for a stated cause (`TOLERATED`), and each is accepted only in its own shape: a `description`
-added to an argument that had none; `additionalProperties` added to an input schema, and only as
-exactly `false`; an output schema's `$defs` inlined where they were referenced; and a `description`
-added on an inlined output node, only where the snapshot had a `$ref`. Anything else is a violation.
-`tolerated_differences` lists the accepted differences per tool, for the record of the change.
+annotation, title, resource or instruction may differ: a tool's annotations differ when either side
+has them and the other has not, or when a hint is on one side only or has another value; its title
+differs when the snapshot has one and the served tool has none or another, or when the served tool
+has one the snapshot lacks other than the title derived from its name. Five kinds of generated
+metadata differ on FastMCP 4, each for a stated cause (`TOLERATED`), and each is accepted only in
+its own shape: a tool's title derived from its name, only where the snapshot has none; a
+`description` added to an argument that had none;
+`additionalProperties` added to an input schema, and only as exactly `false`; an output schema's
+`$defs` inlined where they were referenced; and a `description` added on an inlined output node,
+only where the snapshot had a `$ref`. Anything else is a violation. `tolerated_differences` lists
+the accepted differences per tool, for the record of the change.
 """
 
 from __future__ import annotations
@@ -36,14 +54,16 @@ from typing import Any, Callable
 
 import pytest
 
-from harness import SITE, served_surface
-from rcac_mcp.server import create_mcp_server
+from harness import CONTEXT_URIS, SITE, STORAGE_URIS, scheme, served_surface
+from cluster_mcp.core.server import create_mcp_server
 from test_registry import EXPECTED_TOOLS
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'served_surface.json'
 
 # Each accepted difference kind, with its cause.
 TOLERATED: dict[str, str] = {
+    'derived-title': 'FastMCP 4 serves a tool with no title of its own a display title derived from its name, '
+                     'which 0.1.4 served too',
     'argument-description': "FastMCP 4 copies each docstring `Args:` line into that argument's schema as its "
                             '`description`',
     'additional-properties': 'FastMCP 4 advertises `additionalProperties: false`, the rejection of an unknown '
@@ -54,6 +74,11 @@ TOLERATED: dict[str, str] = {
 }
 
 DEFS_PREFIX = '#/$defs/'
+
+
+def derived_title(name: str) -> str:
+    """The display title FastMCP 4 derives from tool name `name`: each `_` or `-` a space, each word capitalised."""
+    return name.replace('_', ' ').replace('-', ' ').title()
 
 NodePath = tuple[Any, ...]
 
@@ -120,12 +145,39 @@ class _Comparison:
         self.resources(snapshot.get('resources', {}), served.get('resources', {}))
 
     def tool(self, name: str, base: dict[str, Any], head: dict[str, Any]) -> None:
-        for key in sorted(set(base) ^ set(head)):
+        for key in sorted((set(base) ^ set(head)) - {'title'}):
             self.violations.append(f'{name}: tool entry {"lost" if key in base else "gained"} {key!r}')
+        self.title(name, base.get('title'), head.get('title'))
         if base.get('description') != head.get('description'):
             self.violations.append(f'{name}: description differs')
+        self.annotations(name, base.get('annotations'), head.get('annotations'))
         self.input_schema(name, base.get('inputSchema') or {}, head.get('inputSchema') or {})
         self.output_schema(name, base.get('outputSchema'), head.get('outputSchema'))
+
+    def title(self, tool: str, base: Any, head: Any) -> None:
+        if base is None and head is None:
+            return
+        if base is None and head == derived_title(tool):
+            self.tolerate(tool, 'derived-title', repr(head))
+        elif base is None:
+            self.violations.append(f'{tool}: tool entry gained the title {head!r}, not the derived {derived_title(tool)!r}')
+        elif head is None:
+            self.violations.append(f'{tool}: tool entry lost the title {base!r}')
+        elif base != head:
+            self.violations.append(f'{tool}: title differs: {base!r} -> {head!r}')
+
+    def annotations(self, tool: str, base: Any, head: Any) -> None:
+        if not (isinstance(base, dict) and isinstance(head, dict)):
+            if base != head:
+                self.violations.append(f'{tool}: annotations differ: {base!r} -> {head!r}')
+            return
+        for hint in sorted(set(base) | set(head)):
+            if hint not in base:
+                self.violations.append(f'{tool}: annotations gained hint {hint!r}')
+            elif hint not in head:
+                self.violations.append(f'{tool}: annotations lost hint {hint!r}')
+            elif base[hint] != head[hint]:
+                self.violations.append(f'{tool}: annotation {hint} differs: {base[hint]!r} -> {head[hint]!r}')
 
     def input_schema(self, tool: str, base: dict[str, Any], head: dict[str, Any]) -> None:
         for key in sorted(set(base) | set(head)):
@@ -226,6 +278,10 @@ def test_served_surface_matches_baseline() -> None:
     assert served['tools'], 'the server listed no tools'
     violations = surface_violations(load_fixture(), served)
     assert violations == [], '\n'.join(violations)
+    # 0.1.4 served every tool a title, FastMCP 4's derived one. The snapshot's shape has none, so this
+    # is what fails on one lost.
+    untitled = sorted(name for name, tool in served['tools'].items() if 'title' not in tool)
+    assert untitled == [], f'served without the title 0.1.4 served: {untitled}'
 
 
 @pytest.mark.unit
@@ -234,8 +290,10 @@ def test_surface_fixture_is_the_baseline_shape() -> None:
     assert sorted(snapshot) == ['instructions', 'resources', 'tools']
     assert isinstance(snapshot['instructions'], str) and snapshot['instructions']
     assert sorted(snapshot['tools']) == sorted(EXPECTED_TOOLS)
-    assert sorted(snapshot['resources']) == ['rcac://context', 'rcac://storage']
+    assert sorted(snapshot['resources']) == sorted((*CONTEXT_URIS, *STORAGE_URIS))
     for name, tool in snapshot['tools'].items():
+        # No `annotations` key: no tool was served with annotations; and no `title` key, which the
+        # snapshot's shape lacks.
         assert sorted(tool) == ['description', 'inputSchema', 'outputSchema'], name
         assert isinstance(tool['description'], str) and tool['description'], name
         # The metadata FastMCP 4 adds is absent: the snapshot was not taken on the new stack.
@@ -264,6 +322,102 @@ def _summary_only(s: dict[str, Any]) -> None:
     tool['description'] = tool['description'].split('\n\n')[0]
 
 
+# Annotations as a server would send them for one tool: two hints.
+HINTS = {'readOnlyHint': True, 'destructiveHint': False}
+
+
+def _annotate(s: dict[str, Any], tool: str = 'run_command', hints: dict[str, Any] | None = None) -> None:
+    s['tools'][tool]['annotations'] = dict(HINTS if hints is None else hints)
+
+
+def _annotate_all(s: dict[str, Any]) -> None:
+    for name in s['tools']:
+        _annotate(s, name)
+
+
+def _both_annotated(head: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The snapshot and `head`, each with `run_command` served with `HINTS` beforehand."""
+    return _plant(_annotate), head
+
+
+# Each way a tool's annotations can differ, as (snapshot, served): annotations on one side only,
+# either side; a hint on one side only, either side; a hint's value; and empty annotations against none.
+ANNOTATION_DRIFT = [
+    pytest.param(lambda: (load_fixture(), _plant(_annotate_all)), "tool entry gained 'annotations'",
+                 id='annotations-added-to-every-tool'),
+    pytest.param(lambda: (load_fixture(), _plant(_annotate)), "run_command: tool entry gained 'annotations'",
+                 id='annotations-added-to-one-tool'),
+    pytest.param(lambda: (_plant(_annotate), load_fixture()), "run_command: tool entry lost 'annotations'",
+                 id='annotations-removed'),
+    pytest.param(lambda: (load_fixture(), _plant(lambda s: _annotate(s, hints={}))),
+                 "run_command: tool entry gained 'annotations'", id='empty-annotations-added'),
+    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'readOnlyHint': False}))),
+                 'run_command: annotation readOnlyHint differs: True -> False', id='hint-flipped'),
+    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={'readOnlyHint': True}))),
+                 "run_command: annotations lost hint 'destructiveHint'", id='hint-removed'),
+    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'idempotentHint': True}))),
+                 "run_command: annotations gained hint 'idempotentHint'", id='hint-added'),
+    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'readOnlyHint': None}))),
+                 'run_command: annotation readOnlyHint differs: True -> None', id='hint-nulled'),
+    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={}))),
+                 "run_command: annotations lost hint 'readOnlyHint'", id='hints-emptied'),
+]
+
+
+def _title(s: dict[str, Any], tool: str = 'run_command', title: str = 'Run a command') -> None:
+    s['tools'][tool]['title'] = title
+
+
+def _title_all(s: dict[str, Any]) -> None:
+    for name in s['tools']:
+        _title(s, name, name)
+
+
+# Each way a tool's top-level title can differ, as (snapshot, served): a title other than the derived
+# one, on one tool or every tool, an empty one, the derived one's case changed; a title the snapshot
+# has, lost, replaced by the derived one, or changed.
+TITLE_DRIFT = [
+    pytest.param(lambda: (load_fixture(), _plant(_title_all)), "tool entry gained the title 'run_command'",
+                 id='title-added-to-every-tool'),
+    pytest.param(lambda: (load_fixture(), _plant(_title)),
+                 "run_command: tool entry gained the title 'Run a command', not the derived 'Run Command'",
+                 id='title-added-to-one-tool'),
+    pytest.param(lambda: (load_fixture(), _plant(lambda s: _title(s, title=''))), "run_command: tool entry gained the title ''",
+                 id='empty-title-added'),
+    pytest.param(lambda: (load_fixture(), _plant(lambda s: _title(s, title='Run command'))),
+                 "run_command: tool entry gained the title 'Run command'", id='derived-title-recased'),
+    pytest.param(lambda: (_plant(_title), load_fixture()), "run_command: tool entry lost the title 'Run a command'",
+                 id='title-removed'),
+    pytest.param(lambda: (_plant(_title), _plant(lambda s: _title(s, title='Run Command'))),
+                 "run_command: title differs: 'Run a command' -> 'Run Command'", id='title-replaced-by-derived'),
+    pytest.param(lambda: (_plant(_title), _plant(lambda s: _title(s, title='Run command'))),
+                 "run_command: title differs: 'Run a command' -> 'Run command'", id='title-changed'),
+]
+
+
+def _drift_violations(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]]) -> list[str]:
+    snapshot, served = pair()
+    assert snapshot != served, 'the planted difference did not land'
+    assert surface_violations(snapshot, snapshot) == [] and surface_violations(served, served) == []
+    return surface_violations(snapshot, served)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('pair', 'fragment'), ANNOTATION_DRIFT)
+def test_surface_check_catches_annotation_drift(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
+                                                fragment: str) -> None:
+    violations = _drift_violations(pair)
+    assert any(fragment in v for v in violations), violations
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('pair', 'fragment'), TITLE_DRIFT)
+def test_surface_check_catches_title_drift(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
+                                           fragment: str) -> None:
+    violations = _drift_violations(pair)
+    assert any(fragment in v for v in violations), violations
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(('change', 'fragment'), [
     pytest.param(_rename, 'tool missing: run_command', id='renamed-tool'),
@@ -275,8 +429,8 @@ def _summary_only(s: dict[str, Any]) -> None:
     pytest.param(lambda s: _input(s)['properties']['cwd'].update(default='~'),
                  'run_command: argument cwd default differs', id='default-changed'),
     pytest.param(_summary_only, 'run_command: description differs', id='description-changed'),
-    pytest.param(lambda s: s['resources'].pop('rcac://storage'), 'resource missing: rcac://storage',
-                 id='resource-dropped'),
+    *(pytest.param(lambda s, uri=uri: s['resources'].pop(uri), f'resource missing: {uri}',
+                   id=f'resource-dropped-{scheme(uri)}') for uri in STORAGE_URIS),
     pytest.param(lambda s: s.update(instructions=s['instructions'] + '\nUse the docs tool.'), 'instructions differ',
                  id='instructions-changed'),
     pytest.param(lambda s: s['tools']['run_command']['outputSchema']['properties']['exit_code'].update(type='string'),
@@ -318,6 +472,9 @@ def _describe_model(s: dict[str, Any]) -> None:
     pytest.param(_inline_listing, 'list_directory', 'output-defs-inlined: FileInfo', id='output-defs-inlined'),
     pytest.param(_describe_model, 'list_directory', 'output-model-description: properties.result.items',
                  id='output-model-description'),
+    pytest.param(lambda s: _title(s, title='Run Command'), 'run_command', "derived-title: 'Run Command'", id='derived-title'),
+    pytest.param(lambda s: _title(s, 'scontrol_show_job', 'Scontrol Show Job'), 'scontrol_show_job',
+                 "derived-title: 'Scontrol Show Job'", id='derived-title-of-three-words'),
 ])
 def test_surface_check_tolerates_listed_differences(change: Callable[[dict[str, Any]], None], tool: str,
                                                     kind: str) -> None:

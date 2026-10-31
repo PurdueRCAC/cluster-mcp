@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The suite's own safety rails: sandboxed CLI drives, the unit guard, the PATH shim, the harness fence.
@@ -32,8 +32,11 @@ import _posixsubprocess
 import pytest
 
 import harness
-import rcac_mcp
-from rcac_mcp.executor import launch
+import cluster_mcp
+import cluster_mcp.core
+import cluster_mcp.rcac
+import cluster_mcp.slurm
+from cluster_mcp.core.executor import launch
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
@@ -169,19 +172,19 @@ def test_sandbox_check_accepts_sandboxed_drives(source: str) -> None:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(('source', 'fragment'), [
-    pytest.param('import subprocess\nsubprocess.run(["rcac-mcp", "--help"])\n',
+    pytest.param('import subprocess\nsubprocess.run(["cluster-mcp", "--help"])\n',
                  'subprocess.run does not run through', id='bare-cli'),
     pytest.param('import subprocess\nsubprocess.run(argv)\n',
                  'subprocess.run does not run through', id='computed-argv'),
     pytest.param('from subprocess import run\nrun([str(SANDBOX)])\n',
                  'subprocess.run called through a bare name', id='imported-run'),
-    pytest.param('import subprocess as sp\nsp.check_output(["rcac-mcp"])\n',
+    pytest.param('import subprocess as sp\nsp.check_output(["cluster-mcp"])\n',
                  'subprocess.check_output does not run through', id='aliased-module'),
-    pytest.param('import os\nos.system("rcac-mcp --help")\n',
+    pytest.param('import os\nos.system("cluster-mcp --help")\n',
                  'os.system does not run through', id='os-system'),
-    pytest.param('import os\nos.execvp("rcac-mcp", ["rcac-mcp"])\n',
+    pytest.param('import os\nos.execvp("cluster-mcp", ["cluster-mcp"])\n',
                  'os.execvp does not run through', id='exec-family'),
-    pytest.param('import asyncio\nasyncio.create_subprocess_exec("rcac-mcp")\n',
+    pytest.param('import asyncio\nasyncio.create_subprocess_exec("cluster-mcp")\n',
                  'asyncio.create_subprocess_exec does not run through', id='asyncio-subprocess'),
     pytest.param('import subprocess\nsubprocess.run([str(SANDBOX), "sudo", "-n", "true"])\n',
                  "launches 'sudo'", id='sudo-argv'),
@@ -199,7 +202,7 @@ def test_sandbox_check_catches_unsandboxed(source: str, fragment: str) -> None:
 # types, and the HTTP client (`httpx2`/`httpcore2` today; `httpx` stays listed so a stray import of
 # the old client is caught too). Only the harness may import it, so a stack move rewrites the
 # harness and the internals-bound modules AGENTS.md lists (which reach the stack through objects the
-# harness or `rcac_mcp` hands them), and nothing else.
+# harness or `cluster_mcp.core` hands them), and nothing else.
 STACK = ('fastmcp', 'mcp', 'mcp_types', 'httpx', 'httpx2', 'httpcore2')
 STACK_HOME = 'harness.py'
 
@@ -292,9 +295,9 @@ def test_only_the_harness_imports_the_stack() -> None:
     pytest.param('import builtins\nbuiltins.__import__("httpx")\n', 'imports httpx', id='builtins-dunder-import'),
 ])
 def test_stack_import_check_catches_imports(source: str, fragment: str) -> None:
-    for clean in ('from harness import JWTVerifier, call\nimport mcpx\nfrom rcac_mcp.server import create_mcp_server\n',
+    for clean in ('from harness import JWTVerifier, call\nimport mcpx\nfrom cluster_mcp.core.server import create_mcp_server\n',
                   'from . import mcp\n',
-                  'from importlib import import_module\nimport_module("rcac_mcp.docs")\nimport_module(name)\n'):
+                  'from importlib import import_module\nimport_module("cluster_mcp.core.docs")\nimport_module(name)\n'):
         assert stack_import_violations(clean, 'f.py') == [], clean
     assert stack_import_violations(source, STACK_HOME) == []
     violations = stack_import_violations(source, 'f.py')
@@ -396,9 +399,50 @@ def test_unit_guard_redirects_home(tmp_path: Path) -> None:
     assert os.path.expanduser('~') != pwd.getpwuid(os.getuid()).pw_dir
     for var in ('XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME'):
         assert Path(os.environ[var]).is_relative_to(home), var
-    for var in ('RCAC_SSH_HOST', 'RCAC_USER_MAP', 'JWT_SECRET', 'OIDC_CONFIG_URL', 'OIDC_CLIENT_ID',
-                'OIDC_CLIENT_SECRET', 'MCP_BASE_URL'):
+    for var in ('CLUSTER_MCP_SSH_HOST', 'RCAC_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP', 'JWT_SECRET',
+                'OIDC_CONFIG_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'MCP_BASE_URL'):
         assert var not in os.environ, var
+
+
+# Every name of the SSH-host and user-map variables bin/sandbox.sh must unset, the legacy ones included.
+SANDBOX_UNSET = ('CLUSTER_MCP_SSH_HOST', 'RCAC_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP')
+
+
+def sandbox_unset_violations(script: str) -> list[str]:
+    """Return every way `script` (bin/sandbox.sh's text) fails to keep a host or user map from leaking in.
+
+    It must unset each of `SANDBOX_UNSET` (its `unset` statements joined, continuation lines
+    included), and turn uv env files off: unset `UV_ENV_FILE` and export `UV_NO_ENV_FILE`, or
+    `uv run` loads the variables back from an env file after the unset.
+    """
+    statements = re.findall(r'^unset ((?:[^\n]*\\\n)*[^\n]*)', script, re.M)
+    unset = ' '.join(statements).replace('\\', ' ').split()
+    violations = [f'does not unset {name}' for name in SANDBOX_UNSET if name not in unset]
+    if 'UV_ENV_FILE' not in unset:
+        violations.append('does not unset UV_ENV_FILE')
+    if not re.search(r'^export UV_NO_ENV_FILE=1$', script, re.M):
+        violations.append('does not export UV_NO_ENV_FILE=1')
+    return violations
+
+
+@pytest.mark.unit
+def test_sandbox_unsets_both_names() -> None:
+    assert sandbox_unset_violations(SANDBOX.read_text()) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('old', 'new', 'fragment'), [
+    pytest.param('unset CLUSTER_MCP_SSH_HOST RCAC_SSH_HOST ', 'unset CLUSTER_MCP_SSH_HOST ',
+                 'does not unset RCAC_SSH_HOST', id='legacy-host'),
+    pytest.param('RCAC_SSH_HOST CLUSTER_MCP_USER_MAP ', 'RCAC_SSH_HOST ', 'does not unset CLUSTER_MCP_USER_MAP',
+                 id='new-map'),
+    pytest.param('unset UV_ENV_FILE\n', '', 'does not unset UV_ENV_FILE', id='env-file'),
+    pytest.param('export UV_NO_ENV_FILE=1\n', '', 'does not export UV_NO_ENV_FILE=1', id='no-env-file'),
+])
+def test_sandbox_unset_check_catches_a_leak(old: str, new: str, fragment: str) -> None:
+    script = SANDBOX.read_text()
+    assert script.count(old) == 1, f'the plant anchor {old!r} occurs {script.count(old)} times'
+    assert fragment in sandbox_unset_violations(script.replace(old, new))
 
 
 @pytest.mark.unit
@@ -466,8 +510,8 @@ def test_executes_refuses_what_it_does_not_stand_in_for(argv: list[str], fragmen
 
 @pytest.mark.integration
 def test_executes_launches_only_inside_the_sandbox(executes, path_shim: Path) -> None:
-    from rcac_mcp.executor.delegate import DelegatingExecutor
-    from rcac_mcp.executor.shell import LocalShellExecutor
+    from cluster_mcp.core.executor.delegate import DelegatingExecutor
+    from cluster_mcp.core.executor.shell import LocalShellExecutor
 
     local = LocalShellExecutor().run('printf %s "$HOME"', timeout=20)
     probe = 'printf "%s|%s|%s" "$HOME" "$USER" "$(command -v sudo)"'
@@ -564,10 +608,27 @@ def spec_id_violations(name: str, text: str) -> list[str]:
     return [f'{name}:{n}: {line.strip()[:120]}' for n, line in enumerate(text.splitlines(), 1) if SPEC_ID.search(line)]
 
 
+def namespace_portions() -> list[Path]:
+    """Every directory the `cluster_mcp` namespace spans: one per workspace member installed."""
+    return sorted(Path(p).resolve() for p in cluster_mcp.__path__)
+
+
+@pytest.mark.unit
+def test_spec_id_scan_covers_every_member() -> None:
+    # The namespace has no __init__.py, so no one portion's __file__ reaches the others: the scan
+    # walks every portion, and a member left out of it would escape the check.
+    portions = namespace_portions()
+    assert getattr(cluster_mcp, '__file__', None) is None, 'cluster_mcp is a regular package, not a namespace'
+    assert sorted(p.name for p in portions) == ['cluster_mcp'] * 3, portions
+    for member in (cluster_mcp.core, cluster_mcp.slurm, cluster_mcp.rcac):
+        home = Path(member.__file__).resolve().parent.parent
+        assert home in portions, f'{member.__name__} lives under {home}, outside the scanned portions {portions}'
+
+
 @pytest.mark.unit
 def test_no_spec_ids_in_the_package_or_the_suite() -> None:
-    package = Path(rcac_mcp.__file__).resolve().parent
-    files = sorted(package.rglob('*.py')) + sorted(Path(__file__).resolve().parent.glob('*.py'))
+    files = [f for portion in namespace_portions() for f in sorted(portion.rglob('*.py'))]
+    files += sorted(Path(__file__).resolve().parent.glob('*.py'))
     assert files, 'no source files found to check'
     violations = [v for f in files for v in spec_id_violations(str(f), f.read_text())]
     assert violations == [], 'a spec id names a requirement or phase in the code:\n' + '\n'.join(violations)

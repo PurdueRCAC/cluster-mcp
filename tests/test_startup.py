@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """A server whose SSH connection fails at startup says why, to the client, in both protocol eras.
@@ -41,11 +41,11 @@ from fabric import Config, Connection
 from paramiko.ssh_exception import (AuthenticationException, BadAuthenticationType, NoValidConnectionsError,
                                     SSHException)
 
-import rcac_mcp
-import rcac_mcp.executor.ssh
+import cluster_mcp.core
+import cluster_mcp.core.executor.ssh
 from harness import Refused, stdio_refusal
-from rcac_mcp import MCPServerApp
-from rcac_mcp.startup import answer_until_eof
+from cluster_mcp.core import MCPServerApp
+from cluster_mcp.core.startup import answer_until_eof
 from test_cli import CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
@@ -285,18 +285,18 @@ def run_app(argv: list[str], lines_in: Sequence[str], monkeypatch: pytest.Monkey
             caplog: pytest.LogCaptureFixture) -> dict:
     """Run the app in-process with `lines_in` on stdin; return its status, stdout lines and logs."""
     started: list[Any] = []
-    monkeypatch.setattr(rcac_mcp, 'create_mcp_server', lambda *a, **k: started.append(a) or pytest.fail('server built'))
+    monkeypatch.setattr(cluster_mcp.core, 'create_mcp_server', lambda *a, **k: started.append(a) or pytest.fail('server built'))
     stdin, stdout = io.StringIO(''.join(line + '\n' for line in lines_in)), io.StringIO()
     monkeypatch.setattr('sys.stdin', stdin)
     monkeypatch.setattr('sys.stdout', stdout)
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger='rcac_mcp'):
+    with caplog.at_level(logging.INFO, logger='cluster_mcp.core'):
         status = MCPServerApp.main(argv)
     return {
         'status': status,
         'stdout': stdout.getvalue().splitlines(),
         'read': stdin.tell(),
-        'critical': [r.getMessage() for r in caplog.records if r.name == 'rcac_mcp' and r.levelno >= logging.CRITICAL],
+        'critical': [r.getMessage() for r in caplog.records if r.name == 'cluster_mcp.core' and r.levelno >= logging.CRITICAL],
         'started': bool(started),
     }
 
@@ -330,7 +330,7 @@ def test_connect_failure_names_host_and_cause(exc: BaseException, cause: str, mo
         def open(self) -> None:
             raise exc
 
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', Failing)
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', Failing)
     observed = run_app(['--ssh-host', 'alias.example'], RAW_WIRE_IN, monkeypatch, caplog)
     violations = startup_failure_violations(observed, 'alias.example', cause, RAW_WIRE_IN)
     assert violations == [], '\n'.join(violations)
@@ -347,7 +347,7 @@ def test_http_startup_failure_exits_without_reading_stdin(monkeypatch: pytest.Mo
         def open(self) -> None:
             raise ConnectionRefusedError(61, 'Connection refused')
 
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', Refusing)
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', Refusing)
     observed = run_app(['-t', 'http', '--ssh-host', 'alias.example'], RAW_WIRE_IN, monkeypatch, caplog)
     assert observed['status'] == exit_status.runtime_error, observed
     assert observed['critical'] == ['cannot connect to alias.example: connection refused'], observed
@@ -368,7 +368,7 @@ class Unopened(Connection):
         pass
 
 
-BOUND = rcac_mcp.executor.ssh.CONNECT_TIMEOUT
+BOUND = cluster_mcp.core.executor.ssh.CONNECT_TIMEOUT
 QUIET_CONFIG = {'load_ssh_configs': False}
 
 
@@ -393,8 +393,8 @@ def bound_violations(conn: Connection, connect: int, banner: int, auth: int) -> 
 ])
 def test_connect_is_bounded(kwargs: dict, expected: tuple[int, int, int], monkeypatch: pytest.MonkeyPatch, guard) -> None:
     Unopened.made = []
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'Connection', Unopened)
-    rcac_mcp.executor.ssh.SSHExecutor('alias.example', **kwargs)
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'Connection', Unopened)
+    cluster_mcp.core.executor.ssh.SSHExecutor('alias.example', **kwargs)
     assert len(Unopened.made) == 1
     violations = bound_violations(Unopened.made[0], *expected)
     assert violations == [], '\n'.join(violations)
@@ -427,7 +427,7 @@ def test_silent_banner_is_answered_within_the_bound(monkeypatch: pytest.MonkeyPa
     host = f'{LOOPBACK}:{listener.getsockname()[1]}'
     monkeypatch.setenv('HOME', str(tmp_path))
     monkeypatch.delenv('SSH_AUTH_SOCK', raising=False)
-    monkeypatch.setattr(rcac_mcp.executor.ssh, 'CONNECT_TIMEOUT', SILENT_BOUND)
+    monkeypatch.setattr(cluster_mcp.core.executor.ssh, 'CONNECT_TIMEOUT', SILENT_BOUND)
     try:
         began = time.monotonic()
         observed = run_app(['--ssh-host', host], [INITIALIZE], monkeypatch, caplog)

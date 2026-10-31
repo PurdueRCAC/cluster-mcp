@@ -100,7 +100,17 @@ client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecat
 window, not a hard break; the old resource URIs are aliased through the same window.
 
 *Horizon: after 0.1.3 · Depends on: the docs strip (cleared: landed on `develop` 2026-10-16), release 0.1.3 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
-**Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: unshaped*
+**Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: adopted:rename-to-cluster-mcp*
+
+## The rename left three identity strings behind
+
+The JWT issuer and audience are still `rcac-mcp`, so every token a deployment has minted keeps
+working, and renaming them is a break of its own that needs a window. `serverInfo.version` reports
+FastMCP's version rather than this server's. The core member still serves the Purdue favicon, which
+waits for a way for a member to register its own routes and icons.
+
+*Horizon: after 0.2.0 · Depends on: the rename (landed names), capability-extras or site-extras (for the favicon) · Refs: `issues/site-extras.md`*
+**Seed:** [`issues/rename-leftover-identity-strings.md`](issues/rename-leftover-identity-strings.md) · *status: unshaped*
 
 ## Capabilities you don't have shouldn't be tools you see
 

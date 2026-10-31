@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """`write_file` writes exactly the bytes sent, and refuses invalid content before touching anything.
@@ -44,11 +44,11 @@ import pytest
 import argv_echo
 from conftest import need_sftp_server
 from harness import Outcome, RecordingExecutor, call, drive, in_memory, shared_server
-from rcac_mcp.executor import Executor
-from rcac_mcp.executor.delegate import DelegatingExecutor
-from rcac_mcp.executor.shell import LocalShellExecutor
-from rcac_mcp.scripts import script_argv
-from rcac_mcp.tools.filesystem import LIST
+from cluster_mcp.core.executor import Executor
+from cluster_mcp.core.executor.delegate import DelegatingExecutor
+from cluster_mcp.core.executor.shell import LocalShellExecutor
+from cluster_mcp.core.scripts import script_argv
+from cluster_mcp.core.tools.filesystem import LIST
 from ssh_server import LoopbackSSH
 from test_sbatch import FROZEN_STAMP, TOKEN, freeze_clock, shared_violations
 

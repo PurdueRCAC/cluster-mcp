@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """How the server answers at the protocol level, and how the harness picks the era it speaks.
@@ -26,6 +26,11 @@ here) and lists exactly `EXPECTED_TOOLS`, in memory and over HTTP, whatever era 
 token's 401) also run in the modern era on every run, so the default handshake-era pass does not
 leave them unproven there.
 
+**The server's name.** The server identifies itself as `cluster-mcp` in both eras, each on its own
+row whatever era the run selected: in the handshake era in the `InitializeResult`'s serverInfo, with
+no stamp on results; under revision 2026-07-28 in the `_meta` serverInfo stamp on every result,
+which the client's session identity is read from. `identity_violations` decides.
+
 **Delegate state is request-scoped.** The identity `AuthExecutorMiddleware` stores in the context
 state for a tool call is visible to that call and to no later request on the same session, in
 either era: a per-user value never lands in the session store. `state_scope_violations` decides.
@@ -34,19 +39,20 @@ either era: a per-user value never lands in the session store. `state_scope_viol
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
 import harness
-from harness import (MODERN_VERSION, SITE, Negotiated, Outcome, RecordingExecutor, Raises, Rendezvous, StateProbe,
-                     call, call_http, delegate_server, drive, http_client, in_memory, mint, negotiate, protocol_error,
-                     read_resource, rejection_status, select_era, serving, session_era, shared_server, tool_names,
-                     user_map)
-from rcac_mcp.middleware import ToolErrorMiddleware
-from rcac_mcp.server import SERVER_INSTRUCTIONS as BASE
-from rcac_mcp.site import compose
+from harness import (MODERN_VERSION, SITE, STORAGE_URIS, Negotiated, Outcome, RecordingExecutor, Raises, Rendezvous,
+                     StateProbe, call, call_http, delegate_server, drive, http_client, in_memory, mint, negotiate,
+                     protocol_error, read_resource, rejection_status, scheme, select_era, serving, session_era,
+                     shared_server, tool_names, user_map)
+from cluster_mcp.core.middleware import ToolErrorMiddleware
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS as BASE
+from cluster_mcp.core.site import compose
 from test_isolation import isolation_violations, launched_as
 from test_no_executor import NO_EXECUTOR, refusal_violations, report
 from test_registry import EXPECTED_TOOLS
@@ -157,9 +163,11 @@ READ_REFUSALS = [
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ['legacy', 'modern'])
 @pytest.mark.parametrize(('make', 'route'), READ_REFUSALS)
-def test_middleware_refusal_is_a_read_error(make: Callable[[], Exception], route: str, era: str, guard) -> None:
+def test_middleware_refusal_is_a_read_error(uri: str, make: Callable[[], Exception], route: str, era: str,
+                                            guard) -> None:
     exc = make()
     executor = RecordingExecutor('refused')
 
@@ -167,10 +175,10 @@ def test_middleware_refusal_is_a_read_error(make: Callable[[], Exception], route
         server = shared_server(executor, Raises(exc))
         if route == 'memory':
             async with in_memory(server, era=era) as client:
-                return await read_resource(client, 'rcac://storage')
+                return await read_resource(client, uri)
         async with serving(server) as app:
             async with http_client(app, None, era=era) as client:
-                return await read_resource(client, 'rcac://storage')
+                return await read_resource(client, uri)
 
     violations = read_boundary_violations(drive(scenario()), str(exc))
     assert violations == [], report(violations)
@@ -349,6 +357,81 @@ def test_era_check_catches_drift(negotiated: Negotiated, era: str, fragment: str
     assert any(fragment in v for v in violations), violations
 
 
+# The name the server identifies itself by, and the `_meta` key under which revision 2026-07-28
+# stamps its identity on every result.
+SERVER_NAME = 'cluster-mcp'
+SERVER_INFO_KEY = 'io.modelcontextprotocol/serverInfo'
+
+
+@dataclass(frozen=True)
+class Identity:
+    """The server's name as one connection saw it: `session` from the client's negotiated session
+    (the `InitializeResult` or the `DiscoverResult`), `initialize` from the `InitializeResult` if
+    there is one, `stamp` from the `_meta` serverInfo stamp on a `tools/list` result (None when the
+    result carries none)."""
+
+    session: str | None
+    initialize: str | None
+    stamp: str | None
+
+
+def identity_violations(identity: Identity, era: str) -> list[str]:
+    """Every place one connection in `era` saw a server name other than `SERVER_NAME`; empty means none.
+
+    Legacy: the `InitializeResult`'s serverInfo, and no stamp on results. Modern: the stamp, which
+    the session's identity is read from, and no `InitializeResult`.
+    """
+    seen = {'session': identity.session}
+    if era == 'legacy':
+        seen['InitializeResult'] = identity.initialize
+        if identity.stamp is not None:
+            return [f'legacy: a handshake-era result carries a serverInfo stamp naming {identity.stamp!r}']
+    else:
+        seen['_meta stamp'] = identity.stamp
+        if identity.initialize is not None:
+            return [f'modern: an InitializeResult naming {identity.initialize!r}']
+    return [f'{era}: {where} serverInfo name is {name!r}, expected {SERVER_NAME!r}'
+            for where, name in seen.items() if name != SERVER_NAME]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('era', [pytest.param('legacy', id='legacy'), pytest.param('modern', id='modern')])
+def test_server_identifies_as_cluster_mcp(era: str, guard) -> None:
+    async def scenario() -> Identity:
+        server = shared_server(RecordingExecutor('identity'))
+        async with in_memory(server, era) as client:
+            listed = await client.list_tools_mcp()
+            stamp = (listed.meta or {}).get(SERVER_INFO_KEY)
+            initialize = client.initialize_result
+            return Identity(client.server_info.name if client.server_info is not None else None,
+                            initialize.server_info.name if initialize is not None else None,
+                            stamp.get('name') if isinstance(stamp, dict) else None)
+
+    violations = identity_violations(drive(scenario()), era)
+    assert violations == [], violations
+    assert guard.refused == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('identity', 'era', 'fragment'), [
+    pytest.param(Identity('RCAC', 'RCAC', None), 'legacy', "legacy: InitializeResult serverInfo name is 'RCAC'",
+                 id='legacy-old-name'),
+    pytest.param(Identity('RCAC', None, 'RCAC'), 'modern', "modern: _meta stamp serverInfo name is 'RCAC'",
+                 id='modern-old-name'),
+    pytest.param(Identity(SERVER_NAME, None, None), 'modern', "modern: _meta stamp serverInfo name is None",
+                 id='modern-unstamped'),
+    pytest.param(Identity(SERVER_NAME, SERVER_NAME, SERVER_NAME), 'legacy', 'handshake-era result carries',
+                 id='legacy-stamped'),
+    pytest.param(Identity(SERVER_NAME, SERVER_NAME, SERVER_NAME), 'modern', 'modern: an InitializeResult',
+                 id='modern-initialized'),
+])
+def test_identity_check_catches_drift(identity: Identity, era: str, fragment: str) -> None:
+    assert identity_violations(Identity(SERVER_NAME, SERVER_NAME, None), 'legacy') == []
+    assert identity_violations(Identity(SERVER_NAME, None, SERVER_NAME), 'modern') == []
+    violations = identity_violations(identity, era)
+    assert any(fragment in v for v in violations), violations
+
+
 SECRET = 'protocol-test-secret-0123456789abcdef'
 FOREIGN_SECRET = 'a-secret-this-server-never-saw-0123456789'
 USER_MAP = 'alice ualice\nbob ubob\n'
@@ -470,8 +553,9 @@ def test_delegate_state_is_request_scoped(era: str, tmp_path: Path, monkeypatch:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize('uri', STORAGE_URIS, ids=scheme)
 @pytest.mark.parametrize('era', ['legacy', 'modern'])
-def test_delegate_read_state_is_request_scoped(era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_delegate_read_state_is_request_scoped(uri: str, era: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                storage_launches: list[list[str]], guard) -> None:
     # A read resolves its identity by the path a tool call takes, so it stores the same state, as
     # request-scoped.
@@ -483,7 +567,7 @@ def test_delegate_read_state_is_request_scoped(era: str, tmp_path: Path, monkeyp
         server = delegate_server(map_path, probe)
         async with serving(server) as app:
             async with http_client(app, mint(SECRET, sub='alice'), era=era) as client:
-                outcome = await read_resource(client, 'rcac://storage')
+                outcome = await read_resource(client, uri)
                 await tool_names(client)
                 return outcome
 

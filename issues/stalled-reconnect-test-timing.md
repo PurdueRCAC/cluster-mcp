@@ -25,6 +25,11 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   `EOFError` from paramiko's packet reader; 2214 others passed, and the re-run of the same commit
   passed 2215 in both eras. That branch changes no SSH code. So the class may be wider than one
   wall-clock bound: the loopback SSH server under load. Shaping should check both.
+- 2026-10-30: during `rename-to-cluster-mcp`, the test failed in local full-suite runs at two
+  phase gates (macOS), once at P2 and twice in a row at P5's remediation (modern era); each time
+  it passed alone and on a further identical-tree run. The failing assertion was "0 reconnect
+  workers ran, not one": the reconnect worker never started, so the miss is not only the
+  give-up bound.
 
 ## Why it was deferred
 

@@ -1,7 +1,8 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 #
-# The mutation runner (AGENTS.md § Testing), on demand only. It gates nothing: it never runs on
+# The mutation runner (AGENTS.md § Testing), on demand only. Each case runs against a copy of every
+# workspace member's portion of the cluster_mcp namespace. It gates nothing: it never runs on
 # push or pull request, and publish does not read it. GitHub offers a manual run only for a
 # workflow file that exists on the default branch, so this one becomes dispatchable at the
 # release that first carries it to main.

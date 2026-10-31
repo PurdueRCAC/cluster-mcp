@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The `ssh` executor against a loopback server that executes what it is sent, under each login shell.
@@ -76,12 +76,12 @@ from fabric import Config, Connection
 
 import argv_echo
 from conftest import REAL_POPEN, need_sftp_server, need_shell
-from harness import Outcome, call, drive, in_memory, read_resource, shared_server
-from rcac_mcp.executor import CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE, CommandResult, Executor, UserPath
-from rcac_mcp.executor import launch, ssh
-from rcac_mcp.executor.ssh import SSHExecutor
-from rcac_mcp.site import SiteContext, SiteFile
-from rcac_mcp.tools.shell import run_command
+from harness import CONTEXT_URIS, Outcome, call, drive, in_memory, read_resource, scheme, shared_server
+from cluster_mcp.core.executor import CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE, CommandResult, Executor, UserPath
+from cluster_mcp.core.executor import launch, ssh
+from cluster_mcp.core.executor.ssh import SSHExecutor
+from cluster_mcp.core.site import SiteContext, SiteFile
+from cluster_mcp.core.tools.shell import run_command
 from ssh_server import LOOPBACK, USER, DroppingSSH, LoopbackSSH, ThrottledSSH, _drop, _key, _Server
 from test_executors import (LOGIN_MARKER, PROBE, WRITER, held_violations, timed, timeout_violations,
                             writer_violations)
@@ -1346,10 +1346,10 @@ def test_every_refusal_ends_the_reconnect_at_once(refusal: str, rig: ReconnectRi
 @pytest.mark.unit
 def test_the_declared_paramiko_floor_matches_the_classifier() -> None:
     root = Path(__file__).resolve().parent.parent
-    dependencies = tomllib.loads((root / 'pyproject.toml').read_text())['project']['dependencies']
+    dependencies = tomllib.loads((root / 'packages' / 'cluster-mcp' / 'pyproject.toml').read_text())['project']['dependencies']
     floors = [re.fullmatch(r'paramiko\s*>=\s*([0-9.]+)\s*(,.*)?', dependency) for dependency in dependencies]
     found = [match.group(1) for match in floors if match]
-    assert len(found) == 1, f'pyproject.toml declares no one paramiko floor: {dependencies}'
+    assert len(found) == 1, f'packages/cluster-mcp/pyproject.toml declares no one paramiko floor: {dependencies}'
     declared = tuple(int(part) for part in found[0].split('.'))
     assert declared == ssh.PARAMIKO_FLOOR, \
         f'the declared paramiko floor {declared} and the classifier\'s ({ssh.PARAMIKO_FLOOR}) disagree'
@@ -2551,9 +2551,11 @@ RECONNECT_SITE = SiteContext(files=(SiteFile('a.md', 'Alpha rule.'), SiteFile('b
 
 
 @pytest.mark.unit
-def test_a_reconnect_failure_never_changes_the_cluster_context(rig: ReconnectRig, guard) -> None:
+@pytest.mark.parametrize('uri', CONTEXT_URIS, ids=scheme)
+def test_a_reconnect_failure_never_changes_the_cluster_context(uri: str, rig: ReconnectRig, guard) -> None:
     """The site context is the startup read, so a `-1002` from another tool never reaches what
-    `cluster_context` and `rcac://context` serve, and neither read starts a connect attempt."""
+    `cluster_context` and the context resource serve, under either URI, and neither read starts a
+    connect attempt."""
     executor = rig.executor(['ok', (0, refused)])
     # Room for a window on each of the five calls, so a read that does reconnect fails the row by its
     # text, not by running away.
@@ -2561,10 +2563,10 @@ def test_a_reconnect_failure_never_changes_the_cluster_context(rig: ReconnectRig
 
     async def scenario() -> tuple[list[Outcome], Outcome, int, list[Outcome]]:
         async with in_memory(shared_server(executor, site=RECONNECT_SITE)) as client:
-            before = [await call(client, 'cluster_context', {}), await read_resource(client, 'rcac://context')]
+            before = [await call(client, 'cluster_context', {}), await read_resource(client, uri)]
             built = len(rig.built)
             failed = await call(client, 'run_command', {'command': 'true'})
-            after = [await call(client, 'cluster_context', {}), await read_resource(client, 'rcac://context')]
+            after = [await call(client, 'cluster_context', {}), await read_resource(client, uri)]
             return before, failed, built, after
 
     before, failed, built, after = drive(scenario(), timeout=WATCHDOG)
@@ -2574,7 +2576,7 @@ def test_a_reconnect_failure_never_changes_the_cluster_context(rig: ReconnectRig
     if failed.is_error or _command_result(failed).get('exit_code') != NOT_STARTED_EXIT_CODE:
         violations.append(f'run_command gave {failed!r:.400}, not {NOT_STARTED_EXIT_CODE}')
     for when, outcomes in (('before', before), ('after', after)):
-        for read, outcome in zip(('cluster_context', 'rcac://context'), outcomes):
+        for read, outcome in zip(('cluster_context', uri), outcomes):
             if outcome.is_error or outcome.text != RECONNECT_SITE.text:
                 violations.append(f'{read} {when} a failed reconnect served {outcome!r:.400}, '
                                   f'not the startup read {RECONNECT_SITE.text!r}')

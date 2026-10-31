@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The site context: which /etc/agents.d files are read, in what order, and how the budget composes them.
@@ -38,13 +38,13 @@ import pytest
 
 from conftest import need_shell
 from harness import RecordingExecutor
-from rcac_mcp import site
-from rcac_mcp.executor.launch import FIXED_RESET
-from rcac_mcp.executor.shell import LocalShellExecutor
-from rcac_mcp.executor.base import (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE,
+from cluster_mcp.core import site
+from cluster_mcp.core.executor.launch import FIXED_RESET
+from cluster_mcp.core.executor.shell import LocalShellExecutor
+from cluster_mcp.core.executor.base import (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE,
                                     CommandResult)
-from rcac_mcp.scripts import script_argv, script_of
-from rcac_mcp.server import SERVER_INSTRUCTIONS
+from cluster_mcp.core.scripts import script_argv, script_of
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS
 from ssh_server import LoopbackSSH
 
 SANDBOX = Path(__file__).resolve().parents[1] / 'bin' / 'sandbox.sh'

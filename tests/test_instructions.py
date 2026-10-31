@@ -1,7 +1,15 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""The agent-facing instructions name exactly the registered tools and carry no documentation search."""
+"""The agent-facing instructions name exactly the registered tools and carry no documentation search.
+
+The base is three texts, each owned by a member: the generic core (`CORE_INSTRUCTIONS`), which names
+no site and no tool of the RCAC member; the Slurm snippet (`SLURM_INSTRUCTIONS`); and the overlay
+(`RCAC_INSTRUCTIONS`), labelled RCAC-specific on its first line. Each lists exactly the tools its
+member registers, a tool's member being the `cluster_mcp.<member>` module its function was defined
+in, and `SERVER_INSTRUCTIONS` is the three joined by a blank line in that order, so the overlay sits
+directly above the site context.
+"""
 
 from __future__ import annotations
 
@@ -12,9 +20,12 @@ from typing import Callable, Iterable, Sequence
 import pytest
 
 from harness import SITE, served_instructions
-from rcac_mcp.server import SERVER_INSTRUCTIONS, create_mcp_server
-from rcac_mcp.site import HEADING, compose, units
-from rcac_mcp.tools import TOOL_REGISTRY
+from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
+from cluster_mcp.core.server import SERVER_INSTRUCTIONS, create_mcp_server
+from cluster_mcp.core.site import HEADING, compose, units
+from cluster_mcp.core.tools import TOOL_REGISTRY
+from cluster_mcp.rcac.instructions import RCAC_INSTRUCTIONS
+from cluster_mcp.slurm.instructions import SLURM_INSTRUCTIONS
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -139,3 +150,116 @@ def test_cross_check_catches_mutation(text: str, extra_allow: tuple[str, ...], e
 def test_base_leaves_room_for_the_site() -> None:
     # The base is never cut; at the default budget it must leave room for a site file and the note.
     assert units(SERVER_INSTRUCTIONS) <= 1500, units(SERVER_INSTRUCTIONS)
+
+
+# The members that register tools, each owning one text of the base.
+MEMBERS = ('core', 'slurm', 'rcac')
+
+# Words that name a site; the generic core carries none of them, in any case.
+SITE_NAMES = re.compile(r'(?i)rcac|purdue')
+
+# The overlay's first line, which labels everything under it RCAC-specific.
+OVERLAY_LABEL = 'RCAC-specific tools:'
+
+
+def tools_by_member() -> dict[str, set[str]]:
+    """Each registered tool's name under its member: the `cluster_mcp.<member>` module defining it."""
+    by: dict[str, set[str]] = {}
+    for tool in TOOL_REGISTRY:
+        module = getattr(tool.fn, '__module__', '') or ''
+        match = re.fullmatch(r'cluster_mcp\.(\w+)(?:\..+)?', module)
+        by.setdefault(match.group(1) if match else f'outside cluster_mcp ({module})', set()).add(tool.name)
+    return by
+
+
+def listing_violations(text: str, names: set[str]) -> list[str]:
+    """Every way `text` fails to list exactly `names`, each once; an empty list means it does."""
+    if not names:
+        return ['the member registers no tool']
+    listed = LISTED.findall(text)
+    violations = [f'registered by the member, not listed: {name!r}' for name in sorted(names - set(listed))]
+    violations += [f'listed, not registered by the member: {name!r}' for name in sorted(set(listed) - names)]
+    violations += [f'listed twice: {name!r}' for name in sorted({n for n in listed if listed.count(n) > 1})]
+    return violations
+
+
+def core_violations(text: str, rcac_tools: set[str]) -> list[str]:
+    """Every site the core text names, and every tool of the RCAC member it names; empty means generic."""
+    violations = [f'the core names a site: {m.group(0)!r}' for m in SITE_NAMES.finditer(text)]
+    violations += [f'the core names the RCAC tool {name!r}' for name in sorted(rcac_tools) if _occurs(name, text)]
+    return violations
+
+
+def base_violations(base: str, served: str) -> list[str]:
+    """Every way `base` is not core, Slurm then overlay, or `served` does not open with it, uncut, above the site."""
+    violations = []
+    if base != '\n\n'.join((CORE_INSTRUCTIONS, SLURM_INSTRUCTIONS, RCAC_INSTRUCTIONS)):
+        violations.append('the base is not core, Slurm then overlay, joined by a blank line')
+    if not served.startswith(f'{base}\n\n{HEADING}\n\n'):
+        violations.append('the served instructions do not open with the whole base directly above the site context')
+    return violations
+
+
+@pytest.mark.unit
+def test_every_tool_belongs_to_a_member() -> None:
+    by = tools_by_member()
+    assert sorted(by) == sorted(MEMBERS), sorted(by)
+
+
+@pytest.mark.unit
+def test_core_instructions_are_generic() -> None:
+    by = tools_by_member()
+    violations = core_violations(CORE_INSTRUCTIONS, by.get('rcac', set()))
+    violations += listing_violations(CORE_INSTRUCTIONS, by.get('core', set()))
+    assert violations == [], violations
+
+
+@pytest.mark.unit
+def test_overlay_is_labelled_and_lists_the_rcac_member() -> None:
+    first = RCAC_INSTRUCTIONS.splitlines()[0]
+    assert first == OVERLAY_LABEL, f'the overlay opens {first!r}, not {OVERLAY_LABEL!r}'
+    violations = listing_violations(RCAC_INSTRUCTIONS, tools_by_member().get('rcac', set()))
+    assert violations == [], violations
+
+
+@pytest.mark.unit
+def test_slurm_snippet_lists_the_slurm_member() -> None:
+    violations = listing_violations(SLURM_INSTRUCTIONS, tools_by_member().get('slurm', set()))
+    assert violations == [], violations
+
+
+@pytest.mark.unit
+def test_base_is_core_slurm_then_overlay() -> None:
+    served = served_instructions(create_mcp_server('none', site=SITE)) or ''
+    violations = base_violations(SERVER_INSTRUCTIONS, served)
+    assert violations == [], violations
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('check', 'fragment'), [
+    pytest.param(lambda: core_violations(CORE_INSTRUCTIONS + '\nOn RCAC clusters, ask first.', set()),
+                 "the core names a site: 'RCAC'", id='core-names-rcac'),
+    pytest.param(lambda: core_violations(CORE_INSTRUCTIONS + '\nSee Purdue policy.', set()),
+                 "the core names a site: 'Purdue'", id='core-names-purdue'),
+    pytest.param(lambda: core_violations(CORE_INSTRUCTIONS + '\nTry myquota.', {'myquota'}),
+                 "the core names the RCAC tool 'myquota'", id='core-names-rcac-tool'),
+    pytest.param(lambda: listing_violations(_drop_sinfo(SLURM_INSTRUCTIONS + '\n'), {'sinfo', 'sbatch'}),
+                 "registered by the member, not listed: 'sinfo'", id='member-tool-unlisted'),
+    pytest.param(lambda: listing_violations(SLURM_INSTRUCTIONS, {'sbatch'}),
+                 "listed, not registered by the member: 'squeue'", id='other-member-listed'),
+    pytest.param(lambda: listing_violations(SLURM_INSTRUCTIONS + '\n- sbatch: again', {'sbatch'}),
+                 "listed twice: 'sbatch'", id='listed-twice'),
+    pytest.param(lambda: listing_violations(SLURM_INSTRUCTIONS, set()),
+                 'the member registers no tool', id='empty-member'),
+    pytest.param(lambda: base_violations('\n\n'.join((CORE_INSTRUCTIONS, SLURM_INSTRUCTIONS)),
+                                         f'{CORE_INSTRUCTIONS}\n\n{SLURM_INSTRUCTIONS}\n\n{HEADING}\n\n'),
+                 'not core, Slurm then overlay', id='overlay-dropped'),
+    pytest.param(lambda: base_violations('\n\n'.join((CORE_INSTRUCTIONS, RCAC_INSTRUCTIONS, SLURM_INSTRUCTIONS)),
+                                         f'{CORE_INSTRUCTIONS}\n\n{RCAC_INSTRUCTIONS}\n\n{SLURM_INSTRUCTIONS}\n\n{HEADING}\n\n'),
+                 'not core, Slurm then overlay', id='overlay-not-last'),
+    pytest.param(lambda: base_violations(SERVER_INSTRUCTIONS, f'{SERVER_INSTRUCTIONS[:-10]}\n\n{HEADING}\n\n'),
+                 'do not open with the whole base', id='base-cut'),
+])
+def test_member_text_checks_catch_drift(check: Callable[[], list[str]], fragment: str) -> None:
+    violations = check()
+    assert any(fragment in v for v in violations), violations

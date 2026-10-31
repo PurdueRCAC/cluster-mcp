@@ -1,0 +1,37 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: rename-to-cluster-mcp
+escaped_from: null
+planned: {date: '2026-10-29', phases: 5}
+landed: {date: '2026-10-30', phases: 5, failed_verifies: 4}
+open: null
+runs:
+- {step: feature, start: '2026-10-29T09:26:52-04:00', stop: '2026-10-29T09:31:34-04:00', seconds: 282, end: question, agent: claude-opus-5-5}
+- {step: feature, start: '2026-10-29T22:30:34-04:00', stop: '2026-10-29T22:31:32-04:00', seconds: 58, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-10-29T22:31:55-04:00', stop: '2026-10-29T23:24:12-04:00', seconds: 3137, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-10-29T23:24:31-04:00', stop: '2026-10-30T00:12:15-04:00', seconds: 2864, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-10-30T00:12:30-04:00', stop: '2026-10-30T01:00:07-04:00', seconds: 2857, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-10-30T01:00:25-04:00', stop: '2026-10-30T01:33:09-04:00', seconds: 1964, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-10-30T01:33:11-04:00', stop: '2026-10-30T01:55:55-04:00', seconds: 1364, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-10-30T01:55:57-04:00', stop: '2026-10-30T02:41:04-04:00', seconds: 2707, end: done, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-30T02:41:18-04:00', stop: '2026-10-30T03:17:42-04:00', seconds: 2184, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-10-30T03:17:45-04:00', stop: '2026-10-30T05:00:38-04:00', seconds: 6173, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-30T05:02:13-04:00', stop: '2026-10-30T05:22:52-04:00', seconds: 1239, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-10-30T05:23:03-04:00', stop: '2026-10-30T06:29:59-04:00', seconds: 4016, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-10-30T06:30:11-04:00', stop: '2026-10-30T07:06:25-04:00', seconds: 2174, end: question, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-10-30T14:29:43-04:00', stop: '2026-10-30T16:05:17-04:00', seconds: 5734, end: gate, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-10-30'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 2}
+  plausible: 0
+- cycle: 2
+  date: '2026-10-30'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 3}
+  plausible: 0
+- cycle: 3
+  date: '2026-10-30'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 4}
+  plausible: 0

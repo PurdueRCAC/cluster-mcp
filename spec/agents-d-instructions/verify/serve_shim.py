@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Start the real `rcac-mcp` CLI with /etc/agents.d pointed at a planted directory, for serve_gate.py.

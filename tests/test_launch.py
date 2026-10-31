@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""The launcher (`rcac_mcp.executor.launch`): one bash program per command, one wire per backend.
+"""The launcher (`cluster_mcp.core.executor.launch`): one bash program per command, one wire per backend.
 
 Every value a tool passes reaches the command as exactly one literal argument; a `UserPath`'s
 leading `~`/`~/` resolves to the running user's home and nothing else expands; a `run_command`
@@ -36,8 +36,8 @@ from typing import Any, Callable
 
 import pytest
 
-from rcac_mcp.executor import NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE, UserPath
-from rcac_mcp.executor import launch
+from cluster_mcp.core.executor import NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE, UserPath
+from cluster_mcp.core.executor import launch
 
 from conftest import RELAY, need_shell
 
@@ -572,7 +572,7 @@ SEPARATIONS = [
 @pytest.mark.unit
 @pytest.mark.parametrize('raw', SEPARATIONS)
 def test_separate_keeps_only_the_commands_output(raw: tuple[bytes, bytes, int], caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger='rcac_mcp.executor.launch'):
+    with caplog.at_level(logging.WARNING, logger='cluster_mcp.core.executor.launch'):
         result = launch.separate(*raw, M)
     violations = separation_violations(raw, M, result)
     assert violations == [], '\n'.join(violations)
@@ -1310,7 +1310,7 @@ def test_no_stage_reads_a_startup_file_under_sshd(wire: str, form: str, home: Pa
 @pytest.mark.parametrize('wire', ['local', 'ssh-zsh'])
 def test_a_profile_that_exits_is_not_started(wire: str, home: Path, caplog: pytest.LogCaptureFixture) -> None:
     (home / '.bash_profile').write_text('echo leaving >&2; exit 0\n')
-    with caplog.at_level(logging.WARNING, logger='rcac_mcp.executor.launch'):
+    with caplog.at_level(logging.WARNING, logger='cluster_mcp.core.executor.launch'):
         result = run_on(wire, 'echo ran', home)
     note = b'cluster-mcp: the command did not start (exit 0); the server log has the details\n'
     assert result == (b'', note, NOT_STARTED_EXIT_CODE), f'{wire}: the command did not start, but the result is {result!r}'

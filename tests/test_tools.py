@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """Every served tool does its work on the executor the middleware installed, and on nothing else.
@@ -12,7 +12,7 @@ guard refuses every process and connection made anywhere else. A tool that built
 outside the executor.
 
 A tool hands the executor an argv, never a command string (only `run_command` passes a script), and
-a shell argv may run only a registered fixed script (`rcac_mcp.scripts.FIXED_SCRIPTS`), so no
+a shell argv may run only a registered fixed script (`cluster_mcp.core.scripts.FIXED_SCRIPTS`), so no
 caller value is ever formatted into shell text. The filesystem, Slurm and site tools are also
 pinned to their exact argvs, with each path a `UserPath`: each option value is its own element,
 after its option, and a positional value follows `--`. A tool in `EXECUTORLESS` runs nothing and
@@ -28,9 +28,9 @@ from typing import Any, Callable, Sequence
 import pytest
 
 from harness import Outcome, RecordingExecutor, call, drive, in_memory, shared_server
-from rcac_mcp.executor import UserPath
-from rcac_mcp.scripts import script_argv, script_of
-from rcac_mcp.tools import filesystem
+from cluster_mcp.core.executor import UserPath
+from cluster_mcp.core.scripts import script_argv, script_of
+from cluster_mcp.core.tools import filesystem
 from test_registry import EXPECTED_TOOLS
 
 # The one tool that hands the executor a command string: `run_command`, whose command is the
@@ -455,7 +455,7 @@ def optional_scalars(tools: Sequence[Any]) -> set[tuple[str, str]]:
 def test_empty_rows_cover_every_optional_scalar_option() -> None:
     # Every optional string parameter of every tool, an option's value or a positional, except
     # an enum (the schema refuses '' like any other non-member) and content.
-    from rcac_mcp.tools import TOOL_REGISTRY
+    from cluster_mcp.core.tools import TOOL_REGISTRY
     expected = optional_scalars(TOOL_REGISTRY) - EMPTY_IS_A_VALUE
     covered = {(tool, name) for tool, args, *_ in EMPTY_OPTIONALS.values() for name, v in args.items() if v == ''}
     assert {('scontrol_show_node', 'node'), ('sbatch', 'script_path'), ('list_directory', 'path')} <= expected
@@ -464,7 +464,8 @@ def test_empty_rows_cover_every_optional_scalar_option() -> None:
 
 @pytest.mark.unit
 def test_slurm_argvs_cover_the_slurm_and_site_tools() -> None:
-    from rcac_mcp.tools import rcac, slurm
+    from cluster_mcp.rcac import tools as rcac
+    from cluster_mcp.slurm import tools as slurm
     tools = {name for module in (slurm, rcac) for name, value in vars(module).items()
              if type(value).__name__ == 'FunctionTool'}
     assert tools and tools == {tool for tool, *_ in SLURM_ARGVS.values()}, tools

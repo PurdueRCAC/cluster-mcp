@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
 """The `ssh` executor runs a command over the locked Fabric and Paramiko, against a loopback server.
@@ -29,9 +29,9 @@ import pytest
 from fabric import Config
 
 from harness import launched_script
-from rcac_mcp.executor import launch
-from rcac_mcp.executor.base import CommandResult
-from rcac_mcp.executor.ssh import SSHExecutor
+from cluster_mcp.core.executor import launch
+from cluster_mcp.core.executor.base import CommandResult
+from cluster_mcp.core.executor.ssh import SSHExecutor
 
 LOOPBACK = '127.0.0.1'
 EXIT_STATUS = 3

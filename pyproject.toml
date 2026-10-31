@@ -1,44 +1,36 @@
+# The workspace root, and the compat distribution `rcac-mcp`: it installs cluster-mcp and the
+# deprecated `rcac-mcp` command, so the install line every existing client config names keeps
+# working through the deprecation window. It ships no code; the server is packages/cluster-mcp.
 [project]
 name = "rcac-mcp"
 version = "0.1.5"
-description = "Purdue RCAC MCP Server: Enables agentic development with HPC clusters and storage services"
+description = "Deprecated name of cluster-mcp: installs cluster-mcp and the rcac-mcp command"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = [
-    "fastmcp>=4,<5",
-    "cmdkit>=2.7.7",
-    "pyjwt>=2.0",
-    "fabric>=3.0",
-    # Direct for its floor: from 3.2 Paramiko names a link closed during authentication apart from a
-    # refused one, which `executor/ssh.py` (`PARAMIKO_FLOOR`) relies on; Fabric allows older.
-    "paramiko>=3.2",
-]
+dependencies = ["cluster-mcp"]
 
 [project.scripts]
-rcac-mcp = "rcac_mcp:main"
+rcac-mcp = "cluster_mcp.core:legacy_main"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+cluster-mcp = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/rcac_mcp"]
+# A code-less wheel: its metadata (the cluster-mcp dependency and the script) is the whole point.
+bypass-selection = true
 
 [tool.hatch.build.targets.sdist]
-# The sandbox helper, the design records, the backlog, and the hidden security lane are
-# repository furniture, not distribution content. `.security/` is the one that matters: shipping
-# it would publish an inventory of unremediated weaknesses. The release recipe's gate in
-# AGENTS.md re-checks the built tarball because this list only covers the directories that
-# exist today.
-exclude = [
-    "/bin",
-    "/.security",
-    "/.local",
-    "/spec",
-    "/issues",
-    "/tests/fixtures",
-    "/certs",
-]
+# Only the two files the build needs: the workspace's furniture (bin/, spec/, issues/, tests/,
+# packages/ and the hidden security lane) never reaches this sdist, and bin/sdist_hygiene.py
+# re-checks every built tarball.
+only-include = ["pyproject.toml", "README.md"]
 
 [dependency-groups]
 dev = [

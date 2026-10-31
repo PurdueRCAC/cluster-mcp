@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Purdue University
+# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 #
 # Run a command against a throwaway cluster-mcp sandbox so factory verify
@@ -13,21 +13,24 @@
 #
 # Three protections, in order of importance:
 #
-#   1. FAIL CLOSED ON SSH. RCAC_SSH_HOST is unset, so a bare `rcac-mcp` (whose
-#      stdio transport defaults to `ssh` execution) raises
-#      "SSH host required: use --ssh-host or set RCAC_SSH_HOST" instead of
+#   1. FAIL CLOSED ON SSH. CLUSTER_MCP_SSH_HOST and its legacy name RCAC_SSH_HOST
+#      are both unset, and uv env files are turned off so `uv run` cannot load
+#      either back, so a bare `cluster-mcp` or deprecated `rcac-mcp` (whose stdio
+#      transport defaults to `ssh` execution) raises
+#      "SSH host required: use --ssh-host or set CLUSTER_MCP_SSH_HOST" instead of
 #      opening a session on a production cluster. Drive `-e local` explicitly.
 #      This is a guard against accidents, not against an explicit --ssh-host.
 #   2. HOME IS THE SANDBOX. `~` expansion inside a tool call (`write_file`,
 #      `read_file`, `cwd="~/jobs"`) lands in the throwaway dir. XDG config and
 #      cache follow it, so per-user state never lands in the real ~/.config.
-#   3. AUTH ENV IS BLANK. JWT_SECRET and the OIDC_* / RCAC_USER_MAP variables are
-#      unset so a drive cannot accidentally mint or accept a token signed with
-#      the developer's real secret.
+#   3. AUTH ENV IS BLANK. JWT_SECRET, the OIDC_* variables and the user map, by
+#      both names (CLUSTER_MCP_USER_MAP and its legacy RCAC_USER_MAP), are unset,
+#      and no uv env file can set them again, so a drive cannot accidentally mint
+#      or accept a token signed with the developer's real secret.
 #
 # Usage:
-#   bin/sandbox.sh uv run rcac-mcp --help
-#   bin/sandbox.sh sh -c "uv run rcac-mcp -e local --generate-token"
+#   bin/sandbox.sh uv run cluster-mcp --help
+#   bin/sandbox.sh sh -c "uv run cluster-mcp -e local --generate-token"
 #
 # CWD IS THE SANDBOX, NOT THE REPO. That is protection 2 working as intended, but it breaks any
 # tool that discovers the project by walking up from the working directory. `uv run` is handled
@@ -64,8 +67,12 @@ UV_PROJECT="$root"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 export HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_DATA_HOME UV_PROJECT UV_CACHE_DIR
 
-# Fail closed rather than reaching a real cluster or a real identity provider.
-unset RCAC_SSH_HOST RCAC_USER_MAP JWT_SECRET \
+# Fail closed rather than reaching a real cluster or a real identity provider. uv loads the file
+# UV_ENV_FILE names into every `uv run`, after this script has run: an env file carrying a host or a
+# user map would set it again past the unset below, so env files are turned off for the whole drive.
+unset UV_ENV_FILE
+export UV_NO_ENV_FILE=1
+unset CLUSTER_MCP_SSH_HOST RCAC_SSH_HOST CLUSTER_MCP_USER_MAP RCAC_USER_MAP JWT_SECRET \
       OIDC_CONFIG_URL OIDC_CLIENT_ID OIDC_CLIENT_SECRET MCP_BASE_URL
 
 # A marker a test or tool can assert on to prove it is running contained, and the way back to the
