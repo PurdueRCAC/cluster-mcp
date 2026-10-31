@@ -3,7 +3,7 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/capability-extras
 base: develop
 current_phase: done
@@ -74,10 +74,10 @@ phases:
   hill: uphill
   verify: sh spec/capability-extras/verify/p5.sh
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: '4772784'
+  verdict: changes-requested
+  blocked_reason: F1 resource rejection outside R8 path; F2 load-refusal mutants; F3 roadmap
+  cycle: 1
 ---
 
 # TECH.md — Capabilities you don't have shouldn't be tools you see
