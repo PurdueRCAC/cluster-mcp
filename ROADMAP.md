@@ -75,32 +75,15 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Thirteen cycles that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters,
-with Purdue as one supported site*, ending in **release 0.2.0**. Rename and restructure what stays,
-make capabilities optional, then build each capability on that mechanism — Slurm first, then LMOD
-and xdu as the consumers that prove it generalizes — and finally the site extra that bundles them.
-Ahead of the tool families sit the executor fixes: stopping a timed-out command, once its
-measurement is approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a
-reconnect test whose wall-clock bound measures load as well as behaviour.
-
-## Nothing here should assume Purdue
-
-The rename from `rcac-mcp` to `cluster-mcp` is mechanical in places (package, console script,
-`pyproject.toml`, the `rcac://` resource URIs, the `RCAC_*` environment variables) and a judgement
-call in others: `tools/rcac.py` genuinely *is* Purdue-specific and should keep a site-flavoured name,
-while `SERVER_INSTRUCTIONS` is currently a Purdue document that needs splitting into a generic core
-and a site overlay.
-
-The same cycle restructures the tree into a uv workspace of namespace distributions — a core
-`cluster-mcp` providing `cluster_mcp.core`, and one member per capability and site sharing the
-`cluster_mcp` namespace — with no behaviour change, so every import moves once.
-
-The environment-variable rename is the sharp edge — `RCAC_SSH_HOST` appears in every user's MCP
-client config, and `bin/sandbox.sh` unsets it by name to fail closed. A deprecation
-window, not a hard break; the old resource URIs are aliased through the same window.
-
-*Horizon: after 0.1.3 · Depends on: the docs strip (cleared: landed on `develop` 2026-10-16), release 0.1.3 (fixes ship under the old name first) · Refs: starts the `SERVER_INSTRUCTIONS` split that `site-extras` finishes*
-**Seed:** [`issues/rename-to-cluster-mcp.md`](issues/rename-to-cluster-mcp.md) · *status: adopted:rename-to-cluster-mcp*
+Twelve cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP server
+for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename to
+`cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
+([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
+deprecation window. What remains makes capabilities optional, then builds each capability on that
+mechanism — Slurm first, then LMOD and xdu as the consumers that prove it generalizes — and finally
+the site extra that bundles them. Ahead of the tool families sit the executor fixes: stopping a
+timed-out command, once its measurement is approved, the four that `ssh-reconnect-loop` deferred on
+the SSH connection, and a reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -109,8 +92,20 @@ working, and renaming them is a break of its own that needs a window. `serverInf
 FastMCP's version rather than this server's. The core member still serves the Purdue favicon, which
 waits for a way for a member to register its own routes and icons.
 
-*Horizon: after 0.2.0 · Depends on: the rename (landed names), capability-extras or site-extras (for the favicon) · Refs: `issues/site-extras.md`*
+*Horizon: after 0.2.0 · Depends on: the rename (landed names; cleared: landed on `develop` 2026-10-30), capability-extras or site-extras (for the favicon) · Refs: `issues/site-extras.md`*
 **Seed:** [`issues/rename-leftover-identity-strings.md`](issues/rename-leftover-identity-strings.md) · *status: unshaped*
+
+## The legacy names outlive their window
+
+The rename kept every old name working through a deprecation window: the `rcac-mcp` command and its
+compat distribution, the `RCAC_SSH_HOST`, `RCAC_USER_MAP` and `RCAC_INSTRUCTIONS_BUDGET` variables,
+and the `rcac://` resource URIs. The README states the window, deprecated in 0.2.0 and removed no
+earlier than 0.4.0, and the command and each variable warn with it; the aliases do not. Removing
+them breaks every client config that still names one, so it ships in a release whose notes say so,
+and the window's own tests and README section go with it.
+
+*Horizon: 0.4.0 at the earliest · Depends on: release 0.2.0 (the window opens there) · Refs: [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/) (GOAL non-goals); `core/deprecation.py`*
+**Seed:** [`issues/remove-legacy-names.md`](issues/remove-legacy-names.md) · *status: unshaped*
 
 ## Capabilities you don't have shouldn't be tools you see
 
@@ -123,10 +118,10 @@ capability with nothing behind it advertises nothing, and instructions composed 
 This is the load-bearing cycle of Part I: it establishes the mechanism that Slurm, LMOD, xdu and the
 site extras plug into. It also collides directly with an existing invariant — registration is
 currently an import-time side effect driven by a hardcoded list at the bottom of
-`tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract, not
-work around it.
+`core/tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract,
+not work around it.
 
-*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
+*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists; cleared: landed on `develop` 2026-10-30), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
 **Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
 
 ## A timed-out command may keep running after its call returns
@@ -281,12 +276,12 @@ operations only, never caller-written SQL. Byte-sum rollups are an upstream requ
 ## A site extra is shorthand plus a point of view
 
 `cluster-mcp[rcac]` should mean "the right capability extras for Purdue, plus Purdue's own tools and
-context" — one install target a user can name without knowing that Gautschi runs Slurm and LMOD. That
-makes it both a dependency alias and the home for `tools/rcac.py` and the Purdue half of
-`SERVER_INSTRUCTIONS`. Getting the boundary right here is what makes `cluster-mcp[alcf]`,
-`[ncsa]` and `[tacc]` a matter of contribution rather than redesign, so this cycle should produce a
-documented pattern, not just a Purdue special case. It absorbs storage discovery, whose site
-implementation needs exactly the hook this cycle establishes.
+context" — one install target a user can name without knowing that Gautschi runs Slurm and LMOD.
+That makes it both a dependency alias and the home for the `cluster-mcp-rcac` member: Purdue's tools
+and the Purdue part of the instructions. Getting the boundary right here is what makes
+`cluster-mcp[alcf]`, `[ncsa]` and `[tacc]` a matter of contribution rather than redesign, so this
+cycle should produce a documented pattern, not just a Purdue special case. It absorbs storage
+discovery, whose site implementation needs exactly the hook this cycle establishes.
 
 *Horizon: mid-term · Depends on: capability-extras (strictly); lmod-tool-group and xdu-storage (the extra pulls them in) · Refs: absorbs `generalize-storage-discovery`; sets the pattern other centers copy*
 **Seed:** [`issues/site-extras.md`](issues/site-extras.md) · *status: unshaped*
@@ -347,9 +342,10 @@ retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 
 `auth.py`'s `AUTH_MODES` carried a slice inside its annotation's subscript for months:
 `typing.get_type_hints` and eager evaluation both accepted it, in a high-blast-radius module, and it
 was fixed only because `stack-upgrade` happened to rewrite the file (R7). Nothing in the suite or
-the gate checks any other annotation. A gate step or standing test that type-checks `src/`, or at
-least rejects an annotation in `src/rcac_mcp` that resolves to a non-type, closes it; the tool is
-the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement, 2026-10-17.
+the gate checks any other annotation. A gate step or standing test that type-checks every member's
+`src/`, or at least rejects an annotation under `cluster_mcp` that resolves to a non-type, closes
+it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement,
+2026-10-17.
 
 *Horizon: later · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
 **Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*

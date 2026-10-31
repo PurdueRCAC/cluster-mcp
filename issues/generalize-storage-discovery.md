@@ -13,17 +13,19 @@ Storage is the one piece of cluster context an agent needs before it can do almo
 write job output, what is purged, what has quota left. This server answers that question with two
 Purdue commands and no fallback:
 
-- `resolve_storage_paths()` (`tools/rcac.py:339`), the undecorated helper behind the
-  `storage_paths` tool and the `rcac://storage` resource, runs `myquota` and hands the output to
-  `_parse_myquota_output()` (`:272`), a parser written against Purdue's exact column layout.
+- `resolve_storage_paths()` (`rcac/tools.py:340`, in `cluster-mcp-rcac`), the undecorated helper
+  behind the `storage_paths` tool and the `rcac://storage` resource, runs `myquota` and hands the
+  output to `_parse_myquota_output()` (`:273`), a parser written against Purdue's exact column
+  layout.
 - Scratch resolution shells out to `findscratch`, treated as the authoritative source (commit
   `d73f972`).
-- The `rcac://storage` resource (`resources.py:55`) formats `paths.home`, `paths.scratch` and
-  `paths.depots` — a data model with `depot` in it, which is a Purdue concept, not an HPC one.
+- The `cluster://storage` resource (`core/resources.py:59`; `rcac://storage` is its deprecated
+  alias) formats `paths.home`, `paths.scratch` and `paths.depots` — a data model with `depot` in it,
+  which is a Purdue concept, not an HPC one.
 
 On a cluster with neither command, `myquota` returns nonzero, the parser sees nothing it recognizes,
 and the failure surfaces as a parse error rather than "this site does not expose quotas that way."
-`SERVER_INSTRUCTIONS` compounds it by asserting Purdue's numbers — 25GB home, `/depot/<group>`,
+The served instructions compound it by asserting Purdue's numbers — 25GB home, `/depot/<group>`,
 `$CLUSTER_SCRATCH` — as though they were facts about clusters.
 
 ## Why it was deferred
@@ -63,7 +65,7 @@ Two design questions worth naming now:
   SHALL produce output equivalent to today's for a Purdue user.
 - **R4** — The storage data model SHALL express storage *roles* rather than Purdue's vocabulary, and
   SHALL be able to represent an unknown quota distinctly from a zero one.
-- **R5** — The generic `SERVER_INSTRUCTIONS` SHALL contain no site-specific quota figure or path.
+- **R5** — The generic core instructions SHALL contain no site-specific quota figure or path.
 
 ## Notes
 
@@ -73,7 +75,11 @@ Two design questions worth naming now:
   and factored its logic into the undecorated `resolve_storage_paths()` that the tool and the
   resource both call.
 - Related: [`site-extras.md`](site-extras.md) (strict prerequisite),
-  [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) (starts the `SERVER_INSTRUCTIONS` split).
+  [`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/) (split the instructions into core,
+  Slurm and RCAC parts).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: planned to be absorbed by [`site-extras.md`](site-extras.md), the cycle that
   establishes the site hook this one needs.
+- 2026-10-30: the rename split the instructions. `CORE_INSTRUCTIONS` names no Purdue figure, so R5
+  holds for the core already; the numbers above now live in `RCAC_INSTRUCTIONS`, which the server
+  still serves to every user.

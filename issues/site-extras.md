@@ -18,16 +18,15 @@ A site extra is two things at once, and conflating them is the trap:
 
 1. **A dependency alias** — `rcac = ["cluster-mcp[slurm]", "cluster-mcp[lmod]"]`. Cheap, mechanical.
 2. **A point of view** — the site's own tools and the site's own agent-facing context. Today that is
-   `tools/rcac.py` (`myquota`, `storage_paths`, `jobinfo`, `jobcmd`, `jobenv`, `jobscript`,
-   `showpartitions`, `average_wait`), the RCAC-specific `slist`/`sfeatures` that currently sit *inside*
-   `tools/slurm.py`, and the Purdue half of `SERVER_INSTRUCTIONS` — the 25GB home quota,
-   `/depot/<group>`, `$CLUSTER_SCRATCH`, `findscratch`.
+   the `cluster-mcp-rcac` member's `rcac/tools.py` (`myquota`, `storage_paths`, `jobinfo`, `jobcmd`,
+   `jobenv`, `jobscript`, `showpartitions`, `average_wait`, `slist`, `sfeatures`) and its
+   `RCAC_INSTRUCTIONS` — the 25GB home quota, `/depot/<group>`, `$CLUSTER_SCRATCH`, `findscratch`.
 
-Two boundary problems are already visible in the tree. `slist` and `sfeatures` are RCAC commands
-living in the generic Slurm module, so the Slurm/site line is drawn in the wrong place today. And
-`SERVER_INSTRUCTIONS` is one `Final[str]` mixing both halves — [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md)
-starts that split; this cycle has to finish it into something a *contributor* can extend without
-editing a core constant.
+The rename ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/)) drew the first
+boundary: `slist` and `sfeatures` left the Slurm member for the RCAC one, and the instructions
+became `CORE_INSTRUCTIONS`, `SLURM_INSTRUCTIONS` and `RCAC_INSTRUCTIONS`. But `core/server.py` still
+imports and joins all three, so this cycle has to finish the split into something a *contributor*
+can extend without editing a core module.
 
 ## Why it was deferred
 
@@ -77,3 +76,5 @@ plan should say plainly how they compose, because a contributor will ask.
   capabilities as separate distributions ([`capability-extras.md`](capability-extras.md), Notes),
   the `rcac` alias lists distribution names (`cluster-mcp-slurm`, …) rather than the
   self-referencing extras sketched in the Problem above.
+- 2026-10-30: the rename moved `slist` and `sfeatures` into the RCAC member, so R3 is met on
+  `develop`; R2 and R4 stand, since the core still imports and joins every member's instructions.

@@ -1404,6 +1404,12 @@ release:
       container image, and no PyPI project. A release is a signed tag plus a GitHub release, and
       users install from
       `git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`.
+    repo-rename: >-
+      The tree's URLs name PurdueRCAC/cluster-mcp, but the repository keeps its old name,
+      PurdueRCAC/rcac-mcp, until Geoffrey approves the rename, planned for release 0.2.0. GitHub
+      redirects an old name to the new one after a rename, never the reverse, so post_verify cannot
+      pass before it: the rename comes first, as its own approval, then the release's pushes and
+      post_verify.
     pypi: >-
       A PyPI upload (uvx twine upload dist/*) is out of scope unless Geoffrey opts in for that
       release; a version string on a package index can never be reused. The internal requirements

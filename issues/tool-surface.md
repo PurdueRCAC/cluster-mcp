@@ -12,12 +12,12 @@ lane: public
 The server's file tools are too few and too thin, so agents fall back to `run_command` for
 everyday work — and `run_command` is the one tool nobody can reason about from its name.
 
-- **The file tools are minimal.** `list_directory` (`tools/filesystem.py:33`) costs N+1 round trips —
-  it runs a command per entry inside its loop — parses `ls -l` with GNU-only `--time-style`, and
-  returns symlinks as `name -> target`. `read_file` reads a whole file or its first N bytes, with no
-  offset, no line numbers and no truncation flag. There is no edit, stat, find or grep tool, so an
-  agent that needs one runs it through the shell, gets unstructured text back, and on a parallel
-  filesystem may start a recursive walk from a root on a shared login node.
+- **The file tools are minimal.** `list_directory` (`core/tools/filesystem.py:45`) costs N+1 round
+  trips — it runs a command per entry inside its loop — parses `ls -l` with GNU-only `--time-style`,
+  and returns symlinks as `name -> target`. `read_file` reads a whole file or its first N bytes,
+  with no offset, no line numbers and no truncation flag. There is no edit, stat, find or grep tool,
+  so an agent that needs one runs it through the shell, gets unstructured text back, and on a
+  parallel filesystem may start a recursive walk from a root on a shared login node.
 - **No tool carries annotations.** `readOnlyHint`, `destructiveHint` and `idempotentHint` are absent
   everywhere, so a client can't tell `read_file` from `write_file` from `run_command` without
   reading prose. Clients that match permissions by tool name (Claude Code allow-lists
@@ -33,7 +33,7 @@ everyday work — and `run_command` is the one tool nobody can reason about from
 ## Why it was deferred
 
 Not deferred — a roadmap cycle in Part I. It renames today's file tools, so it comes after
-[`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) and
+the rename ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/), landed 2026-10-30) and
 [`capability-extras.md`](capability-extras.md) (every import and registration moves once), and it
 is built on the argv executor from [`spec/safe-execution/`](../spec/safe-execution/).
 

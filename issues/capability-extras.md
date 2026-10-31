@@ -9,12 +9,12 @@ lane: public
 
 ## Problem
 
-Every tool registers unconditionally. `tools/__init__.py` defines `TOOL_REGISTRY` and `mcp_tool`, then
-imports each tool module at the bottom of the file; `@mcp_tool` appends at decoration time. There is
-no condition anywhere — a site with no Slurm still advertises `sbatch`, `squeue`, `scancel`, `sacct`,
-`sinfo`, `scontrol_show_job`, `scontrol_show_node`, `slist` and `sfeatures` to every connecting model,
-and every one of those is an invitation to compose a workflow that cannot run. The same will be true
-of LMOD tools the moment they exist.
+Every tool registers unconditionally. `core/tools/__init__.py` defines `TOOL_REGISTRY` and
+`mcp_tool`, then imports each tool module at the bottom of the file; `@mcp_tool` appends at
+decoration time. There is no condition anywhere — a site with no Slurm still advertises `sbatch`,
+`squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_job`, `scontrol_show_node`, `slist` and
+`sfeatures` to every connecting model, and every one of those is an invitation to compose a workflow
+that cannot run. The same will be true of LMOD tools the moment they exist.
 
 `AGENTS.md` § *Direction* commits to `cluster-mcp[slurm,lmod]` as the shape of the answer: you install
 the capabilities you have. That needs two things this repository does not have — extras in
@@ -47,9 +47,10 @@ Two design questions the plan has to answer rather than assume:
    install. So `[slurm]` is a *declaration of intent*, not a dependency pull — which means the
    mechanism needs a real switch (entry points, an env var, a CLI flag, a probe for `sinfo` on the
    remote host) and the extra is what sets it. Getting this wrong produces extras that do nothing.
-2. **Does `SERVER_INSTRUCTIONS` stay a constant?** It is currently one `Final[str]`. If tool groups
-   are conditional, the instructions describing them cannot be — this becomes composed-at-startup
-   text, which is a change to the one thing every model reads.
+2. **Does `SERVER_INSTRUCTIONS` stay a constant?** It is currently one `Final[str]`, the three
+   members' instructions joined in `core/server.py`. If tool groups are conditional, the
+   instructions describing them cannot be — this becomes composed-at-startup text, which is a change
+   to the one thing every model reads.
 
 A capability *probe* (ask the cluster whether `sinfo` exists) is attractive and should be considered
 explicitly, including its cost: it puts a remote round-trip on the startup path of a server whose SSH
@@ -84,5 +85,5 @@ connection is established eagerly, and it fails differently in `local` mode.
   distribution ships `cluster_mcp/__init__.py` — so an extra such as `slurm = ["cluster-mcp-slurm"]`
   installs real code, and an entry-point group registers it. Verified with uv 0.13.1: a git
   `#subdirectory=` install resolves sibling workspace members from the same commit, and `uv build`
-  drops the workspace sources, so the same tree publishes to PyPI unchanged.
-  [`rename-to-cluster-mcp.md`](rename-to-cluster-mcp.md) does the restructure.
+  drops the workspace sources, so the same tree publishes to PyPI unchanged. The restructure landed
+  with the rename on 2026-10-30 ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/)).
