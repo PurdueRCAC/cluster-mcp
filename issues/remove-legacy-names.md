@@ -46,6 +46,6 @@ was removed, and the one line to change in a client config for each.
 - Whether the `rcac-mcp` compat distribution also goes, or stays as an empty pointer at
   `cluster-mcp`, is the promotion conversation's call; removing it breaks the install line in every
   config that was never updated.
-- The repository's own name follows the 0.2.0 GitHub rename, whose redirect is GitHub's to keep, not
-  this cycle's.
+- The repository was renamed to `PurdueRCAC/cluster-mcp` on 2026-10-31. Its redirect from the old
+  name is GitHub's to keep, not this cycle's: removing the names above does not remove it.
 - Found by: `rename-to-cluster-mcp` GOAL non-goals, carried at retirement, 2026-10-30.

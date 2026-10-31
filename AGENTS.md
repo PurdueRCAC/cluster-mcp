@@ -1405,11 +1405,10 @@ release:
       users install from
       `git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`.
     repo-rename: >-
-      The tree's URLs name PurdueRCAC/cluster-mcp, but the repository keeps its old name,
-      PurdueRCAC/rcac-mcp, until Geoffrey approves the rename, planned for release 0.2.0. GitHub
-      redirects an old name to the new one after a rename, never the reverse, so post_verify cannot
-      pass before it: the rename comes first, as its own approval, then the release's pushes and
-      post_verify.
+      The repository was renamed from PurdueRCAC/rcac-mcp to PurdueRCAC/cluster-mcp on 2026-10-31,
+      after release 0.1.5. GitHub redirects the old name, so every install line and clone that
+      names it keeps working. Never create a repository named PurdueRCAC/rcac-mcp: it would take
+      the redirect, and every old install line with it.
     pypi: >-
       A PyPI upload (uvx twine upload dist/*) is out of scope unless Geoffrey opts in for that
       release; a version string on a package index can never be reused. The internal requirements
