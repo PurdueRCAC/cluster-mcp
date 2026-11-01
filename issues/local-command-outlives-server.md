@@ -43,3 +43,8 @@ When the server exits for any reason, no command it launched in `local` mode kee
 - Related: [`issues/timeout-process-cleanup.md`](timeout-process-cleanup.md) (a timed-out command
   that keeps running); `spec/capability-probe/` (PLAN §5).
 - Found by: `capability-probe` plan step, adversarial review, 2026-11-01.
+- 2026-11-01: `capability-probe` review cycle 1 found the same leak on a *normal* exit. A `local`
+  probe whose login profile ignores SIGTERM (`trap '' TERM`) and then hangs outlives a server that
+  failed open at the bound and exited 0: the probe's login shell and its child keep running in their
+  own process group (`start_new_session=True`), since the executor's timeout sends SIGTERM only. The
+  Outcome above ("exits for any reason") covers it; R1's sketch names only signals.
