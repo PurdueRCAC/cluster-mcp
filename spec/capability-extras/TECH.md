@@ -3,10 +3,10 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/capability-extras
 base: develop
-current_phase: done
+current_phase: P5
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -20,7 +20,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-extras/verify/p4.sh && sh spec/capability-extras/verify/p1.sh mutants && uv run python -I spec/capability-extras/remediation/F2-mutant-sweep.py
+  attempts: 2
+  verify: sh spec/capability-extras/verify/p4.sh && sh spec/capability-extras/verify/p1.sh mutants && uv run python -I spec/capability-extras/remediation/F7-mutant-alternatives.py
 - id: P2
   name: The storage resource belongs to the RCAC member; no core module names a member
   status: done
@@ -43,7 +44,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-extras/verify/p4.sh phase && sh spec/capability-extras/verify/p3.sh phase && sh spec/capability-extras/verify/p3.sh mutants && sh spec/capability-extras/remediation/F1-contribution-refusal.sh
+  attempts: 1
+  verify: sh spec/capability-extras/verify/p4.sh phase && sh spec/capability-extras/verify/p3.sh phase && sh spec/capability-extras/verify/p3.sh mutants && sh spec/capability-extras/remediation/F1-contribution-refusal.sh && sh spec/capability-extras/remediation/F4-load-refusal.sh
 - id: P4
   name: The extras, the core alone, and the compat root that keeps every tool
   status: done
@@ -62,7 +64,7 @@ phases:
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R9
@@ -257,6 +259,82 @@ sweep must cover the decisions F1 adds, in the same file.
   eras: `capability-stray-allowed`, `capability-same-capability-duplicate-allowed`,
   `capability-attribution-exact-module`.
 
+### Reopened at review cycle 2 — F4 (R5, R6, R8): every alternative of every decision, not one
+
+*Amended at remediation (2026-10-31; the route was ruled at the human gate: a scoped fix, verified by the foreman,
+then landed).* REVIEW.md cycle 2, F4: four mutants survived cycle 1's sweep, each a sibling of a
+decision that had one mutant (the composition's tie by capability name, `installed()` caching a
+failed load as no capability, the load above the `--generate-token` branch, the opening tools'
+partition taken above the `transfer` import). The class is every alternative of every decision in
+`C/capabilities.py`, of the load's place in `C/__init__.py` and of the opening/closing partition in
+`C/tools/__init__.py`. P1 and P3 are committed together, as in cycle 1: the sweep must cover the
+decisions P3's fix adds, in the same file.
+
+- [x] The decisions and their alternatives, by parsing the three files (the checker's docstring
+      gives the rules): each condition always, never and negated; each boolean operator without
+      each operand and with the other; each comparison negated (an ordering one to every other
+      ordering); each `except` to `Exception`, to `BaseException` and re-raising; each type of an
+      `isinstance` tuple dropped; each sort key to every key of one or two of its fields (the load's:
+      distribution, entry-point name, value; the composition's: order, distribution, name, tools
+      module), to no sort and to the reverse; `installed()` caching a failure as no capability or as
+      its error; the registration check begun after the entry point loads or after the tools import;
+      `run()`'s load at every other statement boundary of its body and of its `try`, and not at
+      all; the partition at every other index of `CORE_TOOLS` (0-7), before every other tool-module
+      import, and with its halves exchanged. 218 alternatives, each as one tree.
+- [x] 177 new cases in `tests/mutants.py` (`alternative(...)`, `partition_alternative(...)`), each
+      killed beside every member set: the composition and load order by
+      `test_composition_breaks_ties_by_distribution` and
+      `test_entry_points_load_by_distribution_then_name_not_value`, the cache by
+      `test_a_failed_load_is_not_cached` (one, `installed()` reloading when the cached load found
+      nothing, only beside the core alone), the placement by
+      `test_a_token_is_generated_before_any_capability_loads` and
+      `test_capabilities_load_before_the_mode_ladder_beside_every_set`, the partition by
+      `test_the_listing_opens_and_closes_with_the_core_tools_by_name` (the core tools by name, not
+      from `CORE_TOOLS`/`CLOSING_TOOLS`), the rest by the load's tests. Twelve cycle-1 cases
+      re-anchored where the fix moved their lines, ids and `why` kept (but
+      `capability-named-by-missing-distribution`, whose mutant now refuses rather than raises: its
+      `why` is now `is not named by its value`); three gain per-set rows
+      (`capability-order-from-discovery`, `capability-composition-tie-unbroken`,
+      `capability-load-after-ladder`).
+- [x] `tests/conftest.py` no longer stops collection when the installed capabilities fail to load:
+      the header names the failure and each test that needs them fails with it. Without that, a
+      mutant that refuses the members could only die at collection, which the runner counts as a
+      survivor. `test_capabilities.py` imports `test_instructions` (which loads at import) inside
+      the one test that needs it, for the same reason.
+- [x] Equivalents, each run against the whole capability selection in both eras: two of F2's
+      (the scratch server without the core's tools; the listing check's duplicate clause), and
+      six new (`!= 1` for `> 1` in the listing's twice-count; `BaseException` for `Exception` where metadata or entry points are
+      read, four sites, none of which runs a capability's code; the CLI catching every `Exception`
+      where the load raises only a `CapabilityLoadError` or a `KeyboardInterrupt`). F2's other two
+      are now killed and are cases: `installed()` uncached (the cache is pinned) and the tool
+      assembly dropped (a `FunctionTool` of a capability's own class runs its code when FastMCP
+      reads it). Set-equivalents, whose rows of those sets must pass under the case: the eleven
+      partition-index cases beside the core alone (the listing is the core's tools in registration
+      order wherever the partition falls; its halves exchanged is killed there too), and
+      `installed()` reloading when empty beside each member set (the cache holds whenever a member
+      loaded).
+- **Verify (retuned at review cycle 2):** `F7-mutant-alternatives.py` supersedes
+  `F2-mutant-sweep.py`, which stays as cycle 1's record and leaves the gate:
+  `sh spec/capability-extras/verify/p4.sh && sh spec/capability-extras/verify/p1.sh mutants && uv run python -I spec/capability-extras/remediation/F7-mutant-alternatives.py`.
+  Its `coverage` step fails on any alternative no case or equivalent mutates, and on any swept case
+  without a row beside each member set; seen red with the four survivors' alternatives withheld
+  and `capability-load-after-ladder`'s per-set rows dropped (each named).
+  *Attempt 1 (red, 2026-10-31):* coverage ok and 241 of 241 cases killed in each era, but every
+  equivalent failed: the checker's own child lost `HOME` (it read the environment after clearing
+  it). Fixed. *Attempt 2 (red):* its equivalents step then showed
+  `capability-partition-halves-exchanged` killed beside the core alone too (the site context tool
+  moves first), so it is a four-set case, not a set-equivalent; every other equivalent and
+  set-equivalent passed in each era.
+  *Observed at remediation (2026-10-31), P1, P3 and P5 together, each distinct step once on the
+  final tree, the earlier runs standing in where a step's inputs did not change:* `p4.sh` (all
+  modes): `phase` green (lock check, pyprojects, docs, coreonly for core, slurm, rcac and both,
+  probe's five installs and both compares at 24 tools, 4 resources and 1477 characters, baseline
+  with 452 functions and 417 cases kept and 0 retired, P4's tests 1281 passed in each era),
+  `mutants` (`core-imports-member-by-name` killed, 3 controls), `full` 3660 passed and 14 skipped
+  in each era (the bash 4.1 `need_shell` rows, which CI runs) with `cluster-mcp --help` exit 0.
+  `p1.sh mutants` and `p3.sh mutants` stand in by `p5.sh mutants`, their superset: 299 killed, 3
+  controls. `F7-mutant-alternatives.py` all, on the final tree: see P5's record.
+
 ## Phase P2 — The storage resource belongs to the RCAC member; no core module names a member
 **Satisfies:** R3, R7 · **Depends on:** P1
 **Goal:** `cluster://storage` and its `rcac://storage` alias are the RCAC capability's, served only
@@ -357,6 +435,84 @@ load uncaught (exit 6, unanswered). Committed with P1 (see P1's amendment).
   `broken`'s eleven cases and the HTTP one, planted `extra`, docs p3, P3's tests in both eras);
   `F1-contribution-refusal.sh` green: 432 accepted and served whole, 1,292 refused naming the
   capability over 4 member sets, then its pins in both eras.
+
+### Reopened at review cycle 2 — F1-F3 (R8, Q5): whatever a capability's code does while it loads is refused, naming it
+
+*Amended at remediation (2026-10-31; the route was ruled at the human gate).* REVIEW.md cycle 2: a capability
+that exits while loading bypassed the refusal (F1: `SystemExit` is not an `Exception`); a tool its
+entry point's import registered outside its tools module escaped the stray and non-tool guards
+(F2: `before` was taken after `ep.load()`); and ordering ran outside the refusal (F3: a
+distribution with no `Name` made the sort raise `TypeError`). The class, read off the load: every
+point a capability's own code runs (its entry point's import, its tools module's and the modules
+either imports, the load's reading of what it declared, FastMCP's reading of its tools and
+handlers) and anything it can raise or exit with there; every registration since its load began,
+whoever imported what; and discovering and ordering. Committed with P1 (see P1's amendment).
+
+- [x] `C/capabilities.py`: one exit for a failure, `except BaseException`: the registry is cut
+      back, a `CapabilityLoadError` or `KeyboardInterrupt` is raised as it is, anything else is
+      refused naming the capability (`_cause`: the type and its text, the type alone when its text
+      is empty or its `__str__` raises or exits). The assembly's two clauses catch the same, so a
+      tool or resource that exits is refused as one that cannot be served. `before` is taken before
+      `ep.load()`, and the two guards say `loading it registered …`. `_identity()` names each entry
+      point's distribution by its `name` (a missing `Name` read as none, whether this Python warns
+      or raises `KeyError` for it), its entry point's value when it has none or the metadata cannot
+      be read, and such a distribution is refused before any of its code runs. The load orders
+      `_Entry` tuples (that name, the reason, the entry point) by that name and the entry-point name,
+      so ordering cannot raise and needs no entry point to be hashable. `_discovered()` refuses a distribution whose entry points cannot be read,
+      named by its `Name` or its path. `installed()` is unchanged.
+- [x] Pins (each seen red on `2c5ceda`'s code, below): `test_capabilities.py`
+      `test_a_capability_that_cannot_load_is_refused_naming_it` (`UNLOADABLE`: eight raised or exit
+      kinds at five times, six registration timings, three nameless metadata, beside every member
+      set), `test_a_keyboard_interrupt_while_loading_still_interrupts`,
+      `test_a_capability_whose_entry_point_imports_its_tools_loads`,
+      `test_entry_points_that_cannot_be_read_are_refused_naming_their_distribution`,
+      `test_a_discovery_that_fails_with_every_distribution_readable_is_refused_naming_the_group`;
+      `test_startup.py` `test_a_capability_that_cannot_load_stops_startup` (each `UNLOADABLE` kind
+      over the raw wire, with stdin closed and over HTTP, each drive in its own process group),
+      `test_a_keyboard_interrupt_while_loading_still_interrupts_the_start`, and in process beside
+      every set `test_a_keyboard_interrupt_while_loading_interrupts_the_start_beside_every_set`.
+- [x] AGENTS.md §7 states what the load decides (a list: metadata, code that raises or exits and
+      when, the `Capability` and its resources, registrations whenever made, names and URIs taken
+      and the listing, what FastMCP refuses), discovery's refusal and the command line's earlier
+      failure at import, `KeyboardInterrupt`, and `installed()`'s cache; §4's refusal bullet, the
+      repository map's `capabilities.py` row and § Testing's `test_capabilities.py`,
+      `test_startup.py` and `conftest.py` notes follow.
+- [x] Class checker `remediation/F4-load-refusal.py` (+ `.sh`, which then runs the pins by id in
+      both eras): the property over a generated domain beside each member set, in process: 17
+      raised or exit kinds (an `Exception` with and without text, one whose text raises, one whose
+      text exits, `SystemExit` with 0, 1, 3, 255, a string, none, bare, a float and a list,
+      `GeneratorExit`, a `BaseException` of its own, a `BaseExceptionGroup`, `KeyboardInterrupt`)
+      at 9 times, 5 nameless metadata (no `Name`, blank, spaces, no `METADATA`, not UTF-8; each
+      capability would exit if its code ran), a tool and a non-tool registered from 6 places, and 4
+      controls that must load: 174 kinds, 696 verdicts.
+- **Verify (retuned at review cycle 2):**
+  `sh spec/capability-extras/verify/p4.sh phase && sh spec/capability-extras/verify/p3.sh phase && sh spec/capability-extras/verify/p3.sh mutants && sh spec/capability-extras/remediation/F1-contribution-refusal.sh && sh spec/capability-extras/remediation/F4-load-refusal.sh`.
+  *Attempt 1 (red, 2026-10-31), fixed in this remediation before any commit:* `p4.sh` (all modes)
+  and `p3.sh phase` green, then cycle 1's `F1-contribution-refusal.py` failed every case: its
+  hand-built entry points are unhashable and their distributions carry only a `name`, and the load
+  first keyed a dict by entry point and read `metadata.get('Name')`. The load now orders `_Entry`
+  tuples and reads `name`; every step reran from the start on the fixed tree (below). A pin for a
+  `name` that raises `KeyError` (`test_a_name_missing_as_a_key_error_is_no_name`) came with it.
+  *Observed (2026-10-31), on the fixed tree:* `p4.sh phase` stands in by P1's `p4.sh` run (all
+  modes); `p3.sh phase` green (planted `broken`'s eleven cases and the HTTP one, `extra`,
+  `bad-resource`, `shadow`, docs p3, P3's tests 1649 passed in each era); `p3.sh mutants` by
+  `p5.sh mutants`; `F1-contribution-refusal.sh` green (432 accepted and served whole, 1292 refused
+  naming the capability, over 4 member sets; its pins 78 passed in each era);
+  `F4-load-refusal.sh` green (174 kinds beside 4 member sets, 0 violations; its pins 460 passed in
+  each era). Red first on `2c5ceda`'s loader: the F4 checker found 592 violations over 148 of its
+  174 kinds (`SystemExit` and other `BaseException`s escaping the load, nameless distributions
+  raising `TypeError` from the sort or loading under the name `''`, registrations at the entry
+  point's import loading unchecked or refused with an incidental `AttributeError`, interrupted
+  loads leaving tools registered); the 26 that held are the 4 controls and the `Exception` kinds
+  the old `except Exception` already refused with this text. The pins likewise: every `UNLOADABLE`
+  row but the plain `RuntimeError` ones failed in
+  process beside every set (e.g. `the load raised SystemExit, not a CapabilityLoadError`), and over
+  the CLI each exit kind exited 0, 1 or 3 with nothing on stderr and no answer, `raises-base`
+  exited 1 with a traceback, the entry-point-time strays and a blank `Name` started the server
+  (exit 0 on stdio; over HTTP it bound and was killed at 60 s), and no `Name` exited 6 with
+  `'<' not supported between instances of 'NoneType' and 'str'`. The in-process placement and
+  interrupt-at-entry-point rows held on `2c5ceda` (its placement was right; F4's mutants kill
+  them).
 
 ## Phase P4 — The extras, the core alone, and the compat root that keeps every tool
 **Satisfies:** R1, R4, R5, R9, R10 · **Depends on:** P3

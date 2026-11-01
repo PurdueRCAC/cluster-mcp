@@ -42,6 +42,7 @@ import socket
 import subprocess
 import threading
 import time
+from importlib.metadata import EntryPoint, entry_points
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -58,8 +59,9 @@ import cluster_mcp.core.executor.ssh
 import cluster_mcp.core.tools
 from harness import Refused, stdio_refusal
 from cluster_mcp.core import MCPServerApp
+from cluster_mcp.core.capabilities import GROUP
 from cluster_mcp.core.startup import answer_until_eof
-from test_capabilities import REJECTED, rejected_package
+from test_capabilities import MEMBER_SETS, REJECTED, UNLOADABLE, rejected_package, unloadable, write_metadata
 from test_cli import CLI, LEGACY_CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
@@ -627,6 +629,17 @@ def test_a_contribution_the_server_would_refuse_stops_startup(kind: str, drive: 
     # Started in `local` mode, the server would build itself without the load's refusal and fail
     # there, after the mode ladder, with no answer on stdio; the load refuses first instead.
     root, dist = plant_rejected(tmp_path / 'planted', kind)
+    violations = refused_start_violations(root, dist, REJECTED[kind]['cause'], drive)
+    assert violations == [], '\n'.join(violations)
+
+
+def refused_start_violations(root: Path, named: str, cause: str, drive: str) -> list[str]:
+    """Every way a `local` start over `drive`, with `root` first on PYTHONPATH, differs from refusing
+    to start for the capability `named`, its message carrying `cause`.
+
+    Over the raw wire each request is answered with the refusal; with stdin closed the server exits at
+    once; over HTTP it exits before binding, stdout empty. Each exits `exit_status.runtime_error`.
+    """
     held = os.environ.get('PYTHONPATH')
     env = {**os.environ, 'PYTHONPATH': str(root) + (os.pathsep + held if held else ''),
            'FASTMCP_CHECK_FOR_UPDATES': 'off'}
@@ -640,9 +653,8 @@ def test_a_contribution_the_server_would_refuse_stops_startup(kind: str, drive: 
     stderr = result.stderr.splitlines()
     reported = [line.split('] ', 1)[-1] for line in stderr if 'cannot load capability' in line]
     message = reported[0] if reported else ''
-    cause = REJECTED[kind]['cause']
-    violations = [] if message.startswith(f'cannot load capability {dist}: ') and cause in message else \
-        [f'the start was not refused naming {dist} with {cause!r}: status {result.returncode}, {stderr[-6:]!r}']
+    violations = [] if message.startswith(f'cannot load capability {named}: ') and cause in message else \
+        [f'the start was not refused naming {named} with {cause!r}: status {result.returncode}, {stderr[-6:]!r}']
     # Over HTTP nothing reads stdin: the requests on it go unanswered, and stdout stays empty.
     stdout = result.stdout.splitlines() if drive != 'http' else []
     violations += load_refusal_violations(result.returncode, stderr, stdout, [] if drive == 'http' else lines_in,
@@ -652,5 +664,122 @@ def test_a_contribution_the_server_would_refuse_stops_startup(kind: str, drive: 
             violations.append(f'stdout is not empty over http: {result.stdout[:200]!r}')
         if 'Starting MCP server' in result.stderr or 'Uvicorn running' in result.stderr:
             violations.append(f'the server began serving before it refused: {result.stderr[-400:]!r}')
+    if elapsed >= 30:
+        violations.append(f'the refusal took {elapsed:.1f} s')
+    return violations
+
+
+def plant_unloadable(root: Path, kind: str) -> tuple[Path, str, str]:
+    """Plant the `UNLOADABLE` capability `kind` under `root`; return the directory to put on the path,
+    the name its refusal carries and its cause."""
+    case = unloadable(kind)
+    for name, text in case.files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    info = root / f"{case.dist.replace('-', '_')}-0.0.1.dist-info"
+    info.mkdir(parents=True)
+    write_metadata(info, case.dist, case.metadata)
+    (info / 'entry_points.txt').write_text(f'[cluster_mcp.capabilities]\n{case.entry}\n')
+    return root, case.named, case.cause
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('drive', ['raw-wire', 'stdin-closed', 'http'])
+@pytest.mark.parametrize('kind', UNLOADABLE)
+def test_a_capability_that_cannot_load_stops_startup(kind: str, drive: str, tmp_path: Path) -> None:
+    # Whatever its code raised or exited with, whenever it ran, a nameless distribution, a registration
+    # outside its tools module made at its entry point's import: the start is refused, naming it, as
+    # for any capability that cannot load.
+    root, named, cause = plant_unloadable(tmp_path / 'planted', kind)
+    violations = refused_start_violations(root, named, cause, drive)
     assert violations == [], '\n'.join(violations)
-    assert elapsed < 30, f'the refusal took {elapsed:.1f} s'
+
+
+@pytest.mark.integration
+def test_a_keyboard_interrupt_while_loading_still_interrupts_the_start(tmp_path: Path) -> None:
+    root = tmp_path / 'planted'
+    module = 'planted_interrupt'
+    files = {f'{module}/__init__.py': '', f'{module}/capability.py': 'raise KeyboardInterrupt\n'}
+    for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text)
+    info = root / 'planted_interrupt-0.0.1.dist-info'
+    info.mkdir()
+    write_metadata(info, 'planted-interrupt')
+    (info / 'entry_points.txt').write_text(f'[cluster_mcp.capabilities]\ncap = {module}.capability:CAPABILITY\n')
+    held = os.environ.get('PYTHONPATH')
+    env = {**os.environ, 'PYTHONPATH': str(root) + (os.pathsep + held if held else ''), 'FASTMCP_CHECK_FOR_UPDATES': 'off'}
+    result = run_bounded([str(CLI), '-e', 'local'], ''.join(line + '\n' for line in RAW_WIRE_IN), env)
+    assert result.returncode == exit_status.keyboard_interrupt, \
+        f'a keyboard interrupt did not interrupt the start: exit {result.returncode}, {result.stderr[-400:]!r}'
+    assert 'cannot load capability' not in result.stderr + result.stdout, \
+        f'a keyboard interrupt was refused as a capability that cannot load: {result.stderr[-400:]!r}'
+
+
+# A capability that cannot load, found beside a member set: the group as `entry_points` would give it.
+GONE = 'planted_nowhere_at_all.capability:CAPABILITY'
+GONE_MESSAGE = f"cannot load capability {GONE}: ModuleNotFoundError: No module named 'planted_nowhere_at_all'"
+
+
+def discover_beside_gone(names: tuple[str, ...], monkeypatch: pytest.MonkeyPatch, value: str = GONE) -> None:
+    """Make the next load find the members in `names` and the capability `value` names (by default one
+    that cannot load), uncached."""
+    found = (*(ep for ep in entry_points(group=GROUP) if ep.name in names), EntryPoint('planted', value, GROUP))
+    monkeypatch.setattr(cluster_mcp.core.capabilities, 'entry_points', lambda group: found)
+    monkeypatch.setattr(cluster_mcp.core.capabilities, '_installed', None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_token_is_generated_before_any_capability_loads(names: tuple[str, ...], monkeypatch: pytest.MonkeyPatch,
+                                                          caplog: pytest.LogCaptureFixture, guard) -> None:
+    discover_beside_gone(names, monkeypatch)
+    monkeypatch.setenv('JWT_SECRET', 'a planted secret of at least thirty-two characters')
+    observed = run_app(['--generate-token', '--sub', 'planted'], [], monkeypatch, caplog)
+    token = observed['stdout']
+    violations = [] if observed['status'] == exit_status.success else [f"exit status {observed['status']}"]
+    if len(token) != 1 or token[0].count('.') != 2:
+        violations.append(f'no token printed: {token!r}')
+    if observed['critical']:
+        violations.append(f"reported {observed['critical']!r}")
+    assert violations == [], 'the capability load ran before the token was generated: ' + '; '.join(violations)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_keyboard_interrupt_while_loading_interrupts_the_start_beside_every_set(
+        names: tuple[str, ...], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path,
+        guard) -> None:
+    package = tmp_path / 'planted' / 'planted_interrupting'
+    package.mkdir(parents=True)
+    (package / '__init__.py').write_text('')
+    (package / 'capability.py').write_text('raise KeyboardInterrupt\n')
+    monkeypatch.syspath_prepend(str(package.parent))
+    discover_beside_gone(names, monkeypatch, 'planted_interrupting.capability:CAPABILITY')
+    observed = run_app([], RAW_WIRE_IN, monkeypatch, caplog)
+    refused = [line for line in observed['critical'] if 'cannot load capability' in line]
+    assert observed['status'] == exit_status.keyboard_interrupt and not refused and not observed['stdout'], \
+        f"a keyboard interrupt did not interrupt the start: exit {observed['status']}, {observed['critical']!r}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_capabilities_load_before_the_mode_ladder_beside_every_set(names: tuple[str, ...],
+                                                                   monkeypatch: pytest.MonkeyPatch,
+                                                                   caplog: pytest.LogCaptureFixture, guard) -> None:
+    discover_beside_gone(names, monkeypatch)
+    before = list(cluster_mcp.core.tools.TOOL_REGISTRY)
+    consulted: list[str] = []
+    ladder = MCPServerApp._resolve_exec_mode
+    monkeypatch.setattr(MCPServerApp, '_resolve_exec_mode', lambda self: consulted.append('ladder') or ladder(self))
+    observed = run_app([], RAW_WIRE_IN, monkeypatch, caplog)
+    logged = [r.getMessage() for r in caplog.records if r.name == 'cluster_mcp.core']
+    stderr = [*(line for line in logged if any(said in line for said in LADDER)), *observed['critical']]
+    violations = load_refusal_violations(observed['status'], stderr, observed['stdout'], RAW_WIRE_IN, GONE_MESSAGE)
+    if consulted:
+        violations.append('the mode ladder ran before the capability load: _resolve_exec_mode was called')
+    if observed['started']:
+        violations.append('the server was built')
+    assert violations == [], '\n'.join(violations)
+    assert cluster_mcp.core.tools.TOOL_REGISTRY == before
+    assert guard.refused == []

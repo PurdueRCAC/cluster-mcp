@@ -10,21 +10,24 @@ A capability's resources are never open: each needs its request's executor, so i
 every read of one resolves the caller.
 
 Nothing here runs at import. `installed()` loads every capability the environment has, once, when
-the server starts; a capability that cannot be loaded stops the load with a `CapabilityLoadError`
-naming its distribution, and leaves the tool registry as it was before the load began. The load
-assembles each capability's tools and resources on a scratch server through `serve()`, the one way
-every server takes them, so whatever a capability declares fails at the load or not at all.
+the server starts; a capability that cannot be discovered, ordered or loaded stops the load with a
+`CapabilityLoadError` naming its distribution, whatever its code raised or exited with (but a
+`KeyboardInterrupt`, which still interrupts), and leaves the tool registry as it was before the load
+began. The load assembles each capability's tools and resources on a scratch server through
+`serve()`, the one way every server takes them, so whatever a capability declares fails at the load
+or not at all.
 """
 
 # Type annotations
 from __future__ import annotations
-from typing import Final, Iterable
+from typing import Final, Iterable, NamedTuple
 
 # Standard libs
 import re
+import warnings
 from dataclasses import dataclass
 from importlib import import_module
-from importlib.metadata import EntryPoint, entry_points
+from importlib.metadata import Distribution, EntryPoint, distributions, entry_points
 
 # External libs
 from fastmcp import FastMCP
@@ -83,14 +86,70 @@ class CapabilityLoadError(RuntimeError):
         super().__init__(' '.join(f'cannot load capability {distribution}: {cause}'.split()))
 
 
-def _distribution(ep: EntryPoint) -> str:
-    """The distribution that declared `ep`, or the entry point's value when it came from none."""
-    return ep.dist.name if ep.dist is not None else ep.value
+def _identity(ep: EntryPoint) -> tuple[str, str | None]:
+    """How a refusal names `ep`'s capability, and why its distribution cannot be loaded (None when it can).
+
+    The name of the distribution that declared it. An entry point that came from no distribution (one
+    built by hand) is named by its value; so is one whose distribution's metadata cannot be read or
+    names no distribution, and that one cannot be loaded.
+    """
+    if ep.dist is None:
+        return ep.value, None
+    try:
+        with warnings.catch_warnings():
+            # A `Name` missing from the metadata reads as None, with this warning, until it raises KeyError.
+            warnings.simplefilter('ignore', DeprecationWarning)
+            name = ep.dist.name
+    except KeyError:
+        name = None
+    except Exception as exc:
+        return ep.value, f'its distribution metadata cannot be read: {_cause(exc)}'
+    if not isinstance(name, str) or not name.strip():
+        return ep.value, 'its distribution metadata has no Name'
+    return name, None
+
+
+class _Entry(NamedTuple):
+    """An entry point to load, with the name its refusal carries and why it cannot load (None when it can)."""
+
+    distribution: str
+    nameless: str | None
+    ep: EntryPoint
+
+
+def _named(dist: Distribution) -> str:
+    """The name in `dist`'s metadata, or where it is installed when that names none."""
+    try:
+        name = dist.metadata.get('Name')
+    except Exception:
+        name = None
+    return name if isinstance(name, str) and name.strip() else str(getattr(dist, '_path', dist))
+
+
+def _discovered() -> tuple[EntryPoint, ...]:
+    """Every entry point in `GROUP`; one installed distribution whose entry points cannot be read stops
+    the load, named."""
+    try:
+        return tuple(entry_points(group=GROUP))
+    except Exception as exc:
+        unreadable = exc
+    for dist in distributions():
+        try:
+            dist.entry_points
+        except Exception as exc:
+            raise CapabilityLoadError(_named(dist), f'its entry points cannot be read: {_cause(exc)}') from exc
+    raise CapabilityLoadError(GROUP, f'its entry points cannot be read: {_cause(unreadable)}') from unreadable
 
 
 def _cause(exc: BaseException) -> str:
-    """`<ExcType>: <text>`, or the type alone when the text is empty."""
-    text = str(exc)
+    """`<ExcType>: <text>`, or the type alone when the text is empty or cannot be had (its `__str__`, a
+    capability's code, raised or exited)."""
+    try:
+        text = str(exc)
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
+        text = ''
     return f'{type(exc).__name__}: {text}' if text else type(exc).__name__
 
 
@@ -178,18 +237,24 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     """Load the capabilities `eps` name (default: every entry point in `GROUP`), uncached.
 
     They load in order of (distribution, entry-point name), so which failure is reported never
-    depends on `sys.path` or directory order. A capability fails to load when its entry point or its
-    tools module raises, when it is not a well-formed `Capability` (a resource of it included), when
-    its tools module registers anything but a `FunctionTool` or a tool outside itself, when one of its
-    tools, its name or one of its resource URIs is already taken (by the core or by a capability
-    loaded before it), when its instructions do not list exactly its tools, or when one of its tools
-    or resources cannot be served: assembled through `serve()` on a scratch server that holds the
-    core's and every earlier capability's, FastMCP refuses it or keys it as one it already holds. Any
-    other exception while loading a capability fails it too. The first failure raises
-    `CapabilityLoadError`, after `TOOL_REGISTRY` is cut back to what it held before this load began.
+    depends on `sys.path` or directory order; a distribution is named by its entry point's value when
+    its metadata names none (`_identity`). A capability fails to load when its distribution's metadata
+    cannot be read or has no `Name`; when its entry point or its tools module raises anything or
+    exits; when it is not a well-formed `Capability` (a resource of it included); when anything
+    registered since its load began (its entry point's import included, whatever imported its tools
+    module and when) is not a `FunctionTool` or lies outside its tools module; when one of its tools,
+    its name or one of its resource URIs is already taken (by the core or by a capability loaded
+    before it); when its instructions do not list exactly its tools; or when one of its tools or
+    resources cannot be served: assembled through `serve()` on a scratch server that holds the core's
+    and every earlier capability's, FastMCP refuses it or keys it as one it already holds. Anything
+    else raised or exited with while loading a capability fails it too, but a `KeyboardInterrupt`,
+    which is raised as it is. The first failure raises `CapabilityLoadError`, after `TOOL_REGISTRY` is
+    cut back to what it held before this load began; so does a distribution whose entry points cannot
+    be read while they are discovered.
     """
-    found = entry_points(group=GROUP) if eps is None else eps
-    ordered = sorted(found, key=lambda ep: (_distribution(ep), ep.name))
+    found = _discovered() if eps is None else tuple(eps)
+    entries = [_Entry(*_identity(ep), ep) for ep in found]
+    ordered = sorted(entries, key=lambda each: (each.distribution, each.ep.name))
     start = len(TOOL_REGISTRY)
     core = {tool.name for tool in CORE_TOOLS}
     core_uris = {entry['uri'] for entry in RESOURCE_REGISTRY}
@@ -199,28 +264,23 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     loaded: list[Loaded] = []
     scratch = _scratch()
     try:
-        for ep in ordered:
-            distribution = _distribution(ep)
+        for distribution, nameless, ep in ordered:
+            if nameless:
+                raise CapabilityLoadError(distribution, nameless)
+            before = len(TOOL_REGISTRY)
             try:
                 capability = _checked(ep.load())
             except _Invalid as exc:
                 raise CapabilityLoadError(distribution, str(exc)) from exc
-            except Exception as exc:
-                raise CapabilityLoadError(distribution, _cause(exc)) from exc
-            before = len(TOOL_REGISTRY)
-            try:
-                import_module(capability.tools)
-            except Exception as exc:
-                raise CapabilityLoadError(distribution, _cause(exc)) from exc
+            import_module(capability.tools)
             odd = [type(entry).__name__ for entry in TOOL_REGISTRY[before:] if not isinstance(entry, FunctionTool)]
             if odd:
-                raise CapabilityLoadError(distribution, f'importing {capability.tools} registered a {odd[0]}, '
-                                                        f'not a FunctionTool')
+                raise CapabilityLoadError(distribution, f'loading it registered a {odd[0]}, not a FunctionTool')
             stray = [tool.name for tool in TOOL_REGISTRY[before:]
                      if not _below(tool.fn.__module__, capability.tools)]
             if stray:
-                raise CapabilityLoadError(distribution, f'importing {capability.tools} registered {stray}, '
-                                                        f'which are outside it')
+                raise CapabilityLoadError(distribution, f'loading it registered {stray}, which are outside '
+                                                        f'{capability.tools}')
             if capability.name in names:
                 raise CapabilityLoadError(distribution, f'the capability name {capability.name!r} is already '
                                                         f'taken by {names[capability.name]}')
@@ -249,24 +309,27 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
             for tool in tools:
                 try:
                     serve(scratch, (tool,), ())
-                except Exception as exc:
+                except KeyboardInterrupt:
+                    raise
+                except BaseException as exc:
                     raise CapabilityLoadError(distribution, f'its tool {tool.name!r} cannot be served: '
                                                             f'{_cause(exc)}') from exc
             for entry in capability.resources:
                 try:
                     serve(scratch, (), (entry,))
-                except Exception as exc:
+                except KeyboardInterrupt:
+                    raise
+                except BaseException as exc:
                     raise CapabilityLoadError(distribution, f'its resource {entry["uri"]!r} cannot be served: '
                                                             f'{_cause(exc)}') from exc
             names[capability.name] = distribution
             owners.update((tool.name, distribution) for tool in tools)
             uri_owners.update((uri, distribution) for uri in uris)
             loaded.append(Loaded(capability, distribution, tools))
-    except CapabilityLoadError:
+    except BaseException as exc:
         del TOOL_REGISTRY[start:]
-        raise
-    except Exception as exc:
-        del TOOL_REGISTRY[start:]
+        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):
+            raise
         raise CapabilityLoadError(distribution, _cause(exc)) from exc
     return tuple(loaded)
 
