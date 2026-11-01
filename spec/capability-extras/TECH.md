@@ -3,10 +3,10 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-extras
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-10-31'
 phases:
 - id: P1
@@ -64,7 +64,7 @@ phases:
   verify: sh spec/capability-extras/verify/p4.sh
 - id: P5
   name: The whole cycle's gates on the finished tree, the recipe on this head, the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R9
@@ -644,6 +644,24 @@ approved, its entry said it still waited for approval. It was approved on 2026-1
   (the code, tests, docs, ROADMAP and seed it holds; only TECH.md differed, and none of those steps
   reads it). Rerun after this amendment, as the only steps it can touch (each reads TECH.md or
   the wrapper): the wrapper (`ledger: ok`) and the F3 checker (ok).
+
+### Reopened at review cycle 2: the cycle's gates on the remediated tree
+
+*Amended at remediation (2026-10-31).* Cycle 2's fixes (P1 and P3 above) change the load, its
+tests, `tests/mutants.py` and AGENTS.md, so the cycle's last phase runs its gate again on the
+remediated tree. Nothing of its own changes: its `verify:` is kept.
+
+- [x] `p5.sh phase`, `recipe`, `mutants`, the ledger wrapper, `full` and the F3 checker on the
+      remediated tree; the deferral walk finds nothing new (cycle 2 seeds nothing: every finding is
+      fixed here).
+- *Observed (2026-10-31):* `phase` green (pyprojects, imports, compose, docs p4, planted `extra`
+  and `broken`, coreonly, probe, baseline as in P1's record); `recipe` built 4 wheels and 4
+  sdists, `twine check --strict` passed each, sdist hygiene clean; `mutants` 299 killed, 3
+  controls; the ledger wrapper ok; `full` stands in by P1's `p4.sh full` (the same two commands);
+  the F3 checker ok. `F7-mutant-alternatives.py` all (P1's gate step, run last, on the final
+  tree): coverage 218 alternatives, 241 cases, 8 equivalents; 241 of 241 cases killed in each era;
+  each equivalent passes the whole capability selection (995 tests) in each era, and each
+  set-equivalent its rows of those sets.
 
 ---
 
