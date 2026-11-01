@@ -1353,7 +1353,8 @@ CASES: tuple[Case, ...] = (
           'test_exec_mode.py::test_exec_mode_ladder[oidc-without-host]'),
          'mode:'),
     Case('delegate-gets-shared-middleware', 'core/__init__.py',
-         (("        if exec_mode == 'delegate':\n", "        if exec_mode == 'delegate' and False:\n"),),
+         (("        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
+           "        if exec_mode == 'delegate' and False:\n            # Delegate mode uses per-request executors via middleware\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[jwt-without-host]',),
          'middleware:'),
     # The secret floor: create_jwt_auth() and --generate-token each refuse an unset, empty or
@@ -2431,7 +2432,7 @@ CASES: tuple[Case, ...] = (
          every_set(f'{CAPABILITIES}::test_a_tool_outside_the_tools_module_is_refused'),
          'a tool outside the tools module loaded'),
     Case('capability-type-unchecked', 'core/capabilities.py',
-         (("    if not isinstance(value, Capability):\n"
+         (("    if type(value) is not Capability:\n"
            "        raise _Invalid(f'the entry point names a {type(value).__name__}, not a Capability')\n", ''),),
          every_set(MALFORMED, 'not-a-capability'), 'a malformed capability was not refused as such'),
     Case('capability-field-types-unchecked', 'core/capabilities.py',
@@ -2658,13 +2659,13 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-capability-always', LOADER,
-                (('    if not isinstance(value, Capability):\n',
+                (('    if type(value) is not Capability:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-capability-negated', LOADER,
-                (('    if not isinstance(value, Capability):\n',
-                  '    if isinstance(value, Capability):\n'),),
+                (('    if type(value) is not Capability:\n',
+                  '    if not type(value) is not Capability:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-always', LOADER,
@@ -3488,9 +3489,9 @@ CASES: tuple[Case, ...] = (
                   '        self._load_capabilities()\n'
                   '\n',
                   ''),
-                 ("        if exec_mode == 'delegate':\n",
+                 ("        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
                   '        self._load_capabilities()\n'
-                  "        if exec_mode == 'delegate':\n"),),
+                  "        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n"),),
                 f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
                 'the mode ladder ran before the capability load'),
     alternative('capability-load-placed-before-statement-8-of-its-body', CLI,
@@ -3542,11 +3543,22 @@ CASES: tuple[Case, ...] = (
                   '        self._load_capabilities()\n'
                   '\n',
                   ''),
-                 ('            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget)\n',
+                 ('            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n',
                   '            self._load_capabilities()\n'
-                  '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget)\n'),),
+                  '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n'),),
                 f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
                 'the mode ladder ran before the capability load'),
+    *(alternative(f'capability-load-placed-before-the-{step}-of-its-try', CLI,
+                  (('        # Load every installed capability before the mode ladder: one that cannot load stops startup\n'
+                    '        self._load_capabilities()\n'
+                    '\n',
+                    ''),
+                   (line, '            self._load_capabilities()\n' + line)),
+                  f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
+                  'the mode ladder ran before the capability load')
+      for step, line in (('override', '            skipped = self._resolve_skip_probes()\n'),
+                         ('budget-check', '            site_context.compose(base_instructions(installed()), site, budget)\n'),
+                         ('probe', '            served = self._served(self._probe(exec_mode, executor, skipped))\n'))),
     alternative('capability-load-placed-before-statement-4-of-its-try', CLI,
                 (('        # Load every installed capability before the mode ladder: one that cannot load stops startup\n'
                   '        self._load_capabilities()\n'
@@ -4278,6 +4290,166 @@ CASES += (
                         ''),),
                       BASH),
 
+)
+
+
+# A capability record is exactly a `Capability`: the load's check of what the entry point names, put
+# back to `isinstance`, lets a subclass load, whichever field its code reads.
+SUBCLASS_KINDS = ('subclass-reads-nothing', 'subclass-reads-name', 'subclass-reads-order', 'subclass-reads-tools',
+                  'subclass-reads-instructions', 'subclass-reads-resources', 'subclass-reads-commands')
+UNLOADABLE_ROWS = f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it'
+
+CASES += (
+    Case('capability-check-exact-capability-isinstance', LOADER,
+         (('    if type(value) is not Capability:\n',
+           '    if not isinstance(value, Capability):\n'),),
+         every_set(UNLOADABLE_ROWS, *SUBCLASS_KINDS), 'a capability that cannot load was not refused naming it'),
+)
+
+
+# Startup's probe step: every decision of `_resolve_skip_probes`, `_probe` and `_served`, mutated to every
+# alternative it could take, the decisions no node kind names (the skip branches' order and what they
+# serve, what the server is built from, what the budget is checked against), each probe statement of
+# `run()` at every other boundary of its `try` and of its body and not at all, and the branch of
+# `env_setting` for a variable with no legacy name. Each is killed beside every member set by a row of
+# `test_probe_startup.py` (or, for the one the resolver alone can observe, of `test_env.py`).
+PROBE_STARTUP = 'test_probe_startup.py'
+DEPRECATION = 'core/deprecation.py'
+
+ONCE = (f'{PROBE_STARTUP}::test_local_and_ssh_probe_once_after_the_executor', 'local',
+        'the probe did not run once after the executor')
+KEPT = (f'{PROBE_STARTUP}::test_the_server_is_built_from_what_the_probe_keeps', 'local-each-member',
+        'the server was not built from what the probe kept')
+NO_ANSWER = (f'{PROBE_STARTUP}::test_every_ending_without_an_answer_serves_every_capability', 'exit-1-local-stdio',
+             'an ending without an answer did not serve every capability')
+DELEGATE_UNSET = (f'{PROBE_STARTUP}::test_delegate_runs_no_probe_and_says_so', 'unset',
+                  'delegate mode probed or did not say it skipped')
+DELEGATE_OVERRIDDEN = (f'{PROBE_STARTUP}::test_delegate_runs_no_probe_and_says_so', 'variable',
+                       'delegate mode probed or did not say it skipped')
+FLAG = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-flag', 'the override did not skip every probe')
+VARIABLE = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-variable-1',
+            'the override did not skip every probe')
+LEGACY_BUDGET = (f'{PROBE_STARTUP}::test_no_probe_runs_before_a_refusal', 'legacy-budget-short-of-every',
+                 'a probe ran before the legacy-budget-short-of-every refusal')
+BUDGET_ANSWER = (f'{PROBE_STARTUP}::test_the_budget_never_depends_on_the_answer', 'short-of-every-absent',
+                 'the budget depends on the answer')
+
+
+def startup_alternative(case_id: str, file: str, edits: tuple[tuple[str, str], ...], target: tuple[str, str, str]) -> Case:
+    """A case killed by the target test's rows for its case beside every member set."""
+    test, kind, why = target
+    return Case(case_id, file, edits, every_set(test, kind), why)
+
+
+SKIP_FLAG = "        if self.skip_probes:\n"
+SKIP_VALUE = "        return variable if value else None\n"
+DELEGATE_BRANCH = ("        if exec_mode == 'delegate':\n"
+                   "            log.info('Capability probes skipped in delegate mode: every installed capability is served')\n"
+                   "            return probes.unprobed(loaded)\n")
+OVERRIDE_BRANCH = ("        if skipped:\n"
+                   "            log.info(f'Capability probes skipped ({skipped}): every installed capability is served')\n"
+                   "            return probes.unprobed(loaded)\n")
+WITHHELD_TEST = "            if not verdict.served:\n"
+REASON_TEST = "            if verdict.reason:\n"
+NO_LEGACY = "    if legacy is None:\n"
+NO_LEGACY_VALUE = "        return (value or None), name\n"
+
+# The statements of `run()`'s `try`, in order, and where it ends; the statements of its body, and where
+# it ends. The three the probe step adds are each placed before every other one, at each end, and nowhere.
+RUN_TRY = ('            budget = self._resolve_budget()\n',
+           '            skipped = self._resolve_skip_probes()\n',
+           '            site = self._read_site(exec_mode, executor)\n',
+           '            site_context.compose(base_instructions(installed()), site, budget)\n',
+           '            served = self._served(self._probe(exec_mode, executor, skipped))\n',
+           '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n',
+           "            if self.transport == 'stdio':\n")
+RUN_TRY_END = "                mcp.run(transport='streamable-http', host=self.host, port=self.port)\n"
+RUN_BODY = ('        """Run the MCP server or generate token."""\n',
+            '        if self.generate_token_flag:\n',
+            '        self._load_capabilities()\n',
+            '        exec_mode = self._resolve_exec_mode()\n',
+            "        log.info(f'Execution mode: {exec_mode}')\n",
+            '        executor = None\n',
+            '        middlewares = []\n',
+            "        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
+            '        try:\n            budget = self._resolve_budget()\n')
+RUN_BODY_END = '                executor.close()\n'
+PROBE_STATEMENTS = {'override': RUN_TRY[1], 'check': RUN_TRY[3], 'probe': RUN_TRY[4]}
+
+
+def placed(name: str, where: str | None, at: int | None) -> Case:
+    """The probe statement `name` moved before statement `at + 1` of `run()`'s `where` (`try` or `body`;
+    `at` past the last: at its end), or, with `where` None, dropped."""
+    line = PROBE_STATEMENTS[name]
+    edits: list[tuple[str, str]] = [(line, '')]
+    if where == 'try':
+        rest = [s for s in RUN_TRY if s != line]
+        edits.append((rest[at], line + rest[at]) if at < len(rest) else (RUN_TRY_END, RUN_TRY_END + line))
+    elif where == 'body':
+        moved = line[4:]
+        edits.append((RUN_BODY[at], moved + RUN_BODY[at]) if at < len(RUN_BODY)
+                     else (RUN_BODY_END, RUN_BODY_END + moved))
+    what = 'dropped' if where is None else f'placed-before-statement-{at + 1}-of-its-{where}'
+    return startup_alternative(f'probe-step-{name}-{what}', CLI, tuple(edits), ONCE)
+
+
+CASES += (
+    startup_alternative('probe-override-flag-always', CLI, ((SKIP_FLAG, '        if True:\n'),), ONCE),
+    startup_alternative('probe-override-flag-never', CLI, ((SKIP_FLAG, '        if False:\n'),), FLAG),
+    startup_alternative('probe-override-flag-negated', CLI, ((SKIP_FLAG, '        if not self.skip_probes:\n'),), ONCE),
+    startup_alternative('probe-override-value-always', CLI, ((SKIP_VALUE, '        return variable\n'),), ONCE),
+    startup_alternative('probe-override-value-never', CLI, ((SKIP_VALUE, '        return None\n'),), VARIABLE),
+    startup_alternative('probe-override-value-negated', CLI,
+                        ((SKIP_VALUE, '        return variable if not value else None\n'),), ONCE),
+    startup_alternative('probe-delegate-always', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if True:\n            log.info('Capability probes skipped in"),), ONCE),
+    startup_alternative('probe-delegate-never', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if False:\n            log.info('Capability probes skipped in"),), DELEGATE_UNSET),
+    startup_alternative('probe-delegate-negated', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if not exec_mode == 'delegate':\n            log.info('Capability probes skipped in"),),
+                        ONCE),
+    startup_alternative('probe-skipped-always', CLI, (('        if skipped:\n', '        if True:\n'),), ONCE),
+    startup_alternative('probe-skipped-never', CLI, (('        if skipped:\n', '        if False:\n'),), FLAG),
+    startup_alternative('probe-skipped-negated', CLI, (('        if skipped:\n', '        if not skipped:\n'),), ONCE),
+    startup_alternative('probe-skip-branches-exchanged', CLI,
+                        ((DELEGATE_BRANCH + OVERRIDE_BRANCH, OVERRIDE_BRANCH + DELEGATE_BRANCH),), DELEGATE_OVERRIDDEN),
+    startup_alternative('probe-delegate-still-probes', CLI,
+                        ((DELEGATE_BRANCH, DELEGATE_BRANCH.replace('probes.unprobed(loaded)', 'probes.start(executor, loaded)')),),
+                        DELEGATE_UNSET),
+    startup_alternative('probe-override-still-probes', CLI,
+                        ((OVERRIDE_BRANCH, OVERRIDE_BRANCH.replace('probes.unprobed(loaded)', 'probes.start(executor, loaded)')),),
+                        FLAG),
+    startup_alternative('probe-served-withheld-always', CLI, ((WITHHELD_TEST, '            if True:\n'),), ONCE),
+    startup_alternative('probe-served-withheld-never', CLI, ((WITHHELD_TEST, '            if False:\n'),), KEPT),
+    startup_alternative('probe-served-withheld-negated', CLI, ((WITHHELD_TEST, '            if verdict.served:\n'),), ONCE),
+    startup_alternative('probe-served-reason-always', CLI, ((REASON_TEST, '            if True:\n'),), ONCE),
+    startup_alternative('probe-served-reason-never', CLI, ((REASON_TEST, '            if False:\n'),), NO_ANSWER),
+    startup_alternative('probe-served-reason-negated', CLI, ((REASON_TEST, '            if not verdict.reason:\n'),), ONCE),
+    startup_alternative('probe-server-built-from-every-installed', CLI,
+                        (('                                    capabilities=served)',
+                          '                                    capabilities=None)'),), KEPT),
+    startup_alternative('probe-budget-checked-against-the-core-alone', CLI,
+                        (('site_context.compose(base_instructions(installed()), site, budget)',
+                          'site_context.compose(base_instructions(()), site, budget)'),), BUDGET_ANSWER),
+    *(placed(name, 'try', at) for name in PROBE_STATEMENTS for at in range(len(RUN_TRY))
+      if at != RUN_TRY.index(PROBE_STATEMENTS[name])),
+    *(placed(name, 'body', at) for name in PROBE_STATEMENTS for at in range(len(RUN_BODY) + 1)),
+    *(placed(name, None, None) for name in PROBE_STATEMENTS),
+    startup_alternative('env-no-legacy-always', DEPRECATION, ((NO_LEGACY, '    if True:\n'),), LEGACY_BUDGET),
+    startup_alternative('env-no-legacy-never', DEPRECATION, ((NO_LEGACY, '    if False:\n'),), ONCE),
+    startup_alternative('env-no-legacy-negated', DEPRECATION, ((NO_LEGACY, '    if not legacy is None:\n'),), ONCE),
+    startup_alternative('env-no-legacy-value-ignored', DEPRECATION,
+                        ((NO_LEGACY_VALUE, '        return None, name\n'),), VARIABLE),
+    startup_alternative('env-no-legacy-value-and', DEPRECATION,
+                        ((NO_LEGACY_VALUE, '        return (value and None), name\n'),), VARIABLE),
+    # An empty value handed back as itself, not None: the resolver alone can tell (every start reads it
+    # as unset either way), so its row is the resolver's, with no member set to run beside.
+    Case('env-no-legacy-value-empty-kept', DEPRECATION, ((NO_LEGACY_VALUE, '        return value, name\n'),),
+         ('test_env.py::test_a_variable_without_a_legacy_name[empty-CLUSTER_MCP_SKIP_PROBES]',),
+         "resolved ('', 'CLUSTER_MCP_SKIP_PROBES')"),
 )
 
 CASES += tuple(cluster_twin(case, CLUSTER_TWINS[case.id]) for case in CASES if case.id in CLUSTER_TWINS)

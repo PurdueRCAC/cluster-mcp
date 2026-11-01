@@ -27,11 +27,13 @@ __all__ = ['WINDOW', 'LEGACY_ENV', 'legacy_warning', 'env_setting']
 # The deprecation window every legacy-name warning states, and the README states once.
 WINDOW: Final[str] = 'deprecated in 0.2.0, removed no earlier than 0.4.0'
 
-# Each environment variable the server reads, and the legacy name honoured in its place.
-LEGACY_ENV: Final[dict[str, str]] = {
+# Each environment variable the server reads, and the legacy name honoured in its place. None: the
+# variable came after the rename, so it has no legacy name, and nothing is honoured or warned about.
+LEGACY_ENV: Final[dict[str, str | None]] = {
     'CLUSTER_MCP_SSH_HOST': 'RCAC_SSH_HOST',
     'CLUSTER_MCP_USER_MAP': 'RCAC_USER_MAP',
     'CLUSTER_MCP_INSTRUCTIONS_BUDGET': 'RCAC_INSTRUCTIONS_BUDGET',
+    'CLUSTER_MCP_SKIP_PROBES': None,
 }
 
 log = Logger.with_name(__name__)
@@ -62,10 +64,13 @@ def env_setting(name: str) -> tuple[str | None, str]:
     A non-empty `name` wins; when its legacy name is set too, a warning says the legacy one is
     ignored. Otherwise a non-empty legacy value is returned, with its deprecation warning. An empty
     value counts as unset, and a value is never stripped: a whitespace-only host is a host. With
-    neither set, the value is None and the variable is `name`.
+    neither set, the value is None and the variable is `name`. A variable with no legacy name
+    (`LEGACY_ENV` holds None) is read alone, an empty value again counting as unset, with no warning.
     """
     legacy = LEGACY_ENV[name]
     value = os.environ.get(name)
+    if legacy is None:
+        return (value or None), name
     if value:
         if os.environ.get(legacy):
             ignored_warning(legacy, name)

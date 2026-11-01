@@ -6,7 +6,7 @@ appetite: big
 status: in_progress
 branch: feature/capability-probe
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -21,9 +21,10 @@ phases:
   verify: sh spec/capability-probe/verify/p1.sh phase && sh spec/capability-probe/verify/p1.sh mutants-handshake-1 && sh spec/capability-probe/verify/p1.sh mutants-handshake-2 && sh spec/capability-probe/verify/p1.sh mutants-modern-1 && sh spec/capability-probe/verify/p1.sh mutants-modern-2
 - id: P2
   name: Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
-  status: pending
+  status: done
   satisfies:
   - R1
+  - R2
   - R3
   - R4
   - R5
@@ -36,8 +37,8 @@ phases:
   - P1
   parallel: false
   hammerable: false
-  hill: uphill
-  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
+  hill: downhill
+  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
   status: pending
@@ -216,29 +217,29 @@ calls it at startup yet, so nothing a client sees changes.
   `tests/harness.py`, `tests/test_probes.py`, `tests/test_capabilities.py`, `tests/mutants.py`, `AGENTS.md`.
 
 ## Phase P2 — Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
-**Satisfies:** R1, R3, R4, R5, R6, R7, R8, R9, R10 · **Depends on:** P1
+**Satisfies:** R1, R2, R3, R4, R5, R6, R7, R8, R9, R10 · **Depends on:** P1
 **Goal:** `run()` probes once in `ssh` and `local` modes, after the site read and after checking the
 budget against every installed capability, so every refusal comes first. It builds the server from what
 the probe kept. It logs one
 line per withheld or unanswered capability. `delegate` mode and the override skip the probe with one
 line. Every refusal still comes first. The documents R10 names describe all of it.
 
-- [ ] `core/deprecation.py`: `LEGACY_ENV['CLUSTER_MCP_SKIP_PROBES'] = None` (type and comment as PLAN
+- [x] `core/deprecation.py`: `LEGACY_ENV['CLUSTER_MCP_SKIP_PROBES'] = None` (type and comment as PLAN
   §2.5); `env_setting` returns `(value or None, name)` for a variable with no legacy name, with no
   warning.
-- [ ] `core/__init__.py`:
+- [x] `core/__init__.py`:
   - the `--skip-probes` flag (`APP_USAGE`, Options, Environment Variables);
   - `_resolve_skip_probes`, `_probe` and `_served` as PLAN §2.4, with the four lines worded exactly as
     there (`docs_gate.py` reads the withheld line from `_served`'s source);
   - `run()`'s `try` takes, in order: the budget, the override, the site read, the budget check against
     `base_instructions(installed())`, the probe and its verdicts, then `create_mcp_server(…,
     capabilities=served)`.
-- [ ] `core/server.py`: the `capabilities` docstring (PLAN §2.6); no code change.
-- [ ] `tests/conftest.py`: the session `autouse` fixture `skip_probes` (PLAN §2.7).
+- [x] `core/server.py`: the `capabilities` docstring (PLAN §2.6); no code change.
+- [x] `tests/conftest.py`: the session `autouse` fixture `skip_probes` (PLAN §2.7).
   `tests/test_hygiene.py::test_the_suite_skips_probes_by_default` pins it.
-- [ ] `tests/test_env.py`: `test_every_variable_has_its_legacy_name` skips None entries;
+- [x] `tests/test_env.py`: `test_every_variable_has_its_legacy_name` skips None entries;
   `test_a_variable_without_a_legacy_name` (value, empty, and no warning).
-- [ ] New `tests/test_probe_startup.py`, `unit` in process (the test removes the variable), with each
+- [x] New `tests/test_probe_startup.py`, `unit` in process (the test removes the variable), with each
   row that can differ by member set run beside each:
   - `test_local_and_ssh_probe_once_after_the_executor`;
   - `test_the_server_is_built_from_what_the_probe_keeps`;
@@ -266,19 +267,19 @@ line. Every refusal still comes first. The documents R10 names describe all of i
   - `test_withheld_with_stdin_closed_and_over_http`.
 
   About 10 drives per era: hold to it (CI budget, PLAN §6).
-- [ ] `tests/test_transports.py`, `tests/test_cli.py`, `tests/test_exec_mode.py` and
+- [x] `tests/test_transports.py`, `tests/test_cli.py`, `tests/test_exec_mode.py` and
   `tests/test_site_startup.py` stay green unedited under the suite's default. If one cannot, say why in
   the commit body, and do not weaken an assertion.
-- [ ] `tests/mutants.py`: a case for every P2 alternative `alternatives.py coverage p2` lists, each
+- [x] `tests/mutants.py`: a case for every P2 alternative `alternatives.py coverage p2` lists, each
   targeting a row beside each member set (`SET_EQUIVALENT` with why, where a set cannot observe one).
-- [ ] Re-anchor the existing cases whose anchors move with `run()`'s new statements, keeping each id
+- [x] Re-anchor the existing cases whose anchors move with `run()`'s new statements, keeping each id
   and `why`: the plan's prototype broke `delegate-gets-shared-middleware`,
   `capability-load-placed-before-statement-7-of-its-body` and
   `capability-load-placed-before-statement-3-of-its-try` (`test_mutations.py::test_mutation_anchor_applies`).
   `capability-extras`' F7 placement cases number `run()`'s statements: a case whose mutant no longer
   exists is retired through `verify/retired.txt` with the phase and the reason, never deleted
   silently (`baseline.sh` → `kept.py`).
-- [ ] `AGENTS.md`:
+- [x] `AGENTS.md`:
   - §4: the probe step on the shared executor, after the site read and the budget check and before the
     server is built, every refusal first, `PROBE_TIMEOUT` and its 10 s, fail open, `delegate`,
     `--skip-probes`;
@@ -286,12 +287,12 @@ line. Every refusal still comes first. The documents R10 names describe all of i
   - § Configuration: the `CLUSTER_MCP_SKIP_PROBES` row (any non-empty value, `0` included) and the
     sentence on `env_setting` reading a variable with no legacy name;
   - § Testing: the suite's default and how a probe test opts in, plus `test_probe_startup.py`.
-- [ ] `README.md`, beside § Execution Modes or the tool inventory:
+- [x] `README.md`, beside § Execution Modes or the tool inventory:
   - an installed capability is served only where the cluster has what it needs;
   - the `withheld` line as `_served` formats it, and the unanswered line;
   - `--skip-probes` and the variable;
   - `delegate` mode serves every installed capability.
-- **Verify:** `sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2`
+- **Verify:** `sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2`
   (`phase` about 4 min, the startup test files included; each of the four mutants modes, an era's half,
   about 4 min).
   `sh spec/capability-probe/verify/p2.sh pre-push` (7 s) is the docs and quick drives on their own.
@@ -300,9 +301,88 @@ line. Every refusal still comes first. The documents R10 names describe all of i
     `alternatives.py coverage p2` stopped red for want of cases (79 alternatives unmutated).
   - On the P1 cut, `startup_order.py` was red: there was no probe step.
   - On today's tree it is red at import.
+  *Observed (2026-11-01), on the P2 build tree before its commit (the run quoted here):*
+  - `p2.sh phase` green in 3 min 55 s: `startup_order.py` ok; `drives.py all` ok (withholding 4.8 s,
+    hanging 12.0 s, stdin closed 0.9 s and 10.9 s, HTTP 0.9 s, override 5.6 s, refusals 5.0 s);
+    `docs_gate.py p2` ok; `alternatives.py coverage p2` ok (79 alternatives, 80 cases, 0 equivalents,
+    1 set-equivalent); the named tests and files, 553 passed in each era (93.8 s handshake, 93.1 s
+    modern), none skipped.
+  - `p1.sh phase` (P1's file was touched) green in 18 s: `declared.py` (5 loaded, 23 refused, both
+    members), `lookups.py`, `docs_gate.py p1`, `alternatives.py coverage p1` (84 alternatives, 84
+    cases), 252 passed in each era.
+  - `remediation/P2-exact-capability.py all` green in 31 s: 16 kinds beside 4 member sets and a
+    control; 4 alternatives, 4 cases, 4 of 4 killed in each era.
+  - `mutants-handshake-1` 40 of 40 killed (87 s), `mutants-handshake-2` 40 of 40 (88 s),
+    `mutants-modern-1` 40 of 40 (88 s), `mutants-modern-2` 40 of 40 (89 s).
+  - The full suite on the same tree, alone on the host (`p2.sh full-legacy`, `full-modern`): 4382
+    passed, 14 skipped (the bash 4.1 `need_shell` rows, which CI runs, as at P1) in each era; 395.1 s
+    handshake and 381.7 s modern, against `c520432`'s 359.6 s and 359.5 s (+9.9 % and +6.2 %, inside
+    the 20 % the foreman set; P1 alone measured 360.3 s and 353.0 s).
+  - A first `drives.py all` went red on `hang: a probe outlived its bound`: its `pgrep -f 'sleep 61'`
+    matched the calling shell, whose own command line held that text. With no such text in the
+    caller it is green; a timeline of the hang drive showed no `sleep 61` left once the drive ended.
+    Not a product red, and the gate was not edited.
+  *Amendments at build (2026-11-01):*
+  - **The foreman's ruling, as judge: a capability record is exactly `Capability` (R1, R2, and R9 as it
+    bears on load refusals).** P1's load took any `isinstance(value, Capability)`, so a subclass could
+    override how a field is read, and its code would run when startup reads `commands` or the server
+    reads `tools`, `instructions` or `resources`, outside the load's guard: the class P1 closed for
+    `tuple` and `str` subclasses. `_checked` now requires `type(value) is Capability`; anything else is
+    refused at load, naming the distribution, as `the entry point names a <type>, not a Capability`
+    (the existing §7 wording). P2 now also satisfies R2. Pinned by:
+    - `test_capabilities.py`: an `UNLOADABLE` family `subclass-reads-<field>`, one row for every field
+      of the record (`dataclasses.fields`, so a field added later gets one) and one for a subclass that
+      adds nothing, beside every member set, in `test_a_capability_that_cannot_load_is_refused_naming_it`;
+    - `test_startup.py`: `subclass-reads-commands` in `CLI_UNLOADABLE`, so one subclass is driven
+      through the CLI over the raw wire, with stdin closed and over HTTP (every kind with
+      `CLUSTER_MCP_TEST_EVERY_KIND=1`);
+    - `remediation/P2-exact-capability.py` (the frozen `alternatives.py` sweeps only the declared-command
+      checks): `checker` plants every field read through `__getattribute__` and through a data
+      descriptor, a plain and a dataclass subclass, an object whose `__class__` claims `Capability`
+      and another module's class named `Capability`, beside every member set, each refused naming its
+      distribution with none of its code run, and a plain `Capability` loading as a control;
+      `coverage` and `cases` sweep the type check's alternatives (always, never, negated, and
+      `isinstance`), each killed beside every member set in both eras.
+    - Red first, on `e025c37`'s product with these tests: the 28 in-process rows (7 kinds × 4 sets)
+      failed, each loading the subclass (`got ''`), and the 3 CLI rows failed, the server starting
+      (exit 0) instead of refusing. The checker went red on `e025c37`'s `isinstance` check (every
+      subclass kind loaded, and the field-read and `__class__` kinds ran their code during the load),
+      green on the exact check.
+    - It touches P1's file, so P2's `verify:` re-runs `p1.sh phase`, then the checker, before the four
+      mutation halves. AGENTS §7 (the refusal list, a bullet of its own, and the footgun) says the
+      record must be exactly `Capability`.
+    - Re-anchored on the new line, ids and `why` kept: `capability-type-unchecked`,
+      `capability-check-isinstance-capability-always`, `capability-check-isinstance-capability-negated`
+      (the last now plants the negation `alternatives.py`'s rules give). New:
+      `capability-check-exact-capability-isinstance`.
+  - `test_probe_startup.py` holds more than the named tests: `test_every_ending_without_an_answer_serves_every_capability`
+    (each ending, `SystemExit` with 0 and a text, a `BaseException` of its own, `KeyboardInterrupt`
+    raised in the worker, a non-result, a hang, each sentinel code and a malformed answer, in `local`
+    over stdio and HTTP and in `ssh` over stdio and SSE, beside every set) and
+    `test_an_interrupt_while_waiting_for_the_probe_interrupts_the_start` (a real SIGINT to the main
+    thread while it waits: `keyboard_interrupt`, nothing built, no line). Every in-process start
+    records each step, and the order tests compare the whole sequence (`ORDER`), so each placement of
+    the three probe statements is observed, not inferred. `test_no_probe_runs_before_a_refusal` adds a
+    budget short of every capability read from the legacy `RCAC_INSTRUCTIONS_BUDGET`, which is what
+    kills `env_setting`'s no-legacy branch taken always. `test_withheld_with_stdin_closed_and_over_http`
+    runs four drives (Slurm absent, and a login that ends at once, each with stdin closed and over
+    HTTP), and `test_a_withheld_capability_is_not_served_over_stdio` a fourth row with every command
+    present (R3 through the CLI): 9 drives an era.
+  - `SET_EQUIVALENT` (the gate data build may fill) records `env-no-legacy-value-empty-kept`:
+    `env_setting` handing back an empty value as itself rather than None is visible only to the
+    resolver's own row (`test_env.py`), since `_resolve_skip_probes` reads both as unset.
+  - Two cases plant one tree (`probe-step-check-placed-before-statement-5-of-its-try` and
+    `probe-step-probe-placed-before-statement-4-of-its-try`: the check and the probe exchanged), so 80
+    cases sweep 79 alternatives. Three cases beyond the sweep place `capability-extras`' load before
+    each new statement of the `try` (`capability-load-placed-before-the-{override,budget-check,probe}-of-its-try`),
+    so that cycle's placement sweep still covers every boundary; no case was retired.
+  - `tests/test_transports.py`, `test_cli.py`, `test_exec_mode.py` and `test_site_startup.py` are
+    unedited and green under the suite's default.
 - **Touches:** `core/__init__.py`, `core/deprecation.py`, `core/server.py`, `tests/conftest.py`,
-  `tests/harness.py`, `tests/test_probe_startup.py`, `tests/test_env.py`, `tests/test_hygiene.py`,
-  `tests/mutants.py`, `AGENTS.md`, `README.md`.
+  `tests/test_probe_startup.py`, `tests/test_env.py`, `tests/test_hygiene.py`,
+  `tests/mutants.py`, `AGENTS.md`, `README.md`; with the ruling, `core/capabilities.py`,
+  `tests/test_capabilities.py`, `tests/test_startup.py`, `remediation/P2-exact-capability.py`, and
+  `verify/alternatives.py`'s `SET_EQUIVALENT` (gate data). `tests/harness.py` needed no change.
 
 ## Phase P3 — The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
 **Satisfies:** R3, R10 · **Depends on:** P2

@@ -28,6 +28,10 @@ The commands a capability needs on the cluster are declared as data: a tuple of 
 exactly those types. Each malformed declaration (another container, a name that is not a plain file
 name, one declared twice, a subclass of `tuple` or `str`) is refused at load beside each member set;
 a well-formed one loads with no core edit, kept as declared; the members declare theirs.
+
+What an entry point names is exactly a `Capability`: a subclass is refused at load beside each member
+set, whichever field its code would read in place of the record (`SUBCLASS_READS`), or none, so no
+capability code runs when a field is read after the load.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ import re
 import sys
 import textwrap
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from importlib.metadata import Distribution, EntryPoint, entry_points
 from pathlib import Path
 from typing import Callable, Iterator
@@ -49,7 +53,7 @@ import cluster_mcp
 import cluster_mcp.core
 import cluster_mcp.core.capabilities
 from harness import SITE, FastMCP, served_instructions, served_surface, served_tools
-from cluster_mcp.core.capabilities import GROUP, CapabilityLoadError, Loaded, composed, installed, load
+from cluster_mcp.core.capabilities import GROUP, Capability, CapabilityLoadError, Loaded, composed, installed, load
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
 from cluster_mcp.core.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
 from cluster_mcp.core.server import create_mcp_server
@@ -1109,6 +1113,41 @@ NAMELESS = {
 }
 
 
+# A subclass of `Capability` whose code runs whenever `<field>` is read, or, for `nothing`, one that
+# adds no code at all: the load refuses each, its type named, before any field is read. Every field of
+# the record has a row, so a field added later is pinned too.
+SUBCLASS_READS = ('nothing', *(f.name for f in fields(Capability)))
+
+SUBCLASS = '''
+
+class {cls}(Capability):
+    """A record whose code runs when its `{field}` is read: it hands back what was declared."""
+
+    def __getattribute__(self, name: str) -> object:
+        value = object.__getattribute__(self, name)
+        if name == {field!r}:
+            _READS.append(name)
+        return value
+
+
+_READS: list[str] = []
+'''
+
+
+def subclass_files(module: str, field: str) -> tuple[dict[str, str], str]:
+    """A planted package `module` whose entry point names a subclass of `Capability` reading `field`
+    through its own code (none for `nothing`), well formed otherwise; and the subclass's name."""
+    cls = 'Reads' + ''.join(part.title() for part in field.split('_'))
+    files = package(module)
+    source = files[f'{module}/capability.py']
+    head, _, tail = source.partition('\n\nCAPABILITY = Capability(')
+    assert tail, source
+    stub = f'\n\nclass {cls}(Capability):\n    """A subclass adding nothing."""\n' if field == 'nothing' else \
+        SUBCLASS.format(cls=cls, field=field)
+    files[f'{module}/capability.py'] = head + stub + f'\n\nCAPABILITY = {cls}(' + tail
+    return files, cls
+
+
 @dataclass(frozen=True)
 class Unloadable:
     """A planted capability the load must refuse: its distribution, entry point line, files, metadata
@@ -1150,13 +1189,17 @@ def raising_files(module: str, statement: str, when: str) -> dict[str, str]:
 
 
 def unloadable(kind: str) -> Unloadable:
-    """The planted capability of `kind`: `<raised>-at-<when>`, a `TIMING` kind, or `nameless-<NAMELESS kind>`."""
+    """The planted capability of `kind`: `<raised>-at-<when>`, a `TIMING` kind, `nameless-<NAMELESS kind>`, or
+    `subclass-reads-<SUBCLASS_READS field>`."""
     module = 'planted_' + kind.replace('-', '_')
     dist = f'planted-{kind}'
     entry = f'cap = {module}.capability:CAPABILITY'
     if kind.startswith('nameless-'):
         metadata, cause = NAMELESS[kind.removeprefix('nameless-')]
         return Unloadable(dist, entry, package(module), metadata, entry.split(' = ')[1], cause)
+    if kind.startswith('subclass-reads-'):
+        files, cls = subclass_files(module, kind.removeprefix('subclass-reads-'))
+        return Unloadable(dist, entry, files, None, dist, f'the entry point names a {cls}, not a Capability')
     if kind in TIMING:
         spec = {key: text.replace('{m}', module) for key, text in TIMING[kind].items()}
         files = package(module, tools_tail=spec.get('tail', ''))
@@ -1178,7 +1221,7 @@ def unloadable(kind: str) -> Unloadable:
 
 
 UNLOADABLE = [*(f'{raised}-at-{when}' for when in WHEN for raised in RAISED), *TIMING,
-              *(f'nameless-{kind}' for kind in NAMELESS)]
+              *(f'nameless-{kind}' for kind in NAMELESS), *(f'subclass-reads-{field}' for field in SUBCLASS_READS)]
 
 
 @pytest.mark.unit

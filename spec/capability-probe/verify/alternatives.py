@@ -127,7 +127,13 @@ EXTRA = (
 EQUIVALENT: dict[str, tuple[tuple[str, str], str]] = {}
 FILE_OF: dict[str, str] = {}
 EQUIVALENT_TARGETS = ('test_probes.py', 'test_startup.py', 'test_capabilities.py', 'test_env.py')
-SET_EQUIVALENT: dict[str, tuple[tuple[str, ...], tuple[str, ...], str]] = {}
+SET_EQUIVALENT: dict[str, tuple[tuple[str, ...], tuple[str, ...], str]] = {
+    'env-no-legacy-value-empty-kept': (
+        SETS, (),
+        '`env_setting` hands an empty CLUSTER_MCP_SKIP_PROBES back as itself rather than None. Its one reader, '
+        '`_resolve_skip_probes`, counts both as unset, so no start, beside any member set, can tell the two '
+        'apart; the resolver reads no capability, and its own row (test_env.py, empty) kills it.'),
+}
 
 
 @dataclass(frozen=True)

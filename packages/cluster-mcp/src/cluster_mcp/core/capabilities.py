@@ -18,7 +18,8 @@ the server starts; a capability that cannot be discovered, ordered or loaded sto
 `KeyboardInterrupt`, which still interrupts), and leaves the tool registry as it was before the load
 began. The load assembles each capability's tools and resources on a scratch server through
 `serve()`, the one way every server takes them, so whatever a capability declares fails at the load
-or not at all.
+or not at all. What an entry point names must be exactly a `Capability`, never a subclass, so no
+capability code runs when a field is read after the load.
 """
 
 # Type annotations
@@ -69,7 +70,8 @@ class Capability:
     exactly True, its URI served by nothing else. `commands` names the commands its tools need on the
     cluster, each a plain file name (`COMMAND`) declared once, as a tuple of `str` (exactly those
     types, never a subclass of either): the core looks each up, and withholds the capability where one
-    is missing. A capability that declares none, `()`, is served wherever it is installed.
+    is missing. A capability that declares none, `()`, is served wherever it is installed. An entry
+    point names exactly this class, never a subclass: the load refuses one.
     """
 
     name: str
@@ -174,7 +176,9 @@ class _Invalid(Exception):
 
 def _checked(value: object) -> Capability:
     """`value` if it is a well-formed `Capability`; otherwise raise `_Invalid` saying why."""
-    if not isinstance(value, Capability):
+    # Exactly a `Capability`, never a subclass: a subclass's code could run whenever a field is read,
+    # by startup or the server long after the load, where nothing guards it.
+    if type(value) is not Capability:
         raise _Invalid(f'the entry point names a {type(value).__name__}, not a Capability')
     for field, kind in (('name', str), ('tools', str), ('instructions', str), ('resources', tuple)):
         if not isinstance(getattr(value, field), kind):

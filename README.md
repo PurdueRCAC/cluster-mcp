@@ -130,6 +130,26 @@ may not write, a link whose target's directory is missing). A command that excee
 returns what it printed so far with exit code `-1001`; over ssh, a connection lost before the
 command's end was reported gives `-1003`: the command may have run.
 
+### Which capabilities are served
+
+An installed capability is served only where the cluster has what it needs. At startup in `ssh` and
+`local` modes the server looks up, once, the commands each installed capability declares (the Slurm
+capability's `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo` and `scontrol`; the RCAC capability's
+`findscratch` and `myquota`) on the cluster, through the same login shell its tools run in, before it
+answers any request. A capability missing one of its commands is served as if it were not installed:
+none of its tools, resources or instructions. The server says so on stderr, one line for each:
+
+```
+Capability cluster-mcp-slurm withheld: the cluster is missing sbatch, squeue, scancel, sacct, sinfo, scontrol
+```
+
+The lookup takes 10 s at most. If it gives no answer in that time, or cannot run, every capability is
+served, with one line each saying why (`Capability <name> served without a probe answer: the probe
+did not answer within 10 s`). To serve every installed capability without looking, pass
+`--skip-probes`, or set `CLUSTER_MCP_SKIP_PROBES` to any non-empty value (`0` included); the server
+then says the probes were skipped. `delegate` mode never probes: it serves every installed
+capability, and says so.
+
 See [SECURITY.md](SECURITY.md) for detailed architecture and configuration.
 
 ## Hosted HTTP Server
