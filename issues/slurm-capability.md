@@ -91,7 +91,8 @@ Every validation error names the accepted forms with an example. The remaining s
 - Related: [`spec/safe-execution/`](../spec/safe-execution/) (`args`, the executor),
   [`tool-surface.md`](tool-surface.md) (names, annotations, budgets, aliases),
   [`spec/capability-extras/`](../spec/capability-extras/) (the distribution),
-  [`capability-probe.md`](capability-probe.md) (its probe),
+  [`spec/capability-probe/`](../spec/capability-probe/) (its probe: the commands the member
+  declares),
   [`lmod-tool-group.md`](lmod-tool-group.md) (`modules=[…]`), [`xdu-storage.md`](xdu-storage.md)
   (indexes large trees through `job_submit`).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).

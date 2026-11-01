@@ -75,19 +75,22 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Twelve cycles, after the rename and the capability extras, that take this from *the Purdue RCAC MCP
-server* to *an MCP server for HPC clusters, with Purdue as one supported site*, ending in **release
-0.2.0**. The rename to `cluster-mcp` and the uv-workspace restructure landed on `develop` on
-2026-10-30 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names
-through a deprecation window. The capability extras landed on 2026-11-01
+Eleven cycles, after the rename, the capability extras and the capability probe, that take this
+from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as one supported
+site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace restructure
+landed on `develop` on 2026-10-30 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)),
+keeping the old names through a deprecation window. The capability extras landed on 2026-11-01
 ([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
 `[slurm]` and `[rcac]` each install a member that registers through one entry-point group, and the
-served instructions are composed from what loaded. What remains lets an installed capability with
-nothing behind it advertise nothing, then builds each capability on that mechanism — Slurm first,
-then LMOD and xdu as the new capabilities that prove it generalizes — and finally the site extra
-that bundles them. Ahead of the tool families sit the executor fixes: stopping a timed-out command,
-its measurement now approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and
-a reconnect test whose wall-clock bound measures load as well as behaviour.
+served instructions are composed from what loaded. The capability probe landed the same day
+([`spec/capability-probe/`](spec/capability-probe/)): in `ssh` and `local` modes an installed
+capability is served only where the cluster has the commands it declares, looked up once at startup
+within a 10 s bound, while `delegate` mode and `--skip-probes` serve every installed capability.
+What remains builds each capability on the extras mechanism — Slurm first, then LMOD and xdu as the
+new capabilities that prove it generalizes — and finally the site extra that bundles them. Ahead of
+the tool families sit the executor fixes: stopping a timed-out command, its measurement now
+approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a reconnect test
+whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -110,19 +113,6 @@ and the window's own tests and README section go with it.
 
 *Horizon: 0.4.0 at the earliest · Depends on: release 0.2.0 (the window opens there) · Refs: [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/) (GOAL non-goals); `core/deprecation.py`*
 **Seed:** [`issues/remove-legacy-names.md`](issues/remove-legacy-names.md) · *status: unshaped*
-
-## An installed capability with nothing behind it still advertises its tools
-
-After capability-extras, installation is the only switch, so one install that serves several
-clusters advertises the Slurm tools on a cluster with no Slurm. A runtime probe — ask the cluster
-whether `sinfo` exists — would let an installed capability with nothing behind it advertise
-nothing. It was split out of capability-extras because it is not cheap: a remote round trip on the
-startup path of a server whose SSH connection is established eagerly, a different failure mode in
-`local` mode, and no user to probe as in `delegate` mode over HTTP, where instructions are composed
-once per process.
-
-*Horizon: after capability-extras · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
-**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: adopted:capability-probe*
 
 ## A timed-out command may keep running after its call returns
 
@@ -288,8 +278,10 @@ discovery, whose site implementation needs exactly the hook this cycle establish
 ### Absorbed: not every cluster has a Lustre scratch and a myquota
 
 `storage_paths()` parses the output of `myquota`, and scratch discovery shells out to `findscratch` —
-both Purdue commands, and neither degrades on a cluster that lacks them. The `rcac://storage` resource
-is built on the same assumption. Generalizing means a discovery protocol with a site-provided
+both Purdue commands, and neither degrades on a cluster that lacks them. Since `capability-probe`
+the RCAC member is withheld on such a cluster in `ssh` and `local` modes, but `delegate` mode,
+`--skip-probes` and a probe that gives no answer still serve it there. The `rcac://storage`
+resource is built on the same assumption. Generalizing means a discovery protocol with a site-provided
 implementation and an honest "unknown" rather than a parse failure — and the site hook is what
 `site-extras` builds. Found by the harness port, 2026-08-26.
 

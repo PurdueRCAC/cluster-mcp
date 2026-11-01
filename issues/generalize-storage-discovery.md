@@ -26,8 +26,12 @@ Purdue commands and no fallback:
 
 On a cluster with neither command, `myquota` returns nonzero, the parser sees nothing it recognizes,
 and the failure surfaces as a parse error rather than "this site does not expose quotas that way."
-The served instructions compound it by asserting Purdue's numbers — 25GB home, `/depot/<group>`,
-`$CLUSTER_SCRATCH` — as though they were facts about clusters.
+Since `capability-probe` ([`spec/capability-probe/`](../spec/capability-probe/)) the RCAC member,
+which declares both commands, is withheld on such a cluster in `ssh` and `local` modes; `delegate`
+mode, `--skip-probes` and a probe that gives no answer still serve it there, and a cluster that has
+both commands with another output layout still reaches the parser. The served instructions
+compound it by asserting Purdue's numbers — 25GB home, `/depot/<group>`, `$CLUSTER_SCRATCH` — as
+though they were facts about clusters.
 
 ## Why it was deferred
 
@@ -84,3 +88,6 @@ Two design questions worth naming now:
 - 2026-10-30: the rename split the instructions. `CORE_INSTRUCTIONS` names no Purdue figure, so R5
   holds for the core already; the numbers above now live in `RCAC_INSTRUCTIONS`, which the server
   still serves to every user.
+- 2026-11-01: `RCAC_INSTRUCTIONS` is no longer served to every user. Since `capability-extras` it is
+  served only where the `[rcac]` extra is installed, and since `capability-probe` only where the
+  cluster also has `findscratch` and `myquota`, unless the probe is skipped or gives no answer.
