@@ -1,0 +1,330 @@
+---
+slug: capability-probe
+title: Probe the cluster before advertising an installed capability
+kind: feature
+appetite: big
+status: in_progress
+branch: feature/capability-probe
+base: develop
+current_phase: P1
+last_updated: '2026-11-01'
+phases:
+- id: P1
+  name: A capability declares the commands it needs; one bounded lookup decides every ending
+  status: pending
+  satisfies:
+  - R2
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/capability-probe/verify/p1.sh phase && sh spec/capability-probe/verify/p1.sh mutants-handshake-1 && sh spec/capability-probe/verify/p1.sh mutants-handshake-2 && sh spec/capability-probe/verify/p1.sh mutants-modern-1 && sh spec/capability-probe/verify/p1.sh mutants-modern-2
+- id: P2
+  name: Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
+  status: pending
+  satisfies:
+  - R1
+  - R3
+  - R4
+  - R5
+  - R6
+  - R7
+  - R8
+  - R9
+  - R10
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
+- id: P3
+  name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
+  status: pending
+  satisfies:
+  - R3
+  - R10
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
+review:
+  last_reviewed_commit: ''
+  verdict: none
+  blocked_reason: ''
+  cycle: 0
+---
+
+# TECH.md — Probe the cluster before advertising an installed capability
+
+The **context engine and finite-state machine** for building this feature. The YAML
+frontmatter above is the resume ground-truth (read it from the cycle worktree with
+`uv run --with pyyaml python "$KB/bin/factory/next_phase.py" spec/capability-probe/TECH.md`); the
+per-phase checklists below are the work. `code-build` executes the next actionable phase, runs its
+`verify:` command, updates state via
+`uv run --with pyyaml python "$KB/bin/factory/set_phase.py" …`, and makes one atomic code+state commit.
+
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
+- **Authoritative design:** [`PLAN.md`](PLAN.md).
+- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs.
+
+## Frontmatter field reference
+
+- `status` (top): `planned | in_progress | blocked | in_review | done` (`done` is stamped by
+  `code-publish` after confirmation, just before landing — the terminal state of the retained record)
+- `appetite`: `small | big` — caps phase count and build-iteration budget (circuit breaker).
+- `branch`, `base`: the cycle's branch (prefix per GOAL `kind`, from the profile's `branches`) and the
+  profile's `base`.
+- phase `status`: `pending | in_progress | done | blocked`
+- `satisfies`: GOAL R-IDs this phase delivers (traceability anchor for `code-review`).
+  **Artifact-deliverable R-IDs.** Some requirements are met by a *committed document* — a research
+  audit, a protocol doc, an assessment — not by CLI-observable behaviour. Attach such an R-ID to the
+  phase that produces and commits the artifact, and give that phase a content `verify:`
+  (`test -f …`, a `grep -q` for the sections that must exist) rather than forcing a CLI drive.
+  **Say so in the phase body**, because it changes who can grade it: `code-review` blinds its reviewer
+  to all of `spec/`, so an R-ID whose evidence lives there is graded by the *orchestrator*, not the
+  blind reviewer. Naming it in `TECH.md` is what lets the review skill route it correctly instead of
+  reporting an unverifiable requirement.
+- `depends_on`: phase ids that must be `done` first (a phase is actionable only when met).
+- `parallel`: `true` only for genuinely independent, non-coupled work (docs, tests, isolated leaf
+  modules). Any phase touching the profile's `coupled core` is always `false`.
+- `hammerable`: `false` marks a correctness/security phase that scope-hammering must **never** cut.
+- `hill`: `uphill` (still figuring it out) → `crest` (unknowns resolved) → `downhill` (just
+  executing). A phase stuck `uphill` across builds is a raised hand → escalate to the human.
+- `attempts`: durable failed-verify counter (absent = 0), bumped by `set_phase.py --phase P<n>
+  --record-attempt` on every red verify gate; `next_phase.py` warns at ≥3 — the circuit breaker
+  runs on this file, not on session memory.
+- `verify`: the exact command that proves the phase (prefer driving the real CLI, not just tests —
+  wrap CLI drives in the profile's `throwaway environment` helper, `<helper> sh -c "…"`, so they hit
+  a disposable instance, never the developer's real data). A gate carrying `$( )` or quoting the
+  calling shell would mangle is set with `set_phase.py --verify-file PATH`, not `--verify`.
+- `review.cycle`: completed review passes, auto-incremented by every `set_phase.py --verdict …`;
+  REVIEW.md's "Cycle {n}" mirrors it and the ≤3-cycle bound is graded against it. `--verdict approved`
+  also clears `review.blocked_reason` unless one is passed explicitly.
+
+## Conventions (apply to every phase)
+
+- Commit conventions, code style, and load-bearing invariants come from the repo's `AGENTS.md` — it
+  is the constitution. Walk the sections of its § Invariants that this change touches; that is the
+  curated footgun checklist.
+- One phase per `code-build` invocation by default; one atomic commit containing **both** the code and
+  the `TECH.md` state change. The branch commit subject is code-build's (`$KB/skill/code-build.md` →
+  Step 6), not restated here; branch commits are squashed away at `code-publish` per the profile's
+  `landing`. Trailers follow the profile's `branch commits`.
+- The last phase carries the standing last-phase items: the deferral ledger (`code-plan` Step 6.8),
+  and every item the previous cycle's last phase carried for a project-level obligation (mpsearch's
+  `## Times` quote, taken as `code-build` Step 4 says). A plan that drops one says why in `PLAN.md`.
+- A PR body (when the profile's `landing` opens one) ends with an attribution naming the actual
+  harness, model, and variant.
+- A CLI/feature change obeys the profile's `same-commit rules` (§ Conventions in `AGENTS.md`): the
+  help text, docs, or generated files it names change **in the same commit**.
+
+**This cycle's own conventions.**
+
+- The gates under `verify/` are frozen once this plan is signed off. A gate a build finds wrong is
+  never edited: the foreman rules on it, and a wrapper under `spec/capability-probe/remediation/`
+  carries the fix, as in `capability-extras`.
+- Every gate removes the calling shell's `CLUSTER_MCP_SKIP_PROBES`. A build drives the CLI only under
+  `bin/sandbox.sh`, never against a real cluster.
+- The mutation modes are sharded by era and half so each fits the 10-minute command cap (about
+  4–5 minutes each, at about 6 s a case as measured on the plan's prototype). Run them one at a time,
+  never two at once (the footprint headers).
+- Record each verify run under its phase as *Observed (date), on tree X*: the counts per step and era
+  and each mode's time. Record a red run as *Attempt n* and bump `attempts:`.
+
+---
+
+## Phase P1 — A capability declares the commands it needs; one bounded lookup decides every ending
+**Satisfies:** R2 · **Depends on:** —
+**Goal:** the contract and the runner, with no startup change yet. A capability distribution declares
+`commands` on the `Capability` its entry point names. A malformed declaration is refused at load with
+the existing §7 refusal. The Slurm and RCAC members declare theirs. `core/probes.py` looks every
+declared name up in one bounded call and decides each capability's verdict for every ending. Nothing
+calls it at startup yet, so nothing a client sees changes.
+
+- [ ] `core/capabilities.py`:
+  - `Capability.commands: tuple[str, ...] = ()`, last;
+  - `COMMAND`;
+  - `_checked()`: the field exactly a `tuple`, each element exactly a `str` (no subclass: PLAN §2.1),
+    a full `COMMAND` match, declared once;
+  - the refusals worded as PLAN §2.1 (`declared.py`'s `REASON` reads them);
+  - the class docstring and the module docstring say what `commands` is and that a capability with
+    none is served whenever it is installed.
+- [ ] `core/probes.py` (new) as PLAN §2.2: `PROBE_TIMEOUT`, `LOOKUP` (registered through
+  `scripts.fixed`), `Verdict`, `Pending` (verdicts decided once, memoized), `start`, `unprobed`, `_ask`,
+  `_parse`.
+  - It splits on `\n` alone and needs the final newline.
+  - The worker is a daemon that catches `BaseException` and passes the executor `timeout=bound`.
+  - The comments are declarative, with no spec ids.
+- [ ] `slurm/capability.py`: `commands=('sbatch', 'squeue', 'scancel', 'sacct', 'sinfo', 'scontrol')`;
+  `rcac/capability.py`: `commands=('findscratch', 'myquota')`. Each module docstring says why those
+  names.
+- [ ] `tests/harness.py`: `ProbeExecutor` (PLAN §2.7).
+- [ ] New `tests/test_probes.py`:
+  - **`unit`**, each outcome row beside each member set (`MEMBER_SETS`, as `test_capabilities.py`
+    builds the sets): `test_nothing_declared_runs_nothing`,
+    `test_every_declared_command_is_looked_up_once`,
+    `test_a_capability_is_withheld_when_one_of_its_commands_is_absent`,
+    `test_every_ending_without_an_answer_serves_the_capability` (every ending `lookups.py` lists),
+    `test_a_hung_probe_is_abandoned_at_the_bound` (bound patched to 0.3 s, an `Event` set in
+    `finally`), `test_the_verdicts_are_decided_once`.
+  - **`integration`:** `test_the_lookup_finds_only_what_exec_runs` (a `LocalShellExecutor`, a stub
+    directory first on PATH through a test HOME's `.bash_profile`; a function, a `type` function and a
+    non-executable file are absent) and `test_the_lookup_over_ssh` (`LoopbackSSH` with `home/bin`
+    stand-ins present and absent; `DroppingSSH` for a lost connection).
+- [ ] `tests/test_capabilities.py`: `test_a_malformed_command_declaration_is_refused_at_load` (every
+  kind `declared.py` lists, beside each member set),
+  `test_a_planted_capability_declares_commands_with_no_core_edit`, `test_the_members_declare_their_commands`.
+- [ ] `tests/mutants.py`: a case for every P1 alternative `alternatives.py coverage p1` lists, each
+  targeting a row beside each member set. A mutant shown equivalent goes in `alternatives.py`'s
+  `EQUIVALENT` with why; that dict starts empty and is the one gate data build may fill.
+- [ ] `AGENTS.md`:
+  - §7: the record with `commands`, the `type -P` lookup, the refusal at load;
+  - the high-blast-radius list and the footguns gain `core/probes.py`;
+  - § Testing: `test_probes.py`.
+- **Verify:** `sh spec/capability-probe/verify/p1.sh phase && sh spec/capability-probe/verify/p1.sh mutants-handshake-1 && sh spec/capability-probe/verify/p1.sh mutants-handshake-2 && sh spec/capability-probe/verify/p1.sh mutants-modern-1 && sh spec/capability-probe/verify/p1.sh mutants-modern-2`
+  (`phase` about 1 min; each of the four mutants modes, an era's half, about 5 min).
+  *Plan-time dry run (2026-11-01):*
+  - On the prototype cut to P1, `declared.py`, `lookups.py` and `docs_gate.py p1` were green, then
+    `alternatives.py coverage p1` stopped red for want of cases (93 alternatives unmutated).
+  - On today's tree it is red at `declared.py`.
+- **Touches:** `core/capabilities.py`, `core/probes.py`, `slurm/capability.py`, `rcac/capability.py`,
+  `tests/harness.py`, `tests/test_probes.py`, `tests/test_capabilities.py`, `tests/mutants.py`, `AGENTS.md`.
+
+## Phase P2 — Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
+**Satisfies:** R1, R3, R4, R5, R6, R7, R8, R9, R10 · **Depends on:** P1
+**Goal:** `run()` probes once in `ssh` and `local` modes, after the site read and after checking the
+budget against every installed capability, so every refusal comes first. It builds the server from what
+the probe kept. It logs one
+line per withheld or unanswered capability. `delegate` mode and the override skip the probe with one
+line. Every refusal still comes first. The documents R10 names describe all of it.
+
+- [ ] `core/deprecation.py`: `LEGACY_ENV['CLUSTER_MCP_SKIP_PROBES'] = None` (type and comment as PLAN
+  §2.5); `env_setting` returns `(value or None, name)` for a variable with no legacy name, with no
+  warning.
+- [ ] `core/__init__.py`:
+  - the `--skip-probes` flag (`APP_USAGE`, Options, Environment Variables);
+  - `_resolve_skip_probes`, `_probe` and `_served` as PLAN §2.4, with the four lines worded exactly as
+    there (`docs_gate.py` reads the withheld line from `_served`'s source);
+  - `run()`'s `try` takes, in order: the budget, the override, the site read, the budget check against
+    `base_instructions(installed())`, the probe and its verdicts, then `create_mcp_server(…,
+    capabilities=served)`.
+- [ ] `core/server.py`: the `capabilities` docstring (PLAN §2.6); no code change.
+- [ ] `tests/conftest.py`: the session `autouse` fixture `skip_probes` (PLAN §2.7).
+  `tests/test_hygiene.py::test_the_suite_skips_probes_by_default` pins it.
+- [ ] `tests/test_env.py`: `test_every_variable_has_its_legacy_name` skips None entries;
+  `test_a_variable_without_a_legacy_name` (value, empty, and no warning).
+- [ ] New `tests/test_probe_startup.py`, `unit` in process (the test removes the variable), with each
+  row that can differ by member set run beside each:
+  - `test_local_and_ssh_probe_once_after_the_executor`;
+  - `test_the_server_is_built_from_what_the_probe_keeps`;
+  - `test_the_served_instructions_name_exactly_the_served_tools`: the real `create_mcp_server` over
+    each served set, at least one member withheld (R3);
+  - `test_the_probe_follows_the_site_read_and_is_bounded`: the order executor, site read, budget
+    check, probe, server; with the bound 0.6 s, a 0.5 s site read and a hung probe, within 1.4 s,
+    every capability served;
+  - `test_delegate_runs_no_probe_and_says_so`;
+  - `test_the_override_skips_every_probe`: in `local` and in `ssh` mode, the flag; the variable as
+    `1`, `0` and a space; empty probes;
+  - `test_any_non_empty_override_value_skips`: `maybe` and `0` skip, never exit 2 (any non-empty value
+    is set);
+  - `test_no_probe_runs_before_a_refusal`: load refusal, connect failure, `--generate-token`, a budget
+    of 0, one that is not a number, and one short of every capability;
+  - `test_the_budget_never_depends_on_the_answer`.
+
+  Then `integration` CLI drives under `bin/sandbox.sh`, the variable removed, a `.bash_profile` that
+  stubs PATH and logs logins:
+  - `test_a_withheld_capability_is_not_served_over_stdio`: each member absent and both, one per
+    family;
+  - `test_a_probe_without_an_answer_serves_every_capability_over_stdio`: a profile that ends the login
+    at once gives the fast "could not run" ending. The suite never waits out the real 10 s bound;
+    `drives.py` does;
+  - `test_withheld_with_stdin_closed_and_over_http`.
+
+  About 10 drives per era: hold to it (CI budget, PLAN §6).
+- [ ] `tests/test_transports.py`, `tests/test_cli.py`, `tests/test_exec_mode.py` and
+  `tests/test_site_startup.py` stay green unedited under the suite's default. If one cannot, say why in
+  the commit body, and do not weaken an assertion.
+- [ ] `tests/mutants.py`: a case for every P2 alternative `alternatives.py coverage p2` lists, each
+  targeting a row beside each member set (`SET_EQUIVALENT` with why, where a set cannot observe one).
+- [ ] Re-anchor the existing cases whose anchors move with `run()`'s new statements, keeping each id
+  and `why`: the plan's prototype broke `delegate-gets-shared-middleware`,
+  `capability-load-placed-before-statement-7-of-its-body` and
+  `capability-load-placed-before-statement-3-of-its-try` (`test_mutations.py::test_mutation_anchor_applies`).
+  `capability-extras`' F7 placement cases number `run()`'s statements: a case whose mutant no longer
+  exists is retired through `verify/retired.txt` with the phase and the reason, never deleted
+  silently (`baseline.sh` → `kept.py`).
+- [ ] `AGENTS.md`:
+  - §4: the probe step on the shared executor, after the site read and the budget check and before the
+    server is built, every refusal first, `PROBE_TIMEOUT` and its 10 s, fail open, `delegate`,
+    `--skip-probes`;
+  - §9: the base is composed from the served capabilities;
+  - § Configuration: the `CLUSTER_MCP_SKIP_PROBES` row (any non-empty value, `0` included) and the
+    sentence on `env_setting` reading a variable with no legacy name;
+  - § Testing: the suite's default and how a probe test opts in, plus `test_probe_startup.py`.
+- [ ] `README.md`, beside § Execution Modes or the tool inventory:
+  - an installed capability is served only where the cluster has what it needs;
+  - the `withheld` line as `_served` formats it, and the unanswered line;
+  - `--skip-probes` and the variable;
+  - `delegate` mode serves every installed capability.
+- **Verify:** `sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2`
+  (`phase` about 4 min, the startup test files included; each of the four mutants modes, an era's half,
+  about 4 min).
+  `sh spec/capability-probe/verify/p2.sh pre-push` (7 s) is the docs and quick drives on their own.
+  *Plan-time dry run (2026-11-01):*
+  - On the prototype, `startup_order.py`, `drives.py all` (41 s) and `docs_gate.py p2` were green, then
+    `alternatives.py coverage p2` stopped red for want of cases (79 alternatives unmutated).
+  - On the P1 cut, `startup_order.py` was red: there was no probe step.
+  - On today's tree it is red at import.
+- **Touches:** `core/__init__.py`, `core/deprecation.py`, `core/server.py`, `tests/conftest.py`,
+  `tests/harness.py`, `tests/test_probe_startup.py`, `tests/test_env.py`, `tests/test_hygiene.py`,
+  `tests/mutants.py`, `AGENTS.md`, `README.md`.
+
+## Phase P3 — The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
+**Satisfies:** R3, R10 · **Depends on:** P2
+**Goal:** every independent check once more on the finished tree, and the surface and suite against
+`c520432`. Every alternative of both phases covered, every recorded equivalent proven, the release
+recipe's offline steps on this head, the full verify, and the ledger.
+
+- [ ] Run `p3.sh phase`. Fix the product, never a gate: a gate defect goes to the foreman.
+- [ ] Record the suite's time per era against `c520432`'s 359.6 s (handshake) and 359.5 s (modern),
+  local, and the projection in PLAN §6. A growth beyond about 60 s an era is a raised hand before
+  publish: the CI job has 20 minutes for both eras.
+- [ ] Downstream seeds, notes only, with no status change:
+  - append to [`issues/lmod-tool-group.md`](../../issues/lmod-tool-group.md)'s Notes: `module` is a
+    function and its tools run `$LMOD_CMD`, so its probe needs a second kind of declared data beside
+    `commands`, a core edit in that cycle;
+  - append to [`issues/xdu-storage.md`](../../issues/xdu-storage.md)'s Notes: it declares no probe,
+    since its tools offer the install where `xdu` is missing.
+- [ ] **The deferral ledger.** Walk P1–P3 and PLAN for "defer", "follow-up", "out of scope", "known
+  limitation", "left for" and "not fixed here", and confirm each has an `issues/` file and a
+  `ROADMAP.md` entry. The plan filed one:
+  [`issues/mutants-workflow-timeout.md`](../../issues/mutants-workflow-timeout.md) (the on-demand
+  mutation workflow already exceeds its 30-minute job, and this cycle adds cases) and
+  [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md) (a server
+  killed mid-probe leaves the probe's `local` process group running, as any `local` call's), each with
+  its ROADMAP entry. `ledger.py` checks every link.
+- [ ] Standing items carried from `capability-extras`' last phase: the recipe's offline steps on this
+  head (`p3.sh recipe`), and the full verify in both halves.
+- **Verify:** `sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern`
+  (`phase` about 3 min; `ledger` and `recipe` seconds; `equivalents` seconds per equivalent; each full
+  half about 6 min).
+  *Plan-time dry run (2026-11-01), on the prototype:* `baseline.sh` green in 11 s (24 tools,
+  4 resources, 660 cases kept); `ledger` and `recipe` green in about 1 s each.
+- **Touches:** `issues/lmod-tool-group.md`, `issues/xdu-storage.md` (notes), and whatever `p3.sh`
+  proves wrong in the product.
+
+---
+
+## How `code-build` drives this
+
+1. `next_phase.py` prints the next actionable phase (statuses are authoritative; the
+   `current_phase` pointer is reconciled against them).
+2. Pre-flight: the cycle worktree is clean, on `branch`, and `base` is reachable.
+3. Execute every `[ ]` in the phase (consult `PLAN.md` / `research/` for detail).
+4. Run the phase's `verify:` command — never advance on a checkbox alone.
+5. Amend this file freely if reality diverges (regenerate frontmatter with `set_phase.py`; note the
+   amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
+6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[{category}]` commit; stop and report.

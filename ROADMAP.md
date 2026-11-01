@@ -442,6 +442,26 @@ names it instead of the broken one. The command line never retries, so only a li
 *Horizon: later · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
 **Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
 
+## The on-demand mutation run no longer fits its 30-minute job
+
+`.github/workflows/mutants.yml` runs every mutation case serially in one 30-minute job. At about 660
+cases and 2.5–5 s each, it reaches the timeout and is cancelled before it reports, and § Testing's
+"all cases about 3 minutes" is stale. `capability-probe` adds about 200 cases. Pre-existing; it gates
+nothing, so no release waits on it.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
+**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
+
+## A local command in flight outlives a server that is killed
+
+In `local` mode each command runs in a process group of its own, which only its call ever signals. A
+server killed mid-command leaves the group running to its own end. That is true of any tool call
+today, and `capability-probe`'s startup probe adds one more instance, behind a login profile that
+hangs. Pre-existing.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5); `AGENTS.md` § Invariants §2*
+**Seed:** [`issues/local-command-outlives-server.md`](issues/local-command-outlives-server.md) · *status: unshaped*
+
 ---
 
 # Settled questions
