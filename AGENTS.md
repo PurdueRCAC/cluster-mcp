@@ -394,11 +394,31 @@ import has no effect.
     serves (`test_aliases_follow_every_primary_uri`). A planted capability with a tool and a
     resource is discovered and served beside the members, its text placed by its order, with no
     core edit. No core module imports a member by name (`member_import_violations`, an AST scan of
-    every core module, §7).
+    every core module, §7). Each malformed command declaration (`COMMAND_DECLARATIONS`: another
+    container, a non-`str` element, a name that is not a plain command name, one declared twice, a
+    subclass of `tuple` or `str`) is refused at load beside each member set
+    (`test_a_malformed_command_declaration_is_refused_at_load`); a planted capability's well-formed
+    declaration loads as declared with no core edit, and the members declare theirs
+    (`test_the_members_declare_their_commands`).
     `tests/conftest.py` calls `installed()` once at import, so every test sees the same registry,
     in the same order, whatever it imports first. A failed load does not stop collection: the
     report header names it, every test that needs the installed capabilities fails with it, and the
     tests of the load, which plant their own, still run.
+  - `tests/test_probes.py` (`unit`, `integration`): the capability probe (`core/probes.py`, §7).
+    The outcome rows run against `harness.ProbeExecutor` beside each member set, each with two
+    capabilities made in the test (one sharing a member's command, one declaring none), at a bound of
+    0.3 s: nothing declared runs nothing; every declared command is looked up once, in load order,
+    by one call of the registered `LOOKUP` given the bound; the verdicts follow the answer exactly
+    (a capability with a command not found is withheld naming exactly those); every ending without
+    an answer (`ENDINGS`: each exit code, each malformed answer, each thing an executor returns
+    instead of a result or raises, `SystemExit` and other `BaseException`s included, a worker thread
+    that cannot start) serves each capability that declares a command with its reason, decided at
+    once; a hung lookup is abandoned at the bound, read when the probe starts, on a daemon thread;
+    the verdicts are decided once, and a late answer changes nothing; an interrupt while the probe
+    starts still interrupts. `PROBE_TIMEOUT` is pinned at 10 s, no more than the site read's bound.
+    The lookup itself runs through the login bash (`executes`, beside each member set) with stubs a
+    login profile puts first on PATH, an exported function and an exported `type` function, and
+    over the loopback SSH server, present, absent and with the connection lost.
   - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
     read on a planted directory: every regular `*.md` file directly in it but `AGENTS.md` (dotfiles,
     `.md`, a space, `-n.md` and `end 0.md` included; `Upper.MD`, a `.txt`, a whitespace-only file, a
@@ -1705,14 +1725,18 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
   which tools each registers and the order of the base's texts (§7, §9)
 - `packages/cluster-mcp-slurm/src/cluster_mcp/slurm/capability.py` and
   `packages/cluster-mcp-rcac/src/cluster_mcp/rcac/capability.py` — each selects its member's tools
-  module, its text and the text's place in the base (§9)
+  module, its text and the text's place in the base (§9), and declares the commands it needs (§7)
+- `packages/cluster-mcp/src/cluster_mcp/core/probes.py` — decides which loaded capabilities the
+  cluster can serve, from one lookup it runs on the cluster (§7)
 
 The `src/rcac_mcp/` entries are these files' homes before the workspace move, kept because the list
 only widens. These are the files where a mistake executes someone else's command, executes as the wrong user, or
 executes on the wrong machine, but for the three `instructions.py` entries and the three that load
 and place them (`capabilities.py` and the two `capability.py`): they hold or compose the base's
 text, which left `server.py` for them, so the list widened to follow it, and a mistake there
-misleads every model rather than running anything. Everything else in the tree is a leaf.
+misleads every model rather than running anything. `probes.py` runs one fixed lookup on the
+cluster, and decides which capabilities' tools and text are served: a mistake there hides working
+tools or advertises ones that cannot run. Everything else in the tree is a leaf.
 
 #### Footguns (quick reference)
 
@@ -1797,7 +1821,14 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   its tools whether or not its capability loads (§7).
 - **`capabilities.py`** — `installed()` is the one load: a second `load()` of the same capabilities
   registers nothing new, and a member whose editable install was not re-synced after its entry
-  point was added is silently absent (§7).
+  point was added is silently absent (§7). The `commands` checks are exact types (`type(...) is`),
+  never `isinstance`: a subclass's code would run when the probe iterates the names.
+- **`probes.py`** — `LOOKUP`'s `type -P` (`command -v` and `type -t` count a profile function or a
+  builtin as present, where `exec` fails) and its `unset -f type`; the parser's exact shape, split on
+  `\n` alone with the final newline required, never `splitlines`; the deadline taken in `start()`,
+  never at the wait; the worker a daemon that catches `BaseException` (a `SystemExit` silently ends
+  a thread, which would cost the whole bound); the verdicts memoized, so a late answer changes
+  nothing; the bound handed to the executor as well (§7).
 - **`site.py`** — the per-server holder (`register`/`site_of`, a `WeakKeyDictionary` keyed by the
   server object): the site context is set once at construction and read by that server's tool and
   resource, never per user and never keyed by hostname, never one module value (two servers in one
@@ -2167,7 +2198,7 @@ What each mode means:
   (`tests/test_capabilities.py::test_core_imports_no_member`).
 - Every other tool belongs to a **capability**: a distribution that declares one entry point in the
   group **`cluster_mcp.capabilities`**, `<name> = "cluster_mcp.<name>.capability:CAPABILITY"`,
-  naming a `Capability(name, order, tools, instructions, resources)` (`capabilities.py`). The
+  naming a `Capability(name, order, tools, instructions, resources, commands)` (`capabilities.py`). The
   Slurm and RCAC members are capabilities. `installed()` loads every one the environment has, once:
   when the CLI starts, before the mode ladder (§4), and otherwise when a server is built with no
   capability set given (and once at the top of `tests/conftest.py`);
@@ -2186,6 +2217,10 @@ What each mode means:
     when its text is empty or cannot be had);
   - that is not a `Capability`, or one of whose resources is not a dict with a `str` `uri`, `name`
     and `description` and a callable `handler`, or is not marked `executor: True`;
+  - whose `commands` is not exactly a `tuple` of exactly `str` (a subclass of either is refused: the
+    probe iterates and hashes the names after the load, where its code would run), or names a
+    command that is not a plain command name (`COMMAND`: a letter, digit or `_`, then up to 254 of
+    those or `.`, `+`, `-`; no path, space or shell character) or one already declared;
   - that registers anything but a `FunctionTool`, or a tool outside its tools module, at any time
     since its load began: its entry point's import included, and whether the load or its own code
     (its entry-point module, or a module either imports) imported its tools module;
@@ -2218,6 +2253,24 @@ What each mode means:
   Configuration), whatever made it long.
 - `installed()` caches the load once it succeeds and never a failure: a failed load raises again,
   loading again, on the next call (`test_a_failed_load_is_not_cached`).
+- **A capability's `commands` are the commands its tools need on the cluster, declared as data and
+  never as code**, so a probe of them runs no capability code. The Slurm member declares its six
+  client commands (`sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol`); the RCAC member
+  declares `findscratch` and `myquota`, which its storage resource needs and which mark the site;
+  `()`, the default, declares none, and such a capability is served wherever it is installed. A
+  malformed declaration is refused at load, as above. `core/probes.py` decides, for a set of loaded
+  capabilities, which the cluster can serve: `start()` looks every declared command up at once,
+  each once in load order, with one registered fixed script (`LOOKUP`) through the executor it is
+  given, which runs `type -P` (a file on PATH, what a tool's `exec` runs; never a function, builtin
+  or alias) after undoing a function named `type`, and answers one `0` or `1` line per name, then
+  `end <count>`. It runs on a daemon thread, under one deadline taken when it starts
+  (`PROBE_TIMEOUT`, 10 s, no more than the site read's, for every capability together), and the
+  executor is given the same bound. `Pending.verdicts()` decides each capability once: one with a
+  command the answer does not find is withheld, naming each; every other ending (no answer by the
+  deadline, any nonzero or sentinel exit, an answer that is not exactly that shape, each line ended
+  by a newline alone, anything returned instead of a result or raised, `SystemExit` included, a
+  worker that cannot start) serves it, with the reason. A declaration of none runs nothing
+  (`tests/test_probes.py`).
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;
   `test_installed_finds_every_workspace_member` fails loudly in that state.

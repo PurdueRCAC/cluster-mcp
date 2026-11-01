@@ -23,6 +23,11 @@ Whatever a capability declares fails at the load or not at all: every kind of to
 server would refuse while it is assembled, or would let replace another, is refused at load beside
 each member set, and a capability that loads is served whole. The resource kinds' controls show
 FastMCP itself refusing each one, or keying the two URIs alike.
+
+The commands a capability needs on the cluster are declared as data: a tuple of plain command names,
+exactly those types. Each malformed declaration (another container, a name that is not a plain file
+name, one declared twice, a subclass of `tuple` or `str`) is refused at load beside each member set;
+a well-formed one loads with no core edit, kept as declared; the members declare theirs.
 """
 
 from __future__ import annotations
@@ -1386,3 +1391,101 @@ def test_the_listing_opens_and_closes_with_the_core_tools_by_name(names: tuple[s
     middle = [tool.name for loaded in sorted(given, key=lambda c: c.distribution) for tool in loaded.tools]
     want = [*OPENING, *middle, *CLOSING]
     assert tools == want, f'the core tools do not open and close the listing: {tools}, expected {want}'
+
+
+# Each malformed command declaration, as the source a planted capability passes as `commands=`, and the
+# cause its refusal carries. A subclass of `tuple` or `str` is refused for its type: the probe iterates
+# and hashes the names after the load, where its code would run.
+NOT_A_NAME = "its command {!r} is not a command name"
+COMMAND_DECLARATIONS = {
+    'bare-string': ("'sinfo'", 'its commands is a str, not a tuple'),
+    'list': ("['sinfo']", 'its commands is a list, not a tuple'),
+    'not-a-str': ('(1,)', 'one of its commands is a int, not a str'),
+    'bytes': ("(b'sinfo',)", 'one of its commands is a bytes, not a str'),
+    'empty': ("('',)", NOT_A_NAME.format('')),
+    'slash': ("('/usr/bin/sinfo',)", NOT_A_NAME.format('/usr/bin/sinfo')),
+    'relative-slash': ("('bin/sinfo',)", NOT_A_NAME.format('bin/sinfo')),
+    'space': ("('s info',)", NOT_A_NAME.format('s info')),
+    'tab': ("('s\\tinfo',)", NOT_A_NAME.format('s\tinfo')),
+    'newline': ("('sinfo\\n',)", NOT_A_NAME.format('sinfo\n')),
+    'nul': ("('sin\\x00fo',)", NOT_A_NAME.format('sin\x00fo')),
+    'leading-dash': ("('-sinfo',)", NOT_A_NAME.format('-sinfo')),
+    'leading-dot': ("('.sinfo',)", NOT_A_NAME.format('.sinfo')),
+    'non-ascii': ("('s\u00efnfo',)", NOT_A_NAME.format('s\u00efnfo')),
+    'semicolon': ("('a;b',)", NOT_A_NAME.format('a;b')),
+    'dollar': ("('$x',)", NOT_A_NAME.format('$x')),
+    'backtick': ("('`x`',)", NOT_A_NAME.format('`x`')),
+    'star': ("('s*',)", NOT_A_NAME.format('s*')),
+    'quote': ('("a\'b",)', NOT_A_NAME.format("a'b")),
+    'too-long': (repr(('x' * 256,)), NOT_A_NAME.format('x' * 256)),
+    'twice': ("('sinfo', 'squeue', 'sinfo')", "its command 'sinfo' is declared twice"),
+    'tuple-subclass': ("type('T', (tuple,), {})(('sinfo',))", 'its commands is a T, not a tuple'),
+    'str-subclass': ("(type('S', (str,), {})('sinfo'),)", 'one of its commands is a S, not a str'),
+}
+
+# Well-formed declarations, each loading with exactly the commands it declares.
+WELL_FORMED_COMMANDS = {
+    'plain': ("('planted_cmd_a', 'planted_cmd_b')", ('planted_cmd_a', 'planted_cmd_b')),
+    'inner-marks': ("('a.b+c-d_e', '_x', '9z')", ('a.b+c-d_e', '_x', '9z')),
+    'longest': (repr(('x' * 255,)), ('x' * 255,)),
+    'none': (None, ()),
+}
+
+
+def declaring(module: str, commands: str | None, **capability: object) -> dict[str, str]:
+    """The files of a planted package `module` whose capability declares `commands` (source), or none."""
+    files = package(module, **capability)
+    source = files[f'{module}/capability.py']
+    assert source.count('resources=()') == 1, 'the planted source no longer holds resources=()'
+    if commands is not None:
+        files[f'{module}/capability.py'] = source.replace('resources=()', f'resources=(), commands={commands}')
+    return files
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+@pytest.mark.parametrize('kind', list(COMMAND_DECLARATIONS))
+def test_a_malformed_command_declaration_is_refused_at_load(kind: str, names: tuple[str, ...],
+                                                            plant: Callable[..., EntryPoint]) -> None:
+    declared, cause = COMMAND_DECLARATIONS[kind]
+    before = list(TOOL_REGISTRY)
+    ep = plant('planted-commands', 'commands = planted_commands.capability:CAPABILITY',
+               declaring('planted_commands', declared))
+    message = load_error([*members(names), ep])
+    want = f'cannot load capability planted-commands: {cause}'
+    assert message == want, f'a malformed command declaration was not refused as such: expected {want!r}, got {message!r}'
+    assert TOOL_REGISTRY == before, \
+        f'a malformed command declaration was not refused as such: it left {TOOL_REGISTRY[len(before):]} registered'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_planted_capability_declares_commands_with_no_core_edit(names: tuple[str, ...],
+                                                                 plant: Callable[..., EntryPoint]) -> None:
+    for kind, (declared, want) in WELL_FORMED_COMMANDS.items():
+        module = f"planted_{kind.replace('-', '_')}"
+        tool = f'{module}_echo'
+        files = declaring(module, declared, tool=tool, text=echo_text(tool))
+        ep = plant(f"planted-{kind}", f'{kind.replace("-", "_")} = {module}.capability:CAPABILITY', files)
+        try:
+            loaded = load([*members(names), ep])
+        except CapabilityLoadError as exc:
+            pytest.fail(f'a well-formed command declaration was refused: {kind}: {exc}')
+        got = {c.distribution: c.capability.commands for c in loaded}
+        assert got[f'planted-{kind}'] == want, \
+            f'a well-formed command declaration was refused or changed: {kind}: {got[f"planted-{kind}"]!r}, declared {want!r}'
+        assert [c.capability.name for c in loaded[:-1]] == sorted(names), \
+            f'a well-formed command declaration was refused beside {names}: {loaded}'
+    # Built positionally, as the five fields were before commands existed, a capability declares none.
+    template = by_name()['slurm'].capability
+    old = type(template)(template.name, template.order, template.tools, template.instructions, template.resources)
+    assert old.commands == (), f'a well-formed command declaration was refused or changed: positional {old.commands!r}'
+
+
+@pytest.mark.unit
+def test_the_members_declare_their_commands() -> None:
+    declared = {ep.dist.name: ep.load().commands for ep in entry_points(group=GROUP)}
+    assert declared == {'cluster-mcp-slurm': ('sbatch', 'squeue', 'scancel', 'sacct', 'sinfo', 'scontrol'),
+                        'cluster-mcp-rcac': ('findscratch', 'myquota')}, declared
+    loaded = {c.distribution: c.capability.commands for c in installed()}
+    assert loaded == declared, f'the members load other commands than they declare: {loaded}'

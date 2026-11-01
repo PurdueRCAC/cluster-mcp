@@ -6,12 +6,12 @@ appetite: big
 status: in_progress
 branch: feature/capability-probe
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-01'
 phases:
 - id: P1
   name: A capability declares the commands it needs; one bounded lookup decides every ending
-  status: pending
+  status: done
   satisfies:
   - R2
   depends_on: []
@@ -144,7 +144,7 @@ the existing §7 refusal. The Slurm and RCAC members declare theirs. `core/probe
 declared name up in one bounded call and decides each capability's verdict for every ending. Nothing
 calls it at startup yet, so nothing a client sees changes.
 
-- [ ] `core/capabilities.py`:
+- [x] `core/capabilities.py`:
   - `Capability.commands: tuple[str, ...] = ()`, last;
   - `COMMAND`;
   - `_checked()`: the field exactly a `tuple`, each element exactly a `str` (no subclass: PLAN §2.1),
@@ -152,17 +152,17 @@ calls it at startup yet, so nothing a client sees changes.
   - the refusals worded as PLAN §2.1 (`declared.py`'s `REASON` reads them);
   - the class docstring and the module docstring say what `commands` is and that a capability with
     none is served whenever it is installed.
-- [ ] `core/probes.py` (new) as PLAN §2.2: `PROBE_TIMEOUT`, `LOOKUP` (registered through
+- [x] `core/probes.py` (new) as PLAN §2.2: `PROBE_TIMEOUT`, `LOOKUP` (registered through
   `scripts.fixed`), `Verdict`, `Pending` (verdicts decided once, memoized), `start`, `unprobed`, `_ask`,
   `_parse`.
   - It splits on `\n` alone and needs the final newline.
   - The worker is a daemon that catches `BaseException` and passes the executor `timeout=bound`.
   - The comments are declarative, with no spec ids.
-- [ ] `slurm/capability.py`: `commands=('sbatch', 'squeue', 'scancel', 'sacct', 'sinfo', 'scontrol')`;
+- [x] `slurm/capability.py`: `commands=('sbatch', 'squeue', 'scancel', 'sacct', 'sinfo', 'scontrol')`;
   `rcac/capability.py`: `commands=('findscratch', 'myquota')`. Each module docstring says why those
   names.
-- [ ] `tests/harness.py`: `ProbeExecutor` (PLAN §2.7).
-- [ ] New `tests/test_probes.py`:
+- [x] `tests/harness.py`: `ProbeExecutor` (PLAN §2.7).
+- [x] New `tests/test_probes.py`:
   - **`unit`**, each outcome row beside each member set (`MEMBER_SETS`, as `test_capabilities.py`
     builds the sets): `test_nothing_declared_runs_nothing`,
     `test_every_declared_command_is_looked_up_once`,
@@ -174,13 +174,13 @@ calls it at startup yet, so nothing a client sees changes.
     directory first on PATH through a test HOME's `.bash_profile`; a function, a `type` function and a
     non-executable file are absent) and `test_the_lookup_over_ssh` (`LoopbackSSH` with `home/bin`
     stand-ins present and absent; `DroppingSSH` for a lost connection).
-- [ ] `tests/test_capabilities.py`: `test_a_malformed_command_declaration_is_refused_at_load` (every
+- [x] `tests/test_capabilities.py`: `test_a_malformed_command_declaration_is_refused_at_load` (every
   kind `declared.py` lists, beside each member set),
   `test_a_planted_capability_declares_commands_with_no_core_edit`, `test_the_members_declare_their_commands`.
-- [ ] `tests/mutants.py`: a case for every P1 alternative `alternatives.py coverage p1` lists, each
+- [x] `tests/mutants.py`: a case for every P1 alternative `alternatives.py coverage p1` lists, each
   targeting a row beside each member set. A mutant shown equivalent goes in `alternatives.py`'s
   `EQUIVALENT` with why; that dict starts empty and is the one gate data build may fill.
-- [ ] `AGENTS.md`:
+- [x] `AGENTS.md`:
   - §7: the record with `commands`, the `type -P` lookup, the refusal at load;
   - the high-blast-radius list and the footguns gain `core/probes.py`;
   - § Testing: `test_probes.py`.
@@ -190,6 +190,28 @@ calls it at startup yet, so nothing a client sees changes.
   - On the prototype cut to P1, `declared.py`, `lookups.py` and `docs_gate.py p1` were green, then
     `alternatives.py coverage p1` stopped red for want of cases (93 alternatives unmutated).
   - On today's tree it is red at `declared.py`.
+  *Observed (2026-11-01), on the P1 build tree before its commit (the run quoted here):*
+  - `phase` green in 18 s: `declared.py` (5 loaded, 23 refused, both members), `lookups.py`,
+    `docs_gate.py p1`, `alternatives.py coverage p1` (84 alternatives, 84 cases, 0 equivalents), and
+    the 11 named tests, 252 rows, passed in each era with none skipped.
+  - `mutants-handshake-1` 42 of 42 killed (96 s), `mutants-handshake-2` 42 of 42 (93 s),
+    `mutants-modern-1` 42 of 42 (95 s), `mutants-modern-2` 42 of 42 (93 s).
+  - The full suite on the same tree, alone on the host: 3864 passed, 14 skipped (the bash 4.1
+    `need_shell` rows, which CI runs) in each era; 360.3 s handshake and 353.0 s modern, against
+    `c520432`'s 359.6 s and 359.5 s (P1's rows take about 4 s an era; the rest is noise).
+  *Amendments at build:*
+  - 84 alternatives, not the plan's 93: `probes.py` reuses `capabilities._cause` for a raised
+    exception's text, so it adds no `_cause` of its own, and `_parse` drops the prototype's
+    `isinstance(stdout, str)` (a result whose stdout is not a `str` raises in the worker and is
+    decided as any raise is). `verdicts()` waits on an `Event`, not a queue, so no `except
+    queue.Empty` decision exists to sweep (its `Exception` and `BaseException` alternatives would be
+    equivalent). `Pending` is built for every start, and `unprobed()` posts every name found.
+  - A worker thread that cannot start is one more ending, served with its reason (`except
+    Exception`); an interrupt there still interrupts. `test_probes.py` gains
+    `test_an_interrupt_while_the_probe_starts_still_interrupts` and
+    `test_unprobed_serves_every_capability_and_runs_nothing` beside the named tests.
+  - `test_the_lookup_over_ssh` runs three rows (present, absent, lost) beside both members, not
+    beside each set: no mutant targets it, and the bash rows hold the lookup beside each set.
 - **Touches:** `core/capabilities.py`, `core/probes.py`, `slurm/capability.py`, `rcac/capability.py`,
   `tests/harness.py`, `tests/test_probes.py`, `tests/test_capabilities.py`, `tests/mutants.py`, `AGENTS.md`.
 

@@ -5,9 +5,12 @@
 
 A capability is a distribution that declares one entry point in the group `cluster_mcp.capabilities`,
 naming a `Capability`: its name, its place in the served instructions, the module whose `@mcp_tool`
-functions are its tools, its part of the instructions, and its resources. The core never names one.
+functions are its tools, its part of the instructions, its resources, and the commands it needs on
+the cluster. The core never names one.
 A capability's resources are never open: each needs its request's executor, so in `delegate` mode
-every read of one resolves the caller.
+every read of one resolves the caller. The commands are data, never code: the core looks each one
+up on the cluster (`cluster_mcp.core.probes`), and a capability that declares none is served wherever
+it is installed.
 
 Nothing here runs at import. `installed()` loads every capability the environment has, once, when
 the server starts; a capability that cannot be discovered, ordered or loaded stops the load with a
@@ -48,6 +51,10 @@ GROUP: Final = 'cluster_mcp.capabilities'
 # A tool's line in an instructions text: `- name: what it does`.
 LISTED: Final = re.compile(r'^- (\w+):', re.MULTILINE)
 
+# A command a capability may declare it needs: a plain file name, as `exec` finds one on PATH. No
+# path, no space or shell character, and no leading `-` or `.`.
+COMMAND: Final = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.+-]{0,254}')
+
 
 @dataclass(frozen=True)
 class Capability:
@@ -59,7 +66,10 @@ class Capability:
     below it) are its tools. `instructions` is its part of the base and lists exactly those tools, each
     once, as `- name:` lines. `resources` are entries shaped as the core's `RESOURCE_REGISTRY` ones,
     each a dict with a `str` `uri`, `name` and `description`, a callable `handler`, and `executor`
-    exactly True, its URI served by nothing else.
+    exactly True, its URI served by nothing else. `commands` names the commands its tools need on the
+    cluster, each a plain file name (`COMMAND`) declared once, as a tuple of `str` (exactly those
+    types, never a subclass of either): the core looks each up, and withholds the capability where one
+    is missing. A capability that declares none, `()`, is served wherever it is installed.
     """
 
     name: str
@@ -67,6 +77,7 @@ class Capability:
     tools: str
     instructions: str
     resources: tuple[dict, ...] = ()
+    commands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -176,6 +187,17 @@ def _checked(value: object) -> Capability:
         raise _Invalid('its instructions are empty')
     for entry in value.resources:
         _check_resource(entry)
+    # Exactly a tuple of exactly `str`: the probe iterates and hashes the names after the load, where
+    # no subclass's `__iter__`, `__eq__` or `__hash__` may run.
+    if type(value.commands) is not tuple:
+        raise _Invalid(f'its commands is a {type(value.commands).__name__}, not a tuple')
+    for i, command in enumerate(value.commands):
+        if type(command) is not str:
+            raise _Invalid(f'one of its commands is a {type(command).__name__}, not a str')
+        if not COMMAND.fullmatch(command):
+            raise _Invalid(f'its command {command!r} is not a command name')
+        if command in value.commands[:i]:
+            raise _Invalid(f'its command {command!r} is declared twice')
     return value
 
 
