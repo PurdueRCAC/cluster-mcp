@@ -68,7 +68,7 @@ Clarifications Q1–Q6: each verified as ruled.
 - **Routed as the property:** every part of `AGENTS.md` that lists the core's modules or describes what runs at startup, and each member's row, describes the probe as §4, §7 and §9 do.
 
 ### F4 — out of scope, recorded on the existing seed
-- A hung `local` probe whose login profile ignores SIGTERM outlives a server that failed open and exited 0 (block reviewer: `trap '' TERM; sleep 67`, server exit 0 at 10.9 s, the probe's group still running, killed by the reviewer). The mechanism is the `local` executor's timeout, which sends SIGTERM only; it predates the cycle for every `local` command. Recorded as a dated note on [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md) (`2339c0e`), whose Outcome covers any exit.
+- A hung `local` probe whose login profile ignores SIGTERM outlives a server that failed open and exited 0 (block reviewer: `trap '' TERM; sleep 67`, server exit 0 at 10.9 s, the probe's group still running, killed by the reviewer). The mechanism is the `local` executor's timeout, which sends SIGTERM only; it predates the cycle for every `local` command. *(Corrected by cycle 2's F2: the timeout sends SIGTERM, then SIGKILL after `GRACE`; the probe's daemon worker is abandoned at the deadline and cut off by the interpreter's exit within that grace.)* Recorded as a dated note on [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md) (`2339c0e`), whose Outcome covers any exit.
 
 ### F5 [LOW/CONFIRMED] The deadline's placement survives a mutant
 - **Where:** `core/probes.py`, `Pending.verdicts` (the AGENTS footgun "deadline taken in `start()`, never at the wait").
@@ -134,3 +134,8 @@ Clarifications Q1–Q6: each verified as ruled.
 
 ### Bound
 This is review cycle 2 with changes requested: the bound. Escalated to Geoffrey on 2026-11-01.
+
+### Geoffrey's rulings at the bound (2026-11-01)
+- **Scoped fix, foreman verifies, land.** F2 and F4 are fixed in one remediation build; the foreman verifies the fixes on the commit itself (the corrected seed against `launch.py`, each new pin red on `541785c` and green after, the sweep killed in both eras), then publishes. No third review.
+- **F3 (PATH-only declarations): the drop stands.** The LMOD cycle adds the second kind of declaration.
+- **Registered tool objects:** seed a future cycle that makes them inert (exact types), with a ROADMAP entry, in this remediation. No code now.
