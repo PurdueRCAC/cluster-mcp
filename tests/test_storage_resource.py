@@ -3,6 +3,10 @@
 
 """Reading `cluster://storage` runs on the executor of the request that read it, as `storage_paths` does.
 
+The resource is the RCAC capability's (`cluster_mcp.rcac.resources`), served beside the core's
+context resource by every server here, each composed with every installed capability; the URIs
+checked are those a client lists from such a server.
+
 The resource's handler and the `storage_paths` tool both call the undecorated
 `resolve_storage_paths()`: a decorated tool is not callable (§ Invariants §7). It runs
 `findscratch`, then `myquota`, through `get_executor()`, so a read needs its request's executor,
@@ -52,11 +56,13 @@ from typing import Any, Mapping, Sequence
 import pytest
 
 from conftest import LOCAL_OWNER, launch_user
-from harness import (CONTEXT_URIS, STORAGE_URIS, Outcome, RecordingExecutor, Rendezvous, bare_server, call,
+from harness import (CONTEXT_URIS, SITE, STORAGE_URIS, Outcome, RecordingExecutor, Rendezvous, bare_server, call,
                      delegate_server, drive, http_client, in_memory, launched_script, mint, read_resource,
-                     read_verbatim, scheme, serving, shared_server, user_map)
+                     read_verbatim, scheme, served_surface, serving, shared_server, user_map)
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.executor.shell import LocalShellExecutor
 from cluster_mcp.core.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
+from cluster_mcp.core.server import create_mcp_server
 from cluster_mcp.core.site import SiteContext, SiteFile
 from test_identity import NO_IDENTITY, NOT_AUTHORIZED
 from test_no_executor import NO_EXECUTOR, refusal_violations, report
@@ -177,9 +183,19 @@ def neighbourhood(uris: Sequence[str], open_uris: frozenset[str]) -> dict[str, s
 # Every URI the server serves, as `harness` writes them out: each resource under both schemes.
 SERVED_URIS = (*CONTEXT_URIS, *STORAGE_URIS)
 
-# The URIs the registry marks as running nothing. The neighbourhoods leave out these, not whatever
-# OPEN_RESOURCES holds, so an open set grown past the registry's open entries is read here too.
-REGISTRY_OPEN = frozenset(entry['uri'] for entry in RESOURCE_REGISTRY if not entry['executor'])
+# Every resource entry a server with every installed capability registers: the core's, then each
+# capability's (the storage resource is the RCAC capability's).
+ENTRIES = (*RESOURCE_REGISTRY, *(entry for loaded in installed() for entry in loaded.capability.resources))
+
+
+def served_uris() -> list[str]:
+    """The URIs a client lists from a server composed with every installed capability, in the order served."""
+    return list(served_surface(create_mcp_server('none', site=SITE))['resources'])
+
+
+# The URIs the entries mark as running nothing. The neighbourhoods leave out these, not whatever
+# OPEN_RESOURCES holds, so an open set grown past the entries' open ones is read here too.
+REGISTRY_OPEN = frozenset(entry['uri'] for entry in ENTRIES if not entry['executor'])
 
 # The neighbourhood of each served URI, the open ones and those that run commands: about 2,900
 # shapes each, read one served URI per row. None is exactly open, so in `delegate` mode a refused
@@ -316,10 +332,10 @@ ALIASES = [pytest.param(target, alias, id=target.partition('://')[2]) for target
 def test_aliases_are_derived_from_their_targets() -> None:
     # Each alias is its target with only the URI changed: the same handler object, so it runs what
     # its target runs, and the same `executor` flag, so it is resolved exactly when its target is.
-    uris = [entry['uri'] for entry in RESOURCE_REGISTRY]
+    uris = served_uris()
     violations = [] if sorted(uris) == sorted((*CONTEXT_URIS, *STORAGE_URIS)) and len(uris) == 4 else \
-        [f'the registry serves {uris!r}, expected exactly {[*CONTEXT_URIS, *STORAGE_URIS]!r}']
-    entries = {entry['uri']: entry for entry in RESOURCE_REGISTRY}
+        [f'the server serves {uris!r}, expected exactly {[*CONTEXT_URIS, *STORAGE_URIS]!r}']
+    entries = {entry['uri']: entry for entry in ENTRIES}
     for target, alias in (CONTEXT_URIS, STORAGE_URIS):
         if target not in entries or alias not in entries:
             continue
@@ -598,7 +614,7 @@ def test_not_open_shapes_are_neither_open_nor_served() -> None:
     # The shapes are variants of a served open URI and a served URI that runs commands; none of them
     # may itself be served or open, or the tests below would test nothing about it. Each shape built
     # on an rcac URI has its twin on the cluster URI, so neither scheme's neighbourhood is thinner.
-    served = {entry['uri'] for entry in RESOURCE_REGISTRY}
+    served = set(served_uris())
     violations = [f'{uri!r} is served or open' for uri in NOT_OPEN if uri in served | OPEN_RESOURCES]
     for uri in CONTEXT_URIS:
         if uri not in OPEN_RESOURCES:
@@ -662,7 +678,7 @@ def test_near_open_shapes_cover_every_served_uri() -> None:
     # deletions and its control-character and printable insertions at both ends, and the shapes common
     # normalisers map onto the open URI.
     violations = [f'{uri!r} is open' for uri in NEAR_OPEN if uri in OPEN_RESOURCES]
-    served = list(dict.fromkeys([*SERVED_URIS, *(entry['uri'] for entry in RESOURCE_REGISTRY)]))
+    served = list(dict.fromkeys([*SERVED_URIS, *served_uris()]))
     for uri in served:
         wanted = [uri[:at] + uri[at + 1:] for at in range(len(uri))]
         wanted += [f'{char}{uri}' for char in '\x00\t\n\r\x7f' + string.punctuation + string.whitespace]

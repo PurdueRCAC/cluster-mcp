@@ -1,13 +1,14 @@
-# The workspace root, and the compat distribution `rcac-mcp`: it installs cluster-mcp and the
-# deprecated `rcac-mcp` command, so the install line every existing client config names keeps
-# working through the deprecation window. It ships no code; the server is packages/cluster-mcp.
+# The workspace root, and the compat distribution `rcac-mcp`: it installs cluster-mcp with its Slurm
+# and RCAC extras and the deprecated `rcac-mcp` command, so the install line every existing client
+# config names keeps serving every tool through the deprecation window. It ships no code; the server
+# is packages/cluster-mcp. The extras are also what makes `uv sync` install every member.
 [project]
 name = "rcac-mcp"
 version = "0.1.5"
-description = "Deprecated name of cluster-mcp: installs cluster-mcp and the rcac-mcp command"
+description = "Deprecated name of cluster-mcp: installs cluster-mcp[slurm,rcac] and the rcac-mcp command"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["cluster-mcp"]
+dependencies = ["cluster-mcp[slurm,rcac]"]
 
 [project.scripts]
 rcac-mcp = "cluster_mcp.core:legacy_main"

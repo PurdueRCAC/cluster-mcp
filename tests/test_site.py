@@ -44,8 +44,12 @@ from cluster_mcp.core.executor.shell import LocalShellExecutor
 from cluster_mcp.core.executor.base import (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE,
                                     CommandResult)
 from cluster_mcp.core.scripts import script_argv, script_of
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS
+from cluster_mcp.core.capabilities import installed
+from cluster_mcp.core.server import base_instructions
 from ssh_server import LoopbackSSH
+
+# The served base: the core's text and every installed capability's.
+SERVER_INSTRUCTIONS = base_instructions(installed())
 
 SANDBOX = Path(__file__).resolve().parents[1] / 'bin' / 'sandbox.sh'
 

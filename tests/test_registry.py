@@ -25,11 +25,12 @@ import pytest
 
 from conftest import need_git
 from harness import SITE, served_tools
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.server import create_mcp_server
-from cluster_mcp.core.tools import TOOL_REGISTRY
+from cluster_mcp.core.tools import CORE_TOOLS, TOOL_REGISTRY
 
 
-# Every tool change edits this set in the same commit as SERVER_INSTRUCTIONS and the README.
+# Every tool change edits this set in the same commit as its member's instructions text and the README.
 EXPECTED_TOOLS: frozenset[str] = frozenset({
     'average_wait',
     'cluster_context',
@@ -342,6 +343,9 @@ def test_served_tools_match_registry() -> None:
     assert names, 'the server serves no tools'
     assert registry_violations(names) == []
     assert set(names) == {tool.name for tool in TOOL_REGISTRY}
+    # The registry is the core's tools and those of every capability that loaded, and nothing else.
+    loaded = {tool.name for capability in installed() for tool in capability.tools}
+    assert set(names) == {tool.name for tool in CORE_TOOLS} | loaded
 
 
 @pytest.mark.unit

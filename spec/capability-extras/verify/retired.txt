@@ -1,0 +1,2 @@
+# Test functions and mutation case ids this cycle retires on purpose, one per line:
+# <file::function or case id> — P<n>: <reason>

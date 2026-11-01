@@ -6,6 +6,10 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = ["cluster-mcp"]
 
+# The core finds this member through the entry-point group and loads it at startup.
+[project.entry-points."cluster_mcp.capabilities"]
+slurm = "cluster_mcp.slurm.capability:CAPABILITY"
+
 [tool.uv.sources]
 cluster-mcp = { workspace = true }
 

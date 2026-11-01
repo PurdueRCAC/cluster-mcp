@@ -33,13 +33,31 @@ import _posixsubprocess
 import pytest
 
 import cluster_mcp.core.context
+from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.executor import launch
+
+# Every installed capability, loaded once before any test module runs: the registry then holds the
+# same tools in the same order whatever a test imports first, and no capability registers twice. A
+# load that fails is not cached, so it does not stop collection: every test that needs the installed
+# capabilities fails with its message (`test_installed_finds_every_workspace_member` among them), the
+# header says it, and the tests of the load itself, which plant their own, still run. (A load raises
+# nothing but a `CapabilityLoadError`; anything else is a broken loader, reported the same way.)
+try:
+    installed()
+    LOAD_FAILURE = ''
+except Exception as exc:
+    LOAD_FAILURE = f'{type(exc).__name__}: {exc}'
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
 
 # The real Popen, captured before any fixture replaces it.
 REAL_POPEN = subprocess.Popen
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    """Name a failed load of the installed capabilities at the top of the run."""
+    return f'installed capabilities: {LOAD_FAILURE}' if LOAD_FAILURE else None
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

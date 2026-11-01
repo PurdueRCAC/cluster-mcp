@@ -75,15 +75,16 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Twelve cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP server
-for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename to
-`cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
+Thirteen cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP
+server for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename
+to `cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
-deprecation window. What remains makes capabilities optional, then builds each capability on that
-mechanism — Slurm first, then LMOD and xdu as the consumers that prove it generalizes — and finally
-the site extra that bundles them. Ahead of the tool families sit the executor fixes: stopping a
-timed-out command, once its measurement is approved, the four that `ssh-reconnect-loop` deferred on
-the SSH connection, and a reconnect test whose wall-clock bound measures load as well as behaviour.
+deprecation window. What remains makes capabilities optional, then lets an installed one with
+nothing behind it advertise nothing, then builds each capability on that mechanism — Slurm first,
+then LMOD and xdu as the consumers that prove it generalizes — and finally the site extra that
+bundles them. Ahead of the tool families sit the executor fixes: stopping a timed-out command, its
+measurement now approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a
+reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -112,8 +113,9 @@ and the window's own tests and README section go with it.
 Today every tool registers unconditionally: a site without Slurm still advertises `sbatch`, `squeue`
 and `sacct` to every connecting model, which is an invitation to hallucinate a workflow that cannot
 run. The shape is packaging extras — `cluster-mcp[slurm]` — where each extra installs a real
-distribution, registered through an entry-point group, with a runtime probe so an installed
-capability with nothing behind it advertises nothing, and instructions composed from what loaded.
+distribution, registered through an entry-point group, with instructions composed from what
+loaded. The runtime probe, so that an installed capability with nothing behind it advertises
+nothing, moved to its own seed, `capability-probe` (below), at this cycle's GOAL gate.
 
 This is the load-bearing cycle of Part I: it establishes the mechanism that Slurm, LMOD, xdu and the
 site extras plug into. It also collides directly with an existing invariant — registration is
@@ -122,22 +124,34 @@ currently an import-time side effect driven by a hardcoded list at the bottom of
 not work around it.
 
 *Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists; cleared: landed on `develop` 2026-10-30), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
-**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: unshaped*
+**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: adopted:capability-extras*
+
+## An installed capability with nothing behind it still advertises its tools
+
+After capability-extras, installation is the only switch, so one install that serves several
+clusters advertises the Slurm tools on a cluster with no Slurm. A runtime probe — ask the cluster
+whether `sinfo` exists — would let an installed capability with nothing behind it advertise
+nothing. It was split out of capability-extras because it is not cheap: a remote round trip on the
+startup path of a server whose SSH connection is established eagerly, a different failure mode in
+`local` mode, and no user to probe as in `delegate` mode over HTTP, where instructions are composed
+once per process.
+
+*Horizon: after capability-extras · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
+**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: unshaped*
 
 ## A timed-out command may keep running after its call returns
 
 Every mode now returns a result at the deadline, but whether the command stops is open over SSH
 (OpenSSH may ignore the `signal` request, and closing a non-PTY channel stops nothing) and under a
 non-root `delegate` server (TERM reaches only the command, through `sudo`). Measuring it needs a
-long-running process on a login node, outside the read-only dogfood class, so it waits for
-approval. Found by `safe-execution`'s planning research, 2026-10-17.
+long-running process on a login node, outside the read-only dogfood class, so it waited for
+approval, given on 2026-10-29. Found by `safe-execution`'s planning research, 2026-10-17.
 
 It sits ahead of the tool families because they lean on bounded calls (a bounded `file_find`, a
 `job_wait` considered), which make a timeout a routine outcome on a shared login node rather than
-an accident. Its measurement needs Geoffrey's approval first; until it has it, nothing below waits
-on it.
+an accident. Its measurement was approved on 2026-10-29.
 
-*Horizon: mid-term; the measurement needs Geoffrey's approval · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
+*Horizon: mid-term; the measurement approved on 2026-10-29 · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
 **Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: unshaped*
 
 ## A dead SSH link that still reads as connected holds file transfers without limit
@@ -419,6 +433,29 @@ vanish from CI without failing. Found by the landing-merge check of
 
 *Horizon: later · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
 **Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: unshaped*
+
+## A version the lock lifts never reaches a user who installs from git
+
+`uv.lock` pins what `uv sync` installs (development, CI). A `git+…` or `uvx --from` install, and the
+container image's `uv pip install`, resolve fresh within the declared ranges and never read it, so a
+fix that only lifts a locked version changes what the tests run and nothing a user receives. Where
+the newer version matters, the declared requirement needs a floor. Pre-existing. Found by
+`capability-extras` P4, whose install probe resolved a newer dependency than the lock pins,
+2026-10-31.
+
+It stays here because no release waits on it.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-extras/`](spec/capability-extras/) (TECH P4, PLAN §5); `AGENTS.md` § Packaging*
+**Seed:** [`issues/unlocked-install-floors.md`](issues/unlocked-install-floors.md) · *status: unshaped*
+
+## A retried capability load after a failure registers nothing and blames the wrong distribution
+
+A failed load cuts the tool registry back but leaves the imported tools modules cached, so a second
+load in the same process registers nothing for a capability that had loaded cleanly, and the error
+names it instead of the broken one. The command line never retries, so only a library caller sees it.
+
+*Horizon: later · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
+**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
 
 ---
 

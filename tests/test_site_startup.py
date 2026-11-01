@@ -21,9 +21,13 @@ import pytest
 import cluster_mcp.core
 import cluster_mcp.core.executor.ssh
 from cluster_mcp.core import MCPServerApp, site
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS
+from cluster_mcp.core.capabilities import installed
+from cluster_mcp.core.server import base_instructions
 from test_cli import CLI, SANDBOX
 from test_executors import FakeConnection
+
+# The served base: the core's text and every installed capability's.
+SERVER_INSTRUCTIONS = base_instructions(installed())
 
 SENTINEL = site.SiteContext(files=(site.SiteFile('z.md', 'Sentinel rules.'),))
 

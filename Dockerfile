@@ -9,7 +9,8 @@ RUN pip install uv
 COPY pyproject.toml uv.lock README.md ./
 COPY packages/ packages/
 
-# Install the root project, which builds cluster-mcp and its Slurm and RCAC members from packages/
+# Install the root project, whose dependency cluster-mcp[slurm,rcac] builds the core and both of its
+# capability extras, the Slurm and RCAC members, from packages/
 RUN uv pip install --system -e .
 
 # Default command

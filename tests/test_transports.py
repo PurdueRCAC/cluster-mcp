@@ -27,11 +27,13 @@ import pytest
 from harness import Listed, era_mismatch, stdio_tools, url_tools
 from test_cli import CLI, SANDBOX
 from test_registry import EXPECTED_TOOLS
-from cluster_mcp.core.server import SERVER_INSTRUCTIONS
+from cluster_mcp.core.capabilities import installed
+from cluster_mcp.core.server import base_instructions
 from cluster_mcp.core.site import compose, read_local
 
-# What a server started here serves: the base and this host's own /etc/agents.d, at the default budget.
-HOST_INSTRUCTIONS = compose(SERVER_INSTRUCTIONS, read_local('this host'))
+# What a server started here serves: the base of every installed capability and this host's own
+# /etc/agents.d, at the default budget.
+HOST_INSTRUCTIONS = compose(base_instructions(installed()), read_local('this host'))
 
 HOST = '127.0.0.1'
 START_TIMEOUT = 30.0

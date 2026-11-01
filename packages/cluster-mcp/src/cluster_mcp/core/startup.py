@@ -3,16 +3,18 @@
 
 """What a server that cannot start tells its client: the reason, as the answer to every request.
 
-A failed SSH connect at startup is reported three ways: once on stderr, which a client may discard;
-on stdio, as a JSON-RPC error carrying the same message in answer to every request the client sends
+A server refuses to start for one of two reasons: an installed capability that cannot load, or a
+failed SSH connect. Either is reported three ways: once on stderr, which a client may discard; on
+stdio, as a JSON-RPC error carrying the same message in answer to every request the client sends
 until it closes the stream; and as a nonzero exit status. Every request is answered, not only the
 first, because a client of protocol revision 2026-07-28 swallows the error to its `server/discover`
 probe and retries with `initialize`; an answer to that retry is the one it shows.
 
 This module needs no MCP stack: it speaks newline-delimited JSON-RPC directly, the stdio framing
-both protocol eras share, so it behaves the same whichever era the client speaks. The message itself,
-`cannot connect to <host>: <cause>`, is the SSH backend's (`executor.ssh.connect_failure_message`),
-which a call that cannot reconnect reports too.
+both protocol eras share, so it behaves the same whichever era the client speaks. The messages are
+their owners': `cannot load capability <distribution>: <cause>` is the capability loader's
+(`capabilities.CapabilityLoadError`), and `cannot connect to <host>: <cause>` is the SSH backend's
+(`executor.ssh.connect_failure_message`), which a call that cannot reconnect reports too.
 """
 
 # Type annotations

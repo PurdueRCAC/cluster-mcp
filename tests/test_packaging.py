@@ -11,6 +11,12 @@ member would hide every other member's portion, in the editable install and in a
 alike. The four distributions carry one version (uv does not check it), the core's being the source,
 and `__version__` reads it from the installed metadata. The core installs `cluster-mcp`; the root
 installs the deprecated `rcac-mcp`; no member installs both.
+
+The capabilities are the core's extras: the core depends on no member unconditionally, and its
+extras `slurm` and `rcac` each install one member, resolved through a workspace source from the same
+commit. Each member depends on the core alone. The root depends on exactly `cluster-mcp[slurm,rcac]`,
+so the old install line, and `uv sync`, install every capability. Pinned in the sources and in the
+installed metadata.
 """
 
 from __future__ import annotations
@@ -30,6 +36,9 @@ ROOT = Path(__file__).resolve().parents[1]
 # Each workspace member's directory under packages/, and the namespace subpackage it owns.
 MEMBERS = {'cluster-mcp': 'core', 'cluster-mcp-slurm': 'slurm', 'cluster-mcp-rcac': 'rcac'}
 COMPAT = 'rcac-mcp'
+
+# Each capability extra of the core, and the member distribution it installs.
+EXTRAS = {'slurm': 'cluster-mcp-slurm', 'rcac': 'cluster-mcp-rcac'}
 
 
 def pyprojects(root: Path) -> dict[str, dict]:
@@ -130,4 +139,41 @@ def test_console_scripts_are_cluster_mcp_and_the_legacy_alias() -> None:
                  if ep.dist is not None and ep.dist.name in {*MEMBERS, COMPAT}}
     assert installed == {('cluster-mcp', 'cluster-mcp'): 'cluster_mcp.core:main',
                          (COMPAT, 'rcac-mcp'): 'cluster_mcp.core:legacy_main'}
-    assert distribution(COMPAT).requires == ['cluster-mcp']
+
+
+def canonical(name: str) -> str:
+    """A distribution name in its normalized form (PEP 503)."""
+    return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def internal(requirements: list[str]) -> list[str]:
+    """The requirements among `requirements` that name a workspace distribution."""
+    return [r for r in requirements if canonical(re.split(r'[\s\[;<>=!~]', r, maxsplit=1)[0]) in {*MEMBERS, COMPAT}]
+
+
+@pytest.mark.unit
+def test_core_declares_the_capability_extras() -> None:
+    core = pyprojects(ROOT)['cluster-mcp']
+    assert internal(core['project']['dependencies']) == [], 'the core depends on a member unconditionally'
+    assert core['project'].get('optional-dependencies') == {extra: [dist] for extra, dist in EXTRAS.items()}
+    assert core['tool']['uv']['sources'] == {dist: {'workspace': True} for dist in EXTRAS.values()}
+    for dist in EXTRAS.values():
+        member = pyprojects(ROOT)[dist]['project']
+        assert member['dependencies'] == ['cluster-mcp'], f'{dist} depends on {member["dependencies"]}'
+        assert 'optional-dependencies' not in member, dist
+    # The installed metadata: each member is required under its own extra and no other.
+    meta = distribution('cluster-mcp').metadata
+    assert sorted(meta.get_all('Provides-Extra') or []) == sorted(EXTRAS)
+    required = internal(distribution('cluster-mcp').requires or [])
+    assert sorted(required) == sorted(f"{dist}; extra == '{extra}'" for extra, dist in EXTRAS.items()), required
+
+
+@pytest.mark.unit
+def test_compat_root_installs_every_capability() -> None:
+    root = pyprojects(ROOT)[COMPAT]
+    assert root['project']['dependencies'] == ['cluster-mcp[slurm,rcac]']
+    assert root['tool']['uv']['sources'] == {'cluster-mcp': {'workspace': True}}
+    assert distribution(COMPAT).requires == ['cluster-mcp[rcac,slurm]']
+    # The development environment the root syncs carries every capability through those extras.
+    for dist in EXTRAS.values():
+        assert distribution(dist).version == version('cluster-mcp'), dist
