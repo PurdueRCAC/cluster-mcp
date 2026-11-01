@@ -112,7 +112,7 @@ Clarifications Q1–Q6: each verified as ruled.
 
 ### F1 — out of scope, recorded on the existing seed (block MEDIUM; ship S1)
 - Both reviewers reproduced cycle 1's F4: a `local` probe behind a profile of `trap '' TERM` then a hang outlives a server that failed open at 10 s and exited 0. The block reviewer found the mechanism: `run_process` sends SIGTERM, waits `GRACE`, then SIGKILL (`core/executor/launch.py:602-610`); the probe's worker is a daemon abandoned at the deadline, so when the client closes stdin within that grace the interpreter's exit ends the worker before its SIGKILL. Holding the server 2.5 s past its first answer left nothing behind.
-- **Ruling (foreman, as judge): out of scope**, as in cycle 1. It needs a TERM-ignoring hung login profile and a client that leaves within a second; the seed's Outcome ("exits for any reason") covers it, and the fix — process groups reaped at exit — belongs to the launcher, for tool calls as well as the probe. The seed must state the mechanism truly: F2.
+- **Ruling (foreman, as judge): out of scope**, as in cycle 1; recorded on [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md). It needs a TERM-ignoring hung login profile and a client that leaves within a second; the seed's Outcome ("exits for any reason") covers it, and the fix — process groups reaped at exit — belongs to the launcher, for tool calls as well as the probe. The seed must state the mechanism truly: F2.
 
 ### F2 [MEDIUM/CONFIRMED] The seed misstates the leak's mechanism
 - **Where:** `issues/local-command-outlives-server.md`, the 2026-11-01 note ("since the executor's timeout sends SIGTERM only"), and this file's cycle-1 F4, which says the same.

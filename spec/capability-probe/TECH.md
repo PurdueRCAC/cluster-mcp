@@ -3,10 +3,10 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-probe
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -42,7 +42,7 @@ phases:
   verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && uv run python -I spec/capability-probe/remediation/F1-exact-record-values.py all && uv run python -I spec/capability-probe/remediation/F3-map-and-startup.py && uv run python -I spec/capability-probe/remediation/F7-log-levels-and-precedence.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R10
