@@ -28,7 +28,10 @@ in process): over the raw wire, with stdin closed, through a real client in each
 deprecated `rcac-mcp` command, the start is refused, naming it; `--help` and `--version` still work;
 in process the ladder is never consulted; and over HTTP the server exits before it serves. Each kind
 of contribution the server would refuse while it is assembled is planted too, and refused at
-startup the same way, over the raw wire, with stdin closed and over HTTP.
+startup the same way, over the raw wire, with stdin closed and over HTTP; so is each kind of
+capability that cannot load. Through the CLI the suite drives one kind of each family
+(`CLI_REJECTED`, `CLI_UNLOADABLE`); every kind is refused in process beside every member set, and
+setting `CLUSTER_MCP_TEST_EVERY_KIND=1` drives every kind through the CLI as well.
 """
 
 from __future__ import annotations
@@ -608,6 +611,35 @@ def run_bounded(args: list[str], stdin: str, env: dict[str, str], timeout: float
     return subprocess.CompletedProcess(args, proc.returncode, out, err)
 
 
+# Whether the CLI drives below run over every kind, not one kind of each family. The suite never sets
+# it; the class checkers under `spec/capability-extras/remediation/` (`F1-contribution-refusal.sh`,
+# `F4-load-refusal.sh`) do. After the load the CLI's handling does not depend on the kind: the load
+# raises a `CapabilityLoadError` or a `KeyboardInterrupt`, and `_load_capabilities` handles those. The
+# full matrix lives there, and in process every kind is refused beside every member set
+# (`test_capabilities.py`).
+EVERY_KIND = os.environ.get('CLUSTER_MCP_TEST_EVERY_KIND') == '1'
+
+# The `REJECTED` kinds the suite drives through the CLI: a resource FastMCP refuses, a URI collision
+# and a registration that is not a tool.
+CLI_REJECTED = ('resource-not-a-url', 'resource-uri-collides', 'tool-not-a-tool')
+
+# The `UNLOADABLE` kinds the suite drives through the CLI, one of each family, at each of the five
+# times between them: an `Exception`; `SystemExit` with 0, an int and a string; a `BaseException` of
+# its own; a stray tool registered at the entry point's import; a registration that is not a tool;
+# and a distribution with no `Name`.
+CLI_UNLOADABLE = ('raises-at-entry-point', 'exits-0-at-tools', 'exits-int-at-declared', 'exits-text-at-served',
+                  'raises-base-at-served-tool', 'stray-imported-by-the-entry-point', 'not-a-tool-from-the-entry-point',
+                  'nameless-no-name')
+
+
+@pytest.mark.unit
+def test_the_cli_drives_name_kinds_that_exist() -> None:
+    # A kind renamed or dropped from `REJECTED` or `UNLOADABLE` would leave the CLI drives naming a
+    # kind that is not there.
+    unknown = sorted({*CLI_REJECTED} - {*REJECTED}) + sorted({*CLI_UNLOADABLE} - {*UNLOADABLE})
+    assert unknown == [], f'the CLI drives name kinds that are not planted: {unknown}'
+
+
 def plant_rejected(root: Path, kind: str) -> tuple[Path, str]:
     """Plant the `REJECTED` capability `kind` (its package and distribution) under `root`; return the
     directory to put on the path and the distribution's name."""
@@ -624,7 +656,7 @@ def plant_rejected(root: Path, kind: str) -> tuple[Path, str]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize('drive', ['raw-wire', 'stdin-closed', 'http'])
-@pytest.mark.parametrize('kind', list(REJECTED))
+@pytest.mark.parametrize('kind', list(REJECTED) if EVERY_KIND else CLI_REJECTED)
 def test_a_contribution_the_server_would_refuse_stops_startup(kind: str, drive: str, tmp_path: Path) -> None:
     # Started in `local` mode, the server would build itself without the load's refusal and fail
     # there, after the mode ladder, with no answer on stdio; the load refuses first instead.
@@ -685,7 +717,7 @@ def plant_unloadable(root: Path, kind: str) -> tuple[Path, str, str]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize('drive', ['raw-wire', 'stdin-closed', 'http'])
-@pytest.mark.parametrize('kind', UNLOADABLE)
+@pytest.mark.parametrize('kind', UNLOADABLE if EVERY_KIND else CLI_UNLOADABLE)
 def test_a_capability_that_cannot_load_stops_startup(kind: str, drive: str, tmp_path: Path) -> None:
     # Whatever its code raised or exited with, whenever it ran, a nameless distribution, a registration
     # outside its tools module made at its entry point's import: the start is refused, naming it, as

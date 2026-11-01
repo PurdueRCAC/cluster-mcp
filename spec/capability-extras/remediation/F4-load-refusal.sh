@@ -21,6 +21,13 @@ set -eu
 . spec/capability-extras/verify/lib.sh
 uv sync --locked -q
 uv run python -I spec/capability-extras/remediation/F4-load-refusal.py
+
+# The CLI drives below run over every kind (`UNLOADABLE`), not the suite's one kind per family: the suite
+# never sets CLUSTER_MCP_TEST_EVERY_KIND. Collected with it set, they must number every kind's three.
+export CLUSTER_MCP_TEST_EVERY_KIND=1
+drives=$(uv run pytest -q -p no:cacheprovider --collect-only tests/test_startup.py::test_a_capability_that_cannot_load_stops_startup | grep -c '::' || true)
+want=$(uv run python -c 'import sys; sys.path.insert(0, "tests"); from test_capabilities import UNLOADABLE; print(3 * len(UNLOADABLE))')
+[ "$drives" = "$want" ] || { echo "F4: $drives CLI drives collected, not every kind's $want" >&2; exit 1; }
 pytest_both "tests/test_capabilities.py::test_a_capability_that_cannot_load_is_refused_naming_it
 tests/test_capabilities.py::test_a_keyboard_interrupt_while_loading_still_interrupts
 tests/test_capabilities.py::test_a_capability_whose_entry_point_imports_its_tools_loads

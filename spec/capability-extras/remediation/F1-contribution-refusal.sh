@@ -17,6 +17,13 @@ set -eu
 . spec/capability-extras/verify/lib.sh
 uv sync --locked -q
 uv run python -I spec/capability-extras/remediation/F1-contribution-refusal.py
+
+# The CLI drives below run over every kind (`REJECTED`), not the suite's one kind per family: the suite
+# never sets CLUSTER_MCP_TEST_EVERY_KIND. Collected with it set, they must number every kind's three.
+export CLUSTER_MCP_TEST_EVERY_KIND=1
+drives=$(uv run pytest -q -p no:cacheprovider --collect-only tests/test_startup.py::test_a_contribution_the_server_would_refuse_stops_startup | grep -c '::' || true)
+want=$(uv run python -c 'import sys; sys.path.insert(0, "tests"); from test_capabilities import REJECTED; print(3 * len(REJECTED))')
+[ "$drives" = "$want" ] || { echo "F1: $drives CLI drives collected, not every kind's $want" >&2; exit 1; }
 pytest_both "tests/test_capabilities.py::test_what_a_server_would_refuse_is_refused_at_load
 tests/test_capabilities.py::test_each_refused_resource_is_one_fastmcp_refuses
 tests/test_capabilities.py::test_a_colliding_uri_would_be_replaced_silently

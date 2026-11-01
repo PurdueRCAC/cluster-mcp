@@ -41,7 +41,8 @@ era, then in revision 2026-07-28's; each must be killed, every target failing wi
 
 `equivalents` (about 8 min): each equivalent mutant is planted and `EQUIVALENT_TARGETS` runs against
 it in each era, and each set-equivalent case's rows for that set, which must pass: that is what
-recording them claims. One that fails is no longer equivalent and needs a case.
+recording them claims. The CLI drives among them run over every kind (`CLUSTER_MCP_TEST_EVERY_KIND`,
+which the suite never sets). One that fails is no longer equivalent and needs a case.
 
 `all` (the default) runs the three. Footprint: one mutant child at a time, under 1 GB.
 """
@@ -540,7 +541,8 @@ def must_pass(name: str, case: mutants.Case, targets: tuple[str, ...]) -> list[s
         with tempfile.TemporaryDirectory(prefix=f'equivalent-{name}-') as scratch:
             dest = Path(scratch)
             src_root = mutants.apply(case, dest)
-            saved, wanted = os.environ.copy(), era_env(era)
+            # The CLI drives among the targets run over every kind, not the suite's one per family.
+            saved, wanted = os.environ.copy(), {**era_env(era), 'CLUSTER_MCP_TEST_EVERY_KIND': '1'}
             os.environ.clear()
             os.environ.update(wanted)
             try:

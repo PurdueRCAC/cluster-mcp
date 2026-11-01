@@ -587,7 +587,11 @@ import has no effect.
     `test_capabilities.UNLOADABLE` (whatever its code raises or exits with, whenever; a registration
     made at its entry point's import; a nameless distribution, named by its entry point's value)
     (`test_a_capability_that_cannot_load_stops_startup`); each drive runs in its own process group,
-    killed whole if it outlives its bound. A capability that raises `KeyboardInterrupt` while it
+    killed whole if it outlives its bound. The suite drives one kind of each family
+    (`CLI_REJECTED`, `CLI_UNLOADABLE`): after the load the CLI's handling does not depend on the
+    kind, and in process every kind is refused beside every member set. `CLUSTER_MCP_TEST_EVERY_KIND=1`
+    drives every kind through the CLI; the suite never sets it, and a checker that claims every kind
+    does. A capability that raises `KeyboardInterrupt` while it
     loads interrupts the start (`exit_status.keyboard_interrupt`), refused as nothing. In process,
     beside each member set (the group's discovery replaced for the test): `--generate-token` prints
     its token with a capability installed that cannot load, so the load comes after that branch
@@ -2207,7 +2211,8 @@ What each mode means:
   without the capability. So whatever a capability declares fails at the load or not at all, and so
   does whatever its code does while it loads (`test_what_a_server_would_refuse_is_refused_at_load`,
   `test_what_loads_is_served_whole`, `test_a_capability_that_cannot_load_is_refused_naming_it`, and
-  each kind driven through the CLI in `test_a_contribution_the_server_would_refuse_stops_startup` and
+  a kind of each family driven through the CLI, every kind with `CLUSTER_MCP_TEST_EVERY_KIND=1`, in
+  `test_a_contribution_the_server_would_refuse_stops_startup` and
   `test_a_capability_that_cannot_load_stops_startup`). The load does not decide the instructions
   budget: a base too long for it is refused when the server is built, as a budget too small (§
   Configuration), whatever made it long.

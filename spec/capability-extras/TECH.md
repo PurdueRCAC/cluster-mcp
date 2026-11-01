@@ -7,7 +7,7 @@ status: in_review
 branch: feature/capability-extras
 base: develop
 current_phase: done
-last_updated: '2026-10-31'
+last_updated: '2026-11-01'
 phases:
 - id: P1
   name: The capability contract; Slurm and RCAC register through the entry-point group
@@ -513,6 +513,56 @@ whoever imported what; and discovering and ordering. Committed with P1 (see P1's
   `'<' not supported between instances of 'NoneType' and 'str'`. The in-process placement and
   interrupt-at-entry-point rows held on `2c5ceda` (its placement was right; F4's mutants kill
   them).
+
+### Amended at the CI job timeout: the suite drives the CLI per family, the checkers every kind
+
+*Ruled by the foreman, as judge, 2026-10-31: CI job timeout.* CI's run on `48cb232` was cancelled at
+the job's 20-minute `timeout-minutes`: the handshake era passed and the modern era ran out of time.
+Locally `test_a_capability_that_cannot_load_stops_startup` cost 127 s of the 167 s that
+`test_startup.py` and `test_capabilities.py` took (147 drives: 49 `UNLOADABLE` kinds over 3
+transports, each starting a server), and `test_a_contribution_the_server_would_refuse_stops_startup`
+another 23 s (27 drives). After the load, the CLI's handling does not depend on the kind: the load
+raises a `CapabilityLoadError` or a `KeyboardInterrupt`, and `_load_capabilities` handles those. In
+process, `test_a_capability_that_cannot_load_is_refused_naming_it` and
+`test_what_a_server_would_refuse_is_refused_at_load` pin every kind beside every member set. So the
+suite drives a kind of each family through the CLI, over all three transports, and the class checkers
+drive every kind. Nothing under `packages/` changes.
+
+- [x] `tests/test_startup.py`: `CLI_UNLOADABLE` names 8 kinds, one of each family, which between
+      them cover all five times: an `Exception` (`raises-at-entry-point`), `SystemExit` with 0, an
+      int and a string (`exits-0-at-tools`, `exits-int-at-declared`, `exits-text-at-served`), a
+      `BaseException` of its own (`raises-base-at-served-tool`), a stray registered at the entry
+      point's import (`stray-imported-by-the-entry-point`), a registration that is not a tool
+      (`not-a-tool-from-the-entry-point`) and a nameless distribution (`nameless-no-name`).
+      `CLI_REJECTED` names 3: a resource FastMCP refuses (`resource-not-a-url`), a collision
+      (`resource-uri-collides`) and the tool kind (`tool-not-a-tool`). That is 33 drives instead of
+      174. `CLUSTER_MCP_TEST_EVERY_KIND=1` restores every kind. The suite never sets it.
+      `test_the_cli_drives_name_kinds_that_exist` fails if either subset names a kind that is not
+      planted. AGENTS.md § Testing and §7 say so.
+- [x] `remediation/F4-load-refusal.sh` and `F1-contribution-refusal.sh` drove the CLI only through
+      their pytest pins. Each now exports the variable, then checks that the drive collects
+      every kind's three (147 and 27) before it runs the pins in both eras.
+      `F7-mutant-alternatives.py` runs its equivalents' targets with the variable set as well. Its
+      cases name neither drive, so their selection does not change.
+- **Verify:** unchanged; the checkers set the variable themselves.
+  *Observed (2026-10-31 to 2026-11-01), on the trimmed tree:* `F4-load-refusal.sh` green (174 kinds, 0
+  violations; 460 pins passed in each era, the same as before the trim, with 147 drives among them).
+  `F1-contribution-refusal.sh` green (432 served whole, 1,292 refused; 78 pins in each era, 27
+  drives among them). `p5.sh mutants`: 299 killed, 3 controls. `F7-mutant-alternatives.py` all:
+  218 alternatives, 241 cases and 8 equivalents. All 241 cases were killed in each era, the same as
+  before the trim. Each equivalent passed its 995 targets in each era, with every kind driven, and
+  each set-equivalent passed its rows. The profile's verify: `uv lock --check` ok, 3,520 passed and 14 skipped in each era, `--help` ok.
+  Red on `2c5ceda`'s loader for a kind outside the subset, with the checker's variable set:
+  `[exits-none-at-tools-raw-wire]` failed with `the start was not refused naming
+  planted-exits-none-at-tools with 'SystemExit': status 0, []`, and no request was answered. Without
+  the variable, that id is not collected.
+  Suite wall time per era, local (`uv run pytest -q`; handshake, then modern): `2c5ceda` 361 s and
+  341 s; `48cb232` 489 s and 483 s; this tree 357 s and 366 s, which is -1% and +7% against
+  `2c5ceda`. The first handshake run on this tree took 384 s and failed once, in
+  `test_ssh_exec.py::test_a_stalled_reconnect_is_abandoned_against_a_real_handshake` (`0 reconnect
+  workers ran, not one`), as did the modern run after it. That test does not touch the load. It
+  passed alone three times, its file passed whole, and the handshake rerun passed in full: a timing
+  race in that test, not this change.
 
 ## Phase P4 — The extras, the core alone, and the compat root that keeps every tool
 **Satisfies:** R1, R4, R5, R9, R10 · **Depends on:** P3
