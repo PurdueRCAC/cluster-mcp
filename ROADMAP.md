@@ -122,7 +122,7 @@ startup path of a server whose SSH connection is established eagerly, a differen
 once per process.
 
 *Horizon: after capability-extras · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
-**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: unshaped*
+**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: adopted:capability-probe*
 
 ## A timed-out command may keep running after its call returns
 
