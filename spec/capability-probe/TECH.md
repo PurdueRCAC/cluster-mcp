@@ -3,10 +3,10 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: blocked
+status: in_progress
 branch: feature/capability-probe
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -18,7 +18,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-probe/verify/p1.sh phase && sh spec/capability-probe/verify/p1.sh mutants-handshake-1 && sh spec/capability-probe/verify/p1.sh mutants-handshake-2 && sh spec/capability-probe/verify/p1.sh mutants-modern-1 && sh spec/capability-probe/verify/p1.sh mutants-modern-2
+  attempts: 1
+  verify: sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/F5-probe-timing.py all && sh spec/capability-probe/verify/p1.sh mutants-handshake-1 && sh spec/capability-probe/verify/p1.sh mutants-handshake-2 && sh spec/capability-probe/verify/p1.sh mutants-modern-1 && sh spec/capability-probe/verify/p1.sh mutants-modern-2
 - id: P2
   name: Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
   status: done
@@ -38,10 +39,10 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
+  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && uv run python -I spec/capability-probe/remediation/F1-exact-record-values.py all && uv run python -I spec/capability-probe/remediation/F3-map-and-startup.py && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R10
@@ -50,6 +51,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
 review:
   last_reviewed_commit: 2339c0e
@@ -213,8 +215,51 @@ calls it at startup yet, so nothing a client sees changes.
     `test_unprobed_serves_every_capability_and_runs_nothing` beside the named tests.
   - `test_the_lookup_over_ssh` runs three rows (present, absent, lost) beside both members, not
     beside each set: no mutant targets it, and the bash rows hold the lookup beside each set.
+- **Remediation, review cycle 1 (2026-11-01): F5, the probe's timing (R2, and R5's bound).** The review's
+  ship reviewer showed `self._answered.wait(self._bound)` in place of
+  `self._answered.wait(self._deadline - time.monotonic())` surviving every probe row: `run()` asks for the
+  verdicts straight after `start()`, so no row asked late. The frozen `alternatives.py` sweeps the
+  probe's conditions, never a value a call is given.
+  - [x] `tests/test_probes.py`: `test_the_deadline_is_taken_when_the_probe_starts`, beside every member
+    set: with a 0.6 s bound and the lookup hung, `verdicts()` first asked for 0.7 s after `start()`
+    decides within 0.3 s, unanswered; asked for at once, with the answer coming 0.2 s later, it waits for
+    that answer (a hung lookup is released after 3 s whatever happens, so a wait with no bound ends).
+  - [x] `tests/mutants.py`: `probe-timing-<what>`, 28 cases, every timing alternative with a case:
+    where the deadline is taken (at the wait), what it is (the clock less the bound, the bound alone,
+    the clock alone, the wall clock, the module's bound), what the wait is given (the bound, `None`, no
+    timeout, zero, the deadline, the clock, the time past the deadline, the deadline plus the clock, the
+    time left on the wall clock), what a late decision names and the bound kept (the module's), and the
+    bound each part is handed (`start()`'s `Pending`, `_ask`, the executor call: the module's bound, the
+    given timeout, zero; the timed-out reason; `start()`'s default; `unprobed()`'s `None`). Each targets
+    a row beside every member set.
+  - [x] `remediation/F5-probe-timing.py` (`coverage`, `cases`, `equivalents`): the 32 alternatives, the
+    frozen sweep's 72 alternatives of `core/probes.py` still cased, and every line of `core/probes.py`
+    that handles time reached by one or the other; each case killed in both eras; four equivalents
+    planted with their targets green in both eras, each with why: the deadline taken just after the
+    worker starts, the bound plus the clock, the wait floored at zero, `unprobed()`'s zero bound.
+  - Red first: `probe-timing-wait-the-bound`, the review's survivor, killed by the new row beside every
+    set (`failed with 'the deadline was not taken when the probe started'`); the coverage step went red
+    on a timing line planted with no alternative, and green with it gone. `core/probes.py` is unchanged:
+    its timing was right, and only its pin was missing.
+  - P1's `verify:` runs the checker after `p1.sh phase`, before the four mutation halves.
+  *Observed (2026-11-01), the remediation's third run of every distinct step, once each, in order, on the
+  finished tree before its commit (the run quoted here):* `p1.sh phase` green in 18 s (`declared.py`,
+  `lookups.py`, `docs_gate.py p1`, `alternatives.py coverage p1` with 84 alternatives, 252 passed in each
+  era); `F5-probe-timing.py all` green in 582 s (32 timing alternatives, 28 cased, 4 equivalent; the
+  frozen sweep's 72 alternatives of `core/probes.py` cased; 12 timing lines reached; 28 of 28 killed in
+  each era; the 4 equivalents' 223 target rows passed in each era); `mutants-handshake-1` 42 of 42
+  killed (95 s), `-2` 42 of 42 (94 s), `mutants-modern-1` 42 of 42 (97 s), `-2` 42 of 42 (94 s). The
+  `p1.sh phase` step also stands in for P2's (its inputs are the same tree).
+  - *Attempt 1 (2026-11-01), before the commit:* the remediation's first gate run went red at the
+    checker's `equivalents`: every equivalent's child exited 1 with `bin/sandbox.sh: HOME: unbound
+    variable`. The checker cleared the process environment and then built the era's from it, so the
+    child got almost none. Fixed in the checker (the era's environment taken first); the four
+    equivalents then passed their targets in both eras, and every step ran again from the start. The
+    frozen `alternatives.py`'s `run_equivalents` builds its environment in the same order; its
+    `EQUIVALENT` is empty, so it never runs.
 - **Touches:** `core/capabilities.py`, `core/probes.py`, `slurm/capability.py`, `rcac/capability.py`,
-  `tests/harness.py`, `tests/test_probes.py`, `tests/test_capabilities.py`, `tests/mutants.py`, `AGENTS.md`.
+  `tests/harness.py`, `tests/test_probes.py`, `tests/test_capabilities.py`, `tests/mutants.py`, `AGENTS.md`;
+  with review cycle 1's F5, `remediation/F5-probe-timing.py`.
 
 ## Phase P2 — Startup withholds what the cluster lacks, fails open within the bound, and skips in delegate mode or on request
 **Satisfies:** R1, R2, R3, R4, R5, R6, R7, R8, R9, R10 · **Depends on:** P1
@@ -378,11 +423,92 @@ line. Every refusal still comes first. The documents R10 names describe all of i
     so that cycle's placement sweep still covers every boundary; no case was retired.
   - `tests/test_transports.py`, `test_cli.py`, `test_exec_mode.py` and `test_site_startup.py` are
     unedited and green under the suite's default.
+- **Remediation, review cycle 1 (2026-11-01): F1, no read of a loaded record runs capability code (R2,
+  R9; §7), and F3, AGENTS describes the probe wherever it lists the core's modules or startup (R10).**
+  - **F1, the class, found by reading** what `load()`, `composed()`, `base_instructions()`,
+    `create_mcp_server` (`_listed`, `_tools_of`, `_resources_of`, `serve()`), the budget check, `_probe`,
+    `_served` and `probes` read from a `Loaded` and its `Capability`: `name` (hashed by the load, ordered
+    by `_listed`), `order` (ordered by `composed()`), `tools` (`+`'d and compared by the load's
+    attribution), `instructions` (stripped, scanned, joined), `resources` (iterated), each entry (keys
+    looked up), its keys (compared on lookup), `uri` (hashed, compared, `startswith`, read by FastMCP),
+    `name` and `description` (read by FastMCP), `executor` (`is True`), `commands` and each command
+    (P1's exact checks), and `Loaded.distribution` (ordered by `composed()` and `_listed`, formatted by
+    `_served`). Each was an `isinstance` check (`order` refusing a `bool`), so a subclass loaded and its
+    operations ran after the load: the review's `order.__eq__` that exits ended the start with exit 0
+    and no message.
+  - [x] `core/capabilities.py`: every one of those values is checked exact (`type(...) is`) before the
+    load uses it, `order` exactly `int`, each entry exactly `dict`, every key exactly `str` (checked
+    before any lookup), `uri` then `name` and `description` exactly `str`, and the distribution's name
+    exactly a non-blank `str` (else no name, named by its entry point's value). A refusal formats a
+    value only once it is exactly a built-in type (`_shown`, the executor's repr only for a `bool`, an
+    `int` or None). The handler stays the capability's code: FastMCP registers it and a request calls
+    it. A capability's tools (each a `FunctionTool` holding its function) are its code too, read by
+    FastMCP as it registers them; that boundary is not deferred: §7 says it as it holds, and the
+    report asks the foreman whether tools should get the same exactness.
+  - [x] Pins: `test_capabilities.py`'s `exact-<site>` kinds in `UNLOADABLE` (`EXACT_SITES`: each field of
+    the record from `dataclasses.fields`, a command, a resource entry, a key of one, each value of one
+    but the handler from the core's own entry), each a subclass of `str`, `int`, `tuple` or `dict`
+    whose every operation in `OPERATIONS` exits once its record is built, refused for its type beside
+    every member set with none of those operations run; `test_a_distribution_name_of_a_type_of_its_own_is_no_name`
+    beside every set; `exact-order` added to `test_startup.py`'s `CLI_UNLOADABLE`, so the CLI drives it
+    over the raw wire, with stdin closed and over HTTP (every kind with `CLUSTER_MCP_TEST_EVERY_KIND=1`).
+    `MALFORMED` gains `resource-open-unmarked` (`has executor None`), and `resource-uri-not-a-str` now
+    reads `one of its resources has a int uri, not a str` (a URI not exactly a `str` is never formatted).
+  - [x] The `declared` timing of `UNLOADABLE` and of the interrupt rows moved from a `tools` name of a
+    type of its own (now refused for its type before its `+` can run) to the module its tool names, a
+    `str` of a type of its own whose `==` runs the statement when the load attributes the tool: the
+    one declared value capability code can still answer while the load reads it. Every case those rows
+    kill keeps its targets.
+  - [x] `tests/mutants.py`: capability-extras' 22 cases on the replaced checks re-anchored on the exact
+    checks, ids, targets and `why` kept (their mutants now the exact checks' always, never, negated and
+    `isinstance` forms); 30 new cases (`capability-*-exact-*`, `capability-shown-*`,
+    `capability-distribution-name-exact-*`) for the alternatives the rules give the new checks, each
+    targeting a row beside every member set.
+  - [x] `remediation/F1-exact-record-values.py` (`checker`, `coverage`, `cases`, `cli`): 14 sites (from the
+    record's fields and the core's entry keys, so a later one is covered), 29 values of a type of their
+    own (a plain subclass and an all-operations one; a `bool` order) beside every member set, each
+    refused naming its distribution with none of its code run, and an exact control whose every loaded
+    record, the members' too, holds only exact values; every alternative of the 8 exact checks cased;
+    each case killed in both eras; every `exact-<site>` kind driven through the CLI over the three
+    transports in both eras.
+  - Red first, on `949efb5`'s product (the tree's product until this fix): the 44 in-process
+    `exact-<site>` rows of the 11 sites P1 had not made exact failed (`order` loaded; the others refused
+    as `SystemExit: 0` when the load's own hash, strip or iteration ran their code); the 3 `exact-order`
+    CLI drives exited 0 after `Execution mode: local` with nothing on stderr, as the review saw; the 4
+    distribution rows loaded; the checker reached 20 of its 116 refusals, a planted name's `strip`
+    escaping the load as `SystemExit`. Its coverage went red on an alternative planted with no case.
+  - [x] **F3**: § Repository map gains a `probes.py` row; the `__init__.py` row names `_resolve_budget()`,
+    `_resolve_skip_probes()`, `_read_site()`, `_probe()`, `_served()` and `--skip-probes`; the
+    `server.py` row says `run()` gives the capabilities the probe kept; the `capabilities.py` row names
+    the exact values; each member's `capability` row names its `commands`. § Architecture & data flow
+    says the site read, then the probe in `ssh` and `local` modes, run before any request, and what
+    `delegate` and `--skip-probes` do. § Project says an installed capability whose commands the
+    cluster lacks is not served. `remediation/F3-map-and-startup.py` evaluates the property from the
+    code: every core module that defines anything has a map row, the `__init__.py` row names every
+    method `run()` calls on itself, each member row names every command its loaded record declares, and
+    § Architecture names each startup step. Red first on `903ab6a`'s AGENTS.md (20 gaps), green after;
+    it found `_resolve_budget()` and `_read_site()` unnamed beside the probe's two.
+  - [x] AGENTS §7 (the refusal list and the record's bullet, now "No read of a loaded record runs
+    capability code", naming what does run it), the `capabilities.py` footgun, § Testing for the three
+    test files, and the `capabilities.py` module, `Capability` and `_identity` docstrings say exactly
+    what holds.
+  - P2's `verify:` runs the three checkers after `P2-exact-capability.py`, before the four mutation halves.
+  *Observed (2026-11-01), the same run:* `p2.sh phase` green in 242 s (`startup_order.py`, `drives.py
+  all`, `docs_gate.py p2`, `alternatives.py coverage p2` with 79 alternatives and 80 cases, 556 passed
+  in each era); `p1.sh phase` the run above, standing in; `P2-exact-capability.py all` green in 30 s (4
+  of 4 killed in each era); `F1-exact-record-values.py all` green in 284 s (14 sites, 29 values beside 4
+  sets, 116 refused as expected, the controls' records exact; 8 checks, 44 alternatives, 47 cases, 47 of
+  47 killed in each era; 13 kinds, 39 CLI drives passed in each era); `F3-map-and-startup.py` green in
+  under 1 s (26 core modules, 8 methods `run()` calls, 2 members); `mutants-handshake-1` 40 of 40 (89
+  s), `-2` 40 of 40 (88 s), `mutants-modern-1` 40 of 40 (87 s), `-2` 40 of 40 (90 s).
 - **Touches:** `core/__init__.py`, `core/deprecation.py`, `core/server.py`, `tests/conftest.py`,
   `tests/test_probe_startup.py`, `tests/test_env.py`, `tests/test_hygiene.py`,
   `tests/mutants.py`, `AGENTS.md`, `README.md`; with the ruling, `core/capabilities.py`,
   `tests/test_capabilities.py`, `tests/test_startup.py`, `remediation/P2-exact-capability.py`, and
   `verify/alternatives.py`'s `SET_EQUIVALENT` (gate data). `tests/harness.py` needed no change.
+  With review cycle 1's F1 and F3: `core/capabilities.py`, `tests/test_capabilities.py`,
+  `tests/test_startup.py`, `tests/mutants.py`, `AGENTS.md`, `remediation/F1-exact-record-values.py`
+  and `remediation/F3-map-and-startup.py`.
 
 ## Phase P3 — The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
 **Satisfies:** R3, R10 · **Depends on:** P2

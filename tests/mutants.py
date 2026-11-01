@@ -2357,7 +2357,7 @@ CASES: tuple[Case, ...] = (
          'served beyond or short of the core'),
     Case('capability-resource-open-allowed', 'core/capabilities.py',
          (("    if entry.get('executor') is not True:\n"
-           "        raise _Invalid(f'its resource {entry[\"uri\"]!r} has executor {entry.get(\"executor\")!r}, not True: '\n"
+           "        raise _Invalid(f'its resource {entry[\"uri\"]!r} has executor {_shown(entry.get(\"executor\"))}, not True: '\n"
            "                       f'a capability resource is never open')\n", ''),),
          ('test_capabilities.py::test_a_capability_resource_must_need_an_executor[false]',
           'test_capabilities.py::test_a_capability_resource_must_need_an_executor[missing]',
@@ -2436,17 +2436,17 @@ CASES: tuple[Case, ...] = (
            "        raise _Invalid(f'the entry point names a {type(value).__name__}, not a Capability')\n", ''),),
          every_set(MALFORMED, 'not-a-capability'), 'a malformed capability was not refused as such'),
     Case('capability-field-types-unchecked', 'core/capabilities.py',
-         (("        if not isinstance(getattr(value, field), kind):\n"
+         (("        if type(getattr(value, field)) is not kind:\n"
            "            raise _Invalid(f'its {field} is a {type(getattr(value, field)).__name__}, not a {kind.__name__}')\n",
            '        pass\n'),),
          every_set(MALFORMED, 'name-not-a-str', 'tools-not-a-str', 'instructions-not-a-str', 'resources-not-a-tuple'),
          'a malformed capability was not refused as such'),
     Case('capability-order-unchecked', 'core/capabilities.py',
-         (("    if not isinstance(value.order, int) or isinstance(value.order, bool):\n"
+         (("    if type(value.order) is not int:\n"
            "        raise _Invalid(f'its order is a {type(value.order).__name__}, not an int')\n", ''),),
          every_set(MALFORMED, 'order-not-an-int', 'order-a-bool'), 'a malformed capability was not refused as such'),
     Case('capability-order-bool-allowed', 'core/capabilities.py',
-         (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+         (('    if type(value.order) is not int:\n',
            '    if not isinstance(value.order, int):\n'),),
          every_set(MALFORMED, 'order-a-bool'), 'a malformed capability was not refused as such'),
     Case('capability-name-empty-allowed', 'core/capabilities.py',
@@ -2460,13 +2460,15 @@ CASES: tuple[Case, ...] = (
          every_set(MALFORMED, 'resource-not-a-dict', 'resource-name-not-a-str'),
          'a malformed capability was not refused as such'),
     Case('capability-resource-not-a-dict-allowed', 'core/capabilities.py',
-         (("    if not isinstance(entry, dict):\n"
+         (("    if type(entry) is not dict:\n"
            "        raise _Invalid(f'one of its resources is a {type(entry).__name__}, not a dict')\n", ''),),
          every_set(MALFORMED, 'resource-not-a-dict'), 'a malformed capability was not refused as such'),
     Case('capability-resource-fields-unchecked', 'core/capabilities.py',
-         (("        if not isinstance(entry.get(key), str):\n"
-           "            raise _Invalid(f'its resource {entry.get(\"uri\")!r} has a {type(entry.get(key)).__name__} {key}, not a str')\n",
-           '        pass\n'),),
+         (("    if type(entry.get('uri')) is not str:\n"
+           "        raise _Invalid(f'one of its resources has a {type(entry.get(\"uri\")).__name__} uri, not a str')\n", ''),
+          ("        if type(entry.get(key)) is not str:\n"
+           "            raise _Invalid(f'its resource {entry[\"uri\"]!r} has a {type(entry.get(key)).__name__} {key}, not a str')\n",
+           '        pass\n')),
          every_set(MALFORMED, 'resource-uri-not-a-str', 'resource-name-not-a-str', 'resource-description-not-a-str'),
          'a malformed capability was not refused as such'),
     Case('capability-resource-handler-unchecked', 'core/capabilities.py',
@@ -2644,18 +2646,18 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-always', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-identity-isinstance-strip-never', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if False:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-negated', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not (not isinstance(name, str) or not name.strip()):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if not (type(name) is not str or not name.strip()):\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-capability-always', LOADER,
@@ -2669,13 +2671,13 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-always', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-negated', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
-                  '    if not (not isinstance(value.order, int) or isinstance(value.order, bool)):\n'),),
+                (('    if type(value.order) is not int:\n',
+                  '    if not type(value.order) is not int:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-name-empty-always', LOADER,
@@ -2704,13 +2706,13 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-resource-check-isinstance-dict-always', LOADER,
-                (('    if not isinstance(entry, dict):\n',
+                (('    if type(entry) is not dict:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-isinstance-dict-negated', LOADER,
-                (('    if not isinstance(entry, dict):\n',
-                  '    if isinstance(entry, dict):\n'),),
+                (('    if type(entry) is not dict:\n',
+                  '    if not type(entry) is not dict:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-callable-get-handler-always', LOADER,
@@ -2771,18 +2773,18 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-unreadable',
                 'the load raised UnicodeDecodeError, not a CapabilityLoadError naming a capability'),
     alternative('capability-identity-isinstance-strip-without-operand-1', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if not name.strip():\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-no-name',
                 'the load raised AttributeError, not a CapabilityLoadError naming a capability'),
     alternative('capability-identity-isinstance-strip-without-operand-2', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not isinstance(name, str):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if type(name) is not str:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-the-other-operator', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not isinstance(name, str) and (not name.strip()):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if type(name) is not str and (not name.strip()):\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-named-exception-re-raises', LOADER,
@@ -2856,33 +2858,33 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-getattr-field-kind-always', LOADER,
-                (('        if not isinstance(getattr(value, field), kind):\n',
+                (('        if type(getattr(value, field)) is not kind:\n',
                   '        if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-getattr-field-kind-negated', LOADER,
-                (('        if not isinstance(getattr(value, field), kind):\n',
-                  '        if isinstance(getattr(value, field), kind):\n'),),
+                (('        if type(getattr(value, field)) is not kind:\n',
+                  '        if not type(getattr(value, field)) is not kind:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-without-operand-1', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if isinstance(value.order, bool):\n'),),
                 f'{CAPABILITIES}::test_a_malformed_capability_is_refused_as_such', 'order-not-an-int',
                 'a malformed capability was not refused as such'),
     alternative('capability-check-isinstance-order-int-bool-the-other-operator', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if not isinstance(value.order, int) and isinstance(value.order, bool):\n'),),
                 f'{CAPABILITIES}::test_a_malformed_capability_is_refused_as_such', 'order-a-bool',
                 'a malformed capability was not refused as such'),
     alternative('capability-resource-check-isinstance-get-always', LOADER,
-                (('        if not isinstance(entry.get(key), str):\n',
+                (('        if type(entry.get(key)) is not str:\n',
                   '        if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-isinstance-get-negated', LOADER,
-                (('        if not isinstance(entry.get(key), str):\n',
-                  '        if isinstance(entry.get(key), str):\n'),),
+                (('        if type(entry.get(key)) is not str:\n',
+                  '        if not type(entry.get(key)) is not str:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-listing-sorted-listed-names-len-set-without-operand-1', LOADER,
@@ -4293,6 +4295,80 @@ CASES += (
 )
 
 
+# The probe's timing: where its deadline is taken (when it starts, never at the wait), what the deadline
+# is, what the wait is given, what a decision past the deadline says, and the bound each part is handed,
+# each mutated to every alternative it could take. Each is killed beside every member set, most by a
+# row that asks for the verdicts after the deadline has passed and one that is answered after it asks.
+DEADLINE_ROWS = (f'{PROBE_ROWS}::test_the_deadline_is_taken_when_the_probe_starts',
+                 'the deadline was not taken when the probe started')
+STARTUP_BOUND = ('test_probe_startup.py::test_the_probe_follows_the_site_read_and_is_bounded',
+                 'a hung probe was not held to its bound after the site read')
+DELEGATE_SKIP = ('test_probe_startup.py::test_delegate_runs_no_probe_and_says_so',
+                 'delegate mode probed or did not say it skipped')
+DEADLINE = '        self._deadline = time.monotonic() + bound\n'
+BOUND_KEPT = '        self._bound = bound\n'
+WAIT = '            answer = (self._answer if self._answered.wait(self._deadline - time.monotonic())\n'
+LATE_REASON = "                      else f'did not answer within {self._bound:g} s')\n"
+MEMO = '        if self._verdicts is None:\n'
+STARTED = '    pending = Pending(tuple(capabilities), bound)\n'
+ASKED = '            answer = _ask(executor, names, bound)\n'
+RAN = 'timeout=timeout)'
+ASK_REASON = "        return f'did not answer within {timeout:g} s'\n"
+SIGNATURE = 'def start(executor: Executor, capabilities: Iterable[Loaded], timeout: float | None = None) -> Pending:\n'
+UNPROBED_PENDING = '    pending = Pending(tuple(capabilities), PROBE_TIMEOUT)\n'
+
+
+def timing(case_id: str, edits: tuple[tuple[str, str], ...], target: tuple[str, str], kind: str = '') -> Case:
+    return probe_alternative(f'probe-timing-{case_id}', PROBES_FILE, edits, target, kind)
+
+
+def waited(given: str) -> tuple[tuple[str, str], ...]:
+    """The wait for the answer given `given` in place of the time left to the deadline."""
+    return ((WAIT, WAIT.replace('self._deadline - time.monotonic()', given)),)
+
+
+CASES += (
+    timing('deadline-taken-at-the-wait',
+           ((DEADLINE, ''), (MEMO, MEMO + '            self._deadline = time.monotonic() + self._bound\n')),
+           DEADLINE_ROWS),
+    timing('deadline-before-the-start', ((DEADLINE, DEADLINE.replace(' + bound', ' - bound')),), DEADLINE_ROWS),
+    timing('deadline-the-bound-alone', ((DEADLINE, '        self._deadline = bound\n'),), DEADLINE_ROWS),
+    timing('deadline-the-clock-alone', ((DEADLINE, '        self._deadline = time.monotonic()\n'),), DEADLINE_ROWS),
+    timing('deadline-on-the-wall-clock', ((DEADLINE, DEADLINE.replace('time.monotonic()', 'time.time()')),),
+           DEADLINE_ROWS),
+    timing('deadline-the-module-bound', ((DEADLINE, DEADLINE.replace(' + bound', ' + PROBE_TIMEOUT')),), DEADLINE_ROWS),
+    timing('wait-the-bound', waited('self._bound'), DEADLINE_ROWS),
+    timing('wait-forever', waited('None'), DEADLINE_ROWS),
+    timing('wait-with-no-timeout', ((WAIT, WAIT.replace('wait(self._deadline - time.monotonic())', 'wait()')),),
+           DEADLINE_ROWS),
+    timing('wait-nothing', waited('0'), DEADLINE_ROWS),
+    timing('wait-the-deadline', waited('self._deadline'), DEADLINE_ROWS),
+    timing('wait-the-clock', waited('time.monotonic()'), DEADLINE_ROWS),
+    timing('wait-the-time-past-the-deadline', waited('time.monotonic() - self._deadline'), DEADLINE_ROWS),
+    timing('wait-the-deadline-plus-the-clock', waited('self._deadline + time.monotonic()'), DEADLINE_ROWS),
+    timing('wait-on-the-wall-clock', waited('self._deadline - time.time()'), DEADLINE_ROWS),
+    timing('late-reason-names-the-module-bound',
+           ((LATE_REASON, LATE_REASON.replace('{self._bound:g}', '{PROBE_TIMEOUT:g}')),), DEADLINE_ROWS),
+    timing('bound-kept-is-the-module-bound', ((BOUND_KEPT, '        self._bound = PROBE_TIMEOUT\n'),), DEADLINE_ROWS),
+    timing('started-with-the-module-bound', ((STARTED, STARTED.replace(', bound)', ', PROBE_TIMEOUT)')),),
+           DEADLINE_ROWS),
+    timing('started-with-the-given-timeout', ((STARTED, STARTED.replace(', bound)', ', timeout)')),), HUNG),
+    timing('started-with-no-bound', ((STARTED, STARTED.replace(', bound)', ', 0)')),), DEADLINE_ROWS),
+    timing('asked-with-the-module-bound', ((ASKED, ASKED.replace(', bound)', ', PROBE_TIMEOUT)')),), LOOKED_UP),
+    timing('asked-with-the-given-timeout', ((ASKED, ASKED.replace(', bound)', ', timeout)')),), HUNG),
+    timing('asked-with-no-bound', ((ASKED, ASKED.replace(', bound)', ', 0)')),), LOOKED_UP),
+    timing('run-with-the-module-bound', ((RAN, 'timeout=PROBE_TIMEOUT)'),), LOOKED_UP),
+    timing('run-with-no-bound', ((RAN, 'timeout=0)'),), LOOKED_UP),
+    timing('ask-reason-names-the-module-bound',
+           ((ASK_REASON, ASK_REASON.replace('{timeout:g}', '{PROBE_TIMEOUT:g}')),), ENDING, 'timeout-code'),
+    timing('default-the-module-bound',
+           ((SIGNATURE, SIGNATURE.replace('timeout: float | None = None', 'timeout: float | None = PROBE_TIMEOUT')),),
+           STARTUP_BOUND),
+    timing('unprobed-with-no-bound', ((UNPROBED_PENDING, UNPROBED_PENDING.replace('PROBE_TIMEOUT)', 'None)')),),
+           DELEGATE_SKIP, 'unset'),
+)
+
+
 # A capability record is exactly a `Capability`: the load's check of what the entry point names, put
 # back to `isinstance`, lets a subclass load, whichever field its code reads.
 SUBCLASS_KINDS = ('subclass-reads-nothing', 'subclass-reads-name', 'subclass-reads-order', 'subclass-reads-tools',
@@ -4304,6 +4380,93 @@ CASES += (
          (('    if type(value) is not Capability:\n',
            '    if not isinstance(value, Capability):\n'),),
          every_set(UNLOADABLE_ROWS, *SUBCLASS_KINDS), 'a capability that cannot load was not refused naming it'),
+)
+
+
+# What the record holds, and the distribution's name, are exact built-in types: each exact check the
+# load makes of a value the core reads after it, mutated to every alternative it could take (always,
+# never, negated; each comparison inside a boolean operator negated; each field or key of a checked
+# tuple dropped; the `isinstance` check each replaced, which lets a value of a type of its own load; and
+# each type `_shown` shows by its repr dropped). The re-anchored capability-extras cases above carry the
+# other alternatives of the same lines. Each is killed beside every member set by the `exact-<site>`
+# rows, a well-formed capability's, or a malformed one's.
+EXACT_ROWS = UNLOADABLE_ROWS
+EXACT_WHY = 'a capability that cannot load was not refused naming it'
+WELL_LOADS = f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads'
+NAMED_ROWS = f'{CAPABILITIES}::test_a_distribution_name_of_a_type_of_its_own_is_no_name'
+FIELD_CHECK = '        if type(getattr(value, field)) is not kind:\n'
+FIELD_LOOP = "    for field, kind in (('name', str), ('tools', str), ('instructions', str), ('resources', tuple)):\n"
+ORDER_CHECK = '    if type(value.order) is not int:\n'
+NAME_CHECK = '    if type(name) is not str or not name.strip():\n'
+SHOWN = "    return repr(value) if type(value) in (bool, int, type(None)) else f'a {type(value).__name__}'\n"
+DICT_CHECK = '    if type(entry) is not dict:\n'
+KEY_CHECK = '        if type(key) is not str:\n'
+URI_CHECK = "    if type(entry.get('uri')) is not str:\n"
+VALUE_CHECK = '        if type(entry.get(key)) is not str:\n'
+VALUE_LOOP = "    for key in ('name', 'description'):\n"
+
+
+def exact_alternative(case_id: str, edit: tuple[str, str], test: str, kind: str, why: str = EXACT_WHY) -> Case:
+    return alternative(case_id, LOADER, (edit,), test, kind, why)
+
+
+CASES += (
+    exact_alternative('capability-distribution-name-exact-negated-in-its-operator',
+                      (NAME_CHECK, '    if type(name) is str or not name.strip():\n'), WELL_LOADS, '',
+                      'a well-formed capability was refused'),
+    exact_alternative('capability-distribution-name-exact-isinstance',
+                      (NAME_CHECK, '    if not isinstance(name, str) or not name.strip():\n'), NAMED_ROWS, '',
+                      'a distribution name of a type of its own was read as a name'),
+    exact_alternative('capability-field-exact-never', (FIELD_CHECK, '        if False:\n'), EXACT_ROWS, 'exact-name'),
+    exact_alternative('capability-field-exact-isinstance',
+                      (FIELD_CHECK, '        if not isinstance(getattr(value, field), kind):\n'), EXACT_ROWS, 'exact-name'),
+    *(exact_alternative(f'capability-field-exact-without-{field}',
+                        (FIELD_LOOP, FIELD_LOOP.replace(f"('{field}', {kind}), ", '').replace(f", ('{field}', {kind})", '')),
+                        EXACT_ROWS, f'exact-{field}')
+      for field, kind in (('name', 'str'), ('tools', 'str'), ('instructions', 'str'), ('resources', 'tuple'))),
+    exact_alternative('capability-order-exact-never', (ORDER_CHECK, '    if False:\n'), EXACT_ROWS, 'exact-order'),
+    exact_alternative('capability-order-exact-isinstance-not-bool',
+                      (ORDER_CHECK, '    if not isinstance(value.order, int) or isinstance(value.order, bool):\n'),
+                      EXACT_ROWS, 'exact-order'),
+    exact_alternative('capability-shown-repr-always', (SHOWN, '    return repr(value)\n'), EXACT_ROWS,
+                      'exact-resource-executor'),
+    exact_alternative('capability-shown-repr-never', (SHOWN, "    return f'a {type(value).__name__}'\n"), MALFORMED,
+                      'resource-open', 'an open resource loaded'),
+    exact_alternative('capability-shown-repr-negated',
+                      (SHOWN, "    return repr(value) if not type(value) in (bool, int, type(None)) else f'a {type(value).__name__}'\n"),
+                      MALFORMED, 'resource-open', 'an open resource loaded'),
+    *(exact_alternative(f'capability-shown-repr-without-{label}', (SHOWN, SHOWN.replace(shown, rest)), MALFORMED, row,
+                        'an open resource loaded')
+      for label, shown, rest, row in (('bool', '(bool, int, type(None))', '(int, type(None))', 'resource-open'),
+                                      ('int', '(bool, int, type(None))', '(bool, type(None))', 'resource-open-truthy'),
+                                      ('none', '(bool, int, type(None))', '(bool, int)', 'resource-open-unmarked'))),
+    exact_alternative('capability-resource-exact-dict-never', (DICT_CHECK, '    if False:\n'), EXACT_ROWS, 'exact-resource'),
+    exact_alternative('capability-resource-exact-dict-isinstance', (DICT_CHECK, '    if not isinstance(entry, dict):\n'),
+                      EXACT_ROWS, 'exact-resource'),
+    exact_alternative('capability-resource-exact-key-always', (KEY_CHECK, '        if True:\n'), EXACT_ROWS,
+                      'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-key-never', (KEY_CHECK, '        if False:\n'), EXACT_ROWS,
+                      'exact-resource-key'),
+    exact_alternative('capability-resource-exact-key-negated', (KEY_CHECK, '        if not type(key) is not str:\n'),
+                      EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-key-isinstance', (KEY_CHECK, '        if not isinstance(key, str):\n'),
+                      EXACT_ROWS, 'exact-resource-key'),
+    exact_alternative('capability-resource-exact-uri-always', (URI_CHECK, '    if True:\n'), EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-uri-never', (URI_CHECK, '    if False:\n'), EXACT_ROWS,
+                      'exact-resource-uri'),
+    exact_alternative('capability-resource-exact-uri-negated',
+                      (URI_CHECK, "    if not type(entry.get('uri')) is not str:\n"), EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-uri-isinstance',
+                      (URI_CHECK, "    if not isinstance(entry.get('uri'), str):\n"), EXACT_ROWS, 'exact-resource-uri'),
+    exact_alternative('capability-resource-exact-value-never', (VALUE_CHECK, '        if False:\n'), EXACT_ROWS,
+                      'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-isinstance',
+                      (VALUE_CHECK, '        if not isinstance(entry.get(key), str):\n'), EXACT_ROWS,
+                      'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-without-name',
+                      (VALUE_LOOP, "    for key in ('description',):\n"), EXACT_ROWS, 'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-without-description',
+                      (VALUE_LOOP, "    for key in ('name',):\n"), EXACT_ROWS, 'exact-resource-description'),
 )
 
 

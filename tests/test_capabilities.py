@@ -30,8 +30,12 @@ name, one declared twice, a subclass of `tuple` or `str`) is refused at load bes
 a well-formed one loads with no core edit, kept as declared; the members declare theirs.
 
 What an entry point names is exactly a `Capability`: a subclass is refused at load beside each member
-set, whichever field its code would read in place of the record (`SUBCLASS_READS`), or none, so no
-capability code runs when a field is read after the load.
+set, whichever field its code would read in place of the record (`SUBCLASS_READS`), or none. Every value
+in it the core or FastMCP reads is exactly a built-in type too: a value of a type of its own at any site
+(`EXACT_SITES`: each field, a command, a resource entry, a key of one, each value of one but its
+handler), whose every operation would exit once its record is built, is refused at load for its type
+before any of its operations runs, beside each member set, and so is a distribution whose `Name` is a
+`str` of a type of its own, so no read of a loaded record runs capability code.
 """
 
 from __future__ import annotations
@@ -888,7 +892,7 @@ MALFORMED = {
     'resource-not-a-dict': ('resources=()', "resources=('cluster://planted',)",
                             'one of its resources is a str, not a dict'),
     'resource-uri-not-a-str': ('resources=()', f"resources=({resource(uri='42')},)",
-                               'its resource 42 has a int uri, not a str'),
+                               'one of its resources has a int uri, not a str'),
     'resource-name-not-a-str': ('resources=()', f'resources=({resource(name=None)},)',
                                 "its resource 'cluster://planted' has a NoneType name, not a str"),
     'resource-description-not-a-str': ('resources=()', f"resources=({resource(description='b\"Planted\"')},)",
@@ -899,6 +903,9 @@ MALFORMED = {
                       "its resource 'cluster://planted' has executor False, not True: a capability resource is never open"),
     'resource-open-truthy': ('resources=()', f"resources=({resource(executor='1')},)",
                              "its resource 'cluster://planted' has executor 1, not True: a capability resource is never open"),
+    'resource-open-unmarked': ('resources=()', f"resources=({resource(executor=None)},)",
+                               "its resource 'cluster://planted' has executor None, not True: a capability resource is "
+                               'never open'),
 }
 
 
@@ -1057,10 +1064,11 @@ RAISED = {
 }
 
 # When it runs: while its entry point's module is imported; while its tools module is, after its tool
-# registered; once both are, while the load reads what it declared (its `tools` name, a `str` whose `+`
-# runs the statement, as the load's attribution of each registered tool does); or while its resource
-# is assembled (a handler that runs it on any attribute it lacks, as FastMCP reads one) or its tool is
-# (a `FunctionTool` of its own that runs it when FastMCP reads its version).
+# registered; once both are, while the load reads what it declared (the module its tool names, a `str`
+# whose `==` runs the statement, as the load's attribution of each registered tool compares it: the
+# record's own values are exact types, refused before any of their code could run, `exact-<site>`); or
+# while its resource is assembled (a handler that runs it on any attribute it lacks, as FastMCP reads
+# one) or its tool is (a `FunctionTool` of its own that runs it when FastMCP reads its version).
 WHEN = ('entry-point', 'tools', 'declared', 'served', 'served-tool')
 
 # The tools module's tail that replaces its registered tool with one of its own class, which runs
@@ -1148,6 +1156,110 @@ def subclass_files(module: str, field: str) -> tuple[dict[str, str], str]:
     return files, cls
 
 
+# What a record holds as an exact built-in type, given a type of its own: a subclass of `str`, `int`,
+# `tuple` or `dict` whose every operation below exits once the entry point's module has built its
+# record, as one that reads `order.__eq__` once did after the load, ending the start with exit 0 and no
+# message. These are the operations the core, FastMCP and Python's own comparisons, hashes, iteration,
+# formatting and method calls reach a value through.
+OPERATIONS = {
+    'str': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__len__', '__iter__',
+            '__contains__', '__getitem__', '__add__', '__mul__', '__mod__', '__format__', '__str__', '__repr__',
+            'startswith', 'endswith', 'strip', 'lstrip', 'rstrip', 'split', 'rsplit', 'partition', 'rpartition',
+            'splitlines', 'replace', 'lower', 'upper', 'casefold', 'encode', 'join', 'format', 'find', 'index',
+            'count', 'expandtabs', 'removeprefix', 'removesuffix', 'isidentifier'),
+    'int': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__bool__', '__index__',
+            '__int__', '__float__', '__add__', '__radd__', '__sub__', '__rsub__', '__mul__', '__neg__', '__abs__',
+            '__format__', '__str__', '__repr__', '__round__', '__trunc__'),
+    'tuple': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__len__', '__iter__',
+              '__contains__', '__getitem__', '__add__', '__mul__', '__format__', '__str__', '__repr__', 'count',
+              'index'),
+    'dict': ('__eq__', '__ne__', '__len__', '__iter__', '__contains__', '__getitem__', '__setitem__', '__or__',
+             '__ror__', '__reversed__', '__format__', '__str__', '__repr__', 'get', 'keys', 'values', 'items',
+             'copy', 'setdefault', 'pop'),
+}
+
+# The planted classes, each named `Planted<Type>`: `_RAN` records each operation run once `_ARMED`
+# holds a value, which the entry point's module appends as its last statement.
+PLANTED_TYPES = f'''
+
+_RAN: list[str] = []
+_ARMED: list[bool] = []
+_OPERATIONS = {OPERATIONS!r}
+
+
+def _planted(base: type) -> type:
+    """A subclass of `base` whose every operation in `_OPERATIONS` exits once `_ARMED` holds a value."""
+    def operation(name: str):
+        def run(self, *args, **kwargs):
+            if _ARMED:
+                _RAN.append(name)
+                raise SystemExit(0)
+            return getattr(base, name)(self, *args, **kwargs)
+        return run
+    return type('Planted' + base.__name__.title(), (base,),
+                {{name: operation(name) for name in _OPERATIONS[base.__name__]}})
+
+
+PlantedStr, PlantedInt, PlantedTuple, PlantedDict = (_planted(t) for t in (str, int, tuple, dict))
+'''
+
+# A resource entry's source, every key and value given as source text.
+EXACT_ENTRY = {"'uri'": "'cluster://planted'", "'name'": "'planted'", "'description'": "'Planted'",
+               "'handler'": '_read', "'executor'": 'True'}
+
+# Where a value of a type of its own sits, as `exact-<site>`: each field of the record (from
+# `dataclasses.fields`, so a field added later gets a kind), a declared command, a resource entry, a
+# key of one, and each value of one but its handler (from the core's own entries, so a key added later
+# gets one); the handler is the capability's code, which FastMCP registers and a request calls.
+EXACT_FIELD_TYPES = {'name': 'str', 'order': 'int', 'tools': 'str', 'instructions': 'str', 'resources': 'tuple',
+                     'commands': 'tuple'}
+EXACT_ENTRY_KEYS = tuple(key for key in RESOURCE_REGISTRY[0] if key != 'handler')
+EXACT_SITES = (*(f.name for f in fields(Capability)), 'command', 'resource', 'resource-key',
+               *(f'resource-{key}' for key in EXACT_ENTRY_KEYS))
+
+
+def exact_files(module: str, site: str) -> tuple[dict[str, str], str]:
+    """A planted package `module` whose record holds a value of a type of its own at `site`, well formed
+    otherwise; and the cause its refusal carries."""
+    entry = dict(EXACT_ENTRY)
+    record = {'name': repr(module), 'order': '500', 'tools': repr(f'{module}.tools'), 'instructions': repr(ECHO_TEXT),
+              'resources': '', 'commands': "('planted_cmd',)"}
+    shown = "its resource 'cluster://planted'"
+    if site in EXACT_FIELD_TYPES:
+        kind = EXACT_FIELD_TYPES[site]
+        planted = f'Planted{kind.title()}'
+        if site != 'resources':
+            record[site] = f'{planted}({record[site]})'
+        cause = f'its {site} is a {planted}, not {"an" if kind == "int" else "a"} {kind}'
+    elif site == 'command':
+        record['commands'] = "(PlantedStr('planted_cmd'),)"
+        cause = 'one of its commands is a PlantedStr, not a str'
+    elif site == 'resource':
+        cause = 'one of its resources is a PlantedDict, not a dict'
+    elif site == 'resource-key':
+        entry = {("PlantedStr('uri')" if key == "'uri'" else key): value for key, value in entry.items()}
+        cause = 'one of its resources has a PlantedStr key, not a str'
+    elif site == 'resource-executor':
+        entry["'executor'"] = 'PlantedInt(1)'
+        cause = f'{shown} has executor a PlantedInt, not True: a capability resource is never open'
+    else:
+        key = site.removeprefix('resource-')
+        entry[repr(key)] = f'PlantedStr({entry[repr(key)]})'
+        cause = ('one of its resources has a PlantedStr uri, not a str' if key == 'uri'
+                 else f'{shown} has a PlantedStr {key}, not a str')
+    source = '{' + ', '.join(f'{key}: {value}' for key, value in entry.items()) + '}'
+    if site == 'resource':
+        source = f'PlantedDict({source})'
+    record['resources'] = f'PlantedTuple(({source},))' if site == 'resources' else f'({source},)'
+    files = package(module)
+    head, _, tail = files[f'{module}/capability.py'].partition('\n\nCAPABILITY = Capability(')
+    assert tail, files[f'{module}/capability.py']
+    files[f'{module}/capability.py'] = (head + PLANTED_TYPES + '\n\nCAPABILITY = Capability('
+                                        + ', '.join(f'{key}={value}' for key, value in record.items())
+                                        + ')\n\n_ARMED.append(True)\n')
+    return files, cause
+
+
 @dataclass(frozen=True)
 class Unloadable:
     """A planted capability the load must refuse: its distribution, entry point line, files, metadata
@@ -1179,18 +1291,15 @@ def raising_files(module: str, statement: str, when: str) -> dict[str, str]:
         files[f'{module}/capability.py'] = (PLANTED_STOP + '\n' + head + stub + '\n\nCAPABILITY = '
                                             + tail.replace('resources=()', f"resources=({resource(handler='_Handler()')},)"))
     else:
-        declared = f'tools={module + ".tools"!r}'
-        assert source.count(declared) == 1, source
-        stub = (f'\n\nclass _Tools(str):\n    def __add__(self, other: str) -> str:\n        {statement}\n')
-        head, _, tail = source.partition('\n\nCAPABILITY = ')
-        files[f'{module}/capability.py'] = (PLANTED_STOP + '\n' + head + stub + '\n\nCAPABILITY = '
-                                            + tail.replace(declared, f'tools=_Tools({module + ".tools"!r})'))
+        tail = (f'\n\nclass _Module(str):\n    def __eq__(self, other: object) -> bool:\n        {statement}\n\n'
+                '    __hash__ = str.__hash__\n\n\nplanted_echo.fn.__module__ = _Module(planted_echo.fn.__module__)\n')
+        files = package(module, tools_tail='\n' + PLANTED_STOP + tail)
     return files
 
 
 def unloadable(kind: str) -> Unloadable:
-    """The planted capability of `kind`: `<raised>-at-<when>`, a `TIMING` kind, `nameless-<NAMELESS kind>`, or
-    `subclass-reads-<SUBCLASS_READS field>`."""
+    """The planted capability of `kind`: `<raised>-at-<when>`, a `TIMING` kind, `nameless-<NAMELESS kind>`,
+    `subclass-reads-<SUBCLASS_READS field>`, or `exact-<EXACT_SITES site>`."""
     module = 'planted_' + kind.replace('-', '_')
     dist = f'planted-{kind}'
     entry = f'cap = {module}.capability:CAPABILITY'
@@ -1200,6 +1309,9 @@ def unloadable(kind: str) -> Unloadable:
     if kind.startswith('subclass-reads-'):
         files, cls = subclass_files(module, kind.removeprefix('subclass-reads-'))
         return Unloadable(dist, entry, files, None, dist, f'the entry point names a {cls}, not a Capability')
+    if kind.startswith('exact-'):
+        files, cause = exact_files(module, kind.removeprefix('exact-'))
+        return Unloadable(dist, entry, files, None, dist, cause)
     if kind in TIMING:
         spec = {key: text.replace('{m}', module) for key, text in TIMING[kind].items()}
         files = package(module, tools_tail=spec.get('tail', ''))
@@ -1221,7 +1333,8 @@ def unloadable(kind: str) -> Unloadable:
 
 
 UNLOADABLE = [*(f'{raised}-at-{when}' for when in WHEN for raised in RAISED), *TIMING,
-              *(f'nameless-{kind}' for kind in NAMELESS), *(f'subclass-reads-{field}' for field in SUBCLASS_READS)]
+              *(f'nameless-{kind}' for kind in NAMELESS), *(f'subclass-reads-{field}' for field in SUBCLASS_READS),
+              *(f'exact-{site}' for site in EXACT_SITES)]
 
 
 @pytest.mark.unit
@@ -1236,6 +1349,9 @@ def test_a_capability_that_cannot_load_is_refused_naming_it(kind: str, names: tu
     want = f'cannot load capability {case.named}: {case.cause}'
     assert message == want, f'a capability that cannot load was not refused naming it: expected {want!r}, got {message!r}'
     assert TOOL_REGISTRY == before, f'a refused load left {[t for t in TOOL_REGISTRY[len(before):]]} registered'
+    # A value of a type of its own is refused for its type before any of its operations runs.
+    ran = getattr(sys.modules.get(case.entry.split(' = ')[1].split(':')[0]), '_RAN', None)
+    assert not ran, f'a capability that cannot load was not refused naming it: its code ran during the load: {ran}'
 
 
 # A keyboard interrupt raised, and one raised while the load reads the text of what a capability raised.
@@ -1272,6 +1388,58 @@ class KeyedDistribution:
     @property
     def name(self) -> str:
         raise KeyError('Name')
+
+
+class NamedDistribution(Distribution):
+    """A distribution whose `Name` is a `str` of a type of its own (as a distribution finder of its own
+    could hand back), every operation of which is recorded once the row arms it."""
+
+    RAN: list[str] = []
+    ARMED: list[bool] = []
+
+    def __init__(self, info: Path) -> None:
+        self.info = info
+
+    def read_text(self, filename: str) -> str | None:
+        path = self.info / filename
+        return path.read_text() if path.is_file() else None
+
+    def locate_file(self, path: str) -> Path:
+        return self.info.parent / path
+
+    @property
+    def name(self) -> str:
+        def operation(op: str) -> Callable[..., object]:
+            def run(value: str, *args: object, **kwargs: object) -> object:
+                if NamedDistribution.ARMED:
+                    NamedDistribution.RAN.append(op)
+                return getattr(str, op)(value, *args, **kwargs)
+            return run
+        planted = type('PlantedStr', (str,), {op: operation(op) for op in OPERATIONS['str']})
+        return planted(self.read_text('METADATA').split('Name: ', 1)[1].split('\n', 1)[0])
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_distribution_name_of_a_type_of_its_own_is_no_name(names: tuple[str, ...],
+                                                            plant: Callable[..., EntryPoint]) -> None:
+    # The name is ordered against the others and composed after the load, so it must be exactly a
+    # `str`: one of a type of its own is no name, and the capability is named by its entry point's
+    # value, before any of the name's operations runs.
+    why = 'a distribution name of a type of its own was read as a name'
+    planted = plant('planted-named', 'named = planted_named.capability:CAPABILITY', package('planted_named'))
+    (ep,) = NamedDistribution(Path(planted.dist._path)).entry_points.select(group=GROUP)
+    before = list(TOOL_REGISTRY)
+    NamedDistribution.RAN.clear()
+    NamedDistribution.ARMED.append(True)
+    try:
+        message = load_error([*members(names), ep])
+    finally:
+        NamedDistribution.ARMED.clear()
+    want = 'cannot load capability planted_named.capability:CAPABILITY: its distribution metadata has no Name'
+    assert message == want, f'{why}: expected {want!r}, got {message!r}'
+    assert NamedDistribution.RAN == [], f'{why}: its operations ran during the load: {NamedDistribution.RAN}'
+    assert TOOL_REGISTRY == before, f'{why}: the refusal left {TOOL_REGISTRY[len(before):]} registered'
 
 
 @pytest.mark.unit

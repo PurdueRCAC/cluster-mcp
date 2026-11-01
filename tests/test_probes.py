@@ -11,7 +11,9 @@ not find is withheld naming exactly those, and one that declares none is served 
 report. Every other ending (each exit code, each malformed answer, each thing an executor can return
 instead of a result or raise, a worker thread that cannot start, a lookup that hangs) serves every
 capability that declares a command, with the reason, and decides it at once unless it is a hang.
-Nothing is looked up when nothing is declared. The outcome rows run against `harness.ProbeExecutor`,
+The deadline is taken when the probe starts: `verdicts()` first asked for after it has passed decides
+at once, and one asked for before an answer that comes within it waits for that answer. Nothing is
+looked up when nothing is declared. The outcome rows run against `harness.ProbeExecutor`,
 beside each member set (the core alone, each member, both), each with two capabilities made here
 beside the members: one that declares a command a member also declares and one of its own, and one
 that declares none.
@@ -364,6 +366,51 @@ def test_the_verdicts_are_decided_once(names: tuple[str, ...]) -> None:
         f'{why}: the late answer never came, so the row proves nothing'
     assert first == unanswered(capabilities, f'did not answer within {BOUND:g} s'), f'{why}: {first}'
     assert decided(why, pending) == first, f'{why}: a late answer'
+
+
+# The deadline the late rows give a probe, how long past it `verdicts()` is first called, and how long a
+# call that finds the deadline passed may take; a mutant that waits the bound again from the call takes
+# the whole `LATE_BOUND`. A hung lookup is released after `LATE_RELEASE` whatever happens, so a wait
+# with no bound still ends.
+LATE_BOUND = 0.6
+LATE_CALL = 0.7
+LATE_SLACK = 0.3
+LATE_RELEASE = 3.0
+EARLY_ANSWER = 0.2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_the_deadline_is_taken_when_the_probe_starts(names: tuple[str, ...]) -> None:
+    why = 'the deadline was not taken when the probe started'
+    capabilities = capability_set(names)
+    # `verdicts()` first called after the deadline has passed, the lookup still hung: it decides at once,
+    # never waiting the bound again from the call.
+    executor = ProbeExecutor(ProbeExecutor.hang)
+    release = threading.Timer(LATE_RELEASE, executor.release.set)
+    release.start()
+    try:
+        pending = started(why, executor, capabilities, timeout=LATE_BOUND)
+        time.sleep(LATE_CALL)
+        began = time.monotonic()
+        got = decided(why, pending)
+        took = time.monotonic() - began
+    finally:
+        executor.release.set()
+        release.cancel()
+    assert got == unanswered(capabilities, f'did not answer within {LATE_BOUND:g} s'), f'{why}: {got}'
+    assert took <= LATE_SLACK, f'{why}: called {LATE_CALL} s after a {LATE_BOUND} s bound, verdicts() took {took:.2f} s'
+    # Called at once, with the answer coming after the call but before the deadline: it waits for it.
+    every = declared(capabilities)
+
+    def slow(executor: ProbeExecutor, looked_up: list[str]) -> CommandResult:
+        time.sleep(EARLY_ANSWER)
+        return ProbeExecutor.answer(n in every[1:] for n in looked_up)
+
+    pending = started(why, ProbeExecutor(slow), capabilities, timeout=LATE_BOUND)
+    got = decided(why, pending)
+    assert got == expected(capabilities, set(every[1:])), \
+        f'{why}: an answer {EARLY_ANSWER} s into a {LATE_BOUND} s bound was not waited for: {got}'
 
 
 @pytest.mark.unit

@@ -626,10 +626,11 @@ CLI_REJECTED = ('resource-not-a-url', 'resource-uri-collides', 'tool-not-a-tool'
 # The `UNLOADABLE` kinds the suite drives through the CLI, one of each family, at each of the five
 # times between them: an `Exception`; `SystemExit` with 0, an int and a string; a `BaseException` of
 # its own; a stray tool registered at the entry point's import; a registration that is not a tool;
-# a distribution with no `Name`; and a subclass of `Capability` whose code reads its commands.
+# a distribution with no `Name`; a subclass of `Capability` whose code reads its commands; and an `order`
+# of a type of its own whose comparisons exit, which composing the base would run after the load.
 CLI_UNLOADABLE = ('raises-at-entry-point', 'exits-0-at-tools', 'exits-int-at-declared', 'exits-text-at-served',
                   'raises-base-at-served-tool', 'stray-imported-by-the-entry-point', 'not-a-tool-from-the-entry-point',
-                  'nameless-no-name', 'subclass-reads-commands')
+                  'nameless-no-name', 'subclass-reads-commands', 'exact-order')
 
 
 @pytest.mark.unit
