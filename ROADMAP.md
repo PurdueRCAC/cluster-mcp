@@ -462,6 +462,17 @@ hangs. Pre-existing.
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/local-command-outlives-server.md`](issues/local-command-outlives-server.md) · *status: unshaped*
 
+## A sandbox killed with SIGKILL leaves its directory behind
+
+`bin/sandbox.sh` removes its throwaway HOME from a trap, which SIGKILL never runs, and several test
+harnesses stop a sandbox's process group with SIGKILL. Each such stop leaves a bare
+`cluster-mcp-sandbox.*` directory in the host's `TMPDIR`: about 60 per full-suite era, many more
+per mutation sweep, and 18,061 on one developer Mac. Pre-existing; `capability-probe`'s own drives
+add one or two per run, through the shared SSH test server. It gates nothing.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
+**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: unshaped*
+
 ---
 
 # Settled questions

@@ -3,10 +3,10 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-probe
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -41,7 +41,7 @@ phases:
   verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
-  status: pending
+  status: done
   satisfies:
   - R3
   - R10
@@ -390,17 +390,17 @@ line. Every refusal still comes first. The documents R10 names describe all of i
 `c520432`. Every alternative of both phases covered, every recorded equivalent proven, the release
 recipe's offline steps on this head, the full verify, and the ledger.
 
-- [ ] Run `p3.sh phase`. Fix the product, never a gate: a gate defect goes to the foreman.
-- [ ] Record the suite's time per era against `c520432`'s 359.6 s (handshake) and 359.5 s (modern),
+- [x] Run `p3.sh phase`. Fix the product, never a gate: a gate defect goes to the foreman.
+- [x] Record the suite's time per era against `c520432`'s 359.6 s (handshake) and 359.5 s (modern),
   local, and the projection in PLAN §6. A growth beyond about 60 s an era is a raised hand before
   publish: the CI job has 20 minutes for both eras.
-- [ ] Downstream seeds, notes only, with no status change:
+- [x] Downstream seeds, notes only, with no status change:
   - append to [`issues/lmod-tool-group.md`](../../issues/lmod-tool-group.md)'s Notes: `module` is a
     function and its tools run `$LMOD_CMD`, so its probe needs a second kind of declared data beside
     `commands`, a core edit in that cycle;
   - append to [`issues/xdu-storage.md`](../../issues/xdu-storage.md)'s Notes: it declares no probe,
     since its tools offer the install where `xdu` is missing.
-- [ ] **The deferral ledger.** Walk P1–P3 and PLAN for "defer", "follow-up", "out of scope", "known
+- [x] **The deferral ledger.** Walk P1–P3 and PLAN for "defer", "follow-up", "out of scope", "known
   limitation", "left for" and "not fixed here", and confirm each has an `issues/` file and a
   `ROADMAP.md` entry. The plan filed one:
   [`issues/mutants-workflow-timeout.md`](../../issues/mutants-workflow-timeout.md) (the on-demand
@@ -408,14 +408,51 @@ recipe's offline steps on this head, the full verify, and the ledger.
   [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md) (a server
   killed mid-probe leaves the probe's `local` process group running, as any `local` call's), each with
   its ROADMAP entry. `ledger.py` checks every link.
-- [ ] Standing items carried from `capability-extras`' last phase: the recipe's offline steps on this
+- [x] Standing items carried from `capability-extras`' last phase: the recipe's offline steps on this
   head (`p3.sh recipe`), and the full verify in both halves.
 - **Verify:** `sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern`
   (`phase` about 3 min; `ledger` and `recipe` seconds; `equivalents` seconds per equivalent; each full
   half about 6 min).
   *Plan-time dry run (2026-11-01), on the prototype:* `baseline.sh` green in 11 s (24 tools,
   4 resources, 660 cases kept); `ledger` and `recipe` green in about 1 s each.
-- **Touches:** `issues/lmod-tool-group.md`, `issues/xdu-storage.md` (notes), and whatever `p3.sh`
+  *Observed (2026-11-01), on the P3 build tree before its commit (the run quoted here): the product and
+  tests as at `a957c85`, the two notes appended. The new seed, its ROADMAP entry and this record were
+  written after; `ledger` and `recipe` ran again on the finished tree, green.*
+  - `phase` green in 65 s: `declared.py` (5 loaded, 23 refused, both members), `lookups.py`,
+    `startup_order.py`, `drives.py all` (withholding 4.7 s, hanging 12.0 s, stdin closed 0.9 s and
+    10.9 s, HTTP 0.9 s, override 5.7 s, refusals 5.1 s), `docs_gate.py p2`, `alternatives.py coverage
+    all` (163 alternatives in the four files, 164 cases, 0 equivalents), and `baseline.sh` (24 tools,
+    4 resources, 1477 characters of instructions, equal to `c520432`'s; 513 test functions and 660
+    cases kept, none retired; fixture and `test_surface.py` byte-identical; no added skip).
+  - `ledger` green.
+  - `recipe` green in 1 s: 8 artifacts (a wheel and an sdist of each of the four distributions, at
+    0.1.5) passed `twine check --strict`, and the four sdists are clean.
+  - `equivalents` green in 4 s, with nothing to plant: both phases killed every case, so `EQUIVALENT`
+    is empty. The one `SET_EQUIVALENT` row (`env-no-legacy-value-empty-kept`) is held by `coverage`
+    and was killed by `test_env.py` in P2's mutation halves.
+  - `full-legacy` green in 409 s: 4382 passed, 14 skipped, in 407.2 s. `full-modern` green in 391 s:
+    4382 passed, 14 skipped, in 389.4 s, then `cluster-mcp --help` under `bin/sandbox.sh`. The 14 are
+    the bash 4.1 `need_shell` rows (`tests/conftest.py`: "bash 4.1 or later is not installed here"),
+    which the CI legs run. No other suite ran on the host during either half.
+  - **Suite time against `c520432`** (359.6 s, 359.5 s): handshake 407.2 s (+47.6 s, +13.2 %), modern
+    389.4 s (+29.9 s, +8.3 %); P2 measured 395.1 s and 381.7 s, P1 360.3 s and 353.0 s. PLAN §6
+    projected about +20 s an era; the cycle grew more than that, within the 60 s raised hand. On CI,
+    where `c520432` takes about 6.3 min an era (about 1.05 × local), that is about 7.1 and 6.8 min; with
+    PLAN's ×1.6 on the growth alone, about 7.6 and 7.1 min. Both eras together stay inside the job's
+    20 minutes either way.
+  *Amendments at build (2026-11-01):*
+  - **The foreman's addition to the ledger, as judge:** bare `cluster-mcp-sandbox.*` directories pile
+    up in the host's `TMPDIR` (18,061 on the build host), because `bin/sandbox.sh:59-60` removes its
+    directory from a trap SIGKILL never runs, and several harnesses stop a sandbox group with SIGKILL.
+    Pre-existing and outside the GOAL; filed as
+    [`issues/sandbox-dirs-left-on-kill.md`](../../issues/sandbox-dirs-left-on-kill.md), `unshaped`,
+    with its entry in ROADMAP Part III. Measured on this tree by diffing the host `TMPDIR` around each
+    run, deleting nothing: `p3.sh phase` (with `drives.py all`), `recipe` and `equivalents` left none;
+    each full half left 59 (handshake) and 58 (modern); this cycle's integration rows, run alone in
+    each era, left none from `test_probe_startup.py` (its drives point `TMPDIR` at the test's own
+    directory) and one or two from `test_probes.py::test_the_lookup_over_ssh`, through the existing
+    `LoopbackSSH.close()`.
+- **Touches:** `issues/lmod-tool-group.md`, `issues/xdu-storage.md` (notes), `issues/sandbox-dirs-left-on-kill.md` and its `ROADMAP.md` entry, and whatever `p3.sh`
   proves wrong in the product.
 
 ---

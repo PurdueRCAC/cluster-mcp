@@ -95,3 +95,7 @@ repository when this cycle is shaped.
   [`generalize-storage-discovery.md`](generalize-storage-discovery.md) (the storage-roles model
   `storage_spaces` reports in).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).
+- 2026-11-01: [`spec/capability-probe/`](../spec/capability-probe/) serves an installed capability
+  only where the cluster has the commands its `Capability.commands` declares. This capability should
+  declare none: its tools are meant to offer the install where `xdu` is missing, and a declared
+  `xdu` would withhold exactly those tools there (`AGENTS.md` § Invariants §7).
