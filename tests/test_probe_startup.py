@@ -13,25 +13,27 @@ is removed first.
 - `local` and `ssh` look every declared command up once, through the executor the middleware shares,
   after the load, the ladder, the executor, the budget, the override's resolution, the site read and
   the budget check against every installed capability, and before the server is built from what the
-  probe kept: a capability with a missing command is withheld, with one line naming its distribution
-  and each missing command, and every other ending (each code, a malformed answer, whatever the
-  executor raises or exits with, a hang past the bound) serves every capability, with one line each
-  for those that declare a command, on every transport. An interrupt while the start waits for the
-  answer still interrupts it.
+  probe kept: a capability with a missing command is withheld, with one INFO line naming its
+  distribution and each missing command, and every other ending (each code, a malformed answer,
+  whatever the executor raises or exits with, a hang past the bound) serves every capability, with one
+  WARNING line each for those that declare a command, on every transport. Every line is compared with
+  the level its record was logged at. An interrupt while the start waits for the answer still
+  interrupts it.
 - Over each served set the real server's instructions name exactly the tools it serves.
-- `delegate` mode runs no probe and says so in one line, the override set or not; `--skip-probes`, or
-  the variable with any non-empty value, `0` included, runs none in `local` and `ssh` modes and says
-  so in one line; empty, it probes.
+- `delegate` mode runs no probe and says so in one INFO line, the override set or not; `--skip-probes`,
+  or the variable with any non-empty value, `0` included, runs none in `local` and `ssh` modes and says
+  so in one INFO line naming which; with both set, the flag wins and the line names it; empty, it
+  probes.
 - No probe runs before a refusal: a capability that cannot load, a failed connect, `--generate-token`
   and every budget refusal (one too small for every installed capability's text included, whatever
   the probe would answer).
 
 Then the real CLI in `local` mode (`integration`), under `bin/sandbox.sh` with the override removed and
 a `.bash_profile` that puts a stub directory first on PATH and logs each login: a withheld member is
-missing from what a stdio client lists, with its line on stderr, and every command present serves
-everything; a login that ends at once is no answer, and serves every capability; and both hold with
-stdin closed and over HTTP. Each drive starts one login. The suite never waits out the real 10 s
-bound: `spec/capability-probe/verify/drives.py` does.
+missing from what a stdio client lists, with its line on stderr at its level, and every command
+present serves everything; a login that ends at once is no answer, and serves every capability; and
+both hold with stdin closed and over HTTP. Each drive starts one login. The suite never waits out the
+real 10 s bound: `spec/capability-probe/verify/drives.py` does.
 """
 
 from __future__ import annotations
@@ -116,21 +118,24 @@ DELEGATE_ORDER = ['load', 'ladder', 'budget', 'override', 'site', 'check', 'unpr
 # The lines a start logs whatever it probes: the mode, the connect and the delegate middleware.
 OWN = re.compile(r'(Execution mode: |SSH connection established to |Delegate mode: executor will be created)')
 
-DELEGATE_LINE = 'Capability probes skipped in delegate mode: every installed capability is served'
+# Each line the probe step logs, as (level, message): a withheld capability and every skip are INFO, a
+# capability served without an answer WARNING (AGENTS § Invariants §4).
+Line = tuple[str, str]
+DELEGATE_LINE: Line = ('INFO', 'Capability probes skipped in delegate mode: every installed capability is served')
 SECRET = 'probe-startup-test-secret-0123456789abcdef'
 SITE = site.SiteContext.missing('the test')
 
 
-def skip_line(what: str) -> str:
-    return f'Capability probes skipped ({what}): every installed capability is served'
+def skip_line(what: str) -> Line:
+    return 'INFO', f'Capability probes skipped ({what}): every installed capability is served'
 
 
-def withheld_line(loaded: Loaded, missing: list[str]) -> str:
-    return f'Capability {loaded.distribution} withheld: the cluster is missing {", ".join(missing)}'
+def withheld_line(loaded: Loaded, missing: list[str]) -> Line:
+    return 'INFO', f'Capability {loaded.distribution} withheld: the cluster is missing {", ".join(missing)}'
 
 
-def unanswered_line(loaded: Loaded, reason: str) -> str:
-    return f'Capability {loaded.distribution} served without a probe answer: the probe {reason}'
+def unanswered_line(loaded: Loaded, reason: str) -> Line:
+    return 'WARNING', f'Capability {loaded.distribution} served without a probe answer: the probe {reason}'
 
 
 @dataclass
@@ -139,7 +144,7 @@ class Started:
 
     status: int
     events: list[str]
-    lines: list[str]
+    lines: list[Line]
     critical: list[str]
     executor: ProbeExecutor
     built: tuple[Loaded, ...] | None = None
@@ -240,10 +245,11 @@ def start(argv: list[str], capabilities: tuple[Loaded, ...] | Callable[[], Any],
     finally:
         observed.seconds = time.monotonic() - began
         executor.release.set()
-    messages = [r.getMessage() for r in caplog.records if r.name == 'cluster_mcp.core']
-    observed.critical = [r.getMessage() for r in caplog.records
-                         if r.name == 'cluster_mcp.core' and r.levelno >= logging.CRITICAL]
-    observed.lines = [m for m in messages if not OWN.match(m) and m not in observed.critical]
+    records = [r for r in caplog.records if r.name == 'cluster_mcp.core']
+    observed.critical = [r.getMessage() for r in records if r.levelno >= logging.CRITICAL]
+    # Each line beyond the start's own, with the level its record was logged at.
+    observed.lines = [(r.levelname, r.getMessage()) for r in records
+                      if not OWN.match(r.getMessage()) and r.levelno < logging.CRITICAL]
     return observed
 
 
@@ -256,7 +262,7 @@ def mode_argv(mode: str, transport: str = 'http') -> list[str]:
     return ['-t', 'http', '-a', 'jwt']
 
 
-def outcome(capabilities: tuple[Loaded, ...], absent: set[str]) -> tuple[tuple[Loaded, ...], list[str]]:
+def outcome(capabilities: tuple[Loaded, ...], absent: set[str]) -> tuple[tuple[Loaded, ...], list[Line]]:
     """What an answer missing `absent` serves, and the lines it logs."""
     served, lines = [], []
     for c in capabilities:
@@ -521,15 +527,19 @@ def test_delegate_runs_no_probe_and_says_so(override: str | None, names: tuple[s
 
 @pytest.mark.unit
 @pytest.mark.parametrize('names', MEMBER_SETS)
-@pytest.mark.parametrize('how', ['flag', 'variable-1', 'variable-0', 'variable-space', 'variable-empty'])
+@pytest.mark.parametrize('how', ['flag', 'variable-1', 'variable-0', 'variable-space', 'variable-empty',
+                                 'flag-and-variable'])
 @pytest.mark.parametrize('mode', ['local', 'ssh'])
 def test_the_override_skips_every_probe(mode: str, how: str, names: tuple[str, ...],
                                         monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
                                         guard) -> None:
     capabilities = capability_set(names)
-    value = {'variable-1': '1', 'variable-0': '0', 'variable-space': ' ', 'variable-empty': ''}.get(how)
+    value = {'variable-1': '1', 'variable-0': '0', 'variable-space': ' ', 'variable-empty': '',
+             'flag-and-variable': '1'}.get(how)
     env = {} if value is None else {OVERRIDE: value}
-    argv = mode_argv(mode) + (['--skip-probes'] if how == 'flag' else [])
+    # With both set, the flag wins and the line names it.
+    flag = how in ('flag', 'flag-and-variable')
+    argv = mode_argv(mode) + (['--skip-probes'] if flag else [])
     absent = set(declared(capabilities))
     observed = start(argv, capabilities, answering(absent), monkeypatch, caplog, env=env)
     problems = [] if observed.status == 0 else [f'exit {observed.status}: {observed.critical}']
@@ -539,7 +549,7 @@ def test_the_override_skips_every_probe(mode: str, how: str, names: tuple[str, .
         if observed.starts != 1 or len(observed.executor.calls) != 1:
             problems.append(f'an empty variable skipped the probe: {observed.starts} started')
     else:
-        want, lines = capabilities, [skip_line('--skip-probes' if how == 'flag' else OVERRIDE)]
+        want, lines = capabilities, [skip_line('--skip-probes' if flag else OVERRIDE)]
         expected = [e if e != 'start' else 'unprobed' for e in ORDER]
         if observed.events != expected:
             problems.append(f'the start ran {observed.events}, expected {expected}')
@@ -627,7 +637,7 @@ def test_no_probe_runs_before_a_refusal(refusal: str, names: tuple[str, ...], mo
     problems = [] if observed.status == status else [f'exit {observed.status}, expected {status}']
     if observed.starts or observed.executor.calls or 'start' in observed.events or 'unprobed' in observed.events:
         problems.append(f'a probe ran: {observed.events}')
-    probe_lines = [line for line in observed.lines if line.startswith('Capability ')]
+    probe_lines = [line for line in observed.lines if line[1].startswith('Capability ')]
     if probe_lines:
         problems.append(f'logged {probe_lines}')
     if observed.built is not None:
@@ -690,11 +700,12 @@ class Host:
     def logins(self) -> int:
         return len(self.log.read_text().splitlines()) if self.log.exists() else 0
 
-    def lines(self, stderr: str | None = None) -> list[str]:
-        """The probe's lines on stderr, as the core logger wrote them."""
+    def lines(self, stderr: str | None = None) -> list[Line]:
+        """The probe's lines on stderr, as the core logger wrote them, each with its level."""
         text = self.err.read_text() if stderr is None else stderr
-        return [m.group(1).strip() for m in re.finditer(r'\[cluster_mcp\.core\] (.*)$', text, re.M)
-                if m.group(1).startswith('Capability ')]
+        return [(m.group(1), m.group(2).strip())
+                for m in re.finditer(r'(\w+) \[cluster_mcp\.core\] (.*)$', text, re.M)
+                if m.group(2).startswith('Capability ')]
 
 
 def host(tmp_path: Path, present: list[str], ends: bool = False) -> Host:
@@ -751,7 +762,7 @@ def surface_violations(tools: tuple[str, ...], resources: tuple[str, ...], instr
     return problems
 
 
-def withheld_lines(absent: set[str]) -> list[str]:
+def withheld_lines(absent: set[str]) -> list[Line]:
     return [withheld_line(c, [n for n in c.capability.commands if n in absent]) for c in withheld_of(absent)]
 
 

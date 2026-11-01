@@ -454,18 +454,19 @@ import has no effect.
     look every declared command up once, through the executor the middleware shares, after the
     load, the ladder, the executor, the budget, the override's resolution, the site read and the
     budget check against every installed capability, and before the server is built from what the
-    probe kept, with one line per withheld capability; every ending without an answer (`ENDINGS`)
-    serves every capability, one line each, over stdio, HTTP and SSE; a hang is held to the bound
+    probe kept, with one INFO line per withheld capability; every ending without an answer
+    (`ENDINGS`) serves every capability, one WARNING line each, over stdio, HTTP and SSE; a hang is held to the bound
     after the site read; an interrupt while the start waits still interrupts; the real server's
     instructions name exactly the tools it serves over each withheld set; `delegate` mode runs no
-    probe and says so in one line, the override set or not; the flag, and the variable with any
-    non-empty value, skip it in `local` and `ssh` modes with one line, and empty probes; no probe
+    probe and says so in one INFO line, the override set or not; the flag, and the variable with any
+    non-empty value, skip it in `local` and `ssh` modes with one INFO line naming which (the flag,
+    when both are set), and empty probes; every line is compared with its record's level; no probe
     runs before any refusal (a load refusal, a failed connect, `--generate-token`, each budget
     refusal, a budget short of every installed capability's text included), and the budget never
     depends on the answer. Then the real CLI in `local` mode under `bin/sandbox.sh`, the override
     removed, behind a `.bash_profile` that puts stubs first on PATH and logs each login: every
     command present serves everything, a withheld member is missing from a stdio listing with its
-    line on stderr, a login that ends at once serves every capability, and both hold with stdin
+    line on stderr at its level, a login that ends at once serves every capability, and both hold with stdin
     closed and over HTTP; each drive starts one login. The suite never waits out the real 10 s
     bound.
   - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
@@ -2194,12 +2195,14 @@ runs what, where. The current order is:
   a command that did not start or exited nonzero, an answer that does not parse, anything raised)
   fails open: the capability is served, with one WARNING line, `Capability <distribution> served
   without a probe answer: the probe <reason>`, and startup goes on. `delegate` mode runs no probe
-  (no executor exists at startup, and every user is served the same list) and logs `Capability
-  probes skipped in delegate mode: every installed capability is served`, whether or not the
-  override is set; the override in `ssh` or `local` mode runs none either and logs `Capability
-  probes skipped (<--skip-probes | CLUSTER_MCP_SKIP_PROBES>): every installed capability is
-  served`. A start logs exactly one skip line or the probe's lines, never both
-  (`tests/test_probe_startup.py`).
+  (no executor exists at startup, and every user is served the same list) and logs one INFO line,
+  `Capability probes skipped in delegate mode: every installed capability is served`, whether or
+  not the override is set; the override in `ssh` or `local` mode runs none either and logs one INFO
+  line, `Capability probes skipped (<--skip-probes | CLUSTER_MCP_SKIP_PROBES>): every installed
+  capability is served`, which names the flag whenever it is given: with both set, the flag wins.
+  A start logs exactly one skip line or the probe's lines, never both, each at the level named here
+  (`tests/test_probe_startup.py` compares every line with the level its record was logged at,
+  beside every member set, and runs the flag and the variable together).
 
 What each mode means:
 

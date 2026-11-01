@@ -4615,6 +4615,69 @@ CASES += (
          "resolved ('', 'CLUSTER_MCP_SKIP_PROBES')"),
 )
 
+
+# The probe step's documented levels and the override's precedence: each line `_served` and `_probe`
+# log, at every other level the core's logger offers, the two `_served` lines' levels exchanged, the
+# variable read before the flag, each skip line naming the other source, and the variable's emptiness
+# tested another way. Each is killed beside every member set by a row of `test_probe_startup.py` that
+# compares each line with the level its record was logged at (AGENTS § Invariants §4).
+WITHHELD_LOG = "                log.info(f'Capability {name} withheld: the cluster is {verdict.reason}')\n"
+UNANSWERED_LOG = ("                log.warning(f'Capability {name} served without a probe answer: "
+                  "the probe {verdict.reason}')\n")
+DELEGATE_LOG = "            log.info('Capability probes skipped in delegate mode: every installed capability is served')\n"
+OVERRIDE_LOG = "            log.info(f'Capability probes skipped ({skipped}): every installed capability is served')\n"
+SKIP_RESOLVER = ("        if self.skip_probes:\n"
+                 "            return '--skip-probes'\n"
+                 "        value, variable = env_setting('CLUSTER_MCP_SKIP_PROBES')\n"
+                 "        return variable if value else None\n")
+BOTH = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-flag-and-variable',
+        'the override did not skip every probe')
+SPACE = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-variable-space',
+         'the override did not skip every probe')
+# Every method of the core's logger that logs a record, by the level it logs at (`warn` is `warning`'s
+# deprecated alias, `fatal` `critical`'s, and `exception` logs at ERROR).
+LOG_METHODS = ('devel', 'trace', 'debug', 'info', 'notice', 'warning', 'warn', 'error', 'exception', 'critical',
+               'fatal')
+
+
+def relevelled(line: str, level: str) -> str:
+    """`line`'s log call at `level` in place of its own."""
+    own = line.split('log.', 1)[1].split('(', 1)[0]
+    return line.replace(f'log.{own}(', f'log.{level}(', 1)
+
+
+def level_alternatives(name: str, line: str, own: tuple[str, ...], target: tuple[str, str, str]) -> tuple[Case, ...]:
+    """`line` logged at every level but those in `own` (its own method and any alias of it)."""
+    return tuple(startup_alternative(f'probe-level-{name}-{level}', CLI, ((line, relevelled(line, level)),), target)
+                 for level in LOG_METHODS if level not in own)
+
+
+CASES += (
+    *level_alternatives('withheld', WITHHELD_LOG, ('info',), KEPT),
+    *level_alternatives('unanswered', UNANSWERED_LOG, ('warning', 'warn'), NO_ANSWER),
+    startup_alternative('probe-level-served-lines-exchanged', CLI,
+                        ((WITHHELD_LOG, relevelled(WITHHELD_LOG, 'warning')),
+                         (UNANSWERED_LOG, relevelled(UNANSWERED_LOG, 'info'))), KEPT),
+    *level_alternatives('delegate', DELEGATE_LOG, ('info',), DELEGATE_UNSET),
+    *level_alternatives('override', OVERRIDE_LOG, ('info',), FLAG),
+    startup_alternative('probe-precedence-variable-first', CLI,
+                        ((SKIP_RESOLVER,
+                          "        value, variable = env_setting('CLUSTER_MCP_SKIP_PROBES')\n"
+                          "        if value:\n"
+                          "            return variable\n"
+                          "        if self.skip_probes:\n"
+                          "            return '--skip-probes'\n"
+                          "        return None\n"),), BOTH),
+    startup_alternative('probe-precedence-flag-named-as-the-variable', CLI,
+                        (("            return '--skip-probes'\n", "            return 'CLUSTER_MCP_SKIP_PROBES'\n"),), FLAG),
+    startup_alternative('probe-precedence-variable-named-as-the-flag', CLI,
+                        ((SKIP_VALUE, "        return '--skip-probes' if value else None\n"),), VARIABLE),
+    startup_alternative('probe-override-value-stripped', CLI,
+                        ((SKIP_VALUE, "        return variable if (value or '').strip() else None\n"),), SPACE),
+    startup_alternative('probe-override-value-not-the-empty-string', CLI,
+                        ((SKIP_VALUE, "        return variable if value != '' else None\n"),), ONCE),
+)
+
 CASES += tuple(cluster_twin(case, CLUSTER_TWINS[case.id]) for case in CASES if case.id in CLUSTER_TWINS)
 if len(CASES) != len({case.id for case in CASES}):
     raise RuntimeError('two mutation cases share an id')

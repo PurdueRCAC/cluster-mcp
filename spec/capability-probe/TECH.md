@@ -3,10 +3,10 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_review
+status: in_progress
 branch: feature/capability-probe
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -39,10 +39,10 @@ phases:
   parallel: false
   hammerable: false
   hill: downhill
-  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && uv run python -I spec/capability-probe/remediation/F1-exact-record-values.py all && uv run python -I spec/capability-probe/remediation/F3-map-and-startup.py && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
+  verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && uv run python -I spec/capability-probe/remediation/F1-exact-record-values.py all && uv run python -I spec/capability-probe/remediation/F3-map-and-startup.py && uv run python -I spec/capability-probe/remediation/F7-log-levels-and-precedence.py all && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R10
@@ -501,6 +501,76 @@ line. Every refusal still comes first. The documents R10 names describe all of i
   47 killed in each era; 13 kinds, 39 CLI drives passed in each era); `F3-map-and-startup.py` green in
   under 1 s (26 core modules, 8 methods `run()` calls, 2 members); `mutants-handshake-1` 40 of 40 (89
   s), `-2` 40 of 40 (88 s), `mutants-modern-1` 40 of 40 (87 s), `-2` 40 of 40 (90 s).
+- **Remediation, review cycle 2 (2026-11-01): F4, the documented log levels and the override's precedence
+  (R1, R6, R7, R8, R10).** The maintainer's ruling at the bound: a scoped fix the foreman verifies, no third
+  review. Both reviewers showed `log.info` and `log.warning` exchanged in `_served`, and the variable read
+  before the flag in `_resolve_skip_probes`, surviving every probe row: `test_probe_startup.py` compared
+  each line's text and never its level, and no row set the flag and the variable together.
+  - **The class, found by reading** `_served`, `_probe` and `_resolve_skip_probes`: every decision there
+    that §4 documents and a row could observe but did not. The level of each of the four lines (the
+    withheld line, the unanswered line, the delegate line, the override line), under every method of the
+    core's logger that logs a record (`devel`, `trace`, `debug`, `info`, `notice`, `warning`, `warn`,
+    `error`, `exception`, `critical`, `fatal`: cmdkit adds `devel`, `trace` and `notice`); `_served`'s two
+    levels exchanged; the order in which the resolver reads the flag and the variable, and which source
+    each skip line names; the test that the variable is set; `_probe`'s skip test; and the delegate
+    branch before the override's (the frozen sweep's case). Below INFO a line is not captured, and at
+    CRITICAL it is counted as a refusal, so those levels were already killed; NOTICE, WARNING, ERROR and
+    `exception` on an INFO line, and INFO, NOTICE, ERROR and `exception` on the WARNING line, were not.
+  - [x] `tests/test_probe_startup.py`: every line a start logs is compared as `(level, message)`, the level
+    its record was logged at (`Line`; `skip_line`, `withheld_line`, `unanswered_line` and `DELEGATE_LINE`
+    carry theirs: INFO, INFO, WARNING, INFO), so every existing row pins its lines' levels beside every
+    member set: the withheld line (`test_the_server_is_built_from_what_the_probe_keeps`), the unanswered
+    line (`test_every_ending_without_an_answer_serves_every_capability`,
+    `test_the_probe_follows_the_site_read_and_is_bounded`), the delegate line
+    (`test_delegate_runs_no_probe_and_says_so`) and the override line
+    (`test_the_override_skips_every_probe`, `test_any_non_empty_override_value_skips`). The CLI drives
+    read each stderr line's level as the logger formats it (`Host.lines`). A new `how`,
+    `flag-and-variable`, of `test_the_override_skips_every_probe` sets both, in `local` and `ssh` modes
+    beside every member set (8 rows an era): the flag wins and the line names it.
+  - [x] `tests/mutants.py`: 45 cases, each targeting a row beside every member set:
+    `probe-level-<line>-<method>` for the four lines (10, 9, 10, 10), `probe-level-served-lines-exchanged`,
+    `probe-precedence-variable-first`, `probe-precedence-flag-named-as-the-variable`,
+    `probe-precedence-variable-named-as-the-flag`, `probe-override-value-stripped`,
+    `probe-override-value-not-the-empty-string`.
+  - [x] `remediation/F7-log-levels-and-precedence.py` (`coverage`, `docs`, `cases`, `equivalents`): the
+    alternatives derived from the source (every log call of the three methods, every logger method; a
+    log call added later is swept, and a level cmdkit adds without a method in the list is a gap), the
+    frozen sweep's 21 alternatives of those methods still cased, each case killed in both eras, three
+    equivalents planted with their targets green in both eras, and §4 quoting each line after the level
+    its call logs at and saying the flag wins.
+  - [x] AGENTS §4 names each skip line's level (INFO) and says the flag wins when both are set, with what
+    pins both; § Testing says each line is compared with its record's level.
+  - Equivalents, each with why: the unanswered line logged by `warn` (`warning`'s deprecated alias: the
+    same record; only a DeprecationWarning, ignored by default, differs); the variable tested `is not
+    None` (`env_setting` hands back `value or None` for a variable with no legacy name, so the resolver
+    never sees an empty string); `_probe`'s `skipped is not None` (`_resolve_skip_probes` returns a
+    non-empty name or None).
+  - Red first, on `541785c`'s product and tests (a throwaway worktree; `packages/` and `tests/` there
+    are byte-identical to `33d0ef8`'s): the 44 new cases whose targets exist there (all but
+    `probe-precedence-variable-first`, whose `flag-and-variable` row is new) run against `541785c`'s
+    tests: 20 survived (NOTICE, WARNING, `warn`, ERROR and `exception` on each INFO line; INFO, NOTICE,
+    ERROR and `exception` on the WARNING line; the two exchanged) and 24 were already killed (the levels
+    below INFO and at CRITICAL, and the four naming and emptiness cases). With the review's two mutants
+    planted together on `541785c`, its `test_probe_startup.py`, `test_env.py` and `test_probes.py` passed
+    (612); the new `test_probe_startup.py` against the same plant failed 252 rows, the 8
+    `flag-and-variable` rows among them (`logged [('INFO', 'Capability probes skipped
+    (CLUSTER_MCP_SKIP_PROBES): …')], expected [('INFO', 'Capability probes skipped (--skip-probes):
+    …')]`). The checker went red with a level dropped from the cases (4 gaps, `no mutant`) and on
+    `33d0ef8`'s AGENTS.md (the two skip lines quoted after no level; no word that the flag wins), green
+    on the finished tree.
+  - P2's `verify:` runs the checker after `F3-map-and-startup.py`, before the four mutation halves.
+  *Observed (2026-11-01), every distinct step once, in order, on the finished P2 tree before its commit
+  (the run quoted here):* `p2.sh phase` green in 251 s (`startup_order.py`; `drives.py all`: withholding
+  5.0 s, hanging 12.0 s, stdin closed 1.0 s and 10.9 s, HTTP 0.9 s, override 6.0 s, refusals 5.5 s;
+  `docs_gate.py p2`; `alternatives.py coverage p2` with 79 alternatives and 80 cases; 564 passed in each
+  era, 99.4 s handshake and 102.2 s modern); `p1.sh phase` green in 18 s (5 loaded, 23 refused, 84
+  alternatives, 84 cases, 252 passed in each era); `P2-exact-capability.py all` green in 30 s (4 of 4 in
+  each era); `F1-exact-record-values.py all` green in 287 s (116 refused as expected; 47 of 47 in each
+  era; 39 CLI drives passed in each era); `F3-map-and-startup.py` green in under 1 s;
+  `F7-log-levels-and-precedence.py all` green in 345 s (49 alternatives, 46 cased, 3 equivalent; 21
+  frozen alternatives still cased; 4 lines against §4; 46 of 46 killed in each era; each equivalent's 410
+  target rows passed in each era); `mutants-handshake-1` 40 of 40 (89 s), `-2` 40 of 40 (89 s),
+  `mutants-modern-1` 40 of 40 (87 s), `-2` 40 of 40 (88 s). No step was red; none stood in for another.
 - **Touches:** `core/__init__.py`, `core/deprecation.py`, `core/server.py`, `tests/conftest.py`,
   `tests/test_probe_startup.py`, `tests/test_env.py`, `tests/test_hygiene.py`,
   `tests/mutants.py`, `AGENTS.md`, `README.md`; with the ruling, `core/capabilities.py`,
@@ -508,7 +578,8 @@ line. Every refusal still comes first. The documents R10 names describe all of i
   `verify/alternatives.py`'s `SET_EQUIVALENT` (gate data). `tests/harness.py` needed no change.
   With review cycle 1's F1 and F3: `core/capabilities.py`, `tests/test_capabilities.py`,
   `tests/test_startup.py`, `tests/mutants.py`, `AGENTS.md`, `remediation/F1-exact-record-values.py`
-  and `remediation/F3-map-and-startup.py`.
+  and `remediation/F3-map-and-startup.py`. With review cycle 2's F4: `tests/test_probe_startup.py`,
+  `tests/mutants.py`, `AGENTS.md` (§4, § Testing) and `remediation/F7-log-levels-and-precedence.py`.
 
 ## Phase P3 — The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
 **Satisfies:** R3, R10 · **Depends on:** P2
