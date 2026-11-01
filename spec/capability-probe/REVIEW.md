@@ -139,3 +139,24 @@ This is review cycle 2 with changes requested: the bound. Escalated to Geoffrey 
 - **Scoped fix, foreman verifies, land.** F2 and F4 are fixed in one remediation build; the foreman verifies the fixes on the commit itself (the corrected seed against `launch.py`, each new pin red on `541785c` and green after, the sweep killed in both eras), then publishes. No third review.
 - **F3 (PATH-only declarations): the drop stands.** The LMOD cycle adds the second kind of declaration.
 - **Registered tool objects:** seed a future cycle that makes them inert (exact types), with a ROADMAP entry, in this remediation. No code now.
+
+## Cycle 2's items — fixed and verified by the foreman; approved (2026-11-01)
+
+- **Ruling:** Geoffrey, 2026-11-01, at the review bound: "Scoped fix, I verify, land". One remediation of cycle 2's F2 and F4, verified by the foreman, landing without another review cycle.
+- **Fix:** `493190c` (P2: F4), `f24af70` (P3: F2 and the tool-object seed), `e9a43f1` (P3 closed; the cycle-2 deferral above links its seed, which the frozen ledger requires).
+  - **F2:** `issues/local-command-outlives-server.md` states both endings (a killed server; a normal exit inside the SIGTERM→SIGKILL `GRACE` of the probe's abandoned daemon worker), and its R1 covers a normal exit for the probe and tool calls alike. The ROADMAP entry and a recorded-limit bullet in § Invariants §3 say the same. The checker `remediation/F6-leak-mechanism.py` reads the signal order, `GRACE` and the daemon flag from the code. Cycle 1's F4 text above carries a correction.
+  - **F4:** every logged probe line is compared as `(level, message)` beside every member set, and a `flag-and-variable` row pins the flag winning. 45 cases sweep the levels, the precedence, the lines' naming and the emptiness test; all are killed in both eras, with 3 equivalents recorded (`log.warn`, and two `is not None` tests unreachable through `env_setting`).
+  - **New seed:** `issues/capability-tool-objects-inert.md` (Part III, unshaped), per Geoffrey's ruling.
+- **Foreman verification** (a clone of `e9a43f1`):
+  - The seed's mechanism was checked against `core/executor/launch.py` (`run_process`: SIGTERM, read for `GRACE`, SIGKILL) and `core/probes.py` (daemon worker).
+  - Each reviewer mutant was re-planted alone, and `tests/test_probe_startup.py` was run against it:
+
+    | Mutant | Result |
+    |---|---|
+    | INFO and WARNING exchanged in `_served` | 244 failed |
+    | the variable read before the flag in `_resolve_skip_probes` | 8 failed (the `flag-and-variable` rows) |
+    | restored | 405 passed |
+
+    Both had survived the suite at `541785c` (cycle 2, F4).
+- **Gates:** the builder's P2 and P3 steps were green, run once each; the ledger was re-run green after the REVIEW link. Local suite: 4560 passed and 14 skipped per era, 403.8 and 396.0 s.
+- **CI:** run 41360889561 on `e9a43f1` was green, 4574 per era. The pytest steps took 8.1 and 7.8 min, and the gate job 16.4 min against its 20-minute timeout; `541785c` had taken 12.7 min. The growth (53 rows) does not account for that; runner variance does: `4e772ec` ran 7.4 and 7.1 min for 3534 tests. The margin is reported to Geoffrey.

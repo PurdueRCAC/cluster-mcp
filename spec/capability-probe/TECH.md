@@ -54,10 +54,10 @@ phases:
   attempts: 2
   verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && uv run python -I spec/capability-probe/remediation/F6-leak-mechanism.py && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
 review:
-  last_reviewed_commit: 541785c
-  verdict: changes-requested
-  blocked_reason: 'review cycle 2 (bound): F2 seed misstates the leak mechanism; F4 log levels and override precedence unpinned'
-  cycle: 2
+  last_reviewed_commit: e9a43f1
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 
 # TECH.md — Probe the cluster before advertising an installed capability
