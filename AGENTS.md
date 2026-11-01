@@ -1885,7 +1885,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   builtin as present, where `exec` fails) and its `unset -f type`; the parser's exact shape, split on
   `\n` alone with the final newline required, never `splitlines`; the deadline taken in `start()`,
   never at the wait; the worker a daemon that catches `BaseException` (a `SystemExit` silently ends
-  a thread, which would cost the whole bound); the verdicts memoized, so a late answer changes
+  a thread, which would cost the whole bound), and dies with the interpreter, between its timeout's
+  SIGTERM and SIGKILL if the server exits then (§3's recorded limit); the verdicts memoized, so a late answer changes
   nothing; the bound handed to the executor as well (§7).
 - **`site.py`** — the per-server holder (`register`/`site_of`, a `WeakKeyDictionary` keyed by the
   server object): the site context is set once at construction and read by that server's tool and
@@ -2136,6 +2137,12 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 - **A timed-out command may outlive the call** (recorded, not fixed): over SSH the server is asked
   to TERM it and the channel is closed, and under a non-root `delegate` server `sudo` relays TERM
   only to the command; `issues/timeout-process-cleanup.md`. The contract above holds either way.
+- **A `local` command can outlive the server that launched it** (recorded, not fixed): only the call
+  that launched a process group signals it, from its own thread. A server killed mid-command leaves
+  the group running; and the startup probe's worker, a daemon thread abandoned at the probe's
+  deadline, dies with the interpreter when the server exits normally within `GRACE` of its timeout's
+  SIGTERM, before its SIGKILL, so a group that ignores SIGTERM runs on;
+  `issues/local-command-outlives-server.md`.
 - `hostname` differs by mode: the SSH target for `SSHExecutor`, `socket.gethostname()` for the local
   and delegating executors. It is **not** a user-distinguishing key: in delegate mode every user
   reports the same value (see §8).

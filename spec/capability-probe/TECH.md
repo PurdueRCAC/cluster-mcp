@@ -51,8 +51,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 1
-  verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
+  attempts: 2
+  verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && uv run python -I spec/capability-probe/remediation/F6-leak-mechanism.py && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
 review:
   last_reviewed_commit: 541785c
   verdict: changes-requested
@@ -673,8 +673,66 @@ recipe's offline steps on this head, the full verify, and the ledger.
   and `test_mutations.py`'s anchor row for each of the 58 new cases; the full kind matrix stays in the
   checkers. Written after the run,
   this record touched only `TECH.md`, so `ledger` ran again on the finished tree, green.
+- **Remediation, review cycle 2 (2026-11-01): F2, every record of the `local` leak states the mechanism
+  the code shows (R10); the maintainer's ruling: a seed for inert tool objects.** P3 reopened for both,
+  its gate retuned to run `remediation/F6-leak-mechanism.py` after `ledger`.
+  - **The class, scoped by reading** `run_process` (`core/executor/launch.py`: at the deadline SIGTERM to
+    the group, a read for `GRACE`, then SIGKILL unless the output has ended) and `core/probes.py` (the
+    worker a daemon thread, abandoned at the deadline), then every live statement of the leak outside
+    `spec/`: the seed's Problem (killed servers only), its R1 (signals only) and its 2026-11-01 note
+    ("sends SIGTERM only": false); the ROADMAP entry (killed servers only); the sandbox seed's link
+    (true as written). AGENTS stated nothing of this leak: its timeout sequence (the `launch.py`
+    footgun) and §3's "A timed-out command may outlive the call" (`ssh`, `delegate`) are true.
+    `spec/**` records are left as they are; REVIEW.md already carries the correction.
+  - [x] `issues/local-command-outlives-server.md`: the Problem states both ways a group outlives the
+    server (killed; a normal exit between the abandoned worker's SIGTERM and SIGKILL, the group
+    ignoring SIGTERM and re-parented to init), and that a tool call at a normal exit is unmeasured; R1
+    covers a normal exit and SIGTERM or SIGINT, for the probe and in-flight tool calls alike; the
+    2026-11-01 note is corrected in place (this branch's own text, never landed). Title widened to "can
+    outlive the server that launched it", and the ROADMAP entry with it.
+  - [x] `AGENTS.md`: §3 gains the recorded limit beside the timed-out-command one, and the `probes.py`
+    footgun says the daemon worker dies with the interpreter, between SIGTERM and SIGKILL if the server
+    exits then.
+  - [x] `remediation/F6-leak-mechanism.py`: reads the signals `run_process` sends, in order, and the
+    worker's daemon flag from the code; every record (the seed, every block of a live file linking it,
+    the ROADMAP entry) says no signal "only" and names them in the code's order; the seed states the
+    daemon worker, the interpreter's exit, `GRACE` and SIGTERM then SIGKILL; R1 names a normal exit,
+    the probe and a tool call; the ROADMAP entry names a normal exit. Red on `33d0ef8`'s seed and
+    ROADMAP (9 gaps, the "only" note among them), green after.
+  - Drive, under `bin/sandbox.sh` in its own process group, `local` mode over stdio, a login profile of
+    `trap '' TERM` then a sleep: a client that closed stdin at once saw exit 0 at 11.2 s with both
+    members served without an answer (WARNING), and 2 s later the login bash (parent pid 1) and its
+    sleep, in their own group, were still running (killed by their pids); a client that held stdin
+    open 12.5 s saw exit 0 at 12.7 s and nothing left.
+  - [x] The ruling's seed, [`issues/capability-tool-objects-inert.md`](../../issues/capability-tool-objects-inert.md)
+    (`unshaped`), with its entry in ROADMAP Part III beside this cycle's other seeds: each registered tool
+    a FastMCP `FunctionTool` taken by `isinstance` (`core/capabilities.py:330-332`), read at the load
+    and at server build; the outcome, every tool exactly `FunctionTool` with exact field values, decided
+    at load, the handler excepted. No code change.
+  - [x] The ledger's counts: [`issues/mutants-workflow-timeout.md`](../../issues/mutants-workflow-timeout.md)
+    gains a dated note and its ROADMAP entry the figure: the cycle adds 271 cases (931 in all), not
+    about 200.
+  - *Attempt 2 (2026-11-01), STOP:* `p3.sh ledger` is red on `REVIEW.md`, unedited here: the cycle-2
+    F1 ruling's bullet says "out of scope" and links no seed (it names "the existing seed"). It went red
+    with the review commit `d429e7b` (green on `541785c`, red on `d429e7b` and `33d0ef8`, each in a
+    throwaway worktree), so it is no part of this remediation; P3 stays `in_progress` until the
+    foreman links [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md)
+    in that bullet and `ledger` passes.
+  *Observed (2026-11-01), every other step once, on the finished tree before its commit (P2 committed
+  as `493190c`):* `p3.sh phase` green in 64 s (`declared.py`, `lookups.py`, `startup_order.py`,
+  `drives.py all`, `docs_gate.py p2`, `alternatives.py coverage all` with 163 alternatives and 164 cases,
+  `baseline.sh`: 24 tools, 4 resources, 1477 characters equal to `c520432`'s, 513 functions and 660
+  cases kept); `ledger` red as above; `F6-leak-mechanism.py` green (18 blocks of 6 records); `recipe`
+  green in 1 s; `equivalents` green in 3 s; `full-legacy` green in 405 s, 4560 passed and 14 skipped
+  (the bash 4.1 `need_shell` rows, which CI runs) in 403.8 s; `full-modern` green in 398 s, 4560 passed
+  and 14 skipped in 396.0 s, then `cluster-mcp --help` under `bin/sandbox.sh`. Against `c520432`'s
+  359.6 s and 359.5 s: +44.2 s (+12.3 %) and +36.5 s (+10.1 %); cycle 1's remediation measured 392.8 s
+  and 390.7 s. This remediation adds 53 rows an era: 8 `flag-and-variable` rows and 45 anchor rows in
+  `test_mutations.py`; the full level matrix stays in the F7 checker.
 - **Touches:** `issues/lmod-tool-group.md`, `issues/xdu-storage.md` (notes), `issues/sandbox-dirs-left-on-kill.md` and its `ROADMAP.md` entry, and whatever `p3.sh`
-  proves wrong in the product.
+  proves wrong in the product. With review cycle 2: `issues/local-command-outlives-server.md`,
+  `issues/capability-tool-objects-inert.md`, `issues/mutants-workflow-timeout.md` (note), `ROADMAP.md`,
+  `AGENTS.md` (§3, the `probes.py` footgun) and `remediation/F6-leak-mechanism.py`.
 
 ---
 

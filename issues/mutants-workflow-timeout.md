@@ -45,3 +45,5 @@ A manual mutation run finishes and reports every case, and § Testing states its
 
 - Related: `spec/capability-extras/` (TECH, the F7 sweep); `spec/capability-probe/` (PLAN §6).
 - Found by: `capability-probe` plan step research, 2026-11-01.
+- 2026-11-01: with its two review remediations, `capability-probe` adds 271 cases, not about 200:
+  `tests/mutants.py` defines 931.
