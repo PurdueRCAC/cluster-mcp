@@ -3,7 +3,7 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/capability-probe
 base: develop
 current_phase: done
