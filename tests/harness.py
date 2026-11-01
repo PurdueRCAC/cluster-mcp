@@ -70,6 +70,12 @@ Delegate mode is reached over an in-process ASGI route: a real bearer token goes
 `JWTVerifier` and `AuthExecutorMiddleware`, with no socket and no port. Shared mode and tokenless
 calls use the in-memory client.
 
+**The capability probe.** `ProbeExecutor` stands in for the shared executor a probe runs through:
+it records each call (the argv and the timeout it was given) and answers with its responder, which
+returns a `CommandResult` (`ProbeExecutor.answer` builds a well-formed one), returns anything else,
+raises, or blocks until `release` is set. A test that blocks one sets `release` in `finally`, so no
+probe thread outlives it.
+
 Two rules keep a test honest:
 
 - **Build inside the loop.** Every server is built inside the coroutine handed to `drive`; the
@@ -91,11 +97,12 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import weakref
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence, TypeVar
+from typing import Any, AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence, TypeVar
 from urllib.parse import urlsplit
 
 import httpx2
@@ -119,7 +126,7 @@ __all__ = ['Outcome', 'drive', 'serving', 'http_client', 'in_memory', 'call', 'c
            'select_era', 'era_mismatch', 'session_era', 'rejection_status', 'served_tools',
            'served_instructions', 'served_surface', 'protocol_error', 'Negotiated', 'negotiate', 'Listed',
            'stdio_tools', 'url_tools', 'Refused', 'stdio_refusal', 'SANDBOX', 'LOOPBACK', 'installed_auth', 'StateProbe', 'tool_names',
-           'launched_script', 'read_resource', 'read_verbatim', 'SITE', 'DEPRECATION_WINDOW']
+           'launched_script', 'read_resource', 'read_verbatim', 'SITE', 'DEPRECATION_WINDOW', 'ProbeExecutor']
 
 T = TypeVar('T')
 
@@ -699,6 +706,68 @@ class RecordingExecutor:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        pass
+
+
+@dataclass
+class ProbeExecutor:
+    """An `Executor` a capability probe runs through, answering each `run` with `responder(self, names)`.
+
+    `names` are the positional parameters the call hands its fixed script (the names it looks up).
+    Each call is recorded as `(argv, timeout)`. The responder may return a `CommandResult`, return
+    anything else, raise, or wait on `release` (`hang`); `returned` is set once it has returned or
+    raised.
+    """
+
+    responder: Callable[[ProbeExecutor, list[str]], Any]
+    calls: list[tuple[list[str], float | None]] = field(default_factory=list)
+    release: threading.Event = field(default_factory=threading.Event)
+    returned: threading.Event = field(default_factory=threading.Event)
+
+    hostname = 'probe.invalid'
+
+    @staticmethod
+    def names_of(argv: Sequence[str]) -> list[str]:
+        """The positional parameters a fixed script's argv hands it (after `-c`, its text and its name)."""
+        argv = list(argv)
+        return argv[argv.index('-c') + 3:]
+
+    @staticmethod
+    def answer(found: Iterable[bool], code: int = 0, tail: str | None = None) -> CommandResult:
+        """The lookup's answer: a `1` or `0` line per name, then `end <count>` (or `tail`), exiting `code`."""
+        found = list(found)
+        body = ''.join('1\n' if f else '0\n' for f in found)
+        return CommandResult(stdout=body + (f'end {len(found)}\n' if tail is None else tail), stderr='',
+                             exit_code=code, hostname=ProbeExecutor.hostname)
+
+    @staticmethod
+    def hang(executor: ProbeExecutor, names: list[str]) -> CommandResult:
+        """A responder that answers every name present, but only once `release` is set."""
+        executor.release.wait(60)
+        return ProbeExecutor.answer(True for _ in names)
+
+    def run(self, command: Sequence[str] | str, cwd: str | None = None, timeout: float | None = None) -> Any:
+        argv = [command] if isinstance(command, str) else list(command)
+        self.calls.append((argv, timeout))
+        try:
+            return self.responder(self, self.names_of(argv) if '-c' in argv else [])
+        finally:
+            self.returned.set()
+
+    def write(self, path: str, data: bytes, append: bool = False, parent: str | None = None,
+              executable: bool = False) -> CommandResult:
+        raise AssertionError('a probe never writes')
+
+    def put(self, local_path: str, remote_path: str) -> str:
+        raise AssertionError('a probe never transfers')
+
+    def get(self, remote_path: str, local_path: str) -> str:
+        raise AssertionError('a probe never transfers')
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
         pass
 
 

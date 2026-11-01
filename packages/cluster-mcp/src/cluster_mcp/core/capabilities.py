@@ -5,9 +5,12 @@
 
 A capability is a distribution that declares one entry point in the group `cluster_mcp.capabilities`,
 naming a `Capability`: its name, its place in the served instructions, the module whose `@mcp_tool`
-functions are its tools, its part of the instructions, and its resources. The core never names one.
+functions are its tools, its part of the instructions, its resources, and the commands it needs on
+the cluster. The core never names one.
 A capability's resources are never open: each needs its request's executor, so in `delegate` mode
-every read of one resolves the caller.
+every read of one resolves the caller. The commands are data, never code: the core looks each one
+up on the cluster (`cluster_mcp.core.probes`), and a capability that declares none is served wherever
+it is installed.
 
 Nothing here runs at import. `installed()` loads every capability the environment has, once, when
 the server starts; a capability that cannot be discovered, ordered or loaded stops the load with a
@@ -15,7 +18,11 @@ the server starts; a capability that cannot be discovered, ordered or loaded sto
 `KeyboardInterrupt`, which still interrupts), and leaves the tool registry as it was before the load
 began. The load assembles each capability's tools and resources on a scratch server through
 `serve()`, the one way every server takes them, so whatever a capability declares fails at the load
-or not at all.
+or not at all. What an entry point names must be exactly a `Capability`, and every value in it the core
+or FastMCP reads exactly a built-in type, as must its distribution's name; the load refuses anything
+else before using it, so no read of a loaded record runs capability code. A capability's code is its
+modules, run at the load, and its tools and resource handlers: FastMCP reads each as it registers
+it, on the load's scratch server and on each server built after, and a request calls it.
 """
 
 # Type annotations
@@ -48,18 +55,29 @@ GROUP: Final = 'cluster_mcp.capabilities'
 # A tool's line in an instructions text: `- name: what it does`.
 LISTED: Final = re.compile(r'^- (\w+):', re.MULTILINE)
 
+# A command a capability may declare it needs: a plain file name, as `exec` finds one on PATH. No
+# path, no space or shell character, and no leading `-` or `.`.
+COMMAND: Final = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.+-]{0,254}')
+
 
 @dataclass(frozen=True)
 class Capability:
     """What a capability distribution adds to the server, as its entry point names it.
+
+    Every value is exactly the type named here, never a subclass (`order` never a `bool`), and the load
+    refuses anything else: the core reads them after the load, where a subclass's code would run.
 
     `name` is unique among the loaded capabilities. `order` places its text in the served base,
     lower first: a site overlay takes a high one, so it sits last, directly above the site context.
     `tools` is the dotted name of the module whose `@mcp_tool` functions (that module's or any module
     below it) are its tools. `instructions` is its part of the base and lists exactly those tools, each
     once, as `- name:` lines. `resources` are entries shaped as the core's `RESOURCE_REGISTRY` ones,
-    each a dict with a `str` `uri`, `name` and `description`, a callable `handler`, and `executor`
-    exactly True, its URI served by nothing else.
+    each a dict whose keys are `str`, with a `str` `uri`, `name` and `description`, a callable
+    `handler` (the capability's code, which FastMCP registers and a request calls) and `executor`
+    exactly True, its URI served by nothing else. `commands` names the commands its tools need on the
+    cluster, each a plain file name (`COMMAND`) declared once, as a tuple of `str`: the core looks each
+    up, and withholds the capability where one is missing. A capability that declares none, `()`, is served wherever it is installed. An entry
+    point names exactly this class, never a subclass: the load refuses one.
     """
 
     name: str
@@ -67,6 +85,7 @@ class Capability:
     tools: str
     instructions: str
     resources: tuple[dict, ...] = ()
+    commands: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -91,7 +110,8 @@ def _identity(ep: EntryPoint) -> tuple[str, str | None]:
 
     The name of the distribution that declared it. An entry point that came from no distribution (one
     built by hand) is named by its value; so is one whose distribution's metadata cannot be read or
-    names no distribution, and that one cannot be loaded.
+    names no distribution (a `Name` that is not exactly a non-blank `str` names none), and that one
+    cannot be loaded.
     """
     if ep.dist is None:
         return ep.value, None
@@ -104,7 +124,8 @@ def _identity(ep: EntryPoint) -> tuple[str, str | None]:
         name = None
     except Exception as exc:
         return ep.value, f'its distribution metadata cannot be read: {_cause(exc)}'
-    if not isinstance(name, str) or not name.strip():
+    # Exactly a `str`: the name is ordered and composed after the load, where a subclass's code would run.
+    if type(name) is not str or not name.strip():
         return ep.value, 'its distribution metadata has no Name'
     return name, None
 
@@ -163,12 +184,17 @@ class _Invalid(Exception):
 
 def _checked(value: object) -> Capability:
     """`value` if it is a well-formed `Capability`; otherwise raise `_Invalid` saying why."""
-    if not isinstance(value, Capability):
+    # Exactly a `Capability`, never a subclass: a subclass's code could run whenever a field is read,
+    # by startup or the server long after the load, where nothing guards it.
+    if type(value) is not Capability:
         raise _Invalid(f'the entry point names a {type(value).__name__}, not a Capability')
+    # Every field exactly its type, never a subclass (nor a `bool` for `order`), checked before any field is
+    # used: the load, startup and the server read them, ordering, hashing, iterating and formatting each,
+    # and a subclass's code would run there, after the load where nothing guards it.
     for field, kind in (('name', str), ('tools', str), ('instructions', str), ('resources', tuple)):
-        if not isinstance(getattr(value, field), kind):
+        if type(getattr(value, field)) is not kind:
             raise _Invalid(f'its {field} is a {type(getattr(value, field)).__name__}, not a {kind.__name__}')
-    if not isinstance(value.order, int) or isinstance(value.order, bool):
+    if type(value.order) is not int:
         raise _Invalid(f'its order is a {type(value.order).__name__}, not an int')
     if not value.name:
         raise _Invalid('its name is empty')
@@ -176,20 +202,48 @@ def _checked(value: object) -> Capability:
         raise _Invalid('its instructions are empty')
     for entry in value.resources:
         _check_resource(entry)
+    # Exactly a tuple of exactly `str`: the probe iterates and hashes the names after the load, where
+    # no subclass's `__iter__`, `__eq__` or `__hash__` may run.
+    if type(value.commands) is not tuple:
+        raise _Invalid(f'its commands is a {type(value.commands).__name__}, not a tuple')
+    for i, command in enumerate(value.commands):
+        if type(command) is not str:
+            raise _Invalid(f'one of its commands is a {type(command).__name__}, not a str')
+        if not COMMAND.fullmatch(command):
+            raise _Invalid(f'its command {command!r} is not a command name')
+        if command in value.commands[:i]:
+            raise _Invalid(f'its command {command!r} is declared twice')
     return value
 
 
+def _shown(value: object) -> str:
+    """`value`'s repr when it is exactly a `bool`, an `int` or None, whose repr runs no capability code;
+    otherwise its type, named."""
+    return repr(value) if type(value) in (bool, int, type(None)) else f'a {type(value).__name__}'
+
+
 def _check_resource(entry: object) -> None:
-    """Raise `_Invalid` saying why `entry` is not a well-formed capability resource."""
-    if not isinstance(entry, dict):
+    """Raise `_Invalid` saying why `entry` is not a well-formed capability resource.
+
+    The entry is exactly a `dict` whose every key is exactly a `str`, and its `uri`, `name` and
+    `description` are exactly `str`, all checked before any is used: the load and the server look keys
+    up and read, compare and hash the values, and a subclass's code would run there. Its handler is
+    the capability's code, which FastMCP registers and a request calls.
+    """
+    if type(entry) is not dict:
         raise _Invalid(f'one of its resources is a {type(entry).__name__}, not a dict')
-    for key in ('uri', 'name', 'description'):
-        if not isinstance(entry.get(key), str):
-            raise _Invalid(f'its resource {entry.get("uri")!r} has a {type(entry.get(key)).__name__} {key}, not a str')
+    for key in entry:
+        if type(key) is not str:
+            raise _Invalid(f'one of its resources has a {type(key).__name__} key, not a str')
+    if type(entry.get('uri')) is not str:
+        raise _Invalid(f'one of its resources has a {type(entry.get("uri")).__name__} uri, not a str')
+    for key in ('name', 'description'):
+        if type(entry.get(key)) is not str:
+            raise _Invalid(f'its resource {entry["uri"]!r} has a {type(entry.get(key)).__name__} {key}, not a str')
     if not callable(entry.get('handler')):
         raise _Invalid(f'the handler of its resource {entry["uri"]!r} is not callable')
     if entry.get('executor') is not True:
-        raise _Invalid(f'its resource {entry["uri"]!r} has executor {entry.get("executor")!r}, not True: '
+        raise _Invalid(f'its resource {entry["uri"]!r} has executor {_shown(entry.get("executor"))}, not True: '
                        f'a capability resource is never open')
 
 

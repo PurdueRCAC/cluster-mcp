@@ -21,7 +21,8 @@ from cmdkit.cli import Interface
 from cmdkit.logging import Logger, level_by_name, logging_styles
 
 # Internal libs
-from cluster_mcp.core.server import create_mcp_server
+from cluster_mcp.core.server import base_instructions, create_mcp_server
+from cluster_mcp.core import probes
 from cluster_mcp.core.capabilities import CapabilityLoadError, installed
 from cluster_mcp.core import site as site_context
 from cluster_mcp.core.site import DEFAULT_BUDGET
@@ -65,7 +66,7 @@ APP_VERSION = f'cluster-mcp v{__version__} ({python_implementation()} {python_ve
 APP_USAGE = f"""\
 Usage:
   {APP_NAME} [-h] [-v] [-t TRANSPORT] [-H HOST] [-p PORT] [-a AUTH] [-e EXEC_MODE] [--ssh-host HOST]
-             [--instructions-budget CHARS] [--generate-token] [--lifetime SECONDS]
+             [--instructions-budget CHARS] [--skip-probes] [--generate-token] [--lifetime SECONDS]
 
   {__description__}\
 """
@@ -101,6 +102,8 @@ Options:
       --ssh-host    HOST        SSH host to connect to (required for ssh mode).
       --instructions-budget CHARS
                                 Most characters the served instructions may take (default: {DEFAULT_BUDGET}).
+      --skip-probes             Serve every installed capability without probing the cluster for
+                                the commands it needs (ssh and local modes probe by default).
       --generate-token          Generate a JWT token and exit (requires JWT_SECRET).
       --sub         SUBJECT     Subject identifier for token (username or user ID).
       --lifetime    SECONDS     Token lifetime in seconds (default: {DEFAULT_LIFETIME}).
@@ -117,6 +120,7 @@ Environment Variables:
   CLUSTER_MCP_USER_MAP      Path to user mapping file for delegate mode.
   CLUSTER_MCP_INSTRUCTIONS_BUDGET
                             Default for --instructions-budget.
+  CLUSTER_MCP_SKIP_PROBES   Any non-empty value, 0 included, does as --skip-probes; empty is unset.
 
 Examples:
   {APP_NAME} --ssh-host login.cluster.edu         # SSH to cluster (stdio)
@@ -156,6 +160,9 @@ class MCPServerApp(Application):
 
     instructions_budget: int | None = None
     interface.add_argument('--instructions-budget', type=int, default=instructions_budget)
+
+    skip_probes: bool = False
+    interface.add_argument('--skip-probes', action='store_true', dest='skip_probes')
 
     generate_token_flag: bool = False
     interface.add_argument('--generate-token', action='store_true', dest='generate_token_flag')
@@ -213,8 +220,14 @@ class MCPServerApp(Application):
 
         try:
             budget = self._resolve_budget()
+            skipped = self._resolve_skip_probes()
             site = self._read_site(exec_mode, executor)
-            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget)
+            # The budget must hold every installed capability's text, so whether it fits never
+            # depends on what the cluster answers, and a budget that cannot fit refuses before any probe.
+            site_context.compose(base_instructions(installed()), site, budget)
+            served = self._served(self._probe(exec_mode, executor, skipped))
+            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,
+                                    capabilities=served)
             if self.transport == 'stdio':
                 mcp.run(transport='stdio')
             elif self.transport == 'sse':
@@ -274,6 +287,44 @@ class MCPServerApp(Application):
         if budget <= 0:
             raise ValueError(f'the instructions budget must be over 0, not {budget}')
         return budget
+
+    def _resolve_skip_probes(self) -> str | None:
+        """What skips every probe: `--skip-probes`, else CLUSTER_MCP_SKIP_PROBES when it holds any
+        non-empty value (never parsed, so `0` skips too); None when neither does."""
+        if self.skip_probes:
+            return '--skip-probes'
+        value, variable = env_setting('CLUSTER_MCP_SKIP_PROBES')
+        return variable if value else None
+
+    def _probe(self, exec_mode: str, executor, skipped: str | None) -> probes.Pending:
+        """Start probing every installed capability through the shared executor, once.
+
+        In `delegate` mode, or when `skipped` names what skips it, nothing is probed: one line says so
+        (the delegate line alone when both apply) and every installed capability is served.
+        """
+        loaded = installed()
+        if exec_mode == 'delegate':
+            log.info('Capability probes skipped in delegate mode: every installed capability is served')
+            return probes.unprobed(loaded)
+        if skipped:
+            log.info(f'Capability probes skipped ({skipped}): every installed capability is served')
+            return probes.unprobed(loaded)
+        return probes.start(executor, loaded)
+
+    def _served(self, pending: probes.Pending) -> tuple:
+        """The installed capabilities to serve, in load order, once the probe has answered or its
+        deadline has passed: one line for each capability withheld, and one for each served without
+        an answer."""
+        served = []
+        for verdict in pending.verdicts():
+            name = verdict.loaded.distribution
+            if not verdict.served:
+                log.info(f'Capability {name} withheld: the cluster is {verdict.reason}')
+                continue
+            if verdict.reason:
+                log.warning(f'Capability {name} served without a probe answer: the probe {verdict.reason}')
+            served.append(verdict.loaded)
+        return tuple(served)
 
     def _read_site(self, exec_mode: str, executor):
         """Read /etc/agents.d once: the cluster's over the executor in ssh mode, else this host's.

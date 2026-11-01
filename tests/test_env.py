@@ -13,7 +13,8 @@ which carries the stdio transport. An empty value counts as unset, and nothing i
 whitespace-only host is truthy, and the execution-mode ladder must keep selecting `ssh` for it.
 
 The pairs below are written out, not read from `LEGACY_ENV`, so a dropped or renamed pair fails
-here. The warnings are read from `caplog` (the records the deprecation logger emits) and stdout from
+here. A variable that came after the rename has no legacy name (None in `LEGACY_ENV`): it is read
+alone, an empty value counting as unset, with no warning. The warnings are read from `caplog` (the records the deprecation logger emits) and stdout from
 `capsys`; a fixture resets the warn-once set before every test.
 """
 
@@ -60,9 +61,38 @@ def one_warning(caplog: pytest.LogCaptureFixture, old: str) -> str:
     return found[0]
 
 
+# The variables that came after the rename, so have no legacy name.
+NO_LEGACY = ('CLUSTER_MCP_SKIP_PROBES',)
+
+
 @pytest.mark.unit
 def test_every_variable_has_its_legacy_name() -> None:
-    assert LEGACY_ENV == {new: old for new, old, _ in PAIRS}
+    assert {new: old for new, old in LEGACY_ENV.items() if old is not None} == {new: old for new, old, _ in PAIRS}
+    assert sorted(new for new, old in LEGACY_ENV.items() if old is None) == sorted(NO_LEGACY)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('name', NO_LEGACY)
+@pytest.mark.parametrize(('value', 'expected'), [
+    pytest.param('1', '1', id='set'),
+    pytest.param('0', '0', id='zero'),
+    pytest.param(' ', ' ', id='space'),
+    pytest.param('', None, id='empty'),
+    pytest.param(None, None, id='unset'),
+])
+def test_a_variable_without_a_legacy_name(name: str, value: str | None, expected: str | None,
+                                          monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+                                          capsys: pytest.CaptureFixture[str]) -> None:
+    # Read alone, as given, an empty value counting as unset, with no legacy branch and no warning.
+    if value is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, value)
+    with caplog.at_level(logging.DEBUG, logger=LOGGER):
+        got = env_setting(name)
+    assert got == (expected, name), f'{name}={value!r}: resolved {got!r}, expected {(expected, name)!r}'
+    assert [r.getMessage() for r in caplog.records if r.name == LOGGER] == []
+    assert capsys.readouterr().out == ''
 
 
 @pytest.mark.unit

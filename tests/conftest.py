@@ -6,7 +6,7 @@
 The collection hook fails the run on a test carrying neither `unit` nor `integration`. The fixtures
 below it act on every test without adding or reading markers for any other purpose, so they cannot
 launder that hook: a session-wide PATH shim for `sudo` and `ssh` (re-pinned inside a login bash
-through `BASH_ENV`), the unit guard (no process, no network, no real HOME), the `launches` recorder,
+through `BASH_ENV`), the session-wide capability-probe override (`CLUSTER_MCP_SKIP_PROBES`), the unit guard (no process, no network, no real HOME), the `launches` recorder,
 the `executes` launcher (real executions of the local and delegate backends, fenced and sandboxed),
 the `open_tmp` directory every account can reach, and a check that no executor leaks into the main
 context.
@@ -193,6 +193,31 @@ def path_shim(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+# The operator override every test and child runs under, whatever the calling shell exported.
+SKIP_PROBES = 'CLUSTER_MCP_SKIP_PROBES'
+
+
+@pytest.fixture(scope='session', autouse=True)
+def skip_probes() -> Iterator[None]:
+    """Serve every installed capability unprobed in every test and every child it starts.
+
+    A start in `local` or `ssh` mode would otherwise look up the members' commands on this host, which
+    has none of them: in process the unit guard refuses the lookup's process, and a CLI drive would
+    see both members withheld. A test of the probe removes the variable from its own environment
+    (`monkeypatch.delenv`) or from its child's, and drives the probe for real. The calling shell's
+    value is put back afterwards.
+    """
+    saved = os.environ.get(SKIP_PROBES)
+    os.environ[SKIP_PROBES] = '1'
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop(SKIP_PROBES, None)
+        else:
+            os.environ[SKIP_PROBES] = saved
 
 
 @pytest.fixture(autouse=True)

@@ -120,7 +120,8 @@ def create_mcp_server(
         site: The site context read at startup; the server never reads it again.
         budget: The most characters the composed instructions may take.
         capabilities: The loaded capabilities to serve, in any order; None serves every installed one
-            (`installed()`). No flag or environment variable reaches it: installation is the switch.
+            (`installed()`). `run()` passes the installed capabilities the probe kept (AGENTS.md
+            § Invariants §4); nothing else on the startup path chooses them.
 
     Returns:
         Configured FastMCP server instance.

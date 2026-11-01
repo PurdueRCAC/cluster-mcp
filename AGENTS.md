@@ -21,7 +21,8 @@ three distributions under one `cluster_mcp` namespace: the core `cluster-mcp` (`
 and the Slurm and RCAC members (`cluster_mcp.slurm`, `cluster_mcp.rcac`; § Repository map,
 § Packaging). The members are capabilities, installed as the core's extras
 (`cluster-mcp[slurm,rcac]`); a bare `cluster-mcp` is the core alone, and the server serves the tools
-of the capabilities installed (§ Invariants §7). The console entry point
+of the capabilities installed, except those whose commands the cluster lacks (the probe at startup,
+§ Invariants §4, §7). The console entry point
 (`packages/cluster-mcp/pyproject.toml [project.scripts]`) is **`cluster-mcp`** →
 `cluster_mcp.core:main`, and `python -m cluster_mcp.core` works via `__main__.py`. The server's old
 name, **`rcac-mcp`**, is a deprecated command (`cluster_mcp.core:legacy_main`, installed by the root
@@ -157,13 +158,14 @@ member modules:
 
 | Path | Responsibility |
 |------|----------------|
-| `__init__.py` | `MCPServerApp` (cmdkit `Application`) — all CLI wiring, `APP_HELP`, defaults, `_load_capabilities()` (the capability load, before the ladder), `_resolve_exec_mode()`, `_create_executor()`, `main()`, and `legacy_main()`, the deprecated `rcac-mcp` command (one warning, then `main`). **There is no `cli/` package.** |
+| `__init__.py` | `MCPServerApp` (cmdkit `Application`) — all CLI wiring, `APP_HELP`, defaults, `_load_capabilities()` (the capability load, before the ladder), `_resolve_exec_mode()`, `_create_executor()`, `_resolve_budget()` (`--instructions-budget`, else `CLUSTER_MCP_INSTRUCTIONS_BUDGET`), `_resolve_skip_probes()` (`--skip-probes`, else `CLUSTER_MCP_SKIP_PROBES`), `_read_site()` (the site read, once, §8), `_probe()` (the capability probe, once, through the shared executor in `ssh` and `local` modes, after the site read and the budget check against every installed capability; skipped in `delegate` mode and under `--skip-probes`, with one line), `_served()` (the capabilities the probe kept, which the server is built from, with one line for each withheld or served without an answer), `main()`, and `legacy_main()`, the deprecated `rcac-mcp` command (one warning, then `main`). **There is no `cli/` package.** |
 | `__main__.py` | `python -m cluster_mcp.core` shim. |
 | `deprecation.py` | `WINDOW`, the deprecation window of the server's old names, and `legacy_warning()`, the warning a legacy name prints on stderr, once per process per name, never on stdout. |
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`) or a capability's load failure (`cannot load capability <distribution>: <cause>`, from `capabilities.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
-| `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
+| `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (`run()` gives the ones the probe kept; by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
-| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; whatever a capability raises or exits with but a `KeyboardInterrupt` is refused naming it; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a capability resource that is not a well-formed entry, not marked `executor: True`, at a URI already served, or that FastMCP refuses when `serve()` assembles it on the load's scratch server (§7, §8); `serve()` is how every server registers tools and resources. Imports no member. |
+| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; whatever a capability raises or exits with but a `KeyboardInterrupt` is refused naming it; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a record any of whose values (its `commands` included) is not exactly its built-in type, a capability resource that is not a well-formed entry, not marked `executor: True`, at a URI already served, or that FastMCP refuses when `serve()` assembles it on the load's scratch server (§7, §8); `serve()` is how every server registers tools and resources. Imports no member. |
+| `probes.py` | The capability probe (§4, §7): `PROBE_TIMEOUT` (10 s, the one bound on every probe of a start), `LOOKUP` (the registered fixed script that answers, for each declared command, whether `type -P` finds it on PATH), `Verdict`, `Pending` (its deadline taken when the probe starts; `verdicts()` waits until it at most and decides each capability once), `start()` (one lookup of every command the loaded capabilities declare, through the executor given, on a daemon thread, or none when none is declared) and `unprobed()` (every capability served, nothing run). It decides which loaded capabilities the cluster can serve, never what startup does with that. Imports no member. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
 | `auth.py` | `AUTH_MODES` registry: `none` → `None`, `jwt` → `JWTVerifier`, `oidc` → `OIDCProxy`. Enforces the `JWT_SECRET` minimum and OIDC's all-four check. |
@@ -181,11 +183,11 @@ member modules:
 | `tools/context.py` | `cluster_context`: the site context read at startup, in full; runs nothing and needs no executor. |
 | `cluster_mcp.slurm.tools` | The Slurm member (`packages/cluster-mcp-slurm/src/cluster_mcp/slurm/tools.py`): `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol_show_*`. |
 | `cluster_mcp.slurm.instructions` | `SLURM_INSTRUCTIONS`, the Slurm snippet of the served instructions: every Slurm member tool. Imports nothing. |
-| `cluster_mcp.slurm.capability` | `CAPABILITY`: name `slurm`, order 100, tools `cluster_mcp.slurm.tools`, text `SLURM_INSTRUCTIONS`. The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
+| `cluster_mcp.slurm.capability` | `CAPABILITY`: name `slurm`, order 100, tools `cluster_mcp.slurm.tools`, text `SLURM_INSTRUCTIONS`, commands `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo` and `scontrol` (what the probe looks up: a cluster without one is served no Slurm tool, §7). The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 | `cluster_mcp.rcac.tools` | The RCAC member (`packages/cluster-mcp-rcac/src/cluster_mcp/rcac/tools.py`), Purdue-specific: `myquota`, `storage_paths` (its body the undecorated `resolve_storage_paths()`, which `cluster://storage` also calls), `jobinfo`/`jobcmd`/`jobenv`/`jobscript`, `showpartitions`, `average_wait`, and RCAC's Slurm extensions `slist`/`sfeatures`. |
 | `cluster_mcp.rcac.instructions` | `RCAC_INSTRUCTIONS`, the overlay on the served instructions: first line `RCAC-specific tools:`, then every RCAC member tool and `cluster://storage`. Imports nothing. |
 | `cluster_mcp.rcac.resources` | `STORAGE`, the `cluster://storage` entry (`executor: True`): its handler formats the storage summary from `resolve_storage_paths()` on the request's executor, importing the helper inside the handler, so importing this module registers no tool. |
-| `cluster_mcp.rcac.capability` | `CAPABILITY`: name `rcac`, order 900 (the overlay sorts last), tools `cluster_mcp.rcac.tools`, text `RCAC_INSTRUCTIONS`, resources `STORAGE` and its `rcac://storage` alias (`legacy_aliases`). The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
+| `cluster_mcp.rcac.capability` | `CAPABILITY`: name `rcac`, order 900 (the overlay sorts last), tools `cluster_mcp.rcac.tools`, text `RCAC_INSTRUCTIONS`, resources `STORAGE` and its `rcac://storage` alias (`legacy_aliases`), commands `findscratch` and `myquota` (what the probe looks up: a cluster without one is served none of the RCAC tools, resources or text, §7). The member's entry point in `cluster_mcp.capabilities` names it; importing it registers no tool. |
 
 Five repo-level paths sit outside the members: **`bin/sandbox.sh`** — the throwaway-environment
 helper every CLI drive runs under (§ Factory → Throwaway environment); **`bin/audit_lock.py`** — the
@@ -230,10 +232,16 @@ and under `sudo`. A resource read takes the same path: the executor middleware s
 executor in `on_read_resource`, and `cluster://storage`'s handler reaches it through
 `resolve_storage_paths()`, the helper the `storage_paths` tool also calls (§1, §7, §8).
 
-One read happens before any request: at startup, `run()` reads `/etc/agents.d` once, as the server
-(over the shared executor in `ssh` mode, in this process otherwise), bounded by `site.READ_TIMEOUT`,
-and hands the result to `create_mcp_server`, which composes it into the served instructions and
-holds it for `cluster_context` and `cluster://context` (§8). No request reads the site again.
+Two things run before any request. At startup, `run()` reads `/etc/agents.d` once, as the server
+(over the shared executor in `ssh` mode, in this process otherwise), bounded by `site.READ_TIMEOUT`.
+Then, once the budget is checked against every installed capability, in `ssh` and `local` modes it
+probes the cluster once (`core/probes.py`): one lookup, over the same shared executor, of every
+command the installed capabilities declare, bounded by `probes.PROBE_TIMEOUT`, and a capability
+whose command the cluster lacks is withheld; `delegate` mode and `--skip-probes` run no probe and
+serve every installed capability (§4, §7). `run()` hands the site read and the capabilities the
+probe kept to `create_mcp_server`, which composes the site into the served instructions, holds it
+for `cluster_context` and `cluster://context` (§8), and serves only those capabilities' tools,
+resources and text (§9). No request reads the site or probes the cluster again.
 
 The contracts each piece keeps — request isolation, the executor protocol, the execution-mode
 ladder, delegation and auth, tool registration, resources, and the agent-facing surface — are
@@ -251,6 +259,7 @@ There is no config file and no config singleton — everything is CLI flags plus
 | `OIDC_CONFIG_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `MCP_BASE_URL` | OIDC proxy (all four required together) |
 | `MCP_BASE_URL` | also used to build the absolute icon URL in `server.py` |
 | `CLUSTER_MCP_INSTRUCTIONS_BUDGET` | the most characters (UTF-16 code units, as JavaScript clients count) the served instructions may take; default 4096, Claude Code's cut; `--instructions-budget` overrides |
+| `CLUSTER_MCP_SKIP_PROBES` | skip the capability probe and serve every installed capability (§4), as `--skip-probes` does: any non-empty value turns it on, `0`, `false` and `off` included, since the value is never parsed; empty counts as unset |
 
 **The legacy names are honoured, with a warning, through the deprecation window.** `RCAC_SSH_HOST`,
 `RCAC_USER_MAP` and `RCAC_INSTRUCTIONS_BUDGET` are the three variables' names from before the rename.
@@ -264,7 +273,10 @@ module that names a legacy variable or reads a replacement from the environment:
 - each legacy name warns at most once per process;
 - an empty value counts as unset, and the resolver strips nothing: a whitespace-only host is
   truthy and still selects `ssh` (§4). Only the budget's caller strips, as it always has, and its
-  error names the variable it actually read.
+  error names the variable it actually read;
+- a variable that came after the rename, `CLUSTER_MCP_SKIP_PROBES`, has no legacy name (`None` in
+  `LEGACY_ENV`): the resolver reads it alone, an empty value again counting as unset, with no
+  warning, so it is still the one reader of every variable.
 
 The window is one string wherever a user reads it: `WINDOW`, every warning, and README § Upgrading
 from rcac-mcp, whose table pairs each deprecated name with exactly one replacement and which names
@@ -281,6 +293,14 @@ import has no effect.
 
 ## Testing
 
+- **The suite skips the capability probe by default.** A session `autouse` fixture in
+  `tests/conftest.py` (`skip_probes`) sets `CLUSTER_MCP_SKIP_PROBES=1` for every test and every child
+  it starts, whatever the calling shell exported, and puts the shell's value back afterwards; without
+  it every in-process start in `local` mode would launch the lookup the unit guard refuses, and every
+  CLI drive would see both members withheld on a host without their commands. A probe test opts in
+  by removing the variable: `monkeypatch.delenv` in process, or a child environment without it
+  (`tests/test_probe_startup.py`, `tests/test_probes.py`). `tests/test_hygiene.py::test_the_suite_skips_probes_by_default`
+  pins the fixture.
 - `uv run pytest`. Only **`@mark.unit`** and **`@mark.integration`** are real markers under
   `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
   hook that fails the run with a `pytest.UsageError` listing any collected test that carries
@@ -362,7 +382,10 @@ import has no effect.
     list exactly its tools, a resource not marked `executor: True` (`False`, missing or merely
     truthy), a malformed resource (not a dict, a non-`str` `uri`, `name` or `description`, a handler
     not callable), a resource URI the core, an earlier capability or the capability itself already
-    serves. Each is refused in one line naming its distribution, and a failed load leaves
+    serves, and a value of a type of its own wherever the record holds a built-in one (`exact-<site>`,
+    `EXACT_SITES`: each field, a command, a resource entry, a key of one, and each value of one but
+    its handler; a subclass of `str`, `int`, `tuple` or `dict` whose every operation in `OPERATIONS`
+    exits once its record is built), refused for its type with none of those operations run. Each is refused in one line naming its distribution, and a failed load leaves
     `TOOL_REGISTRY` as it was. Whatever a capability's code raises or exits with (an `Exception`,
     `SystemExit` with 0, an int, a string or none, another `BaseException`, an exception whose text
     exits), whenever it runs (its entry point's import, its tools module's, the load's reading of
@@ -370,7 +393,9 @@ import has no effect.
     of a non-tool made at its entry point's import (by that module, a module it imports, or its
     tools module imported from it), and a distribution whose metadata cannot be read or names none
     (named by its entry point's value) are each refused naming it beside each member set
-    (`test_a_capability_that_cannot_load_is_refused_naming_it`); a `KeyboardInterrupt` at any of
+    (`test_a_capability_that_cannot_load_is_refused_naming_it`), and so is a distribution whose `Name`
+    is a `str` of a type of its own, as no name, none of its operations run
+    (`test_a_distribution_name_of_a_type_of_its_own_is_no_name`); a `KeyboardInterrupt` at any of
     those times interrupts the load, the registry cut back; a capability whose entry point imports
     its own tools module loads. Unreadable entry points are refused while the group is discovered,
     named by the distribution's `Name` or its path. The orders are pinned against every other key:
@@ -394,11 +419,56 @@ import has no effect.
     serves (`test_aliases_follow_every_primary_uri`). A planted capability with a tool and a
     resource is discovered and served beside the members, its text placed by its order, with no
     core edit. No core module imports a member by name (`member_import_violations`, an AST scan of
-    every core module, §7).
+    every core module, §7). Each malformed command declaration (`COMMAND_DECLARATIONS`: another
+    container, a non-`str` element, a name that is not a plain command name, one declared twice, a
+    subclass of `tuple` or `str`) is refused at load beside each member set
+    (`test_a_malformed_command_declaration_is_refused_at_load`); a planted capability's well-formed
+    declaration loads as declared with no core edit, and the members declare theirs
+    (`test_the_members_declare_their_commands`).
     `tests/conftest.py` calls `installed()` once at import, so every test sees the same registry,
     in the same order, whatever it imports first. A failed load does not stop collection: the
     report header names it, every test that needs the installed capabilities fails with it, and the
     tests of the load, which plant their own, still run.
+  - `tests/test_probes.py` (`unit`, `integration`): the capability probe (`core/probes.py`, §7).
+    The outcome rows run against `harness.ProbeExecutor` beside each member set, each with two
+    capabilities made in the test (one sharing a member's command, one declaring none), at a bound of
+    0.3 s: nothing declared runs nothing; every declared command is looked up once, in load order,
+    by one call of the registered `LOOKUP` given the bound; the verdicts follow the answer exactly
+    (a capability with a command not found is withheld naming exactly those); every ending without
+    an answer (`ENDINGS`: each exit code, each malformed answer, each thing an executor returns
+    instead of a result or raises, `SystemExit` and other `BaseException`s included, a worker thread
+    that cannot start) serves each capability that declares a command with its reason, decided at
+    once; a hung lookup is abandoned at the bound, read when the probe starts, on a daemon thread;
+    the deadline is taken when the probe starts, so verdicts first asked for after it has passed are
+    decided at once, and ones asked for before an answer that comes within it wait for it
+    (`test_the_deadline_is_taken_when_the_probe_starts`); the verdicts are decided once, and a late
+    answer changes nothing; an interrupt while the probe
+    starts still interrupts. `PROBE_TIMEOUT` is pinned at 10 s, no more than the site read's bound.
+    The lookup itself runs through the login bash (`executes`, beside each member set) with stubs a
+    login profile puts first on PATH, an exported function and an exported `type` function, and
+    over the loopback SSH server, present, absent and with the connection lost.
+  - `tests/test_probe_startup.py` (`unit`, `integration`): the probe at startup (§4). In process,
+    `MCPServerApp.main` runs with a `harness.ProbeExecutor` as the shared executor, the site read
+    stubbed and every step of the start recorded in order (`ORDER`), beside each member set with two
+    capabilities made in the test (one declaring a command, one declaring none): `local` and `ssh`
+    look every declared command up once, through the executor the middleware shares, after the
+    load, the ladder, the executor, the budget, the override's resolution, the site read and the
+    budget check against every installed capability, and before the server is built from what the
+    probe kept, with one INFO line per withheld capability; every ending without an answer
+    (`ENDINGS`) serves every capability, one WARNING line each, over stdio, HTTP and SSE; a hang is held to the bound
+    after the site read; an interrupt while the start waits still interrupts; the real server's
+    instructions name exactly the tools it serves over each withheld set; `delegate` mode runs no
+    probe and says so in one INFO line, the override set or not; the flag, and the variable with any
+    non-empty value, skip it in `local` and `ssh` modes with one INFO line naming which (the flag,
+    when both are set), and empty probes; every line is compared with its record's level; no probe
+    runs before any refusal (a load refusal, a failed connect, `--generate-token`, each budget
+    refusal, a budget short of every installed capability's text included), and the budget never
+    depends on the answer. Then the real CLI in `local` mode under `bin/sandbox.sh`, the override
+    removed, behind a `.bash_profile` that puts stubs first on PATH and logs each login: every
+    command present serves everything, a withheld member is missing from a stdio listing with its
+    line on stderr at its level, a login that ends at once serves every capability, and both hold with stdin
+    closed and over HTTP; each drive starts one login. The suite never waits out the real 10 s
+    bound.
   - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
     read on a planted directory: every regular `*.md` file directly in it but `AGENTS.md` (dotfiles,
     `.md`, a space, `-n.md` and `end 0.md` included; `Upper.MD`, a `.txt`, a whitespace-only file, a
@@ -585,7 +655,9 @@ import has no effect.
     naming its distribution over the raw wire, with stdin closed and over `http` before binding
     (`test_a_contribution_the_server_would_refuse_stops_startup`), and so is each kind of
     `test_capabilities.UNLOADABLE` (whatever its code raises or exits with, whenever; a registration
-    made at its entry point's import; a nameless distribution, named by its entry point's value)
+    made at its entry point's import; a nameless distribution, named by its entry point's value; a
+    subclass of `Capability`; a value of a type of its own in the record, which on a start that let it
+    load ended the start with exit 0 and no message once composing the base compared it)
     (`test_a_capability_that_cannot_load_stops_startup`); each drive runs in its own process group,
     killed whole if it outlives its bound. The suite drives one kind of each family
     (`CLI_REJECTED`, `CLI_UNLOADABLE`): after the load the CLI's handling does not depend on the
@@ -1705,14 +1777,18 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
   which tools each registers and the order of the base's texts (§7, §9)
 - `packages/cluster-mcp-slurm/src/cluster_mcp/slurm/capability.py` and
   `packages/cluster-mcp-rcac/src/cluster_mcp/rcac/capability.py` — each selects its member's tools
-  module, its text and the text's place in the base (§9)
+  module, its text and the text's place in the base (§9), and declares the commands it needs (§7)
+- `packages/cluster-mcp/src/cluster_mcp/core/probes.py` — decides which loaded capabilities the
+  cluster can serve, from one lookup it runs on the cluster (§7)
 
 The `src/rcac_mcp/` entries are these files' homes before the workspace move, kept because the list
 only widens. These are the files where a mistake executes someone else's command, executes as the wrong user, or
 executes on the wrong machine, but for the three `instructions.py` entries and the three that load
 and place them (`capabilities.py` and the two `capability.py`): they hold or compose the base's
 text, which left `server.py` for them, so the list widened to follow it, and a mistake there
-misleads every model rather than running anything. Everything else in the tree is a leaf.
+misleads every model rather than running anything. `probes.py` runs one fixed lookup on the
+cluster, and decides which capabilities' tools and text are served: a mistake there hides working
+tools or advertises ones that cannot run. Everything else in the tree is a leaf.
 
 #### Footguns (quick reference)
 
@@ -1788,7 +1864,9 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   the staging afterwards, but for a host lost after staging, which can leave it (§2); `run`, which starts every program in `$HOME`
   and builds the exec string (refusing an oversize one) before connecting; the SFTP `~` mapping
   (`_remote`).
-- **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder.
+- **`__init__.py`** — `_resolve_exec_mode()`, the posture ladder; `run()`'s order, every refusal
+  before the probe and the budget checked against every installed capability, never the served set
+  (§4).
 - **`server.py`** — `base_instructions()` (what every model reads; its texts are the core's and
   each loaded capability's, §9), the listing order `create_mcp_server` keeps (the core's tools,
   each capability's by distribution, `cluster_context` last), and import-time `MCP_BASE_URL`.
@@ -1797,7 +1875,19 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   its tools whether or not its capability loads (§7).
 - **`capabilities.py`** — `installed()` is the one load: a second `load()` of the same capabilities
   registers nothing new, and a member whose editable install was not re-synced after its entry
-  point was added is silently absent (§7).
+  point was added is silently absent (§7). Every type check of the record, of each value in it (each
+  command, each resource entry, its keys and its values but the handler) and of the distribution's
+  name is exact (`type(...) is`), never `isinstance`, and comes before the value is used: a
+  subclass's code would run when startup composes the base or probes, or a server lists the
+  record's tools and resources, after the load where nothing guards it. A refusal's text formats a
+  value only once it is exactly a built-in type (`_shown`).
+- **`probes.py`** — `LOOKUP`'s `type -P` (`command -v` and `type -t` count a profile function or a
+  builtin as present, where `exec` fails) and its `unset -f type`; the parser's exact shape, split on
+  `\n` alone with the final newline required, never `splitlines`; the deadline taken in `start()`,
+  never at the wait; the worker a daemon that catches `BaseException` (a `SystemExit` silently ends
+  a thread, which would cost the whole bound), and dies with the interpreter, between its timeout's
+  SIGTERM and SIGKILL if the server exits then (§3's recorded limit); the verdicts memoized, so a late answer changes
+  nothing; the bound handed to the executor as well (§7).
 - **`site.py`** — the per-server holder (`register`/`site_of`, a `WeakKeyDictionary` keyed by the
   server object): the site context is set once at construction and read by that server's tool and
   resource, never per user and never keyed by hostname, never one module value (two servers in one
@@ -2047,6 +2137,12 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
 - **A timed-out command may outlive the call** (recorded, not fixed): over SSH the server is asked
   to TERM it and the channel is closed, and under a non-root `delegate` server `sudo` relays TERM
   only to the command; `issues/timeout-process-cleanup.md`. The contract above holds either way.
+- **A `local` command can outlive the server that launched it** (recorded, not fixed): only the call
+  that launched a process group signals it, from its own thread. A server killed mid-command leaves
+  the group running; and the startup probe's worker, a daemon thread abandoned at the probe's
+  deadline, dies with the interpreter when the server exits normally within `GRACE` of its timeout's
+  SIGTERM, before its SIGKILL, so a group that ignores SIGTERM runs on;
+  `issues/local-command-outlives-server.md`.
 - `hostname` differs by mode: the SSH target for `SSHExecutor`, `socket.gethostname()` for the local
   and delegating executors. It is **not** a user-distinguishing key: in delegate mode every user
   reports the same value (see §8).
@@ -2088,6 +2184,32 @@ runs what, where. The current order is:
   capability is reported ahead of a missing SSH host. The server never starts with an installed
   capability silently missing. `--help` and `--version` never reach `run()`, so they work with a
   broken capability installed (`tests/test_startup.py`).
+- **The capability probe runs once, after the site read and every refusal, and before the server is
+  built.** Inside
+  `run()`'s `try` the order is: the budget's resolution, the override's (`--skip-probes`, else
+  `CLUSTER_MCP_SKIP_PROBES` with any non-empty value, § Configuration), the site read (§8), then the
+  budget checked against the base of **every installed** capability with the site, so a budget too
+  small refuses (`bad_argument`) before any probe command runs and never depends on what the cluster
+  answers; then the probe, then `create_mcp_server(…, capabilities=served)`. So the load refusal,
+  the connect refusal, `--generate-token` and every budget refusal all come before the probe, and
+  `--help` and `--version` never reach it. In `ssh` and `local` modes the probe runs on the shared
+  executor the middleware holds, once for the life of the process (`core/probes.py`, §7): every
+  declared command looked up in one call, bounded by `PROBE_TIMEOUT` (10 s, no more than the site
+  read's `READ_TIMEOUT`, for every capability together, not configurable), so the probe adds at
+  most 10 s after the site read. A capability the cluster lacks a command of is withheld (none of
+  its tools, resources or text) with one INFO line, `Capability <distribution> withheld: the
+  cluster is missing <a>, <b>`; any ending without an answer (the bound passed, a lost connection,
+  a command that did not start or exited nonzero, an answer that does not parse, anything raised)
+  fails open: the capability is served, with one WARNING line, `Capability <distribution> served
+  without a probe answer: the probe <reason>`, and startup goes on. `delegate` mode runs no probe
+  (no executor exists at startup, and every user is served the same list) and logs one INFO line,
+  `Capability probes skipped in delegate mode: every installed capability is served`, whether or
+  not the override is set; the override in `ssh` or `local` mode runs none either and logs one INFO
+  line, `Capability probes skipped (<--skip-probes | CLUSTER_MCP_SKIP_PROBES>): every installed
+  capability is served`, which names the flag whenever it is given: with both set, the flag wins.
+  A start logs exactly one skip line or the probe's lines, never both, each at the level named here
+  (`tests/test_probe_startup.py` compares every line with the level its record was logged at,
+  beside every member set, and runs the flag and the variable together).
 
 What each mode means:
 
@@ -2167,7 +2289,7 @@ What each mode means:
   (`tests/test_capabilities.py::test_core_imports_no_member`).
 - Every other tool belongs to a **capability**: a distribution that declares one entry point in the
   group **`cluster_mcp.capabilities`**, `<name> = "cluster_mcp.<name>.capability:CAPABILITY"`,
-  naming a `Capability(name, order, tools, instructions, resources)` (`capabilities.py`). The
+  naming a `Capability(name, order, tools, instructions, resources, commands)` (`capabilities.py`). The
   Slurm and RCAC members are capabilities. `installed()` loads every one the environment has, once:
   when the CLI starts, before the mode ladder (§4), and otherwise when a server is built with no
   capability set given (and once at the top of `tests/conftest.py`);
@@ -2178,14 +2300,22 @@ What each mode means:
   and named, by its entry point's value. For each it loads the entry point, checks it is a
   well-formed `Capability`, imports its `tools` module and attributes to it every registered tool
   defined in that module or below it. It refuses a capability:
-  - whose distribution's metadata cannot be read or has no `Name` (before any of its code runs);
+  - whose distribution's metadata cannot be read or has no `Name` (a `Name` that is not exactly a
+    non-blank `str` is none), before any of its code runs;
   - whose code raises or exits at any point of its load (its entry point's import, its tools
     module's, the load's reading of what it declared, FastMCP's reading of its handlers): any
     `Exception`, `SystemExit` with any code (0, an int, a string, none) and any other
     `BaseException` but `KeyboardInterrupt`, the cause being the type and its text (the type alone
     when its text is empty or cannot be had);
-  - that is not a `Capability`, or one of whose resources is not a dict with a `str` `uri`, `name`
-    and `description` and a callable `handler`, or is not marked `executor: True`;
+  - that is not exactly a `Capability`: a subclass is refused too, its type named (`the entry point
+    names a <type>, not a Capability`), before any field is read;
+  - one of whose values is not exactly its built-in type, a subclass included, its type named: `name`,
+    `tools` and `instructions` a `str`, `order` an `int` (never a `bool`), `resources` a `tuple` of
+    entries each exactly a `dict` whose every key is a `str`, with a `str` `uri`, `name` and
+    `description`, a callable `handler` and `executor` exactly `True` (marked so: it is never open);
+  - whose `commands` is not exactly a `tuple` of exactly `str`, or names a
+    command that is not a plain command name (`COMMAND`: a letter, digit or `_`, then up to 254 of
+    those or `.`, `+`, `-`; no path, space or shell character) or one already declared;
   - that registers anything but a `FunctionTool`, or a tool outside its tools module, at any time
     since its load began: its entry point's import included, and whether the load or its own code
     (its entry-point module, or a module either imports) imported its tools module;
@@ -2218,6 +2348,40 @@ What each mode means:
   Configuration), whatever made it long.
 - `installed()` caches the load once it succeeds and never a failure: a failed load raises again,
   loading again, on the next call (`test_a_failed_load_is_not_cached`).
+- **A capability's `commands` are the commands its tools need on the cluster, declared as data and
+  never as code**, so a probe of them runs no capability code. The Slurm member declares its six
+  client commands (`sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol`); the RCAC member
+  declares `findscratch` and `myquota`, which its storage resource needs and which mark the site;
+  `()`, the default, declares none, and such a capability is served wherever it is installed. A
+  malformed declaration is refused at load, as above. `core/probes.py` decides, for a set of loaded
+  capabilities, which the cluster can serve: `start()` looks every declared command up at once,
+  each once in load order, with one registered fixed script (`LOOKUP`) through the executor it is
+  given, which runs `type -P` (a file on PATH, what a tool's `exec` runs; never a function, builtin
+  or alias) after undoing a function named `type`, and answers one `0` or `1` line per name, then
+  `end <count>`. It runs on a daemon thread, under one deadline taken when it starts
+  (`PROBE_TIMEOUT`, 10 s, no more than the site read's, for every capability together), and the
+  executor is given the same bound. `Pending.verdicts()` decides each capability once: one with a
+  command the answer does not find is withheld, naming each; every other ending (no answer by the
+  deadline, any nonzero or sentinel exit, an answer that is not exactly that shape, each line ended
+  by a newline alone, anything returned instead of a result or raised, `SystemExit` included, a
+  worker that cannot start) serves it, with the reason. A declaration of none runs nothing
+  (`tests/test_probes.py`). Startup runs it once, in `ssh` and `local` modes only, and builds the
+  server from the capabilities it serves (§4).
+- **No read of a loaded record runs capability code.** The record is exactly a `Capability`
+  (`type(value) is Capability`, never `isinstance`), every value in it the core or FastMCP reads is
+  exactly a built-in type (the refusals above), and so is the distribution's name, by which
+  `composed()` and the listing order the records. The load checks each before it uses it and
+  refuses anything else, naming the distribution, so a comparison, hash, iteration or format of a
+  record's value after the load (startup composing the base and probing, a server listing tools and
+  resources) runs none. What does run capability code: its modules, at the load, and its tools
+  (each a `FunctionTool` holding its function) and resource handlers, which FastMCP reads as it
+  registers them, on the load's scratch server and again on each server built after, and a request
+  calls (`test_a_capability_that_cannot_load_is_refused_naming_it`: its `subclass-reads-<field>`
+  rows for every field of the record and its `exact-<site>` rows for every value but the handler,
+  each beside each member set; `test_a_distribution_name_of_a_type_of_its_own_is_no_name`; and
+  `subclass-reads-commands` and `exact-order` driven through the CLI over each transport in
+  `test_a_capability_that_cannot_load_stops_startup`, every kind with
+  `CLUSTER_MCP_TEST_EVERY_KIND=1`).
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;
   `test_installed_finds_every_workspace_member` fails loudly in that state.
@@ -2371,6 +2535,11 @@ What each mode means:
   `create_mcp_server(…, site=…, budget=…)` within the instructions budget (§ Configuration;
   default 4096, Claude Code's cut). The base, `base_instructions()` (`server.py`), is never cut, and
   §9's rules below govern it alone, not the site's text after it.
+- **The base is composed from the capabilities served, which the probe may have withheld** (§4):
+  `run()` passes `create_mcp_server` the installed capabilities the probe kept, so a withheld
+  capability contributes no tool, resource or text, and the base names exactly the tools served;
+  with every probe present it is the base of every installed capability, byte for byte. The
+  instructions budget is still checked against every installed capability's base (§4).
 - **The base is the core's text, then each loaded capability's, in composition order.**
   `CORE_INSTRUCTIONS` (`cluster_mcp/core/instructions.py`) is the generic core, which names neither
   RCAC nor Purdue nor any RCAC member tool and lists the core's own tools. After it, joined by a

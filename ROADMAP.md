@@ -122,7 +122,7 @@ startup path of a server whose SSH connection is established eagerly, a differen
 once per process.
 
 *Horizon: after capability-extras · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
-**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: unshaped*
+**Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: adopted:capability-probe*
 
 ## A timed-out command may keep running after its call returns
 
@@ -441,6 +441,51 @@ names it instead of the broken one. The command line never retries, so only a li
 
 *Horizon: later · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
 **Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
+
+## The on-demand mutation run no longer fits its 30-minute job
+
+`.github/workflows/mutants.yml` runs every mutation case serially in one 30-minute job. At about 660
+cases and 2.5–5 s each, it reaches the timeout and is cancelled before it reports, and § Testing's
+"all cases about 3 minutes" is stale. `capability-probe` adds 271 cases (931 in all). Pre-existing; it gates
+nothing, so no release waits on it.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
+**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
+
+## A local command in flight can outlive the server that launched it
+
+In `local` mode each command runs in a process group of its own, which only its call ever signals. A
+server killed mid-command leaves the group running to its own end, as is true of any tool call today.
+A server that exits normally can leave one too: the startup probe's worker, a daemon thread abandoned
+at the probe's deadline, dies with the interpreter between its timeout's SIGTERM and SIGKILL, so a
+group behind a login profile that ignores SIGTERM and hangs runs on. `capability-probe`'s startup
+probe adds both instances. Pre-existing.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5, REVIEW); `AGENTS.md` § Invariants §2, §3*
+**Seed:** [`issues/local-command-outlives-server.md`](issues/local-command-outlives-server.md) · *status: unshaped*
+
+## A sandbox killed with SIGKILL leaves its directory behind
+
+`bin/sandbox.sh` removes its throwaway HOME from a trap, which SIGKILL never runs, and several test
+harnesses stop a sandbox's process group with SIGKILL. Each such stop leaves a bare
+`cluster-mcp-sandbox.*` directory in the host's `TMPDIR`: about 60 per full-suite era, many more
+per mutation sweep, and 18,061 on one developer Mac. Pre-existing; `capability-probe`'s own drives
+add one or two per run, through the shared SSH test server. It gates nothing.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
+**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: unshaped*
+
+## A capability's registered tool objects can run its code when they are read
+
+The load takes each tool a capability registers by `isinstance(entry, FunctionTool)`, so a subclass, or
+a field the capability sets after construction to a value of a type of its own, runs the capability's
+code whenever the core or FastMCP reads it: at the load's scratch registration, again when the server
+is built, and on every listing. The capability record itself is exact since `capability-probe`; its tools are the one part
+still taken by `isinstance`. The outcome: every tool exactly a `FunctionTool` with exact field values,
+decided at load, the handler excepted. Pre-existing; no code changes until its cycle.
+
+*Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
 
 ---
 

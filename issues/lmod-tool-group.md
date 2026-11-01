@@ -84,3 +84,10 @@ Two things the plan has to get right:
   `run_command` and on job submission ([`slurm-capability.md`](slurm-capability.md)) that loads the
   listed modules in the same invocation, with `run_command`'s guard rails steering a bare
   `module load` toward it ([`tool-surface.md`](tool-surface.md)).
+- 2026-11-01: [`spec/capability-probe/`](../spec/capability-probe/) serves an installed capability
+  only where the cluster has the commands its `Capability.commands` declares, looked up with
+  `type -P` (a file on PATH; never a function). `module` is a shell function, and these tools run
+  `$LMOD_CMD`, so a `commands` declaration can neither find `module` nor name what the tools run:
+  probing for LMOD needs a second kind of declared data beside `commands` (a variable that must be
+  set, say), and that is a core edit to the record and to `core/probes.py` in this cycle
+  (`AGENTS.md` § Invariants §7).

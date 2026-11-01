@@ -1353,7 +1353,8 @@ CASES: tuple[Case, ...] = (
           'test_exec_mode.py::test_exec_mode_ladder[oidc-without-host]'),
          'mode:'),
     Case('delegate-gets-shared-middleware', 'core/__init__.py',
-         (("        if exec_mode == 'delegate':\n", "        if exec_mode == 'delegate' and False:\n"),),
+         (("        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
+           "        if exec_mode == 'delegate' and False:\n            # Delegate mode uses per-request executors via middleware\n"),),
          ('test_exec_mode.py::test_exec_mode_ladder[jwt-without-host]',),
          'middleware:'),
     # The secret floor: create_jwt_auth() and --generate-token each refuse an unset, empty or
@@ -2356,7 +2357,7 @@ CASES: tuple[Case, ...] = (
          'served beyond or short of the core'),
     Case('capability-resource-open-allowed', 'core/capabilities.py',
          (("    if entry.get('executor') is not True:\n"
-           "        raise _Invalid(f'its resource {entry[\"uri\"]!r} has executor {entry.get(\"executor\")!r}, not True: '\n"
+           "        raise _Invalid(f'its resource {entry[\"uri\"]!r} has executor {_shown(entry.get(\"executor\"))}, not True: '\n"
            "                       f'a capability resource is never open')\n", ''),),
          ('test_capabilities.py::test_a_capability_resource_must_need_an_executor[false]',
           'test_capabilities.py::test_a_capability_resource_must_need_an_executor[missing]',
@@ -2431,21 +2432,21 @@ CASES: tuple[Case, ...] = (
          every_set(f'{CAPABILITIES}::test_a_tool_outside_the_tools_module_is_refused'),
          'a tool outside the tools module loaded'),
     Case('capability-type-unchecked', 'core/capabilities.py',
-         (("    if not isinstance(value, Capability):\n"
+         (("    if type(value) is not Capability:\n"
            "        raise _Invalid(f'the entry point names a {type(value).__name__}, not a Capability')\n", ''),),
          every_set(MALFORMED, 'not-a-capability'), 'a malformed capability was not refused as such'),
     Case('capability-field-types-unchecked', 'core/capabilities.py',
-         (("        if not isinstance(getattr(value, field), kind):\n"
+         (("        if type(getattr(value, field)) is not kind:\n"
            "            raise _Invalid(f'its {field} is a {type(getattr(value, field)).__name__}, not a {kind.__name__}')\n",
            '        pass\n'),),
          every_set(MALFORMED, 'name-not-a-str', 'tools-not-a-str', 'instructions-not-a-str', 'resources-not-a-tuple'),
          'a malformed capability was not refused as such'),
     Case('capability-order-unchecked', 'core/capabilities.py',
-         (("    if not isinstance(value.order, int) or isinstance(value.order, bool):\n"
+         (("    if type(value.order) is not int:\n"
            "        raise _Invalid(f'its order is a {type(value.order).__name__}, not an int')\n", ''),),
          every_set(MALFORMED, 'order-not-an-int', 'order-a-bool'), 'a malformed capability was not refused as such'),
     Case('capability-order-bool-allowed', 'core/capabilities.py',
-         (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+         (('    if type(value.order) is not int:\n',
            '    if not isinstance(value.order, int):\n'),),
          every_set(MALFORMED, 'order-a-bool'), 'a malformed capability was not refused as such'),
     Case('capability-name-empty-allowed', 'core/capabilities.py',
@@ -2459,13 +2460,15 @@ CASES: tuple[Case, ...] = (
          every_set(MALFORMED, 'resource-not-a-dict', 'resource-name-not-a-str'),
          'a malformed capability was not refused as such'),
     Case('capability-resource-not-a-dict-allowed', 'core/capabilities.py',
-         (("    if not isinstance(entry, dict):\n"
+         (("    if type(entry) is not dict:\n"
            "        raise _Invalid(f'one of its resources is a {type(entry).__name__}, not a dict')\n", ''),),
          every_set(MALFORMED, 'resource-not-a-dict'), 'a malformed capability was not refused as such'),
     Case('capability-resource-fields-unchecked', 'core/capabilities.py',
-         (("        if not isinstance(entry.get(key), str):\n"
-           "            raise _Invalid(f'its resource {entry.get(\"uri\")!r} has a {type(entry.get(key)).__name__} {key}, not a str')\n",
-           '        pass\n'),),
+         (("    if type(entry.get('uri')) is not str:\n"
+           "        raise _Invalid(f'one of its resources has a {type(entry.get(\"uri\")).__name__} uri, not a str')\n", ''),
+          ("        if type(entry.get(key)) is not str:\n"
+           "            raise _Invalid(f'its resource {entry[\"uri\"]!r} has a {type(entry.get(key)).__name__} {key}, not a str')\n",
+           '        pass\n')),
          every_set(MALFORMED, 'resource-uri-not-a-str', 'resource-name-not-a-str', 'resource-description-not-a-str'),
          'a malformed capability was not refused as such'),
     Case('capability-resource-handler-unchecked', 'core/capabilities.py',
@@ -2643,38 +2646,38 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-always', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-identity-isinstance-strip-never', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if False:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-negated', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not (not isinstance(name, str) or not name.strip()):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if not (type(name) is not str or not name.strip()):\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-capability-always', LOADER,
-                (('    if not isinstance(value, Capability):\n',
+                (('    if type(value) is not Capability:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-capability-negated', LOADER,
-                (('    if not isinstance(value, Capability):\n',
-                  '    if isinstance(value, Capability):\n'),),
+                (('    if type(value) is not Capability:\n',
+                  '    if not type(value) is not Capability:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-always', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-negated', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
-                  '    if not (not isinstance(value.order, int) or isinstance(value.order, bool)):\n'),),
+                (('    if type(value.order) is not int:\n',
+                  '    if not type(value.order) is not int:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-name-empty-always', LOADER,
@@ -2703,13 +2706,13 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-resource-check-isinstance-dict-always', LOADER,
-                (('    if not isinstance(entry, dict):\n',
+                (('    if type(entry) is not dict:\n',
                   '    if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-isinstance-dict-negated', LOADER,
-                (('    if not isinstance(entry, dict):\n',
-                  '    if isinstance(entry, dict):\n'),),
+                (('    if type(entry) is not dict:\n',
+                  '    if not type(entry) is not dict:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-callable-get-handler-always', LOADER,
@@ -2770,18 +2773,18 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-unreadable',
                 'the load raised UnicodeDecodeError, not a CapabilityLoadError naming a capability'),
     alternative('capability-identity-isinstance-strip-without-operand-1', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
+                (('    if type(name) is not str or not name.strip():\n',
                   '    if not name.strip():\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-no-name',
                 'the load raised AttributeError, not a CapabilityLoadError naming a capability'),
     alternative('capability-identity-isinstance-strip-without-operand-2', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not isinstance(name, str):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if type(name) is not str:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-identity-isinstance-strip-the-other-operator', LOADER,
-                (('    if not isinstance(name, str) or not name.strip():\n',
-                  '    if not isinstance(name, str) and (not name.strip()):\n'),),
+                (('    if type(name) is not str or not name.strip():\n',
+                  '    if type(name) is not str and (not name.strip()):\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'nameless-blank-name',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-named-exception-re-raises', LOADER,
@@ -2855,33 +2858,33 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-getattr-field-kind-always', LOADER,
-                (('        if not isinstance(getattr(value, field), kind):\n',
+                (('        if type(getattr(value, field)) is not kind:\n',
                   '        if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-getattr-field-kind-negated', LOADER,
-                (('        if not isinstance(getattr(value, field), kind):\n',
-                  '        if isinstance(getattr(value, field), kind):\n'),),
+                (('        if type(getattr(value, field)) is not kind:\n',
+                  '        if not type(getattr(value, field)) is not kind:\n'),),
                 f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads', '',
                 'a well-formed capability was refused'),
     alternative('capability-check-isinstance-order-int-bool-without-operand-1', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if isinstance(value.order, bool):\n'),),
                 f'{CAPABILITIES}::test_a_malformed_capability_is_refused_as_such', 'order-not-an-int',
                 'a malformed capability was not refused as such'),
     alternative('capability-check-isinstance-order-int-bool-the-other-operator', LOADER,
-                (('    if not isinstance(value.order, int) or isinstance(value.order, bool):\n',
+                (('    if type(value.order) is not int:\n',
                   '    if not isinstance(value.order, int) and isinstance(value.order, bool):\n'),),
                 f'{CAPABILITIES}::test_a_malformed_capability_is_refused_as_such', 'order-a-bool',
                 'a malformed capability was not refused as such'),
     alternative('capability-resource-check-isinstance-get-always', LOADER,
-                (('        if not isinstance(entry.get(key), str):\n',
+                (('        if type(entry.get(key)) is not str:\n',
                   '        if True:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-resource-check-isinstance-get-negated', LOADER,
-                (('        if not isinstance(entry.get(key), str):\n',
-                  '        if isinstance(entry.get(key), str):\n'),),
+                (('        if type(entry.get(key)) is not str:\n',
+                  '        if not type(entry.get(key)) is not str:\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-served',
                 'a capability that cannot load was not refused naming it'),
     alternative('capability-listing-sorted-listed-names-len-set-without-operand-1', LOADER,
@@ -3488,9 +3491,9 @@ CASES: tuple[Case, ...] = (
                   '        self._load_capabilities()\n'
                   '\n',
                   ''),
-                 ("        if exec_mode == 'delegate':\n",
+                 ("        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
                   '        self._load_capabilities()\n'
-                  "        if exec_mode == 'delegate':\n"),),
+                  "        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n"),),
                 f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
                 'the mode ladder ran before the capability load'),
     alternative('capability-load-placed-before-statement-8-of-its-body', CLI,
@@ -3542,11 +3545,22 @@ CASES: tuple[Case, ...] = (
                   '        self._load_capabilities()\n'
                   '\n',
                   ''),
-                 ('            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget)\n',
+                 ('            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n',
                   '            self._load_capabilities()\n'
-                  '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget)\n'),),
+                  '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n'),),
                 f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
                 'the mode ladder ran before the capability load'),
+    *(alternative(f'capability-load-placed-before-the-{step}-of-its-try', CLI,
+                  (('        # Load every installed capability before the mode ladder: one that cannot load stops startup\n'
+                    '        self._load_capabilities()\n'
+                    '\n',
+                    ''),
+                   (line, '            self._load_capabilities()\n' + line)),
+                  f'{STARTUP}::test_capabilities_load_before_the_mode_ladder_beside_every_set', '',
+                  'the mode ladder ran before the capability load')
+      for step, line in (('override', '            skipped = self._resolve_skip_probes()\n'),
+                         ('budget-check', '            site_context.compose(base_instructions(installed()), site, budget)\n'),
+                         ('probe', '            served = self._served(self._probe(exec_mode, executor, skipped))\n'))),
     alternative('capability-load-placed-before-statement-4-of-its-try', CLI,
                 (('        # Load every installed capability before the mode ladder: one that cannot load stops startup\n'
                   '        self._load_capabilities()\n'
@@ -3903,6 +3917,766 @@ def cluster_twin(case: Case, shape: str) -> Case:
     edits = tuple((old, new.replace("'rcac://'", "'cluster://'")) for old, new in case.edits)
     return Case(f'{case.id}-cluster', case.file, edits, targets, let_through(shape))
 
+
+
+# The capability probe: every decision of `core/probes.py`, and each check the load makes of a declared
+# command, mutated to every alternative it could take (each condition always, never and negated, each
+# boolean operator without each operand and with the other, each comparison negated, each `in` tuple
+# without each element, each `except` widened, narrowed or re-raising), and the decisions no node kind
+# names: the bound's figure, the worker thread's `daemon`, the timeout the lookup is given, and the
+# lookup's words. Each is killed beside every member set by the probe's rows, or the load's.
+PROBES_FILE = 'core/probes.py'
+PROBE_ROWS = 'test_probes.py'
+
+# Each target test, with the fragment its failure carries.
+WITHHELD = (f'{PROBE_ROWS}::test_a_capability_is_withheld_when_one_of_its_commands_is_absent',
+            'the verdict does not follow the answer')
+ENDING = (f'{PROBE_ROWS}::test_every_ending_without_an_answer_serves_the_capability',
+          'an ending without an answer did not serve')
+HUNG = (f'{PROBE_ROWS}::test_a_hung_probe_is_abandoned_at_the_bound', 'a hung probe was not abandoned at the bound')
+ONCE = (f'{PROBE_ROWS}::test_the_verdicts_are_decided_once', 'the verdicts changed on a later call')
+NOTHING = (f'{PROBE_ROWS}::test_nothing_declared_runs_nothing', 'nothing was declared, yet the probe ran')
+LOOKED_UP = (f'{PROBE_ROWS}::test_every_declared_command_is_looked_up_once',
+             'the lookup was not one call of every declared command')
+INTERRUPT = (f'{PROBE_ROWS}::test_an_interrupt_while_the_probe_starts_still_interrupts',
+             'an interrupt while the probe started did not interrupt')
+BASH = (f'{PROBE_ROWS}::test_the_lookup_finds_only_what_exec_runs', 'the lookup did not find exactly what exec runs')
+WELL_FORMED = (f'{CAPABILITIES}::test_a_planted_capability_declares_commands_with_no_core_edit',
+               'a well-formed command declaration was refused')
+MALFORMED_COMMANDS = (f'{CAPABILITIES}::test_a_malformed_command_declaration_is_refused_at_load',
+                      'a malformed command declaration was not refused as such')
+
+
+def probe_alternative(case_id: str, file: str, edits: tuple[tuple[str, str], ...], target: tuple[str, str],
+                      kind: str = '') -> Case:
+    """A case killed by the target test's row for `kind` (or its only row) beside every member set."""
+    test, why = target
+    return Case(case_id, file, edits, every_set(test, kind), why)
+
+
+CASES += (
+    probe_alternative('probe-parse-newline-always', PROBES_FILE,
+                      (("    if not stdout.endswith('\\n'):\n",
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-parse-newline-never', PROBES_FILE,
+                      (("    if not stdout.endswith('\\n'):\n",
+                        '    if False:\n'),),
+                      ENDING, 'end-ended-by-cr'),
+    probe_alternative('probe-parse-newline-negated', PROBES_FILE,
+                      (("    if not stdout.endswith('\\n'):\n",
+                        "    if stdout.endswith('\\n'):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-shape-always', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-parse-shape-never', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        '    if False:\n'),),
+                      ENDING, 'wrong-end'),
+    probe_alternative('probe-parse-shape-negated', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        "    if not (len(lines) != count + 1 or lines[-1] != f'end {count}'):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-shape-without-count', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        "    if lines[-1] != f'end {count}':\n"),),
+                      ENDING, 'one-short'),
+    probe_alternative('probe-parse-shape-without-end', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        '    if len(lines) != count + 1:\n'),),
+                      ENDING, 'wrong-end'),
+    probe_alternative('probe-parse-shape-and', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        "    if len(lines) != count + 1 and lines[-1] != f'end {count}':\n"),),
+                      ENDING, 'wrong-end'),
+    probe_alternative('probe-parse-shape-end-equal', PROBES_FILE,
+                      (("    if len(lines) != count + 1 or lines[-1] != f'end {count}':\n",
+                        "    if len(lines) != count + 1 or lines[-1] == f'end {count}':\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-lines-always', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-parse-lines-never', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        '    if False:\n'),),
+                      ENDING, 'a-2'),
+    probe_alternative('probe-parse-lines-negated', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        "    if not any(line not in ('0', '1') for line in lines[:-1]):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-lines-in', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        "    if any(line in ('0', '1') for line in lines[:-1]):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-lines-without-0', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        "    if any(line not in ('1',) for line in lines[:-1]):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-lines-without-1', PROBES_FILE,
+                      (("    if any(line not in ('0', '1') for line in lines[:-1]):\n",
+                        "    if any(line not in ('0',) for line in lines[:-1]):\n"),),
+                      WITHHELD),
+    probe_alternative('probe-parse-found-inverted', PROBES_FILE,
+                      (("    return [line == '1' for line in lines[:-1]]\n",
+                        "    return [line != '1' for line in lines[:-1]]\n"),),
+                      WITHHELD),
+    probe_alternative('probe-ask-timeout-always', PROBES_FILE,
+                      (('    if result.exit_code == TIMEOUT_EXIT_CODE:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-timeout-never', PROBES_FILE,
+                      (('    if result.exit_code == TIMEOUT_EXIT_CODE:\n',
+                        '    if False:\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-ask-timeout-negated', PROBES_FILE,
+                      (('    if result.exit_code == TIMEOUT_EXIT_CODE:\n',
+                        '    if not result.exit_code == TIMEOUT_EXIT_CODE:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-lost-always', PROBES_FILE,
+                      (('    if result.exit_code == CONNECTION_LOST_EXIT_CODE:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-lost-never', PROBES_FILE,
+                      (('    if result.exit_code == CONNECTION_LOST_EXIT_CODE:\n',
+                        '    if False:\n'),),
+                      ENDING, 'connection-lost-code'),
+    probe_alternative('probe-ask-lost-negated', PROBES_FILE,
+                      (('    if result.exit_code == CONNECTION_LOST_EXIT_CODE:\n',
+                        '    if not result.exit_code == CONNECTION_LOST_EXIT_CODE:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-not-started-always', PROBES_FILE,
+                      (('    if result.exit_code == NOT_STARTED_EXIT_CODE:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-not-started-never', PROBES_FILE,
+                      (('    if result.exit_code == NOT_STARTED_EXIT_CODE:\n',
+                        '    if False:\n'),),
+                      ENDING, 'not-started-code'),
+    probe_alternative('probe-ask-not-started-negated', PROBES_FILE,
+                      (('    if result.exit_code == NOT_STARTED_EXIT_CODE:\n',
+                        '    if not result.exit_code == NOT_STARTED_EXIT_CODE:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-exit-always', PROBES_FILE,
+                      (('    if result.exit_code != 0:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-exit-never', PROBES_FILE,
+                      (('    if result.exit_code != 0:\n',
+                        '    if False:\n'),),
+                      ENDING, 'exit-1'),
+    probe_alternative('probe-ask-exit-negated', PROBES_FILE,
+                      (('    if result.exit_code != 0:\n',
+                        '    if not result.exit_code != 0:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-unparsed-always', PROBES_FILE,
+                      (('    if found is None:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-ask-unparsed-never', PROBES_FILE,
+                      (('    if found is None:\n',
+                        '    if False:\n'),),
+                      ENDING, 'empty'),
+    probe_alternative('probe-ask-unparsed-negated', PROBES_FILE,
+                      (('    if found is None:\n',
+                        '    if not found is None:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-no-answer-always', PROBES_FILE,
+                      (('    if isinstance(answer, str):\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-no-answer-never', PROBES_FILE,
+                      (('    if isinstance(answer, str):\n',
+                        '    if False:\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-verdict-no-answer-negated', PROBES_FILE,
+                      (('    if isinstance(answer, str):\n',
+                        '    if not isinstance(answer, str):\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-reason-always', PROBES_FILE,
+                      (('        return Verdict(loaded, True, answer if commands else None)\n',
+                        '        return Verdict(loaded, True, answer)\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-verdict-reason-never', PROBES_FILE,
+                      (('        return Verdict(loaded, True, answer if commands else None)\n',
+                        '        return Verdict(loaded, True, None)\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-verdict-reason-negated', PROBES_FILE,
+                      (('        return Verdict(loaded, True, answer if commands else None)\n',
+                        '        return Verdict(loaded, True, answer if not commands else None)\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-verdict-missing-always', PROBES_FILE,
+                      (('    missing = [name for name in commands if not answer[name]]\n',
+                        '    missing = [name for name in commands if True]\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-missing-never', PROBES_FILE,
+                      (('    missing = [name for name in commands if not answer[name]]\n',
+                        '    missing = [name for name in commands if False]\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-missing-negated', PROBES_FILE,
+                      (('    missing = [name for name in commands if not answer[name]]\n',
+                        '    missing = [name for name in commands if answer[name]]\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-missing-reason-always', PROBES_FILE,
+                      (('    return Verdict(loaded, not missing, f\'missing {", ".join(missing)}\' if missing else None)\n',
+                        '    return Verdict(loaded, not missing, f\'missing {", ".join(missing)}\')\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-missing-reason-never', PROBES_FILE,
+                      (('    return Verdict(loaded, not missing, f\'missing {", ".join(missing)}\' if missing else None)\n',
+                        '    return Verdict(loaded, not missing, None)\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdict-missing-reason-negated', PROBES_FILE,
+                      (('    return Verdict(loaded, not missing, f\'missing {", ".join(missing)}\' if missing else None)\n',
+                        '    return Verdict(loaded, not missing, f\'missing {", ".join(missing)}\' if not missing else None)\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdicts-memo-always', PROBES_FILE,
+                      (('        if self._verdicts is None:\n',
+                        '        if True:\n'),),
+                      ONCE),
+    probe_alternative('probe-verdicts-memo-never', PROBES_FILE,
+                      (('        if self._verdicts is None:\n',
+                        '        if False:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdicts-memo-negated', PROBES_FILE,
+                      (('        if self._verdicts is None:\n',
+                        '        if not self._verdicts is None:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-verdicts-wait-always', PROBES_FILE,
+                      (("            answer = (self._answer if self._answered.wait(self._deadline - time.monotonic())\n                      else f'did not answer within {self._bound:g} s')\n",
+                        '            answer = self._answer\n'),),
+                      HUNG),
+    probe_alternative('probe-verdicts-wait-never', PROBES_FILE,
+                      (("            answer = (self._answer if self._answered.wait(self._deadline - time.monotonic())\n                      else f'did not answer within {self._bound:g} s')\n",
+                        "            answer = f'did not answer within {self._bound:g} s'\n"),),
+                      WITHHELD),
+    probe_alternative('probe-verdicts-wait-negated', PROBES_FILE,
+                      (("            answer = (self._answer if self._answered.wait(self._deadline - time.monotonic())\n                      else f'did not answer within {self._bound:g} s')\n",
+                        "            answer = (self._answer if not self._answered.wait(self._deadline - time.monotonic())\n                      else f'did not answer within {self._bound:g} s')\n"),),
+                      WITHHELD),
+    probe_alternative('probe-start-bound-always', PROBES_FILE,
+                      (('    bound = PROBE_TIMEOUT if timeout is None else timeout\n',
+                        '    bound = PROBE_TIMEOUT\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-start-bound-never', PROBES_FILE,
+                      (('    bound = PROBE_TIMEOUT if timeout is None else timeout\n',
+                        '    bound = timeout\n'),),
+                      HUNG),
+    probe_alternative('probe-start-bound-negated', PROBES_FILE,
+                      (('    bound = PROBE_TIMEOUT if timeout is None else timeout\n',
+                        '    bound = PROBE_TIMEOUT if not timeout is None else timeout\n'),),
+                      ENDING, 'timeout-code'),
+    probe_alternative('probe-start-nothing-always', PROBES_FILE,
+                      (('    if not names:\n',
+                        '    if True:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-start-nothing-never', PROBES_FILE,
+                      (('    if not names:\n',
+                        '    if False:\n'),),
+                      NOTHING),
+    probe_alternative('probe-start-nothing-negated', PROBES_FILE,
+                      (('    if not names:\n',
+                        '    if names:\n'),),
+                      WITHHELD),
+    probe_alternative('probe-worker-catches-exception', PROBES_FILE,
+                      (('        except BaseException as exc:\n            answer = _why(exc)\n',
+                        '        except Exception as exc:\n            answer = _why(exc)\n'),),
+                      ENDING, 'exit-0'),
+    probe_alternative('probe-worker-re-raises', PROBES_FILE,
+                      (('        except BaseException as exc:\n            answer = _why(exc)\n',
+                        '        except BaseException as exc:\n            raise\n'),),
+                      ENDING, 'exception'),
+    probe_alternative('probe-thread-start-catches-baseexception', PROBES_FILE,
+                      (('    except Exception as exc:\n        pending._post(_why(exc))\n',
+                        '    except BaseException as exc:\n        pending._post(_why(exc))\n'),),
+                      INTERRUPT),
+    probe_alternative('probe-thread-start-re-raises', PROBES_FILE,
+                      (('    except Exception as exc:\n        pending._post(_why(exc))\n',
+                        '    except Exception as exc:\n        raise\n'),),
+                      ENDING, 'thread-cannot-start'),
+    probe_alternative('capability-commands-type-always', LOADER,
+                      (('    if type(value.commands) is not tuple:\n',
+                        '    if True:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-commands-type-never', LOADER,
+                      (('    if type(value.commands) is not tuple:\n',
+                        '    if False:\n'),),
+                      MALFORMED_COMMANDS, 'bare-string'),
+    probe_alternative('capability-commands-type-negated', LOADER,
+                      (('    if type(value.commands) is not tuple:\n',
+                        '    if not type(value.commands) is not tuple:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-type-always', LOADER,
+                      (('        if type(command) is not str:\n',
+                        '        if True:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-type-never', LOADER,
+                      (('        if type(command) is not str:\n',
+                        '        if False:\n'),),
+                      MALFORMED_COMMANDS, 'str-subclass'),
+    probe_alternative('capability-command-type-negated', LOADER,
+                      (('        if type(command) is not str:\n',
+                        '        if not type(command) is not str:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-name-always', LOADER,
+                      (('        if not COMMAND.fullmatch(command):\n',
+                        '        if True:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-name-never', LOADER,
+                      (('        if not COMMAND.fullmatch(command):\n',
+                        '        if False:\n'),),
+                      MALFORMED_COMMANDS, 'empty'),
+    probe_alternative('capability-command-name-negated', LOADER,
+                      (('        if not COMMAND.fullmatch(command):\n',
+                        '        if COMMAND.fullmatch(command):\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-twice-always', LOADER,
+                      (('        if command in value.commands[:i]:\n',
+                        '        if True:\n'),),
+                      WELL_FORMED),
+    probe_alternative('capability-command-twice-never', LOADER,
+                      (('        if command in value.commands[:i]:\n',
+                        '        if False:\n'),),
+                      MALFORMED_COMMANDS, 'twice'),
+    probe_alternative('capability-command-twice-negated', LOADER,
+                      (('        if command in value.commands[:i]:\n',
+                        '        if not command in value.commands[:i]:\n'),),
+                      WELL_FORMED),
+    probe_alternative('probe-bound-5-s', PROBES_FILE,
+                      (('PROBE_TIMEOUT: Final = 10.0\n',
+                        'PROBE_TIMEOUT: Final = 5.0\n'),),
+                      HUNG),
+    probe_alternative('probe-bound-9-s', PROBES_FILE,
+                      (('PROBE_TIMEOUT: Final = 10.0\n',
+                        'PROBE_TIMEOUT: Final = 9.0\n'),),
+                      HUNG),
+    probe_alternative('probe-bound-11-s', PROBES_FILE,
+                      (('PROBE_TIMEOUT: Final = 10.0\n',
+                        'PROBE_TIMEOUT: Final = 11.0\n'),),
+                      HUNG),
+    probe_alternative('probe-bound-20-s', PROBES_FILE,
+                      (('PROBE_TIMEOUT: Final = 10.0\n',
+                        'PROBE_TIMEOUT: Final = 20.0\n'),),
+                      HUNG),
+    probe_alternative('probe-worker-not-a-daemon', PROBES_FILE,
+                      (('daemon=True',
+                        'daemon=False'),),
+                      HUNG),
+    probe_alternative('probe-lookup-without-timeout', PROBES_FILE,
+                      (('timeout=timeout)',
+                        'timeout=None)'),),
+                      LOOKED_UP),
+    probe_alternative('probe-lookup-twice-the-bound', PROBES_FILE,
+                      (('timeout=timeout)',
+                        'timeout=2 * timeout)'),),
+                      LOOKED_UP),
+    probe_alternative('probe-lookup-command-v', PROBES_FILE,
+                      (('if type -P -- "$n" >/dev/null 2>&1',
+                        'if command -v -- "$n" >/dev/null 2>&1'),),
+                      BASH),
+    probe_alternative('probe-lookup-type-t', PROBES_FILE,
+                      (('if type -P -- "$n" >/dev/null 2>&1',
+                        'if type -t -- "$n" >/dev/null 2>&1'),),
+                      BASH),
+    probe_alternative('probe-lookup-type-function-kept', PROBES_FILE,
+                      (("    'unset -f type\\n'\n",
+                        ''),),
+                      BASH),
+    probe_alternative('probe-lookup-answers-swapped', PROBES_FILE,
+                      (('printf "1\\\\n"; else printf "0\\\\n"',
+                        'printf "0\\\\n"; else printf "1\\\\n"'),),
+                      BASH),
+    probe_alternative('probe-lookup-without-count', PROBES_FILE,
+                      (('    \'printf "end %s\\\\n" "$#"\\n\'\n',
+                        ''),),
+                      BASH),
+
+)
+
+
+# The probe's timing: where its deadline is taken (when it starts, never at the wait), what the deadline
+# is, what the wait is given, what a decision past the deadline says, and the bound each part is handed,
+# each mutated to every alternative it could take. Each is killed beside every member set, most by a
+# row that asks for the verdicts after the deadline has passed and one that is answered after it asks.
+DEADLINE_ROWS = (f'{PROBE_ROWS}::test_the_deadline_is_taken_when_the_probe_starts',
+                 'the deadline was not taken when the probe started')
+STARTUP_BOUND = ('test_probe_startup.py::test_the_probe_follows_the_site_read_and_is_bounded',
+                 'a hung probe was not held to its bound after the site read')
+DELEGATE_SKIP = ('test_probe_startup.py::test_delegate_runs_no_probe_and_says_so',
+                 'delegate mode probed or did not say it skipped')
+DEADLINE = '        self._deadline = time.monotonic() + bound\n'
+BOUND_KEPT = '        self._bound = bound\n'
+WAIT = '            answer = (self._answer if self._answered.wait(self._deadline - time.monotonic())\n'
+LATE_REASON = "                      else f'did not answer within {self._bound:g} s')\n"
+MEMO = '        if self._verdicts is None:\n'
+STARTED = '    pending = Pending(tuple(capabilities), bound)\n'
+ASKED = '            answer = _ask(executor, names, bound)\n'
+RAN = 'timeout=timeout)'
+ASK_REASON = "        return f'did not answer within {timeout:g} s'\n"
+SIGNATURE = 'def start(executor: Executor, capabilities: Iterable[Loaded], timeout: float | None = None) -> Pending:\n'
+UNPROBED_PENDING = '    pending = Pending(tuple(capabilities), PROBE_TIMEOUT)\n'
+
+
+def timing(case_id: str, edits: tuple[tuple[str, str], ...], target: tuple[str, str], kind: str = '') -> Case:
+    return probe_alternative(f'probe-timing-{case_id}', PROBES_FILE, edits, target, kind)
+
+
+def waited(given: str) -> tuple[tuple[str, str], ...]:
+    """The wait for the answer given `given` in place of the time left to the deadline."""
+    return ((WAIT, WAIT.replace('self._deadline - time.monotonic()', given)),)
+
+
+CASES += (
+    timing('deadline-taken-at-the-wait',
+           ((DEADLINE, ''), (MEMO, MEMO + '            self._deadline = time.monotonic() + self._bound\n')),
+           DEADLINE_ROWS),
+    timing('deadline-before-the-start', ((DEADLINE, DEADLINE.replace(' + bound', ' - bound')),), DEADLINE_ROWS),
+    timing('deadline-the-bound-alone', ((DEADLINE, '        self._deadline = bound\n'),), DEADLINE_ROWS),
+    timing('deadline-the-clock-alone', ((DEADLINE, '        self._deadline = time.monotonic()\n'),), DEADLINE_ROWS),
+    timing('deadline-on-the-wall-clock', ((DEADLINE, DEADLINE.replace('time.monotonic()', 'time.time()')),),
+           DEADLINE_ROWS),
+    timing('deadline-the-module-bound', ((DEADLINE, DEADLINE.replace(' + bound', ' + PROBE_TIMEOUT')),), DEADLINE_ROWS),
+    timing('wait-the-bound', waited('self._bound'), DEADLINE_ROWS),
+    timing('wait-forever', waited('None'), DEADLINE_ROWS),
+    timing('wait-with-no-timeout', ((WAIT, WAIT.replace('wait(self._deadline - time.monotonic())', 'wait()')),),
+           DEADLINE_ROWS),
+    timing('wait-nothing', waited('0'), DEADLINE_ROWS),
+    timing('wait-the-deadline', waited('self._deadline'), DEADLINE_ROWS),
+    timing('wait-the-clock', waited('time.monotonic()'), DEADLINE_ROWS),
+    timing('wait-the-time-past-the-deadline', waited('time.monotonic() - self._deadline'), DEADLINE_ROWS),
+    timing('wait-the-deadline-plus-the-clock', waited('self._deadline + time.monotonic()'), DEADLINE_ROWS),
+    timing('wait-on-the-wall-clock', waited('self._deadline - time.time()'), DEADLINE_ROWS),
+    timing('late-reason-names-the-module-bound',
+           ((LATE_REASON, LATE_REASON.replace('{self._bound:g}', '{PROBE_TIMEOUT:g}')),), DEADLINE_ROWS),
+    timing('bound-kept-is-the-module-bound', ((BOUND_KEPT, '        self._bound = PROBE_TIMEOUT\n'),), DEADLINE_ROWS),
+    timing('started-with-the-module-bound', ((STARTED, STARTED.replace(', bound)', ', PROBE_TIMEOUT)')),),
+           DEADLINE_ROWS),
+    timing('started-with-the-given-timeout', ((STARTED, STARTED.replace(', bound)', ', timeout)')),), HUNG),
+    timing('started-with-no-bound', ((STARTED, STARTED.replace(', bound)', ', 0)')),), DEADLINE_ROWS),
+    timing('asked-with-the-module-bound', ((ASKED, ASKED.replace(', bound)', ', PROBE_TIMEOUT)')),), LOOKED_UP),
+    timing('asked-with-the-given-timeout', ((ASKED, ASKED.replace(', bound)', ', timeout)')),), HUNG),
+    timing('asked-with-no-bound', ((ASKED, ASKED.replace(', bound)', ', 0)')),), LOOKED_UP),
+    timing('run-with-the-module-bound', ((RAN, 'timeout=PROBE_TIMEOUT)'),), LOOKED_UP),
+    timing('run-with-no-bound', ((RAN, 'timeout=0)'),), LOOKED_UP),
+    timing('ask-reason-names-the-module-bound',
+           ((ASK_REASON, ASK_REASON.replace('{timeout:g}', '{PROBE_TIMEOUT:g}')),), ENDING, 'timeout-code'),
+    timing('default-the-module-bound',
+           ((SIGNATURE, SIGNATURE.replace('timeout: float | None = None', 'timeout: float | None = PROBE_TIMEOUT')),),
+           STARTUP_BOUND),
+    timing('unprobed-with-no-bound', ((UNPROBED_PENDING, UNPROBED_PENDING.replace('PROBE_TIMEOUT)', 'None)')),),
+           DELEGATE_SKIP, 'unset'),
+)
+
+
+# A capability record is exactly a `Capability`: the load's check of what the entry point names, put
+# back to `isinstance`, lets a subclass load, whichever field its code reads.
+SUBCLASS_KINDS = ('subclass-reads-nothing', 'subclass-reads-name', 'subclass-reads-order', 'subclass-reads-tools',
+                  'subclass-reads-instructions', 'subclass-reads-resources', 'subclass-reads-commands')
+UNLOADABLE_ROWS = f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it'
+
+CASES += (
+    Case('capability-check-exact-capability-isinstance', LOADER,
+         (('    if type(value) is not Capability:\n',
+           '    if not isinstance(value, Capability):\n'),),
+         every_set(UNLOADABLE_ROWS, *SUBCLASS_KINDS), 'a capability that cannot load was not refused naming it'),
+)
+
+
+# What the record holds, and the distribution's name, are exact built-in types: each exact check the
+# load makes of a value the core reads after it, mutated to every alternative it could take (always,
+# never, negated; each comparison inside a boolean operator negated; each field or key of a checked
+# tuple dropped; the `isinstance` check each replaced, which lets a value of a type of its own load; and
+# each type `_shown` shows by its repr dropped). The re-anchored capability-extras cases above carry the
+# other alternatives of the same lines. Each is killed beside every member set by the `exact-<site>`
+# rows, a well-formed capability's, or a malformed one's.
+EXACT_ROWS = UNLOADABLE_ROWS
+EXACT_WHY = 'a capability that cannot load was not refused naming it'
+WELL_LOADS = f'{CAPABILITIES}::test_a_capability_whose_entry_point_imports_its_tools_loads'
+NAMED_ROWS = f'{CAPABILITIES}::test_a_distribution_name_of_a_type_of_its_own_is_no_name'
+FIELD_CHECK = '        if type(getattr(value, field)) is not kind:\n'
+FIELD_LOOP = "    for field, kind in (('name', str), ('tools', str), ('instructions', str), ('resources', tuple)):\n"
+ORDER_CHECK = '    if type(value.order) is not int:\n'
+NAME_CHECK = '    if type(name) is not str or not name.strip():\n'
+SHOWN = "    return repr(value) if type(value) in (bool, int, type(None)) else f'a {type(value).__name__}'\n"
+DICT_CHECK = '    if type(entry) is not dict:\n'
+KEY_CHECK = '        if type(key) is not str:\n'
+URI_CHECK = "    if type(entry.get('uri')) is not str:\n"
+VALUE_CHECK = '        if type(entry.get(key)) is not str:\n'
+VALUE_LOOP = "    for key in ('name', 'description'):\n"
+
+
+def exact_alternative(case_id: str, edit: tuple[str, str], test: str, kind: str, why: str = EXACT_WHY) -> Case:
+    return alternative(case_id, LOADER, (edit,), test, kind, why)
+
+
+CASES += (
+    exact_alternative('capability-distribution-name-exact-negated-in-its-operator',
+                      (NAME_CHECK, '    if type(name) is str or not name.strip():\n'), WELL_LOADS, '',
+                      'a well-formed capability was refused'),
+    exact_alternative('capability-distribution-name-exact-isinstance',
+                      (NAME_CHECK, '    if not isinstance(name, str) or not name.strip():\n'), NAMED_ROWS, '',
+                      'a distribution name of a type of its own was read as a name'),
+    exact_alternative('capability-field-exact-never', (FIELD_CHECK, '        if False:\n'), EXACT_ROWS, 'exact-name'),
+    exact_alternative('capability-field-exact-isinstance',
+                      (FIELD_CHECK, '        if not isinstance(getattr(value, field), kind):\n'), EXACT_ROWS, 'exact-name'),
+    *(exact_alternative(f'capability-field-exact-without-{field}',
+                        (FIELD_LOOP, FIELD_LOOP.replace(f"('{field}', {kind}), ", '').replace(f", ('{field}', {kind})", '')),
+                        EXACT_ROWS, f'exact-{field}')
+      for field, kind in (('name', 'str'), ('tools', 'str'), ('instructions', 'str'), ('resources', 'tuple'))),
+    exact_alternative('capability-order-exact-never', (ORDER_CHECK, '    if False:\n'), EXACT_ROWS, 'exact-order'),
+    exact_alternative('capability-order-exact-isinstance-not-bool',
+                      (ORDER_CHECK, '    if not isinstance(value.order, int) or isinstance(value.order, bool):\n'),
+                      EXACT_ROWS, 'exact-order'),
+    exact_alternative('capability-shown-repr-always', (SHOWN, '    return repr(value)\n'), EXACT_ROWS,
+                      'exact-resource-executor'),
+    exact_alternative('capability-shown-repr-never', (SHOWN, "    return f'a {type(value).__name__}'\n"), MALFORMED,
+                      'resource-open', 'an open resource loaded'),
+    exact_alternative('capability-shown-repr-negated',
+                      (SHOWN, "    return repr(value) if not type(value) in (bool, int, type(None)) else f'a {type(value).__name__}'\n"),
+                      MALFORMED, 'resource-open', 'an open resource loaded'),
+    *(exact_alternative(f'capability-shown-repr-without-{label}', (SHOWN, SHOWN.replace(shown, rest)), MALFORMED, row,
+                        'an open resource loaded')
+      for label, shown, rest, row in (('bool', '(bool, int, type(None))', '(int, type(None))', 'resource-open'),
+                                      ('int', '(bool, int, type(None))', '(bool, type(None))', 'resource-open-truthy'),
+                                      ('none', '(bool, int, type(None))', '(bool, int)', 'resource-open-unmarked'))),
+    exact_alternative('capability-resource-exact-dict-never', (DICT_CHECK, '    if False:\n'), EXACT_ROWS, 'exact-resource'),
+    exact_alternative('capability-resource-exact-dict-isinstance', (DICT_CHECK, '    if not isinstance(entry, dict):\n'),
+                      EXACT_ROWS, 'exact-resource'),
+    exact_alternative('capability-resource-exact-key-always', (KEY_CHECK, '        if True:\n'), EXACT_ROWS,
+                      'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-key-never', (KEY_CHECK, '        if False:\n'), EXACT_ROWS,
+                      'exact-resource-key'),
+    exact_alternative('capability-resource-exact-key-negated', (KEY_CHECK, '        if not type(key) is not str:\n'),
+                      EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-key-isinstance', (KEY_CHECK, '        if not isinstance(key, str):\n'),
+                      EXACT_ROWS, 'exact-resource-key'),
+    exact_alternative('capability-resource-exact-uri-always', (URI_CHECK, '    if True:\n'), EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-uri-never', (URI_CHECK, '    if False:\n'), EXACT_ROWS,
+                      'exact-resource-uri'),
+    exact_alternative('capability-resource-exact-uri-negated',
+                      (URI_CHECK, "    if not type(entry.get('uri')) is not str:\n"), EXACT_ROWS, 'exits-0-at-served'),
+    exact_alternative('capability-resource-exact-uri-isinstance',
+                      (URI_CHECK, "    if not isinstance(entry.get('uri'), str):\n"), EXACT_ROWS, 'exact-resource-uri'),
+    exact_alternative('capability-resource-exact-value-never', (VALUE_CHECK, '        if False:\n'), EXACT_ROWS,
+                      'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-isinstance',
+                      (VALUE_CHECK, '        if not isinstance(entry.get(key), str):\n'), EXACT_ROWS,
+                      'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-without-name',
+                      (VALUE_LOOP, "    for key in ('description',):\n"), EXACT_ROWS, 'exact-resource-name'),
+    exact_alternative('capability-resource-exact-value-without-description',
+                      (VALUE_LOOP, "    for key in ('name',):\n"), EXACT_ROWS, 'exact-resource-description'),
+)
+
+
+# Startup's probe step: every decision of `_resolve_skip_probes`, `_probe` and `_served`, mutated to every
+# alternative it could take, the decisions no node kind names (the skip branches' order and what they
+# serve, what the server is built from, what the budget is checked against), each probe statement of
+# `run()` at every other boundary of its `try` and of its body and not at all, and the branch of
+# `env_setting` for a variable with no legacy name. Each is killed beside every member set by a row of
+# `test_probe_startup.py` (or, for the one the resolver alone can observe, of `test_env.py`).
+PROBE_STARTUP = 'test_probe_startup.py'
+DEPRECATION = 'core/deprecation.py'
+
+ONCE = (f'{PROBE_STARTUP}::test_local_and_ssh_probe_once_after_the_executor', 'local',
+        'the probe did not run once after the executor')
+KEPT = (f'{PROBE_STARTUP}::test_the_server_is_built_from_what_the_probe_keeps', 'local-each-member',
+        'the server was not built from what the probe kept')
+NO_ANSWER = (f'{PROBE_STARTUP}::test_every_ending_without_an_answer_serves_every_capability', 'exit-1-local-stdio',
+             'an ending without an answer did not serve every capability')
+DELEGATE_UNSET = (f'{PROBE_STARTUP}::test_delegate_runs_no_probe_and_says_so', 'unset',
+                  'delegate mode probed or did not say it skipped')
+DELEGATE_OVERRIDDEN = (f'{PROBE_STARTUP}::test_delegate_runs_no_probe_and_says_so', 'variable',
+                       'delegate mode probed or did not say it skipped')
+FLAG = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-flag', 'the override did not skip every probe')
+VARIABLE = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-variable-1',
+            'the override did not skip every probe')
+LEGACY_BUDGET = (f'{PROBE_STARTUP}::test_no_probe_runs_before_a_refusal', 'legacy-budget-short-of-every',
+                 'a probe ran before the legacy-budget-short-of-every refusal')
+BUDGET_ANSWER = (f'{PROBE_STARTUP}::test_the_budget_never_depends_on_the_answer', 'short-of-every-absent',
+                 'the budget depends on the answer')
+
+
+def startup_alternative(case_id: str, file: str, edits: tuple[tuple[str, str], ...], target: tuple[str, str, str]) -> Case:
+    """A case killed by the target test's rows for its case beside every member set."""
+    test, kind, why = target
+    return Case(case_id, file, edits, every_set(test, kind), why)
+
+
+SKIP_FLAG = "        if self.skip_probes:\n"
+SKIP_VALUE = "        return variable if value else None\n"
+DELEGATE_BRANCH = ("        if exec_mode == 'delegate':\n"
+                   "            log.info('Capability probes skipped in delegate mode: every installed capability is served')\n"
+                   "            return probes.unprobed(loaded)\n")
+OVERRIDE_BRANCH = ("        if skipped:\n"
+                   "            log.info(f'Capability probes skipped ({skipped}): every installed capability is served')\n"
+                   "            return probes.unprobed(loaded)\n")
+WITHHELD_TEST = "            if not verdict.served:\n"
+REASON_TEST = "            if verdict.reason:\n"
+NO_LEGACY = "    if legacy is None:\n"
+NO_LEGACY_VALUE = "        return (value or None), name\n"
+
+# The statements of `run()`'s `try`, in order, and where it ends; the statements of its body, and where
+# it ends. The three the probe step adds are each placed before every other one, at each end, and nowhere.
+RUN_TRY = ('            budget = self._resolve_budget()\n',
+           '            skipped = self._resolve_skip_probes()\n',
+           '            site = self._read_site(exec_mode, executor)\n',
+           '            site_context.compose(base_instructions(installed()), site, budget)\n',
+           '            served = self._served(self._probe(exec_mode, executor, skipped))\n',
+           '            mcp = create_mcp_server(self.auth, middlewares=middlewares, site=site, budget=budget,\n',
+           "            if self.transport == 'stdio':\n")
+RUN_TRY_END = "                mcp.run(transport='streamable-http', host=self.host, port=self.port)\n"
+RUN_BODY = ('        """Run the MCP server or generate token."""\n',
+            '        if self.generate_token_flag:\n',
+            '        self._load_capabilities()\n',
+            '        exec_mode = self._resolve_exec_mode()\n',
+            "        log.info(f'Execution mode: {exec_mode}')\n",
+            '        executor = None\n',
+            '        middlewares = []\n',
+            "        if exec_mode == 'delegate':\n            # Delegate mode uses per-request executors via middleware\n",
+            '        try:\n            budget = self._resolve_budget()\n')
+RUN_BODY_END = '                executor.close()\n'
+PROBE_STATEMENTS = {'override': RUN_TRY[1], 'check': RUN_TRY[3], 'probe': RUN_TRY[4]}
+
+
+def placed(name: str, where: str | None, at: int | None) -> Case:
+    """The probe statement `name` moved before statement `at + 1` of `run()`'s `where` (`try` or `body`;
+    `at` past the last: at its end), or, with `where` None, dropped."""
+    line = PROBE_STATEMENTS[name]
+    edits: list[tuple[str, str]] = [(line, '')]
+    if where == 'try':
+        rest = [s for s in RUN_TRY if s != line]
+        edits.append((rest[at], line + rest[at]) if at < len(rest) else (RUN_TRY_END, RUN_TRY_END + line))
+    elif where == 'body':
+        moved = line[4:]
+        edits.append((RUN_BODY[at], moved + RUN_BODY[at]) if at < len(RUN_BODY)
+                     else (RUN_BODY_END, RUN_BODY_END + moved))
+    what = 'dropped' if where is None else f'placed-before-statement-{at + 1}-of-its-{where}'
+    return startup_alternative(f'probe-step-{name}-{what}', CLI, tuple(edits), ONCE)
+
+
+CASES += (
+    startup_alternative('probe-override-flag-always', CLI, ((SKIP_FLAG, '        if True:\n'),), ONCE),
+    startup_alternative('probe-override-flag-never', CLI, ((SKIP_FLAG, '        if False:\n'),), FLAG),
+    startup_alternative('probe-override-flag-negated', CLI, ((SKIP_FLAG, '        if not self.skip_probes:\n'),), ONCE),
+    startup_alternative('probe-override-value-always', CLI, ((SKIP_VALUE, '        return variable\n'),), ONCE),
+    startup_alternative('probe-override-value-never', CLI, ((SKIP_VALUE, '        return None\n'),), VARIABLE),
+    startup_alternative('probe-override-value-negated', CLI,
+                        ((SKIP_VALUE, '        return variable if not value else None\n'),), ONCE),
+    startup_alternative('probe-delegate-always', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if True:\n            log.info('Capability probes skipped in"),), ONCE),
+    startup_alternative('probe-delegate-never', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if False:\n            log.info('Capability probes skipped in"),), DELEGATE_UNSET),
+    startup_alternative('probe-delegate-negated', CLI,
+                        (("        if exec_mode == 'delegate':\n            log.info('Capability probes skipped in",
+                          "        if not exec_mode == 'delegate':\n            log.info('Capability probes skipped in"),),
+                        ONCE),
+    startup_alternative('probe-skipped-always', CLI, (('        if skipped:\n', '        if True:\n'),), ONCE),
+    startup_alternative('probe-skipped-never', CLI, (('        if skipped:\n', '        if False:\n'),), FLAG),
+    startup_alternative('probe-skipped-negated', CLI, (('        if skipped:\n', '        if not skipped:\n'),), ONCE),
+    startup_alternative('probe-skip-branches-exchanged', CLI,
+                        ((DELEGATE_BRANCH + OVERRIDE_BRANCH, OVERRIDE_BRANCH + DELEGATE_BRANCH),), DELEGATE_OVERRIDDEN),
+    startup_alternative('probe-delegate-still-probes', CLI,
+                        ((DELEGATE_BRANCH, DELEGATE_BRANCH.replace('probes.unprobed(loaded)', 'probes.start(executor, loaded)')),),
+                        DELEGATE_UNSET),
+    startup_alternative('probe-override-still-probes', CLI,
+                        ((OVERRIDE_BRANCH, OVERRIDE_BRANCH.replace('probes.unprobed(loaded)', 'probes.start(executor, loaded)')),),
+                        FLAG),
+    startup_alternative('probe-served-withheld-always', CLI, ((WITHHELD_TEST, '            if True:\n'),), ONCE),
+    startup_alternative('probe-served-withheld-never', CLI, ((WITHHELD_TEST, '            if False:\n'),), KEPT),
+    startup_alternative('probe-served-withheld-negated', CLI, ((WITHHELD_TEST, '            if verdict.served:\n'),), ONCE),
+    startup_alternative('probe-served-reason-always', CLI, ((REASON_TEST, '            if True:\n'),), ONCE),
+    startup_alternative('probe-served-reason-never', CLI, ((REASON_TEST, '            if False:\n'),), NO_ANSWER),
+    startup_alternative('probe-served-reason-negated', CLI, ((REASON_TEST, '            if not verdict.reason:\n'),), ONCE),
+    startup_alternative('probe-server-built-from-every-installed', CLI,
+                        (('                                    capabilities=served)',
+                          '                                    capabilities=None)'),), KEPT),
+    startup_alternative('probe-budget-checked-against-the-core-alone', CLI,
+                        (('site_context.compose(base_instructions(installed()), site, budget)',
+                          'site_context.compose(base_instructions(()), site, budget)'),), BUDGET_ANSWER),
+    *(placed(name, 'try', at) for name in PROBE_STATEMENTS for at in range(len(RUN_TRY))
+      if at != RUN_TRY.index(PROBE_STATEMENTS[name])),
+    *(placed(name, 'body', at) for name in PROBE_STATEMENTS for at in range(len(RUN_BODY) + 1)),
+    *(placed(name, None, None) for name in PROBE_STATEMENTS),
+    startup_alternative('env-no-legacy-always', DEPRECATION, ((NO_LEGACY, '    if True:\n'),), LEGACY_BUDGET),
+    startup_alternative('env-no-legacy-never', DEPRECATION, ((NO_LEGACY, '    if False:\n'),), ONCE),
+    startup_alternative('env-no-legacy-negated', DEPRECATION, ((NO_LEGACY, '    if not legacy is None:\n'),), ONCE),
+    startup_alternative('env-no-legacy-value-ignored', DEPRECATION,
+                        ((NO_LEGACY_VALUE, '        return None, name\n'),), VARIABLE),
+    startup_alternative('env-no-legacy-value-and', DEPRECATION,
+                        ((NO_LEGACY_VALUE, '        return (value and None), name\n'),), VARIABLE),
+    # An empty value handed back as itself, not None: the resolver alone can tell (every start reads it
+    # as unset either way), so its row is the resolver's, with no member set to run beside.
+    Case('env-no-legacy-value-empty-kept', DEPRECATION, ((NO_LEGACY_VALUE, '        return value, name\n'),),
+         ('test_env.py::test_a_variable_without_a_legacy_name[empty-CLUSTER_MCP_SKIP_PROBES]',),
+         "resolved ('', 'CLUSTER_MCP_SKIP_PROBES')"),
+)
+
+
+# The probe step's documented levels and the override's precedence: each line `_served` and `_probe`
+# log, at every other level the core's logger offers, the two `_served` lines' levels exchanged, the
+# variable read before the flag, each skip line naming the other source, and the variable's emptiness
+# tested another way. Each is killed beside every member set by a row of `test_probe_startup.py` that
+# compares each line with the level its record was logged at (AGENTS § Invariants §4).
+WITHHELD_LOG = "                log.info(f'Capability {name} withheld: the cluster is {verdict.reason}')\n"
+UNANSWERED_LOG = ("                log.warning(f'Capability {name} served without a probe answer: "
+                  "the probe {verdict.reason}')\n")
+DELEGATE_LOG = "            log.info('Capability probes skipped in delegate mode: every installed capability is served')\n"
+OVERRIDE_LOG = "            log.info(f'Capability probes skipped ({skipped}): every installed capability is served')\n"
+SKIP_RESOLVER = ("        if self.skip_probes:\n"
+                 "            return '--skip-probes'\n"
+                 "        value, variable = env_setting('CLUSTER_MCP_SKIP_PROBES')\n"
+                 "        return variable if value else None\n")
+BOTH = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-flag-and-variable',
+        'the override did not skip every probe')
+SPACE = (f'{PROBE_STARTUP}::test_the_override_skips_every_probe', 'local-variable-space',
+         'the override did not skip every probe')
+# Every method of the core's logger that logs a record, by the level it logs at (`warn` is `warning`'s
+# deprecated alias, `fatal` `critical`'s, and `exception` logs at ERROR).
+LOG_METHODS = ('devel', 'trace', 'debug', 'info', 'notice', 'warning', 'warn', 'error', 'exception', 'critical',
+               'fatal')
+
+
+def relevelled(line: str, level: str) -> str:
+    """`line`'s log call at `level` in place of its own."""
+    own = line.split('log.', 1)[1].split('(', 1)[0]
+    return line.replace(f'log.{own}(', f'log.{level}(', 1)
+
+
+def level_alternatives(name: str, line: str, own: tuple[str, ...], target: tuple[str, str, str]) -> tuple[Case, ...]:
+    """`line` logged at every level but those in `own` (its own method and any alias of it)."""
+    return tuple(startup_alternative(f'probe-level-{name}-{level}', CLI, ((line, relevelled(line, level)),), target)
+                 for level in LOG_METHODS if level not in own)
+
+
+CASES += (
+    *level_alternatives('withheld', WITHHELD_LOG, ('info',), KEPT),
+    *level_alternatives('unanswered', UNANSWERED_LOG, ('warning', 'warn'), NO_ANSWER),
+    startup_alternative('probe-level-served-lines-exchanged', CLI,
+                        ((WITHHELD_LOG, relevelled(WITHHELD_LOG, 'warning')),
+                         (UNANSWERED_LOG, relevelled(UNANSWERED_LOG, 'info'))), KEPT),
+    *level_alternatives('delegate', DELEGATE_LOG, ('info',), DELEGATE_UNSET),
+    *level_alternatives('override', OVERRIDE_LOG, ('info',), FLAG),
+    startup_alternative('probe-precedence-variable-first', CLI,
+                        ((SKIP_RESOLVER,
+                          "        value, variable = env_setting('CLUSTER_MCP_SKIP_PROBES')\n"
+                          "        if value:\n"
+                          "            return variable\n"
+                          "        if self.skip_probes:\n"
+                          "            return '--skip-probes'\n"
+                          "        return None\n"),), BOTH),
+    startup_alternative('probe-precedence-flag-named-as-the-variable', CLI,
+                        (("            return '--skip-probes'\n", "            return 'CLUSTER_MCP_SKIP_PROBES'\n"),), FLAG),
+    startup_alternative('probe-precedence-variable-named-as-the-flag', CLI,
+                        ((SKIP_VALUE, "        return '--skip-probes' if value else None\n"),), VARIABLE),
+    startup_alternative('probe-override-value-stripped', CLI,
+                        ((SKIP_VALUE, "        return variable if (value or '').strip() else None\n"),), SPACE),
+    startup_alternative('probe-override-value-not-the-empty-string', CLI,
+                        ((SKIP_VALUE, "        return variable if value != '' else None\n"),), ONCE),
+)
 
 CASES += tuple(cluster_twin(case, CLUSTER_TWINS[case.id]) for case in CASES if case.id in CLUSTER_TWINS)
 if len(CASES) != len({case.id for case in CASES}):

@@ -456,6 +456,19 @@ def test_path_shim_shadows_sudo_and_ssh(path_shim: Path) -> None:
     assert bash_env.read_text().startswith(f'PATH={path_shim}:'), bash_env.read_text()
 
 
+@pytest.mark.unit
+def test_the_suite_skips_probes_by_default(request: pytest.FixtureRequest) -> None:
+    # Every test and every child it starts runs with the override set, whatever the calling shell
+    # exported, so no start probes this host unless the test removes the variable itself.
+    assert 'skip_probes' in request.fixturenames, 'the override fixture does not reach every test'
+    defs = request._fixturemanager.getfixturedefs('skip_probes', request.node)
+    assert [d.scope for d in defs or ()] == ['session'], defs
+    assert os.environ.get('CLUSTER_MCP_SKIP_PROBES') == '1', os.environ.get('CLUSTER_MCP_SKIP_PROBES')
+    from cluster_mcp.core import MCPServerApp
+
+    assert MCPServerApp()._resolve_skip_probes() == 'CLUSTER_MCP_SKIP_PROBES'
+
+
 # Resolves each name inside the sandbox and runs it only when it resolves into the shim ($1).
 SHIM_PROBE = """\
 shim=$1
