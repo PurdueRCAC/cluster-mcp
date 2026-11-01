@@ -3,10 +3,10 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_progress
+status: in_review
 branch: feature/capability-probe
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-01'
 phases:
 - id: P1
@@ -42,7 +42,7 @@ phases:
   verify: sh spec/capability-probe/verify/p2.sh phase && sh spec/capability-probe/verify/p1.sh phase && uv run python -I spec/capability-probe/remediation/P2-exact-capability.py all && uv run python -I spec/capability-probe/remediation/F1-exact-record-values.py all && uv run python -I spec/capability-probe/remediation/F3-map-and-startup.py && sh spec/capability-probe/verify/p2.sh mutants-handshake-1 && sh spec/capability-probe/verify/p2.sh mutants-handshake-2 && sh spec/capability-probe/verify/p2.sh mutants-modern-1 && sh spec/capability-probe/verify/p2.sh mutants-modern-2
 - id: P3
   name: The whole cycle's checks on the finished tree, the recipe on this head, the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R10
@@ -578,6 +578,30 @@ recipe's offline steps on this head, the full verify, and the ledger.
     each era, left none from `test_probe_startup.py` (its drives point `TMPDIR` at the test's own
     directory) and one or two from `test_probes.py::test_the_lookup_over_ssh`, through the existing
     `LoopbackSSH.close()`.
+- **Remediation, review cycle 1 (2026-11-01).** P1 and P2 were reopened for F1, F3 and F5 (their
+  amendments); P3 reopened with them, its gate unchanged, and ran again on the remediated tree after
+  theirs, every step once.
+  - *Attempt 1 (2026-11-01), before the commit:* the second run of every step was green up to
+    `full-legacy`, which went red on 10 rows, every one a SIGINT row:
+    `test_launch.py::test_a_signal_death_is_reported_and_reraised[*-exit-130]` (6) and
+    `test_probe_startup.py::test_an_interrupt_while_waiting_for_the_probe_interrupts_the_start` (4). The
+    builder had started that run as a disowned background job of a non-interactive shell, which starts
+    its children with SIGINT ignored; the same 4 interrupt rows failed alone when started that way and
+    passed in the foreground and under the harness's own background runner. Not a product red. The
+    runner now refuses to start with SIGINT ignored, and every step ran again from the start.
+  *Observed (2026-11-01), the same run as P1's and P2's:* `phase` green in 65 s (`declared.py`,
+  `lookups.py`, `startup_order.py`, `drives.py all`, `docs_gate.py p2`, `alternatives.py coverage all`
+  with 163 alternatives and 164 cases, `baseline.sh`: 24 tools, 4 resources, 1477 characters of
+  instructions equal to `c520432`'s, 513 functions and 660 cases kept, none retired); `ledger`,
+  `recipe` and `equivalents` green; `full-legacy` green in 395 s, 4507 passed and 14 skipped (the bash
+  4.1 `need_shell` rows, which CI runs) in 392.8 s; `full-modern` green in 393 s, 4507 passed and 14
+  skipped in 390.7 s, then `cluster-mcp --help` under `bin/sandbox.sh`. Against `c520432`'s 359.6 s
+  and 359.5 s: +33.2 s (+9.2 %) and +31.2 s (+8.7 %), within the 20 %; P3's own run measured 407.2 s
+  and 389.4 s. The remediation adds 125 rows an era: the `exact-<site>` rows (52 in process, 3 CLI
+  drives), 4 distribution rows, 4 deadline rows (about 0.9 s each), 4 `resource-open-unmarked` rows,
+  and `test_mutations.py`'s anchor row for each of the 58 new cases; the full kind matrix stays in the
+  checkers. Written after the run,
+  this record touched only `TECH.md`, so `ledger` ran again on the finished tree, green.
 - **Touches:** `issues/lmod-tool-group.md`, `issues/xdu-storage.md` (notes), `issues/sandbox-dirs-left-on-kill.md` and its `ROADMAP.md` entry, and whatever `p3.sh`
   proves wrong in the product.
 
