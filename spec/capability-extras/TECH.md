@@ -77,10 +77,10 @@ phases:
   attempts: 1
   verify: sh spec/capability-extras/verify/p5.sh phase && sh spec/capability-extras/verify/p5.sh recipe && sh spec/capability-extras/verify/p5.sh mutants && uv run --no-project python -I spec/capability-extras/remediation/P5-ledger-headings.py && sh spec/capability-extras/verify/p5.sh full && uv run --no-project python -I spec/capability-extras/remediation/F3-timeout-approval.py
 review:
-  last_reviewed_commit: 2c5ceda
-  verdict: changes-requested
-  blocked_reason: F1 SystemExit and F2 import-timing escape R8; F3 sort outside refusal; F4 surviving mutants
-  cycle: 2
+  last_reviewed_commit: 82d2f2b
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 
 # TECH.md — Capabilities you don't have shouldn't be tools you see

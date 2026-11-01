@@ -173,3 +173,40 @@ member installed, the full ordered surface is byte-identical (`cmp`) to `ad70cc0
 ### Human-gate triggers
 
 - **Triggered:** F1 and F2 are CONFIRMED in `core/capabilities.py` and `core/__init__.py`, on § Invariants' high-blast-radius list. This verdict reaches the review bound (`review.cycle` 2 of ≤3), so the remediation route goes to Geoffrey.
+
+## Cycle 2's four items — fixed and verified by the foreman; approved (2026-11-01)
+
+- **Ruling:** Geoffrey, 2026-10-31, at the review bound: "Scoped fix, I verify, land". One
+  remediation of cycle 2's F1–F4, verified by the foreman with the reviewers' own plants and mutants
+  plus the gates and CI, landing without another review cycle.
+- **Fix:** `c7f85eb` (P1+P3: F1–F4), `48cb232` (P5: the gates), `82d2f2b` (P3: CLI drives per
+  family). The load has one failure exit (`except BaseException`; `CapabilityLoadError` and
+  `KeyboardInterrupt` re-raised as they are, anything else refused naming the distribution);
+  registrations are checked from before `ep.load()`; a distribution without a name, or with
+  unreadable metadata, is named by its entry point and refused before its code runs; ordering cannot
+  raise. The sweep mutates each decision to every alternative (218 alternatives, 241 cases, each
+  killed beside every member set in both eras; 8 equivalents recorded).
+- **Foreman verification** (fresh environments from `git+file://` URLs, `[slurm,rcac]` plus each
+  plant, driven under `bin/sandbox.sh` over stdio, closed stdin and HTTP):
+
+  | Plant | `2c5ceda` | `48cb232` |
+  |---|---|---|
+  | `raise SystemExit(0)` at import | exit 0, silent | exit 5, `cannot load capability cap-sysexit: SystemExit: 0`, answered on stdio |
+  | `sys.exit("this capability needs Linux")` | exit 1, bare text | exit 5, refusal naming the distribution |
+  | entry point imports its tools, which import a stray | started, stray silently missing | exit 5, `loading it registered ['helper_tool'], which are outside cap_stray2.tools` |
+  | dist-info with no `Name` | exit 6, `'<' not supported` | exit 5, named by its entry point: `its distribution metadata has no Name` |
+  | well-formed, entry point imports its tools (control) | served | served |
+
+  The four surviving mutants of cycle 2's F4, re-planted by the foreman in a clone of `48cb232`
+  (the composition tie by name, `installed()` caching a failure as `()`, the load moved above
+  `--generate-token`, `_OPENING` above the `transfer` import): each killed.
+- **CI:** run 41261148800 on `48cb232` was cancelled at the job's 20-minute timeout (handshake era
+  3674 passed; the 147 CLI drives added about four minutes per era). Ruled by the foreman as judge
+  (2026-10-31): the suite drives one kind per family over every transport, and the class checkers
+  drive every kind; the CI timeout is unchanged. `82d2f2b` changes no file under `packages/`; local
+  suite 357 s / 366 s per era against `2c5ceda`'s 361 s / 341 s; every mutant's status unchanged.
+  CI run 41272798575 on `82d2f2b`: success, 3534 passed per era.
+- **Human gate:** findings in cycles 1 and 2 touched `core/capabilities.py`, `core/server.py` and
+  `core/__init__.py`. The foreman held the gate for cycle 1 under the autonomy decision; Geoffrey
+  ruled cycle 2's escalation and this landing.
+- **Verdict: approved**, pinned to `82d2f2b`.
