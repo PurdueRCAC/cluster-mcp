@@ -60,8 +60,7 @@ changes.
 
 ## Acceptance criteria (the contract)
 
-Q1–Q6 are open for the foreman's ruling before the plan; each requirement that leans on one names
-it, with the recommended answer in parentheses.
+Each requirement that leans on a clarification names it, with the ruled answer in parentheses.
 
 - **R1** — WHERE an installed capability's probe reports that the cluster lacks what the capability
   needs, the server SHALL register none of its tools and none of its resources, the served
@@ -71,30 +70,29 @@ it, with the recommended answer in parentheses.
   (§ Invariants §7), with no edit to any core module. The Slurm and RCAC members SHALL each declare
   one, and tests SHALL drive each against an executor that reports what it needs as present and as
   absent, with no cluster. A capability that declares no probe SHALL be treated as Q1 rules
-  (recommended: served whenever it is installed, as today).
+  (served whenever it is installed, as today).
 - **R3** — WHERE every installed capability's probe reports present, the served surface SHALL be
   unchanged: `test_served_surface_matches_baseline` passes with no fixture edit. Under any set the
   probes withhold, the served instructions SHALL name exactly the tools served, verified by a test
   that cross-checks the two with at least one capability withheld.
-- **R4** — WHEN the server starts in `ssh` or `local` mode (Q3 rules on `local`; recommended: it
+- **R4** — WHEN the server starts in `ssh` or `local` mode (Q3: `local`
   probes), it SHALL run each declared probe once, through the shared executor the tools use, after
   that executor exists and before it answers any request, and SHALL NOT probe again for the life of
   the process.
 - **R5** — The probes SHALL together add no more than a documented bound to startup, whatever the
-  number of installed capabilities (Q5 rules on the bound; recommended: one fixed figure, no more
+  number of installed capabilities (Q5: one fixed figure, no more
   than the site read's 10 s). WHERE no installed capability declares a probe, the server SHALL run no
   probe command.
 - **R6** — IF a probe does not give a definite answer — it has not finished within the bound, its
   command could not run, or the connection was lost — THEN the server SHALL treat the capability as
-  Q2 rules (recommended: serve it, as if the probe reported present), SHALL log one line on stderr
+  Q2 rules (serve it, as if the probe reported present), SHALL log one line on stderr
   naming the capability's distribution and why, and SHALL keep starting.
-- **R7** — WHILE the server runs in `delegate` mode, it SHALL behave as Q3 rules (recommended: run no
+- **R7** — WHILE the server runs in `delegate` mode, it SHALL behave as Q3 rules (run no
   probe, serve every installed capability, and log one line on stderr saying probing is skipped in
   that mode), and every user SHALL be served the same tools and instructions.
-- **R8** — WHERE the operator override Q4 rules on is set (recommended: one process-wide switch, a
+- **R8** — WHERE the operator override Q4 rules on is set (one process-wide switch, a
   flag and an environment variable under § Configuration's conventions), the server SHALL run no
-  probe and SHALL serve every installed capability. If Q4 is ruled "no override", this requirement
-  is dropped.
+  probe and SHALL serve every installed capability.
 - **R9** — The existing startup refusals SHALL be unchanged and SHALL precede any probe: a
   capability that cannot load stops startup before the ladder, and a failed SSH connect is answered
   as § Invariants §4 describes, with no probe run. `--help`, `--version` and `--generate-token` SHALL
@@ -131,10 +129,10 @@ it, with the recommended answer in parentheses.
 
 ## Clarifications
 
-Open: each question below carries a recommended answer and its trade-off, for the foreman to rule
-before the plan. None is resolved yet.
+Ruled by the foreman, as judge under the effort's autonomy decision, on 2026-11-01, each as the
+shaping proposed; the trade-offs stay as the record. Reported to Geoffrey the same day.
 
-- **Q1:** Must every capability declare a probe? — **Recommended:** no. A probe is optional; a
+- **Q1:** Must every capability declare a probe? — **Ruled:** no. A probe is optional; a
   capability that declares none is served whenever it is installed, as today, and the Slurm and RCAC
   members declare one each (R2). What a probe declares — a command to look up, a script, a callable
   over the executor — is the plan's design. *Trade-off:* a capability written without a probe keeps
@@ -142,13 +140,13 @@ before the plan. None is resolved yet.
   just landed for every capability written against it, and force one on a capability that needs
   nothing from the cluster.
 - **Q2:** What does a probe that times out or errors mean: advertise, withhold, or refuse to start?
-  — **Recommended:** advertise (fail open), with one stderr line naming the capability and why (R6).
+  — **Ruled:** advertise (fail open), with one stderr line naming the capability and why (R6).
   *Trade-off:* on a cluster that really lacks the capability, a probe that also times out leaves
   today's over-advertising. Withholding would hide working tools for the whole session on a slow
   login node, with no recovery short of a restart, since the instructions are composed once.
   Refusing to start would turn a slow login node into an outage, and a probe failure is not a broken
   install (unlike § Invariants §4's load refusal).
-- **Q3:** What do `local` and `delegate` modes do? — **Recommended:** `local` probes, through its
+- **Q3:** What do `local` and `delegate` modes do? — **Ruled:** `local` probes, through its
   shared executor, as `ssh` does: it runs as the same owner on the same host its tools run on, so the
   answer is exact and costs no round trip. `delegate` runs no probe and serves every installed
   capability, with one stderr line saying so (R7). A `delegate` install lives on the one host it
@@ -159,20 +157,20 @@ before the plan. None is resolved yet.
   code's commands at startup in a process that runs privileged (§ Invariants §4, §5, a human gate),
   in the server's own environment rather than a mapped user's, so its answer can differ from what a
   user's login shell finds, and it is wrong for every user at once when it does.
-- **Q4:** Is there an operator override? — **Recommended:** yes, one process-wide switch that skips
+- **Q4:** Is there an operator override? — **Ruled:** yes, one process-wide switch that skips
   every probe and serves every installed capability (R8): a flag and a `CLUSTER_MCP_`-prefixed
   variable, read through `env_setting` like the others in § Configuration. *Trade-off:* it adds a
   setting. Without it, a probe that answers "absent" wrongly — a command that appears only after a
   step the probe's shell does not take — has no remedy but patching the code: installation, the only
   other switch (`capability-extras`, its Q3), cannot turn a withheld capability back on.
   Per-capability switches stay a non-goal.
-- **Q5:** What is the startup bound? — **Recommended:** one fixed figure for all probes together, no
+- **Q5:** What is the startup bound? — **Ruled:** one fixed figure for all probes together, no
   more than the site read's `READ_TIMEOUT` (10 s, `site.py:68`), stated in `AGENTS.md`; not
   configurable. Whether the probes overlap the site read is the plan's. *Trade-off:* a short bound
   makes fail-open (Q2) common on a loaded login node, which is today's behaviour; a long one delays
   every stdio start, and a client waits for the first answer through connect, site read and probes.
   Making it configurable adds a setting for a number few operators would change.
-- **Q6:** Is a probe result cached across restarts? — **Recommended:** no; every start probes afresh
+- **Q6:** Is a probe result cached across restarts? — **Ruled:** no; every start probes afresh
   (Non-goals). *Trade-off:* the bounded cost is paid on every start, and a stdio server starts once
   per client session. A cache would add on-disk state keyed by host and capability, a staleness rule,
   and a file to secure, and a stale "absent" would hide tools the cluster has gained.
