@@ -88,3 +88,49 @@ Clarifications Q1–Q6: each verified as ruled.
 ## Optional completeness sub-pass
 
 Not run.
+
+## Review cycle 2 — changes-requested (2026-11-01)
+
+A fresh blind debate (ship and block, xhigh, each in its own clone) over `541785c`, the cycle-1 remediation (`6196062`, `541785c`). CI green on `541785c`: 4521 passed per era, 6.2/6.0 min. Both reviewers: `uv sync --locked`, `uv lock --check`, both eras at 4507 passed, 14 skipped (the bash 4.1 rows CI runs), 400–422 s per era locally; `--help` in the sandbox lists the flag and the variable. Drives as cycle 1's: `local` with stub commands on `PATH`, the loopback SSH server, `delegate` over HTTP with JWT users, core-only and planted venvs, both protocol eras.
+
+### Matrix
+
+| R-ID | Verified how (both reviewers unless noted) | Status |
+|------|--------------------------------------------|--------|
+| R1 | Slurm absent, RCAC absent, both: no withheld tool, resource (alias included) or instruction line served; one INFO line naming distribution and missing commands; `local`, `ssh`, HTTP, modern era | ✅ |
+| R2 | Members declare 6 and 2; a planted third-party capability withheld and served with no core edit; malformed declarations (list, `'a;b'`, exiting tuple subclass) refused at load, 0 logins | ✅ (block F3 below) |
+| R3 | All present: tools, resources, instructions and initialize result byte-identical to a `c520432` build over `local` and `ssh`; `- name:` lines equal the served tools under every withheld set | ✅ |
+| R4 | `local` 1 login, `ssh` 2 (site read, probe); the probe's executor is the shared one; first answer after the probe | ✅ |
+| R5 | Hung profile: `local` first answer 10.7–10.8 s; `ssh` 20.0–20.8 s (site read + probe); core-only 0 logins | ✅ |
+| R6 | Profile `exit 3`, hang, link lost on the second exec, rc files printing a fake `end 0`: one WARNING per capability, all served, exit 0 | ✅ |
+| R7 | `delegate` with and without the override: one skip line, 0 logins | ✅ |
+| R8 | Flag; variable at `0`, `false`, `" "`: 0 logins, one skip line; empty probes | ✅ (F4 below) |
+| R9 | Budget (exit 2), missing host (exit 2), refused connect (exit 5, no probe line), load refusal (exit 5), `--help`/`--version`/`--generate-token`: 0 logins | ✅ |
+| R10 | §4, §7, §9, § Configuration, the repository map, architecture, § Testing, footguns, README match the code and the drives; the one false text is the seed (F2) | ❌ F2 |
+
+Clarifications Q1–Q6: each verified as ruled.
+
+### F1 — out of scope, recorded on the existing seed (block MEDIUM; ship S1)
+- Both reviewers reproduced cycle 1's F4: a `local` probe behind a profile of `trap '' TERM` then a hang outlives a server that failed open at 10 s and exited 0. The block reviewer found the mechanism: `run_process` sends SIGTERM, waits `GRACE`, then SIGKILL (`core/executor/launch.py:602-610`); the probe's worker is a daemon abandoned at the deadline, so when the client closes stdin within that grace the interpreter's exit ends the worker before its SIGKILL. Holding the server 2.5 s past its first answer left nothing behind.
+- **Ruling (foreman, as judge): out of scope**, as in cycle 1. It needs a TERM-ignoring hung login profile and a client that leaves within a second; the seed's Outcome ("exits for any reason") covers it, and the fix — process groups reaped at exit — belongs to the launcher, for tool calls as well as the probe. The seed must state the mechanism truly: F2.
+
+### F2 [MEDIUM/CONFIRMED] The seed misstates the leak's mechanism
+- **Where:** `issues/local-command-outlives-server.md`, the 2026-11-01 note ("since the executor's timeout sends SIGTERM only"), and this file's cycle-1 F4, which says the same.
+- **Evidence (block reviewer):** `launch.py:602-610` sends SIGKILL after the grace; the hold control above leaves no process. A cycle working from the seed's R1 sketch (signals only) would miss the normal-exit case.
+- **Routed as the property:** every record of this leak states the mechanism the code shows (an abandoned worker cut off within the SIGTERM→SIGKILL grace at interpreter exit), and the seed's sketch covers a normal exit.
+
+### F3 — the declaration covers only files on `PATH` (block MEDIUM, interpretive)
+- Cycle 1's F2 again, with the same evidence (a planted capability declaring an exported `module` function is withheld where `bash -l -c module` works) and the diff's own note on `issues/lmod-tool-group.md`. **Ruling unchanged: drop**, as cycle 1 ruled; still with Geoffrey for override.
+
+### F4 [LOW/CONFIRMED] Two documented behaviours survive mutants
+- **Log levels** (both reviewers): swapping INFO and WARNING in `_served` (`core/__init__.py`) survives `tests/test_probe_startup.py tests/test_probes.py` (564 passed); a CLI drive prints `WARNING … withheld` and `INFO … served without a probe answer`. § Invariants §4 names the levels.
+- **Override precedence** (both reviewers): checking the variable before the flag in `_resolve_skip_probes` survives 685–722 tests; with both set, the skip line names the variable, where §4 and the docstring say the flag.
+- **Routed as the property:** each documented level and the skip line's naming are pinned beside every member set, with an alternative sweep of `_served`'s and `_resolve_skip_probes`'s decisions.
+
+### Noted, not blocking
+- **Two refusal messages reworded** (ship S2): a non-str `uri` and a non-`True` `executor` no longer repr the value. The refusals stand unchanged and first; the wording is cycle 1's F1 fix (no repr of capability values). R9 met.
+- **Scope:** the exact-type hardening of every field (cycle 1's F1) refuses a `Capability` subclass, an `IntEnum` order or a `str`-subclass name; both reviewers note it, neither blocks. No released version accepts capabilities.
+- **Suite time** is ~6 min per era in CI against the 20-minute job timeout.
+
+### Bound
+This is review cycle 2 with changes requested: the bound. Escalated to Geoffrey on 2026-11-01.

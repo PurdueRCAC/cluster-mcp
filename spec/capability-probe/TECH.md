@@ -54,10 +54,10 @@ phases:
   attempts: 1
   verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
 review:
-  last_reviewed_commit: 2339c0e
+  last_reviewed_commit: 541785c
   verdict: changes-requested
-  blocked_reason: F1 field values run capability code after load (§7 false); F3 AGENTS map/architecture; F5 deadline mutant
-  cycle: 1
+  blocked_reason: 'review cycle 2 (bound): F2 seed misstates the leak mechanism; F4 log levels and override precedence unpinned'
+  cycle: 2
 ---
 
 # TECH.md — Probe the cluster before advertising an installed capability
