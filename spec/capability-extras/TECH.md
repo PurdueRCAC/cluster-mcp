@@ -3,7 +3,7 @@ slug: capability-extras
 title: Capabilities you don't have shouldn't be tools you see
 kind: feature
 appetite: big
-status: in_review
+status: done
 branch: feature/capability-extras
 base: develop
 current_phase: done
