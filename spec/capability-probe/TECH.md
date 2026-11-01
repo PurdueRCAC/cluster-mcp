@@ -3,7 +3,7 @@ slug: capability-probe
 title: Probe the cluster before advertising an installed capability
 kind: feature
 appetite: big
-status: in_review
+status: blocked
 branch: feature/capability-probe
 base: develop
 current_phase: done
@@ -52,10 +52,10 @@ phases:
   hill: uphill
   verify: sh spec/capability-probe/verify/p3.sh phase && sh spec/capability-probe/verify/p3.sh ledger && sh spec/capability-probe/verify/p3.sh recipe && sh spec/capability-probe/verify/p3.sh equivalents && sh spec/capability-probe/verify/p3.sh full-legacy && sh spec/capability-probe/verify/p3.sh full-modern
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 2339c0e
+  verdict: changes-requested
+  blocked_reason: F1 field values run capability code after load (§7 false); F3 AGENTS map/architecture; F5 deadline mutant
+  cycle: 1
 ---
 
 # TECH.md — Probe the cluster before advertising an installed capability
