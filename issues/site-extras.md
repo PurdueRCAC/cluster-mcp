@@ -24,13 +24,16 @@ A site extra is two things at once, and conflating them is the trap:
 
 The rename ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/)) drew the first
 boundary: `slist` and `sfeatures` left the Slurm member for the RCAC one, and the instructions
-became `CORE_INSTRUCTIONS`, `SLURM_INSTRUCTIONS` and `RCAC_INSTRUCTIONS`. But `core/server.py` still
-imports and joins all three, so this cycle has to finish the split into something a *contributor*
-can extend without editing a core module.
+became `CORE_INSTRUCTIONS`, `SLURM_INSTRUCTIONS` and `RCAC_INSTRUCTIONS`. `capability-extras`
+([`spec/capability-extras/`](../spec/capability-extras/)) made the RCAC member an optional `[rcac]`
+extra that registers its tools, its instructions and its storage resource through the entry-point
+group, so the core no longer imports it. What is left is the contract: the bundle alias, what a
+*contributor* writes to add a site, and how packaged site context composes with `/etc/agents.d`.
 
 ## Why it was deferred
 
-Not deferred — sequenced after [`capability-extras.md`](capability-extras.md), whose mechanism it
+Not deferred — sequenced after `capability-extras`
+([`spec/capability-extras/`](../spec/capability-extras/), landed 2026-11-01), whose mechanism it
 consumes. Filed separately because the interesting work here is the **contribution boundary**, not the
 Purdue code: what exactly does a new center have to write, and where does it put it?
 
@@ -67,14 +70,19 @@ plan should say plainly how they compose, because a contributor will ask.
 
 - Naming: an extra called `rcac` inside a distribution called `cluster-mcp` is the intended shape.
   Whether the *module* keeps `rcac` or becomes `sites/rcac.py` is a plan-level call.
-- Related: [`capability-extras.md`](capability-extras.md) (strict prerequisite),
+- Related: [`spec/capability-extras/`](../spec/capability-extras/) (strict prerequisite, landed),
   [`lmod-tool-group.md`](lmod-tool-group.md) (pulled in by the site extra),
   [`generalize-storage-discovery.md`](generalize-storage-discovery.md) (the site hook this establishes
   is where a discovery implementation lands).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: absorbs [`generalize-storage-discovery.md`](generalize-storage-discovery.md). With
-  capabilities as separate distributions ([`capability-extras.md`](capability-extras.md), Notes),
-  the `rcac` alias lists distribution names (`cluster-mcp-slurm`, …) rather than the
-  self-referencing extras sketched in the Problem above.
+  capabilities as separate distributions ([`spec/capability-extras/`](../spec/capability-extras/),
+  GOAL Clarifications), the `rcac` alias lists distribution names (`cluster-mcp-slurm`, …) rather
+  than the self-referencing extras sketched in the Problem above.
 - 2026-10-30: the rename moved `slist` and `sfeatures` into the RCAC member, so R3 is met on
   `develop`; R2 and R4 stand, since the core still imports and joins every member's instructions.
+- 2026-11-01: `capability-extras` meets R2 and R4 on `develop`. Without the RCAC member no Purdue
+  tool registers, and the served instructions are composed from the core and Slurm texts, which name
+  no Purdue path, quota figure or command (R2). The member declares `RCAC_INSTRUCTIONS` on its own
+  capability record beside its tools, and no core constant holds it (R4). R1 is half met: the `rcac`
+  extra exists but installs only the RCAC member, so the bundle alias stands, with R5 and R6.

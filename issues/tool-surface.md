@@ -34,8 +34,9 @@ everyday work — and `run_command` is the one tool nobody can reason about from
 
 Not deferred — a roadmap cycle in Part I. It renames today's file tools, so it comes after
 the rename ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/), landed 2026-10-30) and
-[`capability-extras.md`](capability-extras.md) (every import and registration moves once), and it
-is built on the argv executor from [`spec/safe-execution/`](../spec/safe-execution/).
+`capability-extras` ([`spec/capability-extras/`](../spec/capability-extras/), landed 2026-11-01;
+every import and registration moves once), and it is built on the argv executor from
+[`spec/safe-execution/`](../spec/safe-execution/).
 
 **Pre-existing:** the thin tools and missing annotations are on `main`; the family is new work.
 

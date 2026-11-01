@@ -32,10 +32,11 @@ The four commands that carry nearly all the value:
 
 ## Why it was deferred
 
-Not deferred — sequenced after [`capability-extras.md`](capability-extras.md), and deliberately so:
-it is the **second** consumer of the extras mechanism, which is what proves that mechanism
-generalizes rather than having been shaped around Slurm alone. Doing LMOD first would produce two
-ad-hoc conditionals instead of one mechanism.
+Not deferred — sequenced after `capability-extras`
+([`spec/capability-extras/`](../spec/capability-extras/), landed 2026-11-01), and deliberately so:
+it is the **first** capability written for the extras mechanism rather than moved onto it, which is
+what proves that mechanism generalizes rather than having been shaped around the Slurm and RCAC
+members alone. Doing LMOD first would produce two ad-hoc conditionals instead of one mechanism.
 
 **Pre-existing:** n/a — new work.
 
@@ -75,7 +76,7 @@ Two things the plan has to get right:
 - The direction is explicitly "may not be LMOD" (`AGENTS.md` § *Direction*) — Tcl Environment Modules,
   Spack, and EasyBuild-generated hierarchies all exist. This cycle should not over-abstract for them,
   but its tool names should not be so LMOD-specific that a sibling `[tmod]` extra cannot reuse them.
-- Related: [`capability-extras.md`](capability-extras.md) (strict prerequisite),
+- Related: [`spec/capability-extras/`](../spec/capability-extras/) (strict prerequisite, landed),
   [`site-extras.md`](site-extras.md) (a site extra pulls this one in).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: module state does not persist between calls — each call is a fresh shell — so a

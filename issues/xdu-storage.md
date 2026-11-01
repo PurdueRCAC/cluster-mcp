@@ -30,9 +30,9 @@ aarch64 (glibc 2.28+), 35–46 MB with DuckDB bundled, with one `SHA256SUMS`.
 ## Why it was deferred
 
 Not deferred — a roadmap cycle in Part I. It is a capability distribution
-([`capability-extras.md`](capability-extras.md)), it routes [`tool-surface.md`](tool-surface.md)'s
-`file_find`, and it indexes large trees through [`slurm-capability.md`](slurm-capability.md)'s
-`job_submit`, so it comes after all three.
+([`spec/capability-extras/`](../spec/capability-extras/)), it routes
+[`tool-surface.md`](tool-surface.md)'s `file_find`, and it indexes large trees through
+[`slurm-capability.md`](slurm-capability.md)'s `job_submit`, so it comes after all three.
 
 **Pre-existing:** n/a — new work.
 
@@ -89,8 +89,9 @@ repository when this cycle is shaped.
   parallel-filesystem roots toward these tools.
 - xdu facts are from the public repository and its v0.5.2 release; the pinned version is chosen at
   shaping.
-- Related: [`capability-extras.md`](capability-extras.md), [`tool-surface.md`](tool-surface.md),
-  [`slurm-capability.md`](slurm-capability.md), [`site-extras.md`](site-extras.md),
+- Related: [`spec/capability-extras/`](../spec/capability-extras/),
+  [`tool-surface.md`](tool-surface.md), [`slurm-capability.md`](slurm-capability.md),
+  [`site-extras.md`](site-extras.md),
   [`generalize-storage-discovery.md`](generalize-storage-discovery.md) (the storage-roles model
   `storage_spaces` reports in).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).

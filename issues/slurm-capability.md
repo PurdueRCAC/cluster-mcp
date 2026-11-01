@@ -25,18 +25,18 @@ ways that cost a job submission. Found while submitting and watching test jobs t
   accepted forms.
 
 The surface is also wider than it needs to be. Five tools answer "tell me about this job" —
-`jobinfo`, `jobcmd`, `jobenv`, `jobscript` (Purdue wrappers in `tools/rcac.py`) and
-`scontrol_show_job` — and the Slurm definitions are among the largest the server sends: `sbatch`
-2.9K characters, `sacct` 2.0K, `scancel` 1.6K, `squeue` 1.5K. Reading a job's output means finding
-its `StdOut` path in `scontrol` and then reading the file. Waiting for a job means polling in a
-loop, one tool call per poll.
+`jobinfo`, `jobcmd`, `jobenv`, `jobscript` (Purdue wrappers in the RCAC member's `rcac/tools.py`)
+and `scontrol_show_job` — and the Slurm definitions are among the largest the server sends:
+`sbatch` 2.9K characters, `sacct` 2.0K, `scancel` 1.6K, `squeue` 1.5K. Reading a job's output means
+finding its `StdOut` path in `scontrol` and then reading the file. Waiting for a job means polling
+in a loop, one tool call per poll.
 
 ## Why it was deferred
 
-Not deferred — a roadmap cycle in Part I. It is the Slurm capability distribution that
-[`capability-extras.md`](capability-extras.md) makes possible, it follows the naming, annotation and
-budget rules from [`tool-surface.md`](tool-surface.md), and it rides the argv executor from
-[`spec/safe-execution/`](../spec/safe-execution/).
+Not deferred — a roadmap cycle in Part I. It rebuilds the Slurm capability distribution, which
+[`spec/capability-extras/`](../spec/capability-extras/) made an optional extra, it follows the
+naming, annotation and budget rules from [`tool-surface.md`](tool-surface.md), and it rides the
+argv executor from [`spec/safe-execution/`](../spec/safe-execution/).
 
 **Pre-existing:** every problem above is on `main` today.
 
@@ -90,7 +90,8 @@ Every validation error names the accepted forms with an example. The remaining s
   `job_info` or registers its own view.
 - Related: [`spec/safe-execution/`](../spec/safe-execution/) (`args`, the executor),
   [`tool-surface.md`](tool-surface.md) (names, annotations, budgets, aliases),
-  [`capability-extras.md`](capability-extras.md) (the distribution and its probe),
+  [`spec/capability-extras/`](../spec/capability-extras/) (the distribution),
+  [`capability-probe.md`](capability-probe.md) (its probe),
   [`lmod-tool-group.md`](lmod-tool-group.md) (`modules=[…]`), [`xdu-storage.md`](xdu-storage.md)
   (indexes large trees through `job_submit`).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).

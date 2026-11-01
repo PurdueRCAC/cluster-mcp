@@ -23,8 +23,8 @@ strings it found are outside those requirements, and each is a judgement call ra
   list among R8's deltas.
 - **The Purdue favicon** (`static/purdue-favicon.ico`, its `/static/purdue-favicon.ico` route and
   `ICON_URL`) stays in the core member, though the core is meant to read as generic. Moving it to the
-  RCAC member needs a way for a member to register routes and icons, which `capability-extras` or
-  `site-extras` (`issues/site-extras.md`) introduces.
+  RCAC member needs a way for a member to register routes and icons. `capability-extras` landed
+  without one (its GOAL non-goals), so `site-extras` (`issues/site-extras.md`) or this seed adds it.
 
 The dev hostname `mcp.rcac.dev` in `compose.yml`, `nginx-dev.conf` and the README's TLS section is a
 local development name, not an identity the server reports; it changes with the favicon, if at all.
@@ -51,7 +51,7 @@ announced and windowed the way the rename's own deprecations are.
 
 ## Notes
 
-- Related: `issues/site-extras.md`, `issues/capability-extras.md`, `spec/rename-to-cluster-mcp/`
+- Related: `issues/site-extras.md`, `spec/capability-extras/`, `spec/rename-to-cluster-mcp/`
 - Found by: `rename-to-cluster-mcp` plan (research briefs 03, 04, 05)
 - 2026-10-30: the request-state keys `rcac_user` and `rcac_local_user` (set in `middleware.py` for
   a delegate call or read) still carry the old name too. They are never served, so nothing outside

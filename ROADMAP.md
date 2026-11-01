@@ -75,16 +75,19 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Thirteen cycles, after the rename, that take this from *the Purdue RCAC MCP server* to *an MCP
-server for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename
-to `cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
-([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
-deprecation window. What remains makes capabilities optional, then lets an installed one with
+Twelve cycles, after the rename and the capability extras, that take this from *the Purdue RCAC MCP
+server* to *an MCP server for HPC clusters, with Purdue as one supported site*, ending in **release
+0.2.0**. The rename to `cluster-mcp` and the uv-workspace restructure landed on `develop` on
+2026-10-30 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names
+through a deprecation window. The capability extras landed on 2026-11-01
+([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
+`[slurm]` and `[rcac]` each install a member that registers through one entry-point group, and the
+served instructions are composed from what loaded. What remains lets an installed capability with
 nothing behind it advertise nothing, then builds each capability on that mechanism — Slurm first,
-then LMOD and xdu as the consumers that prove it generalizes — and finally the site extra that
-bundles them. Ahead of the tool families sit the executor fixes: stopping a timed-out command, its
-measurement now approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a
-reconnect test whose wall-clock bound measures load as well as behaviour.
+then LMOD and xdu as the new capabilities that prove it generalizes — and finally the site extra
+that bundles them. Ahead of the tool families sit the executor fixes: stopping a timed-out command,
+its measurement now approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and
+a reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -93,7 +96,7 @@ working, and renaming them is a break of its own that needs a window. `serverInf
 FastMCP's version rather than this server's. The core member still serves the Purdue favicon, which
 waits for a way for a member to register its own routes and icons.
 
-*Horizon: after 0.2.0 · Depends on: the rename (landed names; cleared: landed on `develop` 2026-10-30), capability-extras or site-extras (for the favicon) · Refs: `issues/site-extras.md`*
+*Horizon: after 0.2.0 · Depends on: the rename (landed names; cleared: landed on `develop` 2026-10-30), capability-extras or site-extras (for the favicon; capability-extras cleared: landed on `develop` 2026-11-01 without member routes) · Refs: `issues/site-extras.md`*
 **Seed:** [`issues/rename-leftover-identity-strings.md`](issues/rename-leftover-identity-strings.md) · *status: unshaped*
 
 ## The legacy names outlive their window
@@ -108,24 +111,6 @@ and the window's own tests and README section go with it.
 *Horizon: 0.4.0 at the earliest · Depends on: release 0.2.0 (the window opens there) · Refs: [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/) (GOAL non-goals); `core/deprecation.py`*
 **Seed:** [`issues/remove-legacy-names.md`](issues/remove-legacy-names.md) · *status: unshaped*
 
-## Capabilities you don't have shouldn't be tools you see
-
-Today every tool registers unconditionally: a site without Slurm still advertises `sbatch`, `squeue`
-and `sacct` to every connecting model, which is an invitation to hallucinate a workflow that cannot
-run. The shape is packaging extras — `cluster-mcp[slurm]` — where each extra installs a real
-distribution, registered through an entry-point group, with instructions composed from what
-loaded. The runtime probe, so that an installed capability with nothing behind it advertises
-nothing, moved to its own seed, `capability-probe` (below), at this cycle's GOAL gate.
-
-This is the load-bearing cycle of Part I: it establishes the mechanism that Slurm, LMOD, xdu and the
-site extras plug into. It also collides directly with an existing invariant — registration is
-currently an import-time side effect driven by a hardcoded list at the bottom of
-`core/tools/__init__.py` (`AGENTS.md` § Invariants §7) — so the design has to replace that contract,
-not work around it.
-
-*Horizon: near-term after the rename · Depends on: the rename (the extras are named `cluster-mcp[…]`, and the workspace exists; cleared: landed on `develop` 2026-10-30), stack-upgrade (FastMCP 4's providers are a candidate carrier; cleared: landed on `develop` 2026-10-17) · Refs: prerequisite for every capability entry below*
-**Seed:** [`issues/capability-extras.md`](issues/capability-extras.md) · *status: adopted:capability-extras*
-
 ## An installed capability with nothing behind it still advertises its tools
 
 After capability-extras, installation is the only switch, so one install that serves several
@@ -136,7 +121,7 @@ startup path of a server whose SSH connection is established eagerly, a differen
 `local` mode, and no user to probe as in `delegate` mode over HTTP, where instructions are composed
 once per process.
 
-*Horizon: after capability-extras · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
+*Horizon: after capability-extras · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (GOAL non-goals, Q2)*
 **Seed:** [`issues/capability-probe.md`](issues/capability-probe.md) · *status: unshaped*
 
 ## A timed-out command may keep running after its call returns
@@ -234,7 +219,7 @@ as a net for mistakes, not a security boundary. A `--profile read-only` register
 read-only tools. Aliases versus a clean break for the old names, and names a client can allow-list
 by pattern, are open shaping questions.
 
-*Horizon: mid-term · Depends on: capability-extras (the core distribution it lands in), safe-execution (the argv executor; cleared: landed on `develop` 2026-10-23) · Refs: sets the naming, annotation and budget rules every capability follows; absorbs `list-directory-parsing`*
+*Horizon: mid-term · Depends on: capability-extras (the core distribution it lands in; cleared: landed on `develop` 2026-11-01), safe-execution (the argv executor; cleared: landed on `develop` 2026-10-23) · Refs: sets the naming, annotation and budget rules every capability follows; absorbs `list-directory-parsing`*
 **Seed:** [`issues/tool-surface.md`](issues/tool-surface.md) · *status: unshaped*
 
 ### Absorbed: `list_directory` misreads some entries
@@ -256,9 +241,9 @@ job id must be wrapped in a list, a purged id is an error rather than an empty r
 tools answer "tell me about this job". The `job_*` family — `job_submit` with `args`, `modules` and
 typed resources accepting an int or a string, `job_list` and `job_history` accepting a scalar or a
 list, a consolidated `job_info`, `job_output`, `job_cancel`, and a bounded `job_wait` considered —
-is the first capability distribution, with validation errors that say what to send.
+lands in the Slurm capability distribution, with validation errors that say what to send.
 
-*Horizon: mid-term · Depends on: capability-extras, tool-surface, safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: the first consumer of the extras mechanism*
+*Horizon: mid-term · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01), tool-surface, safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: rebuilds the Slurm member, an extra since capability-extras*
 **Seed:** [`issues/slurm-capability.md`](issues/slurm-capability.md) · *status: unshaped*
 
 ## Module systems are the other half of "can I run this"
@@ -266,12 +251,12 @@ is the first capability distribution, with validation errors that say what to se
 Every tool here is about jobs; none is about software. On an LMOD cluster an agent cannot discover
 what is installed, what versions exist, or what a module load would do to the environment — so it
 guesses, and `INSTRUCTIONS.md` has to compensate with prose. `module avail`, `module spider`,
-`module list` and `module show` are the missing capability group, and they are the second consumer
-of the extras mechanism, which is what proves the mechanism generalizes past one instance. Module
-state does not persist between calls, so a `modules=[…]` parameter on `run_command` and job
-submission is part of the idea.
+`module list` and `module show` are the missing capability group, and they are the first capability
+written for the extras mechanism rather than moved onto it, which is what proves the mechanism
+generalizes past the members it was shaped around. Module state does not persist between calls, so
+a `modules=[…]` parameter on `run_command` and job submission is part of the idea.
 
-*Horizon: mid-term · Depends on: capability-extras (strictly), tool-surface (`run_command`'s parameters) · Refs: `slurm-capability` takes the same `modules=[…]`*
+*Horizon: mid-term · Depends on: capability-extras (strictly; cleared: landed on `develop` 2026-11-01), tool-surface (`run_command`'s parameters) · Refs: `slurm-capability` takes the same `modules=[…]`*
 **Seed:** [`issues/lmod-tool-group.md`](issues/lmod-tool-group.md) · *status: unshaped*
 
 ## Answer storage questions from an index, not a walk
@@ -284,7 +269,7 @@ home, indexes large trees through the scheduler and small ones at low priority, 
 `storage_spaces`, `storage_index`, `file_find` routed to the index, and `storage_usage` — typed
 operations only, never caller-written SQL. Byte-sum rollups are an upstream request to xdu.
 
-*Horizon: mid-term · Depends on: capability-extras, tool-surface (`file_find`), slurm-capability (indexing jobs) · Refs: the third consumer of the extras mechanism*
+*Horizon: mid-term · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01), tool-surface (`file_find`), slurm-capability (indexing jobs) · Refs: the second capability written for the extras mechanism*
 **Seed:** [`issues/xdu-storage.md`](issues/xdu-storage.md) · *status: unshaped*
 
 ## A site extra is shorthand plus a point of view
@@ -297,7 +282,7 @@ and the Purdue part of the instructions. Getting the boundary right here is what
 cycle should produce a documented pattern, not just a Purdue special case. It absorbs storage
 discovery, whose site implementation needs exactly the hook this cycle establishes.
 
-*Horizon: mid-term · Depends on: capability-extras (strictly); lmod-tool-group and xdu-storage (the extra pulls them in) · Refs: absorbs `generalize-storage-discovery`; sets the pattern other centers copy*
+*Horizon: mid-term · Depends on: capability-extras (strictly; cleared: landed on `develop` 2026-11-01); lmod-tool-group and xdu-storage (the extra pulls them in) · Refs: absorbs `generalize-storage-discovery`; sets the pattern other centers copy*
 **Seed:** [`issues/site-extras.md`](issues/site-extras.md) · *status: unshaped*
 
 ### Absorbed: not every cluster has a Lustre scratch and a myquota
@@ -454,7 +439,7 @@ A failed load cuts the tool registry back but leaves the imported tools modules 
 load in the same process registers nothing for a capability that had loaded cleanly, and the error
 names it instead of the broken one. The command line never retries, so only a library caller sees it.
 
-*Horizon: later · Depends on: capability-extras · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
+*Horizon: later · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
 **Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
 
 ---

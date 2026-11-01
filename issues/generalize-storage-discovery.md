@@ -19,9 +19,10 @@ Purdue commands and no fallback:
   layout.
 - Scratch resolution shells out to `findscratch`, treated as the authoritative source (commit
   `d73f972`).
-- The `cluster://storage` resource (`core/resources.py:59`; `rcac://storage` is its deprecated
-  alias) formats `paths.home`, `paths.scratch` and `paths.depots` — a data model with `depot` in it,
-  which is a Purdue concept, not an HPC one.
+- The `cluster://storage` resource (`rcac/resources.py:14`, registered by the RCAC member since
+  `capability-extras`; `rcac://storage` is its deprecated alias) formats `paths.home`,
+  `paths.scratch` and `paths.depots` — a data model with `depot` in it, which is a Purdue concept,
+  not an HPC one.
 
 On a cluster with neither command, `myquota` returns nonzero, the parser sees nothing it recognizes,
 and the failure surfaces as a parse error rather than "this site does not expose quotas that way."
