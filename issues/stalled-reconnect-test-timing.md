@@ -29,6 +29,12 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   `EOFError` (run 41375322079, handshake era, branch `ci/split-eras` at `3a87f35`, which changes
   only the workflow and AGENTS.md); the server side logged `Connection reset by peer`. 4573 others
   passed, and the re-run of the failed job passed. It is the second CI failure of this row.
+- 2026-11-01: the class reaches beyond SSH. `capability-probe`'s
+  `tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability[interrupt-both]`
+  failed on CI (run 41377031448, handshake era, `ci/split-eras` at `c8843b2`): a raised ending must be
+  decided in under `BOUND / 2` (0.15 s) and took 0.20 s. 4573 others passed, and the same commit
+  passed in both eras on `develop` (run 41377033067). It is a wall-clock bound a busy runner can
+  miss, like the reconnect row's; shaping should sweep every such bound in the suite, not one test.
 - 2026-10-30: during `rename-to-cluster-mcp`, the test failed in local full-suite runs at two
   phase gates (macOS), once at P2 and twice in a row at P5's remediation (modern era); each time
   it passed alone and on a further identical-tree run. The failing assertion was "0 reconnect
