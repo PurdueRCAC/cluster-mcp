@@ -127,7 +127,7 @@ It sits ahead of the tool families because they lean on bounded calls (a bounded
 an accident. Its measurement was approved on 2026-10-29.
 
 *Horizon: mid-term; the measurement approved on 2026-10-29 · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
-**Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: unshaped*
+**Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: adopted:timeout-process-cleanup*
 
 ## A dead SSH link that still reads as connected holds file transfers without limit
 
