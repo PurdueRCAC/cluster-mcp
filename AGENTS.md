@@ -1522,7 +1522,7 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | commit categories | `[feature]` `[fix]` `[docs]` `[refactor]` `[test]` `[ci]` `[release]` `[harness]`: lowercase, an open set (coin one when it fits). Branch commits take the GOAL's `kind` verbatim; landing subjects use these categories |
 | branch commits | `[{kind}] Build {slug} P<n>`; no `Co-Authored-By:` trailer (existing repo convention) |
 | landing | `squash-local`: squash onto `origin/develop` in the cycle worktree as one `[category] What changed` commit, then push `develop` |
-| ci | `.github/workflows/ci.yml`, job `gate`: the one check publish reads. Before a `squash-local` landing, list the push runs of the cycle branch's head commit with `gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" -e push --json databaseId,attempt,status,conclusion`: at least one run must be listed, and every listed run, in its latest attempt, must be `completed` with conclusion `success`. A red, cancelled, missing or unfinished run is not green. Pull-request runs and `.github/workflows/mutants.yml` are never read |
+| ci | `.github/workflows/ci.yml`: the one check publish reads, a run of three jobs (`suite-legacy` and `suite-modern`, one protocol era each, then `gate`, which needs both). Before a `squash-local` landing, list the push runs of the cycle branch's head commit with `gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" -e push --json databaseId,attempt,status,conclusion`: at least one run must be listed, and every listed run, in its latest attempt, must be `completed` with conclusion `success`. A red, cancelled, missing or unfinished run is not green. Pull-request runs and `.github/workflows/mutants.yml` are never read |
 | setup | `uv sync --locked`: dependency refresh, run before any verify |
 | verify | `uv lock --check && uv run pytest -q && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q && bin/sandbox.sh uv run cluster-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in both protocol eras: the handshake era first, then revision 2026-07-28 (§ Testing) |
 | throwaway environment | `bin/sandbox.sh <cmd…>` (contract below) |
@@ -2605,10 +2605,13 @@ What each mode means:
   a new member's wheel takes only its own subpackage (§ Packaging).
 - A change to `[project.dependencies]` or `[dependency-groups]` and its `uv lock` land in the same
   commit, and a CLI flag name or default moves `compose.yml` with it: § Packaging.
-- **CI mirrors the gate.** `.github/workflows/ci.yml`'s `gate` job runs the profile's `setup`, then
-  each command of its `verify`, then each release-recipe `gate` step that `verify` lacks: one step
-  per command, verbatim, in that order. A change to any of the three lists changes the workflow in
-  the same commit, and the reverse. Before them, one provisioning step installs the login shells the suite
+- **CI mirrors the gate.** `.github/workflows/ci.yml` runs the profile's `setup`, then each command
+  of its `verify`, then each release-recipe `gate` step that `verify` lacks: one step per command,
+  verbatim. The two suite commands (one per protocol era) each run in a job of their own,
+  `suite-legacy` and `suite-modern`, in parallel and each after `setup`, so that neither job nears
+  its 20-minute timeout; the `gate` job needs both and runs `setup`, then every other command in
+  list order. A change to any of the three lists changes the workflow in the same commit, and the
+  reverse. Before `setup` in each suite job, one provisioning step installs the login shells the suite
   drives (`zsh`, `tcsh`, `ksh`, `csh`) and nothing else: the runner lacks them, and without them
   those tests would fail there (`conftest.need_shell` fails a missing-shell row on CI rather than
   skip it). It has no local counterpart, since macOS ships them. The sdist furniture set lives only in `bin/sdist_hygiene.py`,

@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: MIT
 #
 # The gate, on GitHub. Each run step is a command from the factory profile's `setup` and `verify`
-# or the release recipe's `gate` (AGENTS.md § Factory), in that order; § Conventions binds the
-# three lists. The `gate` job is the check publish reads before a squash-local landing.
+# or the release recipe's `gate` (AGENTS.md § Factory); § Conventions binds the three lists. The
+# suite runs once per protocol era, each era in a job of its own and the two in parallel, so that
+# neither job nears its timeout; every other command runs in `gate`, in list order, once both eras
+# have passed. A run is green only when all three jobs are; publish reads the run.
 #
 # Least privilege: a read-only token, no secrets, no caches, no uploads, and every action pinned
 # to a full commit SHA (the trailing comment carries the readable version).
@@ -23,8 +25,8 @@ defaults:
     shell: bash
 
 jobs:
-  gate:
-    name: gate
+  suite-legacy:
+    name: suite (handshake era)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -38,9 +40,41 @@ jobs:
           enable-cache: false
       - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
       - run: uv sync --locked
-      - run: uv lock --check
       - run: uv run pytest -q
+
+  suite-modern:
+    name: suite (modern era)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
       - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q
+
+  gate:
+    name: gate
+    needs: [suite-legacy, suite-modern]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: uv sync --locked
+      - run: uv lock --check
       - run: bin/sandbox.sh uv run cluster-mcp --help
       # Needs the network: uv audit asks the advisory service, and fails closed when it cannot.
       - run: uv run python bin/audit_lock.py
