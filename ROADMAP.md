@@ -479,6 +479,16 @@ decided at load, the handler excepted. Pre-existing; no code changes until its c
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
 
+## A disk-image step that hangs outlives its test
+
+On macOS the full-filesystem write test builds a real 4 MB volume with `hdiutil`. Its fixture waits
+120 s for each step and, at the timeout, fails the test without stopping the step: one stalled
+`hdiutil create` and its formatter stayed with a half-made device for about a day on a developer
+Mac. Pre-existing; macOS only, since the CI runner never calls `hdiutil`. It gates nothing.
+
+*Horizon: later · Depends on: — · Refs: `tests/test_ssh_exec.py` (`_host`, `full_volume`); [`spec/safe-execution/`](spec/safe-execution/)*
+**Seed:** [`issues/full-volume-fixture-leaks-hdiutil.md`](issues/full-volume-fixture-leaks-hdiutil.md) · *status: unshaped*
+
 ---
 
 # Settled questions
