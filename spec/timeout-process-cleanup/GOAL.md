@@ -63,24 +63,24 @@ within what bound, and what is not.
 ## Acceptance criteria (the contract)
 
 "The command's processes" below means the command, the children and grandchildren it started, and
-any of them that ignores TERM, except a process that has left the command's process group
-[NEEDS CLARIFICATION: Q4 — whether such a process is out of scope].
+any of them that ignores TERM, except a process that has left the command's process group (Q4).
 "The bound" is R4's. Each requirement that leans on a clarification names it.
 
 - **R1** — WHEN a command run in `ssh` mode is still incomplete at its deadline, the command's
   processes SHALL all have exited on the host the command ran on within the bound. The plan step's
   measurement on a login node records what the test cluster's OpenSSH does today and informs the
-  design; the requirement holds whatever it shows [NEEDS CLARIFICATION: Q1 — how the measurement
-  bears on R1, and whether a post-fix run is part of it].
+  design; the requirement holds whatever it shows, and is graded on the host-free tests (R6, Q1).
 - **R2** — WHEN a command run in `local` mode, or in `delegate` mode by a server running as root, is
   still incomplete at its deadline, the command's processes SHALL all have exited within the bound,
   whether or not a process that ignores TERM still holds the command's output streams.
 - **R3** — WHEN a command run in `delegate` mode by a server that is not root is still incomplete at
-  its deadline, the command's processes SHALL all have exited within the bound
-  [NEEDS CLARIFICATION: Q3 — whether a documented limit may stand in for this, and when].
+  its deadline, the command's processes SHALL all have exited within the bound, unless the PLAN
+  gate records that stopping them needs a privilege beyond the `sudo` rule `SECURITY.md` documents;
+  then R3 narrows to what TERM reaches and the limit is documented (R7, Q3).
 - **R4** — The bound SHALL be one figure, the same in every mode, stated in `AGENTS.md` § Invariants
-  §3 [NEEDS CLARIFICATION: Q2 — the figure, and whether the stop must finish before `run`
-  returns]. `run` SHALL return a timed-out call no later than it does today.
+  §3: every process in reach has exited within 2 × `GRACE` of the deadline, on the server's clock
+  and, over `ssh`, excluding the link's own delay. The stop may finish after `run` returns (Q2).
+  `run` SHALL return a timed-out call no later than it does today.
 - **R5** — The result contract SHALL be unchanged: a timed-out call returns `TIMEOUT_EXIT_CODE` with
   the output captured before the deadline and while the command stopped, and raises nothing; over
   `ssh`, a command whose exit status arrived before its output keeps `launch.LATE_NOTE`; a call
@@ -107,28 +107,26 @@ any of them that ignores TERM, except a process that has left the command's proc
   worker: a different trigger, `issues/local-command-outlives-server.md`. A design that happens to
   cover it is welcome, but it is not graded here.
 - **A connection lost before or at the deadline** over `ssh`: the call reports
-  `CONNECTION_LOST_EXIT_CODE` and the command may still be running; not this trigger
-  [NEEDS CLARIFICATION: Q5 — whether it is in scope].
+  `CONNECTION_LOST_EXIT_CODE` and the command may still be running; not this trigger (Q5).
 - **A dead link that reads as connected, a stuck reconnect, a write's staging left behind**:
   `issues/ssh-half-open-link.md`, `issues/ssh-reconnect-stuck-step.md`,
   `issues/ssh-write-staging-leftover.md`. Each is its own trigger or its own leftover.
 - **Background jobs a login startup file starts**, over `ssh` or not:
   `issues/startup-background-jobs.md`. The command did not start them.
-- **A process that has left the command's process group** (`setsid`, a daemon)
-  [NEEDS CLARIFICATION: Q4].
+- **A process that has left the command's process group** (`setsid`, a daemon): a documented limit
+  (R7, Q4).
 - **What a completed command left running**, and a call with no `timeout`: neither is a timeout.
   §3's rule that nothing a completed command left running is signalled stands (R5).
 - **A scheduler job a timed-out command submitted** (`sbatch`): it is Slurm's, not a process the
   command started on the node.
 - **Changing `TIMEOUT_EXIT_CODE`, `GRACE`'s value, or the result's shape.**
-- **A post-fix run on a login node** as part of the contract: the host-free tests are the contract
-  [NEEDS CLARIFICATION: Q1].
+- **A post-fix run on a login node** as part of the contract: the host-free tests are the contract;
+  a confirmation run is offered to the maintainer at the review gate as its own approval (Q1).
 
 ## Clarifications
 
-Open: each awaits the foreman's ruling, as judge under the effort's autonomy decision, and is
-reported to the maintainer after. The **Recommended** option is the shaping's proposal, not a
-ruling.
+Ruled 2026-11-01 by the foreman, as judge under the effort's autonomy decision, as the shaping
+proposed, and reported to the maintainer.
 
 - **Q1:** How does the approved login-node measurement (2026-10-29) bear on R1? Options: **(a)** the
   plan step measures today's behaviour once, run by the foreman only, through the server's real
@@ -138,7 +136,7 @@ ruling.
   and R1 is graded on the host-free tests (R6); a confirmation run of the same measurement on the
   built branch is offered to the maintainer at the review gate as a separate approval. **(b)** as
   (a), with no confirmation run. **(c)** as (a), with the confirmation run made under the 2026-10-29
-  approval. — **Recommended: (a).** The measurement decides the mechanism (whether the `signal`
+  approval. — **Ruled: (a).** The measurement decides the mechanism (whether the `signal`
   request reaches the group, whether a remote wrapper is needed), which is the plan's; the contract
   must not rest on a host the tests cannot reach. A confirmation run is the strongest evidence for
   R1, but whether the approval covers a second run is the maintainer's to say, not the factory's to
@@ -149,7 +147,7 @@ ruling.
   today: TERM at the deadline, KILL no later than `GRACE` after), on the server's clock and, over
   `ssh`, excluding the link's own delay; the stop may finish after `run` returns, and `run`'s return
   bound is unchanged (R4). **(b)** the same figure, and the stop must be complete before `run`
-  returns. **(c)** a configurable bound. — **Recommended: (a).** It is the bound the `local` backend
+  returns. **(c)** a configurable bound. — **Ruled: (a).** It is the bound the `local` backend
   already intends and the call already returns within, so it adds no wait. Requiring the stop before
   return (b) needs, over `ssh`, a further round trip to observe the remote host, and lengthens every
   timed-out call. A setting (c) adds configuration for a number few operators would change.
@@ -160,14 +158,14 @@ ruling.
   (R7) satisfies R3. **(c)** R3 holds, unless the plan shows that stopping a TERM-ignoring command
   and its descendants needs a privilege beyond the `sudo` rule `SECURITY.md` documents for the
   service account; then the PLAN gate says so, R3 narrows to what TERM reaches, and the limit is
-  documented (R7). — **Recommended: (c).** The fix should not be traded for a sentence where a
+  documented (R7). — **Ruled: (c).** The fix should not be traded for a sentence where a
   mechanism exists inside the rights the server already has, but widening a service account's
   `sudo` rule is a security decision for a human gate, not for this cycle. *Trade-off:* (c) leaves
   the outcome open until the PLAN gate; (a) could force a sudoers change; (b) makes the fix
   optional in the mode where processes run as other users.
 - **Q4:** Is a descendant that has left the command's process group (`setsid`, a daemonising
   program) in scope? Options: **(a)** no: it is a documented limit (R7), and the call stays
-  bounded as today. **(b)** yes: every descendant, however it detached. — **Recommended: (a).** A
+  bounded as today. **(b)** yes: every descendant, however it detached. — **Ruled: (a).** A
   process that leaves its group has detached on purpose, the way a user starts something meant to
   outlive a session; reaching it needs a walk of the process tree that races the forks it walks, or
   a control group the server does not own, and `local` mode already records it as a limit.
@@ -175,7 +173,7 @@ ruling.
 - **Q5:** Is a command whose `ssh` connection is lost before or at its deadline in scope? Options:
   **(a)** no: a non-goal; a design that covers it incidentally is welcome but not graded, and a seed
   is filed if it is wanted. **(b)** yes: such a command is also stopped within the bound after its
-  deadline. — **Recommended: (a).** The trigger is the timeout over a working link; a lost link
+  deadline. — **Ruled: (a).** The trigger is the timeout over a working link; a lost link
   is a different trigger, like a server that exits (`issues/local-command-outlives-server.md`),
   and requiring it would force a remote-side mechanism the plan should be free to choose or not.
   *Trade-off:* a command whose link drops keeps running, as today.
