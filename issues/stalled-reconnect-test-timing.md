@@ -25,6 +25,10 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   `EOFError` from paramiko's packet reader; 2214 others passed, and the re-run of the same commit
   passed 2215 in both eras. That branch changes no SSH code. So the class may be wider than one
   wall-clock bound: the loopback SSH server under load. Shaping should check both.
+- 2026-11-01: `test_startup_output_is_separated[tcsh]` failed again on CI with the same paramiko
+  `EOFError` (run 41375322079, handshake era, branch `ci/split-eras` at `3a87f35`, which changes
+  only the workflow and AGENTS.md); the server side logged `Connection reset by peer`. 4573 others
+  passed, and the re-run of the failed job passed. It is the second CI failure of this row.
 - 2026-10-30: during `rename-to-cluster-mcp`, the test failed in local full-suite runs at two
   phase gates (macOS), once at P2 and twice in a row at P5's remediation (modern era); each time
   it passed alone and on a further identical-tree run. The failing assertion was "0 reconnect
