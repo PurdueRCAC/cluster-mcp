@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:ssh-half-open-link
 kind: fix
 appetite: small
 lane: public

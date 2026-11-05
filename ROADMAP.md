@@ -152,7 +152,7 @@ It sits with the timeout entry above because both are about a call that a client
 dead or stuck remote end.
 
 *Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
-**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: unshaped*
+**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: adopted:ssh-half-open-link*
 
 ## A write whose host is lost after staging leaves its staging directory behind
 
