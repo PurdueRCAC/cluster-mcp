@@ -80,3 +80,8 @@ scheduling; or mark it so that a load-sensitive failure reports its measured tim
 
 - `tests/test_ssh_exec.py` (`STALL_WINDOW`, `STALL_LATE`, `STALL_WORKER`, `not_run_violations`).
 - `spec/ssh-reconnect-loop/`.
+- 2026-11-05: the startup-probe bound again, on a new row:
+  `tests/test_probe_startup.py::test_every_ending_without_an_answer_serves_every_capability[hang-ssh-sse-core-only]`
+  failed on CI (run 41977646670, handshake era, `fix/ssh-half-open-link` at `7bf9666`, a plan-only
+  commit that changes no code). The start must finish in under 0.8 s and took 0.85 s. 4835 others
+  passed; the modern era passed, and the re-run of the failed job passed.
