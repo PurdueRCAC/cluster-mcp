@@ -75,7 +75,18 @@ raised by a longer ssh_config `ConnectTimeout` (Q1).
   for a call with no timeout as well.
 - **R4** — WHILE the link is live, no call SHALL be ended or reported lost because it is quiet: a
   command that prints nothing for longer than the bound, and a transfer whose replies are slow but
-  arrive, SHALL run to their end with their results unchanged (Q4).
+  arrive, SHALL run to their end with their results unchanged (Q4), as long as the peer answers
+  within the floor (Q7). At the default 15 s `CONNECT_TIMEOUT`:
+  - a quiet command SHALL survive the peer answering nothing for up to 29 s after a probe: an
+    outage of up to about 25 s that begins as the probe is sent (TCP's retransmission backoff
+    included), or up to about 40 s that begins at the last message heard;
+  - a transfer SHALL survive while some reply arrives at least every 44 s, which for an SFTP upload
+    (one reply per 32 KiB) is an uplink above about 0.75 KB/s;
+  - while another call starts on the same connection, both shrink to that call's 15 s verdict (a
+    15 s answer, an upload above about 2.2 KB/s).
+
+  The figures scale with a longer ssh_config `ConnectTimeout`. A link quieter than the floor is
+  treated as dead: the limit `issues/ssh-liveness-message-gap.md` records.
 - **R5** — WHEN one call's traffic is stalled on a silent link, a concurrent call on the same server
   SHALL still end within the bound, as R1 says.
 - **R6** — `AGENTS.md` § Invariants and the `executor/ssh.py` footgun SHALL state how a silent link
@@ -124,6 +135,22 @@ Geoffrey may overrule at the GOAL gate.
   the completeness side ("return once only holders remain; never cut the command's own output",
   `safe-execution` review cycle 2). A detector that reads silence as death would cut every quiet
   `sbatch --wait` or long compile.
+
+Readings settled at the PLAN/TECH sign-off (2026-11-05), ruled by the foreman as judge; Geoffrey
+may overrule. They come from PLAN §3's deviation rows; no R-ID moves.
+
+- **Q5:** R3 — what does a call report when its own timeout comes before the link is noticed dead?
+  — **Ruled: `TIMEOUT_EXIT_CODE`,** as `AGENTS.md` §3's timeout contract requires; it reports
+  `CONNECTION_LOST_EXIT_CODE` only once the link has been noticed dead. At the timeout there is no
+  evidence yet that the link is dead, and calling a quiet live link lost would break R4.
+- **Q6:** R1 — does "complete over a new connection" within the bound include the command's own run
+  time? — **Ruled: no.** The bound covers noticing the dead link and reconnecting, as the reconnect
+  bound is read today; the command then runs for its own time, under its own timeout.
+- **Q7:** R4 — what floor may the detector have? — **Ruled: a split verdict.** A probe sent for a
+  call that is about to use the connection is judged after one connect bound, leaving the reconnect
+  two. A background probe, with no call waiting, is judged after two bounds less a margin, so work
+  in flight still ends within the bound after the link went silent. This roughly doubles what a
+  quiet running command survives over a single verdict. The figures are in R4.
 
 ## Related materials
 
