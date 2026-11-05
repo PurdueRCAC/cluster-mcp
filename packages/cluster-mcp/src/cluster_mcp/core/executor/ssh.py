@@ -160,7 +160,23 @@ def _drain(chan: Any, out: bytearray, err: bytearray) -> None:
 
 
 def _signal(chan: Any, name: str) -> None:
-    """Ask the server to deliver signal `name` to the command (RFC 4254 §6.9); best effort."""
+    """Ask the server to deliver signal `name` to the command (RFC 4254 §6.9), on an open channel
+    only; best effort.
+
+    The request never goes on a channel the client has closed or begun to close: OpenSSH answers a
+    request on a channel it has freed by dropping the connection (`server_input_channel_req`, "unknown
+    channel"), which every call and transfer shares. Paramiko marks a channel closed under the
+    channel's lock before it sends its own close, whether this side closes it or answers the server's,
+    so the check and the send are made holding that lock, and a close waits for the request to be on
+    the wire. The wait for a key exchange to finish is made without that lock, as Paramiko's own sends
+    make it, since its transport thread takes the lock to deliver what arrives meanwhile.
+
+    OpenSSH signals the session's whole process group, and only while the session's process (the
+    program, which the bootstrap `exec`s into) lives: the program dies of a TERM, and its watchdog
+    stops what is left of the group. A program that ignored TERM from its entry (the remote login
+    shell's own rc file ignored it before the bootstrap ran, and bash cannot undo an ignore it
+    started with) lives on, so it and its group are reached by a KILL request.
+    """
     try:
         message = Message()
         message.add_byte(cMSG_CHANNEL_REQUEST)
@@ -168,7 +184,17 @@ def _signal(chan: Any, name: str) -> None:
         message.add_string('signal')
         message.add_boolean(False)
         message.add_string(name)
-        chan.transport._send_user_message(message)
+        transport = chan.transport
+        give_up = time.monotonic() + transport.clear_to_send_timeout
+        while transport.is_active() and time.monotonic() < give_up:
+            transport.clear_to_send.wait(SELECT_WAIT)
+            with chan.lock:
+                if chan.closed:
+                    return
+                with transport.clear_to_send_lock:
+                    if transport.clear_to_send.is_set():
+                        transport._send_message(message)
+                        return
     except Exception:
         pass
 
@@ -223,10 +249,14 @@ def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tupl
     output (`_lost`), before both records arrived, lost its connection, and the code is
     `CONNECTION_LOST_EXIT_CODE` with `launch.LOST_NOTE`: the command may have run. At the deadline the code is
     `TIMEOUT_EXIT_CODE`: a command whose exit status has arrived is asked nothing and the note
-    (`launch.LATE_NOTE`) names that status; otherwise the command is asked to TERM and what it prints
-    as it stops is read for `GRACE`. The status beside complete output is the channel's if it has
-    arrived, else -1, as Paramiko reports a signal death or a lost status; the record is the
-    command's.
+    (`launch.LATE_NOTE`) names that status; otherwise the command is asked to TERM, what it prints
+    as it stops is read for `GRACE`, and then, unless the channel has ended meanwhile (closed, or its
+    output and exit status both in: the launch has exited), it is asked to KILL, which adds no wait;
+    `_signal` sends nothing on a channel that has closed. sshd acts on the KILL only while the launch
+    lives, which after that read means its program ignored TERM from its entry; otherwise it refuses
+    it, and the program's watchdog stops the group. The status beside complete
+    output is the channel's if it has arrived, else -1, as Paramiko reports a signal death or a lost
+    status; the record is the command's.
     """
     out, err = bytearray(), bytearray()
     deadline = None if timeout is None else time.monotonic() + timeout
@@ -252,6 +282,8 @@ def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tupl
                 return bytes(out), bytes(err), TIMEOUT_EXIT_CODE, note
             _signal(chan, 'TERM')
             _stopped(chan, out, err)
+            if not _ended(chan):
+                _signal(chan, 'KILL')
             return bytes(out), bytes(err), TIMEOUT_EXIT_CODE, b''
         _wait(chan, None if deadline is None else deadline - now)
 
@@ -957,6 +989,8 @@ class SSHExecutor:
              deadline: float) -> CommandResult:
         """`run`, reconnecting no later than `deadline`, which the calling method took at its entry."""
         timeout = launch.check_timeout(timeout)
+        # The program is given no deadline: the remote clock is not the server's, and `timeout` runs
+        # from the command's start, once the connection is made, however long that takes.
         prog, marks = launch.program(command, cwd, start='home')
         wire = launch.ssh_command(prog)
         transport = self._ensure_connected(deadline)

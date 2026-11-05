@@ -13,10 +13,18 @@ RHEL's and macOS's are) does so for every non-login `bash -c` that does not refu
 pumped to the process until the client sends EOF; stdout, stderr and the exit status come back. The
 exit status goes as soon as the process exits, as sshd sends it, so a background process that
 still holds the output open delays only the end of output.
-When the client closes the channel first (a timeout), the server does not kill the process, as
-OpenSSH does not: as sshd does, it closes the process's output pipes, then its stdin, so a later
-write meets a broken pipe; and `close()` kills whatever is still running, so a test never leaves a
-process behind.
+A `signal` channel request (RFC 4254 §6.9, which Paramiko's server side drops) is acted on as
+OpenSSH 8.0p1's `session_signal_req` acts on it: HUP, INT, KILL, QUIT, TERM, USR1 or USR2 goes to
+the exec's whole process group (`killpg`; the process is started in a session of its own, as sshd's
+child calls `setsid()`), only while that process runs, so a request before it has started or once
+it has exited, or one naming any other signal, is ignored; every name asked for is recorded
+(`signals`). A message for a channel the server has freed (both sides have sent their close), like
+one for a channel it never opened, drops the connection, as OpenSSH's `server_input_channel_req`
+does ("unknown channel"), where Paramiko's server would ignore it: a client that asks for a signal
+on a channel it has closed loses every call and transfer on that connection. When the client
+closes the channel first, the server signals nothing, as OpenSSH does not: as sshd does, it closes
+the process's output pipes, then its stdin, so a later write meets a broken pipe; and `close()`
+kills whatever is still running, so a test never leaves a process behind.
 
 `ThrottledSSH` is the same server on a slow link, as sshd behaves on one: it reads the command's
 output as fast as the client's window allows, sends stdout and stderr over one link at a fixed rate
@@ -63,6 +71,7 @@ from typing import Any
 
 import paramiko
 from fabric import Config
+from paramiko.common import MSG_CHANNEL_REQUEST, cMSG_CHANNEL_FAILURE, cMSG_CHANNEL_SUCCESS
 
 from cluster_mcp.core.executor.ssh import SSHExecutor
 
@@ -79,6 +88,10 @@ SSH_CONNECTION = f'{LOOPBACK} 50000 {LOOPBACK} 22'
 # sshd runs the exec string from the user's home; the sandbox starts elsewhere, so step there first
 # and then exec the login shell exactly as sshd would, on exactly the string the client sent.
 ENTER_HOME = 'cd "$HOME" && exec "$0" -c "$1"'
+
+# The signals sshd delivers on a `signal` request (`name2sig`), by the names the request carries; it
+# refuses any other.
+SIGNALS = {name: getattr(signal, f'SIG{name}') for name in ('HUP', 'INT', 'KILL', 'QUIT', 'TERM', 'USR1', 'USR2')}
 
 # The shortest time between an exec request and its exit status: Paramiko confirms the request
 # after the server's check returns, and a channel closed before that confirmation reaches the client
@@ -347,6 +360,17 @@ def openssh_sftp_server() -> str | None:
     return next((path for path in SFTP_SERVERS if os.access(path, os.X_OK)), None)
 
 
+class _Forgotten(dict[int, bool]):
+    """A server transport's `channels_seen` that, as sshd, knows no channel once it has freed it.
+
+    Paramiko's run loop ignores a message for a channel it has unlinked if the id is in
+    `channels_seen`, and ends the connection for any other id; sshd ends it for both.
+    """
+
+    def __contains__(self, key: object) -> bool:
+        return False
+
+
 class LoopbackSSH:
     """The server, serving `home` with `shell` as the login shell; a context manager.
 
@@ -372,7 +396,9 @@ class LoopbackSSH:
         self.close_failure = False
         self.received: list[str] = []
         self.stdin_bytes: list[list[int]] = []
+        self.signals: list[str] = []
         self.processes: list[subprocess.Popen[bytes]] = []
+        self._execs: dict[paramiko.Channel, subprocess.Popen[bytes]] = {}
         self._transports: list[paramiko.Transport] = []
         self.port = 0
         self._listen()
@@ -414,6 +440,10 @@ class LoopbackSSH:
             except OSError:
                 return
             transport = paramiko.Transport(conn)
+            # This transport's own table: the client's transport, in the same process, keeps Paramiko's.
+            transport._channel_handler_table = {**paramiko.Transport._channel_handler_table,
+                                                MSG_CHANNEL_REQUEST: self._request}
+            transport.channels_seen = _Forgotten()
             self._transports.append(transport)
             transport.add_server_key(_key('host'))
             if self.sftp_server is None:
@@ -421,6 +451,37 @@ class LoopbackSSH:
             else:
                 transport.set_subsystem_handler('sftp', _RealSFTP, self)
             transport.start_server(server=_Server(self))
+
+    def _request(self, channel: paramiko.Channel, m: paramiko.Message) -> None:
+        # A `signal` request is delivered here; any other is read again by Paramiko's own handler.
+        at = m.packet.tell()
+        if m.get_text() != 'signal':
+            m.packet.seek(at)
+            paramiko.Channel._handle_request(channel, m)
+            return
+        want_reply = m.get_boolean()
+        delivered = self.deliver(channel, m.get_text())
+        if want_reply:
+            reply = paramiko.Message()
+            reply.add_byte(cMSG_CHANNEL_SUCCESS if delivered else cMSG_CHANNEL_FAILURE)
+            reply.add_int(channel.remote_chanid)
+            channel.transport._send_user_message(reply)
+
+    def deliver(self, channel: paramiko.Channel, name: str) -> bool:
+        """Act on a `signal` request for `name` as sshd does; True when it was delivered.
+
+        It is recorded in `signals` either way. The exec's whole process group gets it, while the
+        exec's process runs (its `wait()` has not returned), when `name` is one sshd delivers.
+        """
+        self.signals.append(name)
+        proc = self._execs.get(channel)
+        if proc is None or name not in SIGNALS or proc.poll() is not None:
+            return False
+        try:
+            os.killpg(proc.pid, SIGNALS[name])
+        except OSError:
+            return False
+        return True
 
     def environment(self) -> list[str]:
         shim = Path(os.environ['BASH_ENV']).parent
@@ -431,7 +492,7 @@ class LoopbackSSH:
     def execute(self, channel: paramiko.Channel, wire: str) -> None:
         """Run `wire` as sshd would, relaying the channel; never kill the process on a closed channel."""
         started = time.monotonic()
-        proc = self._launch(wire)
+        proc = self._launch(wire, channel)
         stop = threading.Event()
         out = threading.Thread(target=_pump, args=(proc.stdout, channel.sendall, stop), daemon=True)
         err = threading.Thread(target=_pump, args=(proc.stderr, channel.sendall_stderr, stop), daemon=True)
@@ -466,12 +527,16 @@ class LoopbackSSH:
         self.stdin_bytes.append([0])
         return self.stdin_bytes[-1]
 
-    def _launch(self, wire: str) -> subprocess.Popen[bytes]:
+    def _launch(self, wire: str, channel: paramiko.Channel | None = None) -> subprocess.Popen[bytes]:
+        """Start `wire`'s process in a session of its own, as sshd does; a `signal` request on
+        `channel`, if given, reaches its process group from now on."""
         proc = subprocess.Popen([str(SANDBOX), 'env', '-i', *self.environment(), '/bin/sh', '-c', ENTER_HOME,
                                  self.shell, wire],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 start_new_session=True)
         self.processes.append(proc)
+        if channel is not None:
+            self._execs[channel] = proc
         return proc
 
     def executor(self) -> SSHExecutor:
@@ -592,7 +657,7 @@ class ThrottledSSH(LoopbackSSH):
     def execute(self, channel: paramiko.Channel, wire: str) -> None:
         """Run `wire` as sshd would on the slow link: the exit status goes ahead of queued output."""
         started = time.monotonic()
-        proc = self._launch(wire)
+        proc = self._launch(wire, channel)
         stop = threading.Event()
         link = _Link(channel, self.rate, self.window, self.piece, self.stall_at)
         readers = [threading.Thread(target=link.read, args=(proc.stdout, False, stop), daemon=True),

@@ -101,8 +101,11 @@ class Executor(Protocol):
             exit status comes ahead of output still queued on the link, and decides nothing). The
             call then returns at once: nothing the command or a startup file left running holds it,
             and nothing printed after the record is kept. When the end has not been reported by
-            `timeout`, the command is stopped (unless it has exited) and the result carries what it
-            printed before the deadline and as it stopped, and `exit_code == TIMEOUT_EXIT_CODE`
+            `timeout`, the command is stopped (unless it has exited), with what it started, within
+            2 × `launch.GRACE` of the deadline (a process that has left its process group is not
+            reached; AGENTS.md § Invariants §3 has the limits), the call returns within the same
+            bound, and the result carries what it printed before the deadline and as it stopped, and
+            `exit_code == TIMEOUT_EXIT_CODE`
             (−1001); over `ssh`, a command whose exit status had arrived is named in a note on
             stderr. No backend raises on a timeout. A command that never began (the login
             initialisation ended first, or took a descriptor the command's streams were parked on,

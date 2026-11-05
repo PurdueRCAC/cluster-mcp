@@ -859,6 +859,57 @@ import has no effect.
     `delegate`, `cwd` `~`, `~/…` and `~name`, the starting directory and both sides of `put`/`get`
     resolve in the mapped home, never the server's `HOME`, and a transfer returns the path it wrote,
     read exactly.
+  - `tests/test_timeout_stop.py` (`integration`): `stop_violations`, `survival_violations`,
+    `completion_violations`. A timed-out command is stopped with what it started (§3), in `local`,
+    `delegate-root` (under `ROOT_RELAY`), `delegate` (under `RELAY`), through `executes`, and
+    `ssh-bash`, against a loopback server connected before the row's clock starts: each shape
+    (`tree`, a child and a grandchild; `ignores-holding`, the same ignoring every catchable
+    terminating signal and holding the output; and, in `local` and both `delegate` settings,
+    `ignores-none`, an ignoring child and grandchild holding no stream) writes its pids first, and
+    every pid is gone by `start + timeout + 2 × GRACE + SLACK` (`SLACK` 0.5 s; a missing pid file
+    fails as a process not started before the deadline, never as a stop), and `run` returns within
+    `2 × GRACE + SLACK` of the deadline (within `GRACE / 2` where a launcher without the watchdog
+    would return at the TERM, its output ended); every other timed-out row checks the return too. A completed call's background job, the command exited or died of a
+    signal, is alive `2 × GRACE + SLACK` after the call; a command that stops gracefully on its first
+    TERM and exits at once on a second gets one TERM, as does a child of it, and prints its clean stop
+    `0.6 s` into it in `local`, `delegate-root` and `ssh-bash`, under a profile whose `sleep`
+    function, `/bin/sleep` function and `sleep` first on `PATH` would cut the watchdog's wait short;
+    under a non-root `delegate` server the same command and child get no TERM, run on at `GRACE / 2`
+    after the deadline and are gone by the bound (the watchdog's KILL); a `.bash_profile` that
+    ignores TERM and sets `-C` and `-m` stops nothing less (`delegate`, `ssh-bash`), nor, over `ssh`,
+    does a remote `.bashrc` (bash) or `.zshenv` (zsh) that ignores every catchable terminating signal
+    before the program starts; a login initialisation that ignores them and hangs is stopped over
+    `ssh`; one that ignores TERM and runs 0.5 s past the deadline (with functions `date` and
+    `/bin/date` answering the epoch) leaves nothing running past the bound in every setting, and
+    where the program reads the server's clock (`local`, both `delegate` settings) the command never
+    starts; a deadline that comes in a window planted 1.5 s wide while the watchdog is started, in the
+    program right after the fork and before TERM's default is back (`program`; the command never
+    starts where the program reads the server's clock, and over `ssh` the KILL request stops it), or
+    in the watchdog before its first statement (`watchdog`; it is born ignoring TERM), leaves nothing
+    of the `ignores-none` shape running past the bound, in every setting, each window anchored on the
+    fork it tests rather than on the text around it; a profile's `enable -n trap` beside a function
+    named `enable` (`local`, `delegate-root`, `ssh-bash`) stops nothing less; the `run_command` tool
+    stops the `ignores-none` shape in `local`; under a profile's `set -a` a command's environment holds
+    no name it does not hold under no profile, in every setting; on a bash 4.4 or later (CI's), a
+    command sees the shell options a profile that exports `BASHOPTS` left (`expand_aliases` and
+    `shift_verbose` on, `inherit_errexit` off); and over `ssh` a connection that takes longer than
+    the timeout still runs the command. The watchdog never acts on time:
+    under a `.bash_profile` with a readonly, exported `TMOUT` of 1 s, a command that runs 2 s, with
+    no timeout and with a longer one, completes with its output and its background job in every
+    setting, and through the `run_command` tool in `local`; so does one under a profile that turns
+    `read` off beside an exported `TMOUT` and defines a `/bin/cat` function (`local`, `delegate`),
+    and one that beside a `/bin/cat` function defines a function named `unset` or turns `unset` off
+    (`local`, `delegate`). A
+    timed-out call whose command dies at the TERM leaves the connection usable: the next call on
+    the same executor runs on it (`ssh-bash`). `test_a_recorded_limit` shows each limit §3 records
+    in every setting (what runs on past the bound, what is stopped, and a command with no timeout cut
+    short; a server that does not act on `signal`); it is defined only
+    with `CLUSTER_MCP_TEST_LIMITS=1`, so the suite collects it nowhere and skips nothing, since each
+    row leaves a process running until teardown and the suite pins what is stopped. Teardown kills
+    every recorded pid's process group, never the
+    runner's. The module imports only names the launcher had before its watchdog, so it also runs
+    against that launcher; `CLUSTER_MCP_TEST_EVERY_KIND=1` adds `ssh-zsh`, `ssh-sh` and `ssh-tcsh`,
+    and the profile rows (`TMOUT`, the shadowed wait, the shadowed `unset`) in every setting.
   - `tests/test_exec_mode.py` (`unit`): `LADDER_CASES`, `ladder_violations`. The posture ladder
     through `MCPServerApp.main` with server construction stubbed, and the middleware class each
     mode installs (§4). An explicit `-e` is decided at rung 1 whatever the later rungs read: a row
@@ -893,7 +944,7 @@ import has no effect.
     check's docstring lists what else it cannot see); self-tests prove the guard, the PATH shim
     (also inside a program the launcher runs under the login bash,
     `test_path_shim_survives_a_login_bash`), the harness fence and the build-inside-the-loop rule
-    are active. No feature-scoped spec id (`R#`, `P#`) appears in the package or the suite
+    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`) appears in the package or the suite
     (`test_no_spec_ids_in_the_package_or_the_suite`, which reads every portion of the imported
     `cluster_mcp` namespace, so a planted id in a mutated copy fails it; `test_spec_id_scan_covers_every_member`
     asserts the three portions, so a member cannot drop out of the scan). A row that needs a login shell calls `conftest.need_shell`: off
@@ -1007,7 +1058,13 @@ import has no effect.
     stop, then the stop) ends the call at its status while the launch still holds its streams
     (`test_a_local_end_record_split_across_reads_is_found`);
     a command that traps SIGTERM keeps what it prints as it stops, and one that ignores it is ended
-    by SIGKILL.
+    by SIGKILL. The program's watchdog line is a fixed copy the checker reads right after the
+    prologue, its release line one right after the end record, and its wait is `GRACE` as rendered,
+    as is the wait of a command past its deadline (`test_the_watchdog_waits_grace`); a program given
+    a timeout checks its deadline, on the server's clock as rendered, right after the watchdog's line
+    (`test_a_program_given_a_timeout_checks_its_deadline`); a watchdog whose pipe ends before the program's first line
+    exits and stops nothing (`test_a_watchdog_that_cannot_start_stops_nothing`, its body run alone,
+    since no whole program can reach that case).
     **Profile state:** a profile's `IFS` (`:` or empty), every glob option with a function named
     like a pattern, `set -k`, `set -P` under a symlinked home, `CDPATH` and `POSIXLY_CORRECT` change
     no result, locally and under bash and zsh login shells; and with `SSH_CLIENT` set, no stage, script
@@ -1037,8 +1094,12 @@ import has no effect.
     `tests/ssh_server.py` (a helper, not collected), an in-process server that executes each exec
     string as `<login shell> -c <string>` inside `bin/sandbox.sh`, from the home, under an sshd-like
     `env -i`, serves SFTP over the same files (refusing any path outside the test's tree), and kills
-    what is still running when the test ends (it never kills on channel close, as OpenSSH does
-    not, and it sends the exit status when the process exits, as sshd does, even while something
+    what is still running when the test ends (it acts on a `signal` request as OpenSSH's
+    `session_signal_req` does, `killpg` of the exec's group for HUP, INT, KILL, QUIT, TERM, USR1 and
+    USR2 while the exec's process runs, ignoring it otherwise, and records each name asked for; it
+    drops the connection for a message on a channel it has freed, as sshd does ("unknown channel"),
+    where Paramiko's server would ignore it; it
+    never kills on channel close, as OpenSSH does not, and it sends the exit status when the process exits, as sshd does, even while something
     still holds the output open; when the client closes the channel it closes the output pipes
     before stdin, as sshd does, so a command that starts later meets a broken pipe; its environment
     carries `SSH_CLIENT` and `SSH_CONNECTION`, as sshd's does; it records the bytes each exec received
@@ -1097,8 +1158,11 @@ import has no effect.
     loop with a fake channel: it waits rather than spins once the exit status is in, the read ends
     at both end records and not at one, output trickling in after the status is read to its record,
     a command whose records have not come by the deadline is a timeout naming its status, a lost
-    status stays `-1`, and what the command prints after the TERM at a deadline is read; an
-    oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
+    status stays `-1`, what the command prints after the TERM at a deadline is read, and KILL is
+    asked for after the TERM, only once `GRACE` has been read and only on a channel that has not
+    ended (one that closed during the read gets TERM alone); against the loopback server, a `signal` request on
+    a channel both sides have closed is never sent, so the connection serves the next call, and one
+    on an open channel is written holding the channel's lock; an oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
     a published connection that has gone dead, with Fabric's `Connection` scripted or built for
     real with its `open()` stubbed, under a fake clock (`ssh.time`, and `ssh._await` for the wait
     on an attempt) that only a calling thread moves and that raises `Runaway` past twice the bound,
@@ -1270,10 +1334,13 @@ import has no effect.
     it replaces `Popen` in `cluster_mcp.core.executor.launch` with a launcher that accepts only a `/bin/bash`
     argv or one starting exactly `sudo -n -H -u <mapped user>` (anything else is refused before it
     launches), and runs each inside `bin/sandbox.sh` under `env -i` with a sudo-like environment.
-    The `sudo` prefix is replaced by a relaying stand-in that starts the command in its own session,
-    relays only TERM, INT and HUP, dies of the signal that killed the command (SIGKILL included, which
-    it cannot catch), and gives it a mapped home apart from the server's, from a cwd
-    that is not that home. A `local` launch starts in the sandbox's directory, or in
+    The `sudo` prefix is replaced by a relaying stand-in for a non-root server's `sudo` (`RELAY`):
+    it starts the command in its own session, so it is the only process of the launch the server
+    can signal, relays only TERM, to the command's process alone, as sudo's no-pty path does, dies
+    of the signal that killed the command (SIGKILL included, which it cannot catch), and gives it a
+    mapped home apart from the server's, from a cwd that is not that home. A test that sets
+    `executes.server_root` gets a root server's instead (`ROOT_RELAY`): the same, with the command
+    left in the stand-in's process group, so the server's signal to the group reaches all of it. A `local` launch starts in the sandbox's directory, or in
     `executes.local_cwd` when a test sets it (the matrix sets the server's home, where a server
     process started from a login would be). No launched argv names `sudo`. Everywhere else `subprocess.Popen` refuses
     any argv not starting with `bin/sandbox.sh` (the loopback SSH server's launches do), so the
@@ -1812,8 +1879,26 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   program outlives it) and the end record printed after it on both streams (its nonce never whole
   in the text, its status `s<N>` for a signal death, which the program re-raises on itself,
   `TERMINATING`), the read that is complete at both records or at a local launch's exit and at no
-  timing rule (`run_process`), and the timeout sequence (SIGTERM, then SIGKILL, each followed by a
-  bounded drain).
+  timing rule (`run_process`), the timeout sequence (SIGTERM and a drain bounded by `GRACE`, then,
+  unless the output has ended, SIGKILL and a second drain), the prologue's undoing of what a startup
+  file shadows (`BUILTINS` turned back on and their functions unset in posix mode, entered by an
+  assignment, after any function named `enable`; posix mode left before the watchdog's process
+  substitution, which bash before 5.1 refuses in it; then the functions named `/bin/cat`,
+  `/bin/date` and `/bin/sleep` unset, which posix mode refuses to name), the watchdog (`WATCHDOG`: forked with TERM ignored,
+  so it is born ignoring it, and TERM's default taken back right after the fork, so a TERM from then
+  on ends the program before its command starts; one that comes while it forks is lost, which the
+  deadline's check covers, the server's TERM coming only at the deadline; its output
+  `/dev/null` so it never holds the call, armed by the program's first line on descriptor 46, written
+  with `>|`; released by `RELEASE` after both records and before the re-raise, so a completed call is
+  never signalled; descriptor 46 closed in the command's subshell; its one wait `/bin/cat` to the
+  pipe's end, never a builtin, so no `TMOUT` or other shell setting ends it early and it never acts
+  on time; at the program's death, armed and not released, `GRACE` rendered into the text through
+  an absolute `/bin/sleep`, then KILL to group 0, never TERM), the deadline's check (`DEADLINE_CHECK`,
+  in `local` and `delegate` only, from `program(…, timeout=…)` just before `run_process` takes its
+  own deadline: `/bin/date` in nanoseconds once TERM's default is back, a command past its deadline
+  never started, and the reading unset; never given over `ssh`, whose timeout runs from the command's
+  start), every name the program sets unset before the command starts (a profile's `set -a` exports
+  it otherwise), and the prologue's `set +m`.
 - **`auth.py` / `token.py`** — the 32-char minimum in two places; the issuer/audience/algorithm
   triple that must match across signer and verifier; OIDC's all-four check and the proxy's held
   posture (§6). `AUTH_MODES`' annotation is checked in its resolved shape: a stray `:` once made its
@@ -1853,7 +1938,13 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   send no stdin and its EOF at once; wait without spinning; read to both end records, never stopping
   at the exit status (sshd sends it ahead of output still queued on the link); and at the deadline
   return the timeout marker rather than raise, naming an exit status that had arrived
-  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM, and report a channel that closed
+  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM and then asking for KILL unless
+  the channel has ended (sshd acts on it only while the launch lives: a TERM ignored from the
+  launch's entry; never before the read, which would cut short what a stopping command prints),
+  never sending a `signal` request on a channel the client has closed or begun to close (sshd drops
+  the connection for one on a channel it has freed; `_signal` checks and sends holding the channel's
+  lock, and waits for a key exchange without it, as Paramiko does, for no longer than Paramiko's own
+  bound), and report a channel that closed
   without its end of output as a lost connection (`CONNECTION_LOST_EXIT_CODE`), never as a command
   that did not start; `write`, which stages content by SFTP as a 0600 file in a fresh 0700
   directory beside the target, with no pipelined writes and a checked close (`_upload`, `_close`:
@@ -2017,6 +2108,45 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   launcher (`executor/launch.py`): never the server's `$SHELL`, never the user's login shell. The
   login initialisation runs (so `module` and the site's tools behave the same for every user), and
   nothing it reads or prints reaches a result, but for the one exception §3 states.
+- **The prologue undoes what a startup file shadows, as far as a program can.** It turns the builtins
+  the program runs (`launch.BUILTINS`) back on and unsets the functions named after them in posix
+  mode, which it enters by an assignment no function can shadow and where the special builtins
+  (`unset`, `set`, `exec`, `trap`, `exit`) are found before any function of their name, after first
+  unsetting any function named `enable`; then it leaves posix mode (bash before 5.1 has no process
+  substitution there) and unsets the functions named `/bin/cat`, `/bin/date` and `/bin/sleep`, which
+  bash would run in place of those paths and which posix mode refuses to name. What a program cannot
+  undo (a readonly function, a function named `enable` beside a disabled `unset`, `enable -n
+  enable`, aliases on the prologue's own second line) is §3's recorded limit, as it already was for
+  the launch itself. **The posix-mode round trip changes the program's own shell options, never a
+  command's** (measured: leaving posix mode turns `expand_aliases` off in bash 3.2, 4.4 and 5.1,
+  `inherit_errexit` on in 4.4 and 5.1, and `shift_verbose` off in 5.1). It does not refresh
+  `BASHOPTS`, so a bash the command starts, given `BASHOPTS` by a startup file's `export`, gets the
+  options the login initialisation left (measured on 4.4, 5.1 and 5.2), and an argv's first word
+  runs through `exec`, which never runs a builtin (`shopt -p` as an argv is not found), so nothing
+  runs in the program's own shell. The program therefore never runs `shopt`, or anything else that
+  refreshes `BASHOPTS`, before the command; `test_a_command_sees_the_shell_options_its_profile_left`
+  (bash 4.4 or later, so CI) pins it. **No variable the program sets reaches the command**, whatever a
+  startup file's options: under its `set -a` every name assigned is exported, so the program unsets
+  each of its own (the deadline check's clock reading, the function export's name) before the
+  command starts.
+- **Every program starts a watchdog** (`launch.WATCHDOG`), right after the prologue, forked with TERM
+  ignored, so it is born ignoring TERM and no TERM to the group ends it at any instant; the program
+  then takes TERM's default back (which also undoes a TERM trap or ignore a startup file left). A TERM
+  that reaches the program while it forks is lost: the server sends one only at the deadline, so the
+  deadline's check that follows refuses the start where the program runs on the server's host, and
+  over `ssh` the KILL request after the grace stops the command (§3). The watchdog is a process in
+  the command's process group that prints nothing and holds no stream of the call (its output is `/dev/null`, its input a pipe the program holds on
+  descriptor 46, which the command's subshell closes). The program's first line on the pipe arms it
+  (written with `>|`, so a profile's `set -C` cannot refuse it) and its line after the end records
+  (`launch.RELEASE`) releases it. The watchdog waits for the pipe's end, which comes only with the
+  program's exit, through `/bin/cat`, never a shell builtin (a startup file's `TMOUT` bounds `read`,
+  and nothing undoes a readonly one); so it acts on the program's death alone, never on time. If the
+  program died after the arming and before the release, as it does at a timeout's TERM, the
+  watchdog waits `launch.GRACE` and sends the process group KILL, and never TERM (§3). A watchdog
+  that never got its pipe, or whose `cat` did not read to the end, stops nothing. Where the program
+  runs on the server's own host (`local`, `delegate`) and has a timeout, its next line checks the
+  deadline (`launch.DEADLINE_CHECK`, §3). These lines make every program longer, so a caller's room
+  inside the `ssh` limit above is that much smaller; the limit itself is the program's and unchanged.
 - **`put(local_path, remote_path)` and `get(remote_path, local_path)` return the absolute path they
   wrote**, as that side names it (symlinks unresolved), with one exception: `SSHExecutor.put`
   returns the SFTP server's canonical form of the remote path (`sftp.normalize`), which OpenSSH
@@ -2103,7 +2233,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   no positional parameters (bash 4 and later bind them before the startup files run, which may
   rewrite them; bash 3.2 binds them after). The prologue unsets `IFS` and resets the shell options
   the program's own lines would read (`set -k` would turn an argument shaped like an assignment
-  into one; `set -P` would name the start directory by its physical path), and the function export
+  into one; `set -P` would name the start directory by its physical path; `set -m` would start the
+  command in a process group of its own, out of reach of a timeout's signals), and the function export
   reads one name per line, so no field separator or glob option touches it. Every other bash the
   launcher starts (the stages, a `run_command` script's, a fixed script's) runs with `--norc`, so it
   reads no startup file even where bash reads `~/.bashrc` for a shell it believes sshd started
@@ -2130,19 +2261,116 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   incomplete`, `launch.UNFINISHED_NOTE`). Output shaped like a record but not carrying the nonce
   is output. Pinned by a throttled sshd model (`tests/ssh_server.py`'s `ThrottledSSH`) at three
   rates, behind stalls after the exit status and mid-result and with 32 KiB packets at 6,000 and
-  24,000 B/s, and by the background-job rows in all three modes. A recorded limit: over `ssh`, a
-  launch that dies before its records (killed from outside) while something it started still holds
-  the channel is held until the timeout, as is a program that never starts behind an rc file that
-  leaves such a job.
-- **A timed-out command may outlive the call** (recorded, not fixed): over SSH the server is asked
-  to TERM it and the channel is closed, and under a non-root `delegate` server `sudo` relays TERM
-  only to the command; `issues/timeout-process-cleanup.md`. The contract above holds either way.
-- **A `local` command can outlive the server that launched it** (recorded, not fixed): only the call
-  that launched a process group signals it, from its own thread. A server killed mid-command leaves
-  the group running; and the startup probe's worker, a daemon thread abandoned at the probe's
+  24,000 B/s, and by the background-job rows in all three modes. A launch that dies before its
+  records (killed from outside) has its process group KILLed by its watchdog `GRACE` later. So does
+  one whose reader went away while its command ran (a server killed, a link lost): once the command
+  ends, the program dies of SIGPIPE writing its end record, before it releases the watchdog, so the
+  group is stopped, background jobs the command left included. A
+  recorded limit: over `ssh`, such a launch is still held until the timeout by something it started
+  that has left the group and holds the channel, as is a program that never starts behind an rc
+  file that leaves such a job.
+- **A timed-out command is stopped, with what it started.** The command's processes (the command,
+  the children and grandchildren it started, and any of them that ignores TERM, as long as they stay
+  in its process group) have all exited within **2 × `launch.GRACE` of the deadline** (2 s), on the
+  server's clock and, over `ssh`, not counting the link's own delay, unless a startup file shadows
+  the launch's builtins past what the prologue undoes (§2; the last limit below). The stop may finish
+  after `run` returns; **`run` returns a timed-out call within the same bound**, no later than 2 ×
+  `GRACE` after the deadline on the server's clock and, over `ssh`, not counting the link's own delay
+  (`run_process`'s two drains, or the `GRACE` read over `ssh`, bound it, whatever the program does
+  meanwhile). The deadline's TERM
+  reaches the program in every mode (`run_process`'s signal to the group in `local` and under a root
+  `delegate` server, `sudo`'s relay under a non-root one, sshd's signal to the session's group on the
+  RFC 4254 `signal` request over `ssh`), the program dies of it (its watchdog's line forks the
+  watchdog with TERM ignored, so the watchdog is born ignoring it, then takes TERM's default back,
+  undoing a TERM trap or ignore that a startup file the program read left; and the prologue's `set
+  +m` keeps the command in the group), and its watchdog (§2) waits `GRACE` and sends the group KILL. **Every process gets at most that one TERM**: the watchdog never sends TERM, so a
+  command that handles it has `GRACE` to print as it stops, and what it prints is in the result.
+  Under a non-root `delegate` server that TERM reaches the program alone, so the rest of the group
+  gets no TERM, and the watchdog's KILL `GRACE` later. Where the program runs on the server's own
+  host (`local`, `delegate`) it is given its deadline on the server's wall clock (epoch nanoseconds,
+  `time.time_ns()` as the program is rendered, just before `run_process` takes its own deadline on
+  the monotonic clock), and reads `/bin/date +%s%N` once TERM's default is back (GNU `date` prints
+  nanoseconds, macOS's microseconds): a command whose deadline passed while the login initialisation
+  ran (a startup file that ignores or traps TERM took the deadline's TERM), or while the program
+  forked its watchdog (the TERM came while it was ignored), never starts; the program waits up to
+  `GRACE` for the server's TERM, so the call reads as the timeout it is, then dies of TERM, and its
+  watchdog stops what is left. Over `ssh` the remote clock is not the server's, so the program gets
+  no deadline and the call's timeout runs from the command's start, after the connection is made;
+  the KILL request after the grace stops a command that starts late, or whose TERM came while the
+  program forked its watchdog. The watchdog acts on the program's death alone, never on
+  time: its one wait is an external `/bin/cat` reading its pipe to the end, never a shell builtin, so
+  no startup file's `TMOUT` (readonly or not), disabled `read`, or function named like a builtin or a
+  path the launch runs that the prologue undoes makes it signal a command that has not reached its
+  deadline, or has no timeout. Over `ssh` the client asks for
+  TERM, reads for `GRACE`, then, unless the channel has ended meanwhile (closed, or its output and
+  exit status both in), asks for KILL, and closes the channel (`_collect`); the KILL adds no wait. No `signal` request goes on a channel the client
+  has closed or begun to close: sshd answers a request on a channel it has freed by dropping the
+  connection, which every call and transfer shares, so `_signal` checks and sends holding the
+  channel's lock, under which Paramiko marks a channel closed before it sends its own close; and none
+  goes during a key exchange (RFC 4253 §7.1): `_signal` waits for it to end without that lock, for
+  no longer than Paramiko's own bound. sshd
+  acts on the KILL only while the launch lives, which after the read means the program ignored TERM
+  from its entry (the remote login shell's own rc file, `.bashrc` for a bash login shell or
+  `.zshenv`, ignored it before the bootstrap ran, and bash cannot undo an ignore it started with),
+  and refuses it once the launch has exited, where the watchdog stops the group. Pinned in
+  `local`, under a root and under a non-root `delegate` server and over `ssh` by
+  `tests/test_timeout_stop.py`: the non-root one against a `sudo` stand-in that is the only process
+  the server can signal and passes on TERM alone; the `ssh` rows against `tests/ssh_server.py`,
+  which acts on the `signal` request as sshd does (the session's whole group, only while its process
+  runs) and drops the connection for a message on a channel it has freed, with a remote `.bashrc` and
+  `.zshenv` that ignore every catchable terminating signal and a login initialisation that does and
+  hangs; one TERM per process and the clean stop of a command that would exit at once on a second,
+  in `local`, under a root server and over `ssh`, and no TERM but the KILL after the grace under a
+  non-root server; a login initialisation that ignores TERM past the deadline, and a deadline while
+  the program forks its watchdog or before the watchdog's first statement, in every mode, each with
+  `run`'s return within the bound; a profile's readonly `TMOUT` below a command's run, with no timeout
+  and with a longer one, in every mode, stops nothing, nor does one that shadows `unset` or `/bin/cat`;
+  no variable of the program's reaches a command under a profile's `set -a`, in every mode; a command
+  sees the shell options its profile left (where bash is 4.4 or later); over `ssh` a connection
+  slower than the timeout leaves the command its whole timeout; and a timed-out call leaves the
+  connection usable. The requests, TERM and then KILL on a channel
+  still open after the `GRACE` read and none on a closed one or during a key exchange, are pinned by
+  `tests/test_ssh_exec.py`'s rows. The limits (recorded, not fixed; `issues/timeout-stop-limits.md`),
+  each shown in every mode by `tests/test_timeout_stop.py`'s `test_a_recorded_limit` rows, which run
+  only with `CLUSTER_MCP_TEST_LIMITS=1`:
+  - **A process that has left the group** (`setsid`, a daemon) is not reached, in any mode.
+  - **A login initialisation that hangs**, before the watchdog exists. In `local` and under a root
+    `delegate` server the server's TERM reaches the group, and its KILL follows while anything still
+    holds the call's output, so a process the startup file started that ignores TERM and holds no
+    stream of the call runs on. Over `ssh` sshd's TERM reaches the group and the KILL request follows
+    while the channel is open, which stops a login shell that ignores TERM; but sshd refuses the KILL
+    once the login shell has died of the TERM, so a process it started that ignores TERM runs on.
+    Under a non-root `delegate` server `sudo` relays TERM to the login shell alone and nothing sends
+    KILL, so what the startup file started runs on, and the login shell too if it ignores TERM.
+  - **An SSH server that does not act on the `signal` request** leaves the command running.
+  - **A startup file that shadows the launch's builtins past what the prologue undoes** (a readonly
+    function, a function named `enable` beside a disabled `unset`, `enable -n enable`, aliases on the
+    prologue's own second line) can make the stop fail and can stop a
+    command early, as it can already break the launch itself; it only ever affects its own user's
+    commands. With `unset` and `trap` turned off and a function named `enable`, the watchdog is not
+    TERM-proof and dies of the deadline's TERM, so in `local`, under a root `delegate` server and over
+    `ssh` a process that ignores TERM and holds no stream of the call runs on; with a function named
+    `/bin/cat` beside them, the watchdog reads its arming line at once as the program's death and
+    KILLs a command `GRACE` into its run, with or without a timeout.
+  - **A step of the server's wall clock during the login initialisation.** The program's deadline is
+    on the wall clock and the server's on the monotonic one, so a step between the rendering and the
+    check moves one against the other: a step forward refuses a command whose deadline has not come
+    (it did not start, `-1002`, about `GRACE` into the call); a step back lets a command start past
+    its deadline, which in `local` and under a root `delegate` server the server's KILL after the
+    grace still stops, and which under a non-root `delegate` server runs on (the relayed TERM went to
+    the startup file that delayed it). Over `ssh` the program is given no deadline, so no step reaches
+    it. The rows simulate the step by moving the deadline the program is given (`clock-forward`,
+    `clock-back`).
+
+  A connection lost before the deadline is not a timeout (`CONNECTION_LOST_EXIT_CODE`), and its
+  command may run on.
+- **A `local` command can outlive the server that launched it** (recorded, not fixed): the server
+  signals a process group only from the call that launched it, on that call's thread, and the
+  program's watchdog acts only once the program has died. A server killed mid-command leaves the
+  command running; and the startup probe's worker, a daemon thread abandoned at the probe's
   deadline, dies with the interpreter when the server exits normally within `GRACE` of its timeout's
-  SIGTERM, before its SIGKILL, so a group that ignores SIGTERM runs on;
-  `issues/local-command-outlives-server.md`.
+  SIGTERM, before its SIGKILL, so a login initialisation that ignores SIGTERM and hangs (the
+  watchdog does not exist yet) runs on; `issues/local-command-outlives-server.md`.
 - `hostname` differs by mode: the SSH target for `SSHExecutor`, `socket.gethostname()` for the local
   and delegating executors. It is **not** a user-distinguishing key: in delegate mode every user
   reports the same value (see §8).
@@ -2234,6 +2462,16 @@ What each mode means:
   missing sudoers rule into a hang instead of an error. **`-H` is required** — it gives the command
   the mapped user's `HOME`, which is what `~` resolves to. Everything the caller sent is inside the
   one program argument: each argv element and the `cwd` as one quoted word, a script as one word.
+- **A timeout reaches a delegated command through `sudo` and the watchdog.** A server that is not
+  root can signal `sudo` alone, which relays the deadline's TERM to the program (KILL cannot be
+  relayed); the program dies of it, and its watchdog (§2), running as the mapped user in the
+  command's process group, sends the rest KILL `GRACE` later, and no TERM (§3). A root server's
+  signal reaches the whole group. The program, given its deadline on the server's clock, never starts
+  a command once it has passed, so a login initialisation that took the relayed TERM, or a TERM that
+  came while the program forked its watchdog, starts nothing late (a step of the wall clock aside:
+  §3's limits). None of this needs a `sudo` right beyond the rule `SECURITY.md` documents. What the relayed
+  TERM cannot reach before the watchdog exists (a login initialisation that hangs) runs on under a
+  non-root server: §3's limits.
 - **The interpreter is the constant `/bin/bash`** (`launch.BASH`), absolute so `sudo`'s
   secure_path cannot pick another, and never read from any environment, the server's `$SHELL`
   included.
@@ -2641,7 +2879,7 @@ What each mode means:
   error message and exit status are the intended ones, the file landed where you expected).
 - **Comments (and docstrings) are declarative statements of the invariant or the *why*** —
   capitalized sentences (`# Non-interactive: there is no TTY to prompt on.`), not lowercase
-  fragments, and **never** a feature-scoped spec id (`R#`, `P#`): those restart per feature, live in
+  fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`): those restart per feature, live in
   `spec/{slug}/`, and collide across branches (`tests/test_hygiene.py` keeps them out of the
   package and the suite). Requirement provenance lives in the commit, the PR,
   and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,

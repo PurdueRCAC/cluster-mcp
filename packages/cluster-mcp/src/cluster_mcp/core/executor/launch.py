@@ -42,6 +42,24 @@ running can cut a result short or hold a call past its records. bash reports a s
 re-raises it on itself, so the launch dies of the signal its command died of. Only a timeout bounds
 a call whose records do not come.
 
+A timed-out command is stopped, with what it started. Right after the login initialisation the
+program starts a watchdog, forking it with TERM ignored and taking TERM's default back after: a
+process in the command's process group, born ignoring TERM, that holds no stream of the call,
+waiting on a pipe from the program (descriptor 46) that the command never holds, through `/bin/cat`
+and never a shell builtin, so it acts on the program's death alone, never on time (no startup file's
+`TMOUT` ends its wait). If the program dies
+before it has reported its command's end, as the deadline's TERM makes it do in every mode, the
+watchdog waits `GRACE` and sends the group KILL; it never sends TERM, so a process gets at most the
+deadline's one. Once the program has written its records it releases the watchdog, so nothing a
+completed command left running is signalled. Where the program runs on the server's own host
+(`local`, `delegate`) it is given its deadline and reads the clock before the command starts, so a
+command whose deadline passed during the login initialisation, or while the program forked its
+watchdog, never starts. `run` returns a timed-out call within 2 × `GRACE` of its deadline. A process
+that has left the group (`setsid`, a daemon) is out of reach, and so is everything when a startup
+file shadows the launch's builtins past what the prologue undoes (AGENTS.md § Invariants §3). No
+variable the program sets reaches the command, and the shell options the command can see are the
+ones the login initialisation left.
+
 `local` and `delegate` hand `bash_argv(program)` to `run_process`; `ssh` sends `ssh_command(program)`,
 a fixed bootstrap whose only variable part is one base64 word, so the remote login shell (sh, bash,
 zsh, ksh, csh or tcsh) parses no byte of the command.
@@ -80,8 +98,11 @@ log = logging.getLogger(__name__)
 BASH: Final = '/bin/bash'
 BASH_ARGS: Final = ('-l',)
 
-# The bound on the drain after each of SIGTERM and SIGKILL at a timeout, and on the wait for a
-# launch to exit once it has reported its command's end (it exits at once).
+# The bound on the drain after each of SIGTERM and SIGKILL at a timeout, on the wait for a launch to
+# exit once it has reported its command's end (it exits at once), on the watchdog's wait between
+# the program's death and its KILL, and on a command past its deadline's wait for the server's TERM.
+# Every process of a timed-out command still in its process group has exited within 2 × GRACE of the
+# deadline, and `run` has returned the call (AGENTS.md § Invariants §3).
 GRACE: Final = 1.0
 
 # The options before `-c` of every non-login bash the launcher starts or a fixed script runs in.
@@ -125,25 +146,97 @@ TAKEN_MARK: Final = b'cluster-mcp:parked-descriptor-taken'
 # (Linux reads /proc/self/fd, which is per process.)
 PARKED_SAME: Final = '[[ /dev/fd/57 -ef /dev/fd/47 && /dev/fd/58 -ef /dev/fd/48 && /dev/fd/59 -ef /dev/fd/49 ]]'
 
+# The builtins the program's own lines run, which a startup file could disable (`enable -n`) or
+# shadow with a function of the same name.
+BUILTINS: Final = 'builtin command exec set printf trap cd export declare compgen read kill ulimit exit unset unalias'
+
 # The program's first two lines: undo what a profile can leave behind (aliases, functions shadowing
-# the words used here, the field separator, shell options: `-k` would turn an argument shaped like an
-# assignment into one, `-P` would name the start directory by its physical path; traps), then take
-# the caller's streams back. Anything those commands print still goes to /dev/null. Bash reads a
-# whole line before running any of it, so the alias reset is a line of its own (quoted, so no alias
-# reaches it): an alias on any later word of a shared line would already have been expanded. A
-# startup file that took a parked descriptor (bash 5 lets a profile's `exec 58>file` replace it; the
-# 3.2 measured leaves an open descriptor above 9 as it was) leaves it naming another file than its
-# copy: the program then runs nothing, leaves `TAKEN_MARK` on whichever stderr is still the
-# caller's, and exits, so the command is reported as not started, which it was not, rather than run
-# with its streams lost or its stdin replaced.
+# the words used here or the absolute paths the program runs, disabled builtins, the field separator,
+# shell options: `-k` would turn an argument shaped like an assignment into one, `-P` would name the
+# start directory by its physical path, `-m` would start the command in a process group of its own,
+# out of reach of a timeout's signals; traps), then take the caller's streams back. Anything those
+# commands print still goes to /dev/null. Bash reads a whole line before running any of it, so the
+# alias reset is a line of its own (quoted, so no alias reaches it): an alias on any later word of a
+# shared line would already have been expanded. The functions over the builtins are unset in posix
+# mode, entered by an assignment no function can shadow, where the special builtins (`unset`,
+# `set`, `exec`, `trap`, `exit`) are found before any function of their name, and after the builtins
+# have been enabled again; then posix mode is left (bash before 5.1 has no process substitution in
+# it), and the functions named like the absolute paths the program runs are unset, which a posix-mode
+# bash refuses to name. What this cannot undo (a readonly function, a function named `enable` beside
+# a disabled builtin, `enable -n enable`) is a recorded limit (AGENTS.md § Invariants §3). A startup
+# file that took a parked descriptor (bash 5 lets a profile's `exec 58>file` replace it; the 3.2
+# measured leaves an open descriptor above 9 as it was) leaves it naming another file than its copy:
+# the program then runs nothing, leaves `TAKEN_MARK` on whichever stderr is still the caller's, and
+# exits, so the command is reported as not started, which it was not, rather than run with its
+# streams lost or its stdin replaced.
+#
+# The posix-mode round trip changes the program's own shell options (measured: leaving posix mode
+# turns `expand_aliases` off in bash 3.2, 4.4 and 5.1, `inherit_errexit` on in 4.4 and 5.1, and
+# `shift_verbose` off in 5.1), but it does not refresh `BASHOPTS`. A bash the command starts (a
+# script's, or any the command runs) takes its options from `BASHOPTS` once a startup file has
+# exported it (bash 4.1 and later), so it gets the ones the login initialisation left (measured on
+# bash 4.4, 5.1 and 5.2). An argv's first word is run by `exec`, which runs a file, never a builtin
+# (`shopt -p` as an argv is not found), so no command runs in the program's own shell. The program's
+# lines therefore never run `shopt`, or anything else that refreshes `BASHOPTS`, before the command:
+# that would hand the round trip's options on.
 PROLOGUE: Final = ('\\unalias -a\n'
-                   'unset -f builtin command exec set printf trap cd export declare compgen read kill ulimit exit; '
-                   'unset IFS; '
-                   'set +euxvTkP +o errtrace +o posix; trap - EXIT ERR DEBUG RETURN; '
+                   f'POSIXLY_CORRECT=y; unset -f enable; enable {BUILTINS} || :; unset -f {BUILTINS}; \\unalias -a; '
+                   'set +euxvTkPm +o errtrace +o posix; unset -f /bin/cat /bin/date /bin/sleep; unset IFS; '
+                   'trap - EXIT ERR DEBUG RETURN; '
                    f'{PARKED_SAME} || {PARKED_SAME} || {PARKED_SAME} || '
                    f'{{ printf %s {TAKEN_MARK.decode()} >&49; '
                    f'printf %s {TAKEN_MARK.decode()} >&59; exec /usr/bin/false; }}; '
                    'exec 0<&57 1>&58 2>&59 47<&- 48>&- 49>&- 57<&- 58>&- 59>&-')
+
+# The watchdog, the program's line after the prologue: a process substitution in the command's
+# process group (no shell here has job control) that holds no stream of the call (its output is
+# /dev/null, its input a pipe whose write end the program keeps on descriptor 46) and waits. It acts
+# on the program's death alone, never on time: its one wait is `/bin/cat`, which reads the pipe to
+# end of file, and end of file comes only once the program has exited (the command's subshell closes
+# the descriptor). No shell builtin waits, so no `TMOUT` (readonly or not) or trap a startup file
+# left can end the wait early, and the prologue has unset the functions bash would look up before
+# its absolute paths. The program writes one line on the pipe right after the fork (the arming;
+# `>|`, because a profile's `set -C` refuses `>` onto the path bash 3.2 names a process substitution
+# by) and one after the end records (`RELEASE`). At end of file the watchdog has read the arming line
+# alone exactly when the program died with its command unreported, as it does at a timeout's TERM in
+# every mode, and only then (and only when `cat` itself read to the end) does it act: it waits GRACE
+# (rendered into the text when the program is) and sends the group KILL, never TERM, so a process
+# gets at most the deadline's one TERM, a command that handles it keeps its whole grace, and every
+# process of the command still in the group has exited within 2 × GRACE of the deadline. Nothing read
+# (the program never got the pipe), both lines (the call completed) or a `cat` that did not finish
+# stops nothing. The program forks it with TERM ignored, so the watchdog is born ignoring TERM and no
+# TERM to the group ends it at any instant, then takes TERM's default back, which also undoes a TERM
+# trap or ignore a startup file left: from then on a TERM that reaches the program ends it before its
+# command can start. One that reaches it while it forks is lost. The server sends its TERM only at
+# the deadline, so where the program runs on the server's own host the deadline's check, the next
+# line, refuses the start (`DEADLINE_CHECK`); over `ssh` the command starts, and the KILL request
+# after the grace stops it with the rest of the group.
+WATCHDOG: Final = ("trap '' TERM; exec 46>| >(exec >/dev/null 2>&1; "
+                   "[[ $(/bin/cat && printf .) == $'\\n.' ]] && {{ /bin/sleep {grace}; kill -s KILL 0; }}); "
+                   "trap - TERM; printf '\\n' >&46")
+
+# The deadline's check, the program's line after the watchdog's when it has a deadline (`local` and
+# `delegate`, which run it on the server's own host): a command whose deadline has passed before it
+# starts never starts. A login initialisation that ignores or traps TERM and runs past the deadline
+# takes the deadline's TERM, and so does the program if it comes while it forks the watchdog (under
+# a non-root `delegate` server `sudo`'s relay reaches the program alone, and nothing else would), so
+# the program reads the clock once TERM's default is back, and from then on a TERM ends it. The
+# deadline is on the wall clock, in nanoseconds since the epoch (`time.time_ns()` when the program is
+# rendered, just before `run_process` takes its own on the monotonic clock), so it is never later
+# than the TERM unless the wall clock steps in between: a step forward refuses a command early, one
+# back lets a late one start (AGENTS.md § Invariants §3). The clock is `/bin/date +%s%N`: GNU date
+# prints nanoseconds and macOS's microseconds (its last three digits zero); one that prints seconds
+# alone only delays the check by under a second, and one that prints no number skips it. A command
+# past its deadline waits up to GRACE for the server's TERM, so the call reads as the timeout it is,
+# then the program dies of TERM itself (KILL, should bash have started with TERM ignored), and its
+# watchdog stops what is left of the group; the server's own drains still bound the call's return at
+# 2 × GRACE after the deadline. The clock's reading is unset once compared, so it never reaches the
+# command.
+DEADLINE_CHECK: Final = ('cluster_mcp_n=$(/bin/date +%s%N); '
+                         'case $cluster_mcp_n in *N) cluster_mcp_n=${{cluster_mcp_n%%[!0-9]*}}000000000 ;; esac; '
+                         "case $cluster_mcp_n in ''|*[!0-9]*) ;; *) (( cluster_mcp_n < {deadline} )) || "
+                         '{{ /bin/sleep {grace}; kill -s TERM $$; kill -s KILL $$; }} ;; esac; unset cluster_mcp_n')
+RELEASE: Final = "printf '\\n' >&46"
 
 # A script runs in a fresh non-login bash: it inherits the login environment and every function
 # (`module`), exported one name per line, so no field separator or glob option touches the list; its
@@ -160,8 +253,10 @@ QUIET: Final = 'exec 59>&2 2>/dev/null'
 
 # The command runs in a subshell, which changes to its start and `exec`s the command, so the
 # program outlives it to report its end. A failed `cd`, or a `~` with HOME unset, ends only the
-# subshell, with its status (`exit` in a subshell never runs ~/.bash_logout).
-SUBSHELL: Final = ('(', ') 2>&59 59>&-')
+# subshell, with its status (`exit` in a subshell never runs ~/.bash_logout). The subshell closes
+# the watchdog's descriptor, so nothing the command starts holds the pipe and hides the program's
+# death from it.
+SUBSHELL: Final = ('(', ') 2>&59 59>&- 46>&-')
 CD_LINE: Final = 'command cd -- {word} || exit'
 
 # The signals whose default action ends a process (a stop, a continue or an ignored signal is none
@@ -171,8 +266,9 @@ TERMINATING: Final = ('HUP', 'INT', 'QUIT', 'ILL', 'TRAP', 'ABRT', 'BUS', 'FPE',
                       'PIPE', 'ALRM', 'TERM', 'XCPU', 'XFSZ', 'VTALRM', 'PROF', 'SYS', 'RTMIN*', 'RTMAX*')
 
 # The program's last lines: the command's status and what it means; its end record on both streams
-# (`record_line`); the signal re-raised (no core file, no trap); and, if the shell is still alive,
-# the command's own status as the program's.
+# (`record_line`); the watchdog released (`RELEASE`), before anything can end the program; the
+# signal re-raised (no core file, no trap); and, if the shell is still alive, the command's own
+# status as the program's.
 STATUS: Final = ('cluster_mcp_s=$? cluster_mcp_k=\n'
                  '(( cluster_mcp_s > 128 )) && cluster_mcp_k=$(kill -l "$cluster_mcp_s")\n'
                  f'case $cluster_mcp_k in {"|".join(TERMINATING)}) cluster_mcp_r=s$((cluster_mcp_s - 128)) ;; '
@@ -275,7 +371,7 @@ def record_line(end: str) -> str:
 
 
 def program(command: Sequence[str] | str, cwd: str | None = None,
-            start: str | None = None) -> tuple[str, Marks]:
+            start: str | None = None, timeout: float | None = None) -> tuple[str, Marks]:
     """The bash program for `command`, and the nonces `separate` reads its output by.
 
     `command` is an argv (a sequence of `str`, each element one literal argument) or a script
@@ -283,10 +379,15 @@ def program(command: Sequence[str] | str, cwd: str | None = None,
     running user's home. `start` is where the program first changes to, after the login
     initialisation and whatever it `cd`s to: `'home'` (`$HOME`, so a relative path means the running
     user's home) or an absolute directory, written into the program as one quoted word (the local
-    backend's working directory); None stays put.
+    backend's working directory); None stays put. `timeout`, given only where the program runs on
+    the server's own host (`local`, `delegate`), and just before `run_process` takes its own
+    deadline: the program does not start the command once that many seconds have passed
+    (`DEADLINE_CHECK`).
     """
     if isinstance(command, UserPath):
         raise TypeError('command must be an argv list or a script str, not a UserPath')
+    timeout = check_timeout(timeout)
+    deadline = None if timeout is None else time.time_ns() + math.ceil(timeout * 1e9)
     lines = []
     if start == 'home':
         lines.append(START_HOME)
@@ -306,9 +407,10 @@ def program(command: Sequence[str] | str, cwd: str | None = None,
         raise TypeError(f'command must be an argv list or a script str, not {type(command).__name__}')
     # Each nonce is printed in two halves, so the whole of it never appears in the program text.
     start_nonce, end_nonce = secrets.token_hex(16), secrets.token_hex(16)
-    text = '\n'.join([PROLOGUE,
+    checks = [] if deadline is None else [DEADLINE_CHECK.format(deadline=deadline, grace=format(GRACE, 'g'))]
+    text = '\n'.join([PROLOGUE, WATCHDOG.format(grace=format(GRACE, 'g')), *checks,
                       f'printf %s%s {_halves(start_nonce)}; printf %s%s {_halves(start_nonce)} >&2; {QUIET}',
-                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RERAISE])
+                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RELEASE, RERAISE])
     return text, Marks(start_nonce.encode('ascii'), end_nonce.encode('ascii'))
 
 
@@ -578,10 +680,12 @@ def run_process(argv: list[str], stdin: bytes | None, timeout: float | None,
     is the launch's own status. A launch that exits first is complete at its exit, with everything
     it wrote, since an exited process has nothing more to write; one that closes its output early
     is waited for. At the deadline, a call still incomplete gets `TIMEOUT_EXIT_CODE`: the whole
-    process group gets SIGTERM, then SIGKILL, each followed by a bounded drain, and the output
-    captured so far is kept; a process that left the group and still holds a pipe cannot hold the
-    call past the drains, as the pipes are then closed. The note is always empty here (the SSH wire
-    has its own).
+    process group gets SIGTERM and a drain bounded by `GRACE`, then, unless the output has ended,
+    SIGKILL and a second such drain, and the output captured so far is kept; a process that left
+    the group and still holds a pipe cannot hold the call past the drains, as the pipes are then
+    closed. A program's watchdog (`WATCHDOG`) sends the KILL this skips once the output has ended,
+    and the KILL a group the server cannot signal (a non-root `delegate` server's) needs.
+    The note is always empty here (the SSH wire has its own).
     """
     timeout = check_timeout(timeout)
     deadline = None if timeout is None else time.monotonic() + timeout

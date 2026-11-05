@@ -34,6 +34,13 @@ running:
   cycle 2: a client that held the server 2.5 s past its first answer left nothing behind, since the
   worker's SIGKILL had landed.
 
+- 2026-11-01: the call that launched a group is no longer its only signaller. Every program now
+  starts a watchdog in the command's process group (`timeout-process-cleanup`), which sends the
+  group KILL `GRACE` after the program dies without having reported its command's end. Both cases
+  above remain: a killed server leaves the command running (the program has not died; it dies of
+  SIGPIPE writing its end record once the command ends, and the watchdog then stops the group), and
+  the probe's case is a login initialisation that hangs before the watchdog exists.
+
 Whether a tool call still running when the server exits normally is waited for, signalled or
 abandoned has not been measured.
 

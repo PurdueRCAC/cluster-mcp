@@ -19,13 +19,18 @@ the login bash's or the remote login shell's own, moves where a command starts, 
 content or holds the call past the command's end records; the one documented exception, a remote
 rc file's background job writing into a result, is pinned with the texts that state it. On a slow
 or stalling link the call reads to the end records, however long they take (`ThrottledSSH`). The
-server does not kill a process when its channel closes, as OpenSSH does not; it kills what is left
-when the test ends.
+server signals the exec's process group on a `signal` request while the exec's process runs, as
+sshd does, and does not kill a process when its channel closes, as OpenSSH does not; it kills what
+is left when the test ends.
 
 The `unit` rows drive the channel loop (`_collect`) with a fake channel: an exit status that arrives
 before the end of output is waited on, not spun on, and decides nothing; the read ends at both end
 records; a command whose records have not come by the deadline is a timeout, naming its status if
-that has arrived; and what a command prints after the TERM at its deadline is read. An exec string
+that has arrived; what a command prints after the TERM at its deadline is read; and the command is
+asked to KILL once that read is over, never before, and only if its channel has not ended. Against
+the loopback server, which drops the connection for a message on a channel it has freed, as sshd
+does, no `signal` request goes on a closed channel, and one on an open channel is written holding
+the channel's lock. An exec string
 over the per-argument limit is refused before connecting.
 
 The `unit` reconnect rows start from a published connection that has gone dead, under a fake clock
@@ -2772,6 +2777,209 @@ def test_a_timeout_drains_what_follows_the_term(monkeypatch: pytest.MonkeyPatch)
     assert [name for name, _ in sent] == ['TERM'] and sent[0][1] < 0.5, sent
     assert (out, code) == (b'stopping\n', TIMEOUT_EXIT_CODE), \
         f'the timeout lost what followed the TERM: {out!r}, exit code {code}'
+
+
+@pytest.mark.unit
+def test_a_timeout_asks_for_kill_after_its_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The command neither prints nor ends after the TERM, as one whose launch ignored TERM from its
+    # entry: the read waits out GRACE, and only then is the command asked to KILL.
+    channel = LateChannel(60.0, b'')
+    sent: list[tuple[str, float]] = []
+    monkeypatch.setattr(ssh, '_signal', lambda chan, name: sent.append((name, channel.now())))
+    try:
+        out, err, code, _ = ssh._collect(channel, 0.3)
+    finally:
+        channel.release()
+    assert [name for name, _ in sent] == ['TERM', 'KILL'], \
+        f'a timeout asked for {[name for name, _ in sent]}, not TERM and then KILL'
+    waited = sent[1][1] - sent[0][1]
+    assert waited >= launch.GRACE - 0.05, \
+        f'the KILL was asked for {waited:.2f} s after the TERM, before the GRACE read was over ({launch.GRACE:g} s)'
+    assert (out, err, code) == (b'', b'', TIMEOUT_EXIT_CODE), (out, err, code)
+
+
+def _session(server: LoopbackSSH, executor: SSHExecutor, wire: str) -> paramiko.Channel:
+    """A channel of `executor`'s connection running `wire`, its process started by the server."""
+    assert executor.run('true', timeout=30).exit_code == 0
+    started = len(server.processes)
+    chan = executor._conn.client.get_transport().open_session(timeout=30)
+    chan.exec_command(wire)
+    until = time.monotonic() + 10
+    while len(server.processes) == started and time.monotonic() < until:
+        time.sleep(0.02)
+    return chan
+
+
+@pytest.mark.integration
+def test_no_signal_is_asked_for_on_a_closed_channel(serve: Callable[..., LoopbackSSH]) -> None:
+    # A channel both sides have closed, the server's copy freed: the server drops the connection for
+    # a request on it, as sshd does ("unknown channel"), so none may go, and the next call runs on the
+    # same connection.
+    server = serve('/bin/bash')
+    executor = server.executor()
+    try:
+        chan = _session(server, executor, 'exit 0')
+        until = time.monotonic() + 10
+        while (not chan.closed or server._transports[0]._channels.values()) and time.monotonic() < until:
+            time.sleep(0.02)
+        assert chan.closed and not server._transports[0]._channels.values(), 'the channel did not close on both sides'
+        ssh._signal(chan, 'KILL')
+        try:
+            again: object = executor.run('echo again', timeout=30)
+        except Exception as exc:
+            again = exc
+        found = (getattr(again, 'stdout', None), getattr(again, 'exit_code', None), len(server._transports))
+        assert found == ('again\n', 0, 1), \
+            f'a signal request went on a closed channel and the connection was lost: {again!r}, ' \
+            f'{len(server._transports)} connections'
+    finally:
+        executor.close()
+
+
+@pytest.mark.integration
+def test_a_signal_request_goes_while_the_channel_is_held_open(serve: Callable[..., LoopbackSSH],
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    # Paramiko marks a channel closed under the channel's lock before it sends its own close: a request
+    # written while that lock is held, the channel open, is on the wire before any close can be.
+    server = serve('/bin/bash')
+    executor = server.executor()
+    try:
+        chan = _session(server, executor, 'exec /bin/sleep 30')
+        transport = chan.transport
+        send, seen = transport._send_message, []
+
+        def watched(data: paramiko.Message) -> None:
+            m = paramiko.Message(data.asbytes())
+            if (m.get_byte(), m.get_int(), m.get_text()) == (paramiko.common.cMSG_CHANNEL_REQUEST, chan.remote_chanid,
+                                                            'signal'):
+                seen.append((chan.lock.locked(), chan.closed))
+            send(data)
+
+        monkeypatch.setattr(transport, '_send_message', watched)
+        ssh._signal(chan, 'TERM')
+        until = time.monotonic() + 10
+        while not chan.closed and time.monotonic() < until:
+            time.sleep(0.02)
+        assert seen == [(True, False)], \
+            f'the signal request was not written holding the channel\'s lock on an open channel: (locked, closed) {seen}'
+        assert server.signals == ['TERM'] and chan.closed, \
+            f'the server did not end the command on the request: {server.signals}, closed {chan.closed}'
+    finally:
+        executor.close()
+
+
+class _KeyExchange(threading.Event):
+    """A transport's `clear_to_send` during a key exchange: clear until the exchange ends (`set`). Each
+    wait records whether the channel's lock was held while it waited."""
+
+    def __init__(self, lock: Any) -> None:
+        super().__init__()
+        self.lock, self.held = lock, []
+
+    def wait(self, timeout: float | None = None) -> bool:
+        self.held.append(self.lock.locked())
+        return super().wait(timeout)
+
+
+def _rekeying(active: bool = True, give_up: float = 10.0) -> SimpleNamespace:
+    """A channel on a fake transport in the middle of a key exchange; `sent` records, for each message
+    the transport was asked to send, whether the exchange had ended."""
+    chan = SimpleNamespace(remote_chanid=7, closed=False, lock=threading.Lock())
+    chan.transport = SimpleNamespace(clear_to_send=_KeyExchange(chan.lock), clear_to_send_lock=threading.Lock(),
+                                     clear_to_send_timeout=give_up, is_active=lambda: active)
+    chan.sent = []
+    transport = chan.transport
+    transport._send_message = lambda message: chan.sent.append(transport.clear_to_send.is_set())
+
+    def send_user_message(message: Any) -> None:
+        # Paramiko's own wait, made by whatever thread sends: until the exchange ends or its bound passes.
+        give_up = time.monotonic() + transport.clear_to_send_timeout
+        while time.monotonic() < give_up:
+            transport.clear_to_send.wait(0.1)
+            with transport.clear_to_send_lock:
+                if transport.clear_to_send.is_set():
+                    transport._send_message(message)
+                    return
+
+    transport._send_user_message = send_user_message
+    return chan
+
+
+@pytest.mark.unit
+def test_a_signal_request_waits_out_a_key_exchange() -> None:
+    # RFC 4253 §7.1: nothing but the exchange's own messages goes while a key exchange runs. The
+    # request waits for it to end, without holding the channel's lock (the transport thread takes it
+    # to deliver what arrives meanwhile), then goes.
+    chan = _rekeying()
+    sender = threading.Thread(target=ssh._signal, args=(chan, 'TERM'), daemon=True)
+    sender.start()
+    time.sleep(0.5)
+    during = list(chan.sent)
+    chan.transport.clear_to_send.set()
+    sender.join(5)
+    assert during == [], f'the signal request was sent during the key exchange: {during}'
+    assert not sender.is_alive() and chan.sent == [True], \
+        f'the signal request did not go once the key exchange ended: {chan.sent}, waiting {sender.is_alive()}'
+    held = chan.transport.clear_to_send.held
+    assert held and not any(held), f'the wait for the key exchange held the channel\'s lock: {held}'
+
+
+class _ExchangeStarts(threading.Event):
+    """A transport's `clear_to_send`, no key exchange running, whose first check starts one: the check
+    hands the transport thread its start, which clears the event under `clear_to_send_lock` as
+    Paramiko's does, and gives it `held` seconds to begin before it answers."""
+
+    def __init__(self, lock: Any, held: float) -> None:
+        super().__init__()
+        self.set()
+        self.lock, self.held, self.started = lock, held, False
+
+    def is_set(self) -> bool:
+        answer = super().is_set()
+        if answer and not self.started:
+            self.started = True
+            transport_thread = threading.Thread(target=self._start, daemon=True)
+            transport_thread.start()
+            transport_thread.join(self.held)
+        return answer
+
+    def _start(self) -> None:
+        with self.lock:
+            self.clear()
+
+
+@pytest.mark.unit
+def test_a_signal_request_never_goes_as_a_key_exchange_starts() -> None:
+    # The check that no key exchange runs and the send are one step against the transport thread,
+    # which starts an exchange by clearing `clear_to_send` under `clear_to_send_lock`: the request is
+    # sent holding that lock, so an exchange that starts as it is checked starts only once it is on
+    # the wire, never between the check and the send (RFC 4253 §7.1).
+    chan = _rekeying()
+    transport = chan.transport
+    transport.clear_to_send = _ExchangeStarts(transport.clear_to_send_lock, held=0.2)
+    transport._send_message = lambda message: chan.sent.append(threading.Event.is_set(transport.clear_to_send))
+    sender = threading.Thread(target=ssh._signal, args=(chan, 'TERM'), daemon=True)
+    sender.start()
+    sender.join(5)
+    assert transport.clear_to_send.started, 'the signal request never checked for a key exchange'
+    assert not sender.is_alive() and chan.sent == [True], \
+        f'the signal request was sent as the key exchange started: {chan.sent}, waiting {sender.is_alive()}'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('active', 'give_up', 'held'), [pytest.param(True, 0.5, 1.5, id='exchange-never-ends'),
+                                                          pytest.param(False, 10.0, 1.0, id='transport-gone')])
+def test_a_signal_request_gives_up_on_a_key_exchange(active: bool, give_up: float, held: float) -> None:
+    # A key exchange that does not end within Paramiko's own bound, or a transport that has gone: the
+    # request is dropped, best effort, and the caller is held no longer than that bound, or not at all.
+    chan = _rekeying(active, give_up)
+    sender = threading.Thread(target=ssh._signal, args=(chan, 'KILL'), daemon=True)
+    started = time.monotonic()
+    sender.start()
+    sender.join(give_up + 2)
+    took = time.monotonic() - started
+    assert not sender.is_alive() and took < held, f'the signal request held its caller {took:.2f} s'
+    assert chan.sent == [], f'the signal request was sent with no key exchange ended: {chan.sent}'
 
 
 @pytest.mark.unit

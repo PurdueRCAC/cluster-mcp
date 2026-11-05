@@ -611,9 +611,9 @@ def test_harness_builds_servers_inside_the_running_loop(tmp_path: Path, monkeypa
         probe.reset(token)
 
 
-# A feature-scoped spec id (`R#`, `P#`) in a comment, docstring or message of the package or the
+# A feature-scoped spec id (`R#`, `P#`, `Q#`) in a comment, docstring or message of the package or the
 # suite: those restart per feature and live in `spec/`, never in the code (AGENTS.md § Conventions).
-SPEC_ID = re.compile(r'\b[RP][0-9]{1,2}\b')
+SPEC_ID = re.compile(r'\b[RPQ][0-9]{1,2}\b')
 
 
 def spec_id_violations(name: str, text: str) -> list[str]:
@@ -651,7 +651,8 @@ def test_no_spec_ids_in_the_package_or_the_suite() -> None:
 @pytest.mark.parametrize(('text', 'found'), [
     pytest.param('"""Differs from ' + 'R' + '9\'s report."""', True, id='requirement'),
     pytest.param('# Added in ' + 'P' + '3.', True, id='phase'),
-    pytest.param('x = "R2D2 P100 RP1 HTTP2"', False, id='not-ids'),
+    pytest.param('# As ruled (GOAL ' + 'Q' + '3).', True, id='clarification'),
+    pytest.param('x = "R2D2 P100 RP1 HTTP2 Q100 QUIT SIGQUIT IQ3 Q3PO"', False, id='not-ids'),
 ])
 def test_spec_id_check_catches_planted_ids(text: str, found: bool) -> None:
     assert bool(spec_id_violations('planted', text)) == found

@@ -52,7 +52,7 @@ from cluster_mcp.core.executor import launch
 from cluster_mcp.core.executor.delegate import DelegatingExecutor
 from cluster_mcp.core.executor.shell import LocalShellExecutor
 from cluster_mcp.core.executor.ssh import SSHExecutor
-from test_launch import SEPARATION_CASES, STAGE_ARGV, chatty_home, launch_violations
+from test_launch import RELEASE_LINE, SEPARATION_CASES, STAGE_ARGV, WATCHDOG_LINE, chatty_home, launch_violations
 
 COMMAND = 'echo $HOME; ls *'
 USER_MAP = {'bob': 'ubob'}
@@ -152,6 +152,9 @@ DRIFTS: dict[str, tuple[Callable[[list[str]], list[str]], str]] = {
     'wrong-user': (lambda a: a[:4] + ['ualice'] + a[5:], '(local user)'),
     'not-in-home': (lambda a: _swap_program(a, 'command cd -- "${HOME:?HOME is not set}" || exit\n', ''),
                     'does not start in $HOME'),
+    'no-watchdog': (lambda a: _swap_program(a, WATCHDOG_LINE, ''), 'does not start the watchdog'),
+    # The release line also ends the watchdog's own line (its arming), so the swap names what follows it.
+    'no-release': (lambda a: _swap_program(a, RELEASE_LINE + '[[ -z', '[[ -z'), 'does not release the watchdog'),
 }
 
 

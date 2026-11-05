@@ -127,8 +127,27 @@ and then moved into place, so the file is replaced whole and keeps its permissio
 setgid, as `cat >` leaves them). A transfer that fails or falls short (a full filesystem, a spent
 quota) leaves the file untouched and says why, and a write refuses what `cat >` refuses (a file you
 may not write, a link whose target's directory is missing). A command that exceeds its `timeout`
-returns what it printed so far with exit code `-1001`; over ssh, a connection lost before the
-command's end was reported gives `-1003`: the command may have run.
+returns what it printed so far with exit code `-1001`, within 2 seconds of the deadline, and is
+stopped, with everything it started, within the same 2 seconds: each process gets at most one TERM signal, so a command that
+handles it has a second to finish, and then KILL (in `delegate` mode under a server that is not
+root, only the launch gets the TERM, and the command's processes get KILL a second later); a
+command whose deadline passes while a login startup file still runs is not started in `local` or
+`delegate` mode (unless the server's wall clock steps meanwhile: a step forward reports a command
+whose deadline has not come as not started, `-1002`, and a step back lets a late one start, which in
+`delegate` mode under a server that is not root then runs on). A command with no timeout, or one that has not reached it, is never signalled by
+the stop, unless a login startup file shadows the shell builtins the launch runs in a way it cannot
+undo (a readonly function, a function named `enable` beside a disabled `unset`), which can stop a
+command early, as such a file can already break the launch itself. A command that has finished
+while what reads its output went away (the server killed, the link lost) has what it left running
+stopped too, since its launch dies before it can report the end. What is not stopped: a process that
+has left the command's process group (`setsid`, a daemon); a login startup file that hangs before
+the command starts, in `delegate` mode under a server that is not root, and in every mode a process
+it started that ignores the TERM signal and holds none of the command's output (over ssh, one that
+holds it too, once the login shell has died of the TERM); over ssh, a command on a server that
+ignores the SSH `signal` request; and, under such a startup file, whatever ignores TERM and holds
+none of the command's output ([`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md)). Over
+ssh, a connection lost before the command's end was reported gives `-1003`: the command may have
+run, and may still be running.
 
 ### Which capabilities are served
 

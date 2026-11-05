@@ -49,25 +49,46 @@ SANDBOX = Path(__file__).resolve().parent.parent / 'bin' / 'sandbox.sh'
 SYSTEM_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
 
 # The texts the plan fixes, written out here so a change to any of them fails a check.
+BUILTINS = 'builtin command exec set printf trap cd export declare compgen read kill ulimit exit unset unalias'
 PROLOGUE = ('\\unalias -a\n'
-            'unset -f builtin command exec set printf trap cd export declare compgen read kill ulimit exit; '
-            'unset IFS; '
-            'set +euxvTkP +o errtrace +o posix; trap - EXIT ERR DEBUG RETURN; '
+            f'POSIXLY_CORRECT=y; unset -f enable; enable {BUILTINS} || :; unset -f {BUILTINS}; \\unalias -a; '
+            'set +euxvTkPm +o errtrace +o posix; unset -f /bin/cat /bin/date /bin/sleep; unset IFS; '
+            'trap - EXIT ERR DEBUG RETURN; '
             '[[ /dev/fd/57 -ef /dev/fd/47 && /dev/fd/58 -ef /dev/fd/48 && /dev/fd/59 -ef /dev/fd/49 ]] || '
             '[[ /dev/fd/57 -ef /dev/fd/47 && /dev/fd/58 -ef /dev/fd/48 && /dev/fd/59 -ef /dev/fd/49 ]] || '
             '[[ /dev/fd/57 -ef /dev/fd/47 && /dev/fd/58 -ef /dev/fd/48 && /dev/fd/59 -ef /dev/fd/49 ]] || '
             '{ printf %s cluster-mcp:parked-descriptor-taken >&49; '
             'printf %s cluster-mcp:parked-descriptor-taken >&59; exec /usr/bin/false; }; '
             'exec 0<&57 1>&58 2>&59 47<&- 48>&- 49>&- 57<&- 58>&- 59>&-')
+# The watchdog, started right after the prologue, forked with TERM ignored so it is born ignoring it,
+# TERM's default taken back right after the fork; holding no stream, armed by the program's first
+# line on descriptor 46 and waiting for the pipe's end with no builtin; at the program's death, armed
+# and not released, it waits GRACE and KILLs the group, and never sends TERM.
+WATCHDOG_LINE = ("trap '' TERM; exec 46>| >(exec >/dev/null 2>&1; "
+                 "[[ $(/bin/cat && printf .) == $'\\n.' ]] && { /bin/sleep 1; kill -s KILL 0; }); "
+                 "trap - TERM; printf '\\n' >&46\n")
+# The same line as review cycle 3 found it: TERM's default back before the fork, and the watchdog
+# ignoring TERM only from its own first statement.
+BORN_WITH_TERM = ("trap - TERM; exec 46>| >(trap '' TERM; exec >/dev/null 2>&1; "
+                  "[[ $(/bin/cat && printf .) == $'\\n.' ]] && { /bin/sleep 1; kill -s KILL 0; }); "
+                  "printf '\\n' >&46\n")
+# With a deadline (local and delegate), the line after the watchdog's: the server's clock read once,
+# and a command past its deadline never started (it waits GRACE for the server's TERM, then dies of
+# TERM itself).
+DEADLINE_LINE = re.compile(r"cluster_mcp_n=\$\(/bin/date \+%s%N\); "
+                           r"case \$cluster_mcp_n in \*N\) cluster_mcp_n=\$\{cluster_mcp_n%%\[!0-9\]\*\}000000000 ;; esac; "
+                           r"case \$cluster_mcp_n in ''\|\*\[!0-9\]\*\) ;; \*\) \(\( cluster_mcp_n < ([0-9]+) \)\) \|\| "
+                           r"\{ /bin/sleep 1; kill -s TERM \$\$; kill -s KILL \$\$; \} ;; esac; unset cluster_mcp_n\n")
 SENTINEL_LINE = re.compile(r'printf %s%s ([0-9a-f]{16}) ([0-9a-f]{16}); printf %s%s \1 \2 >&2; '
                            r'exec 59>&2 2>/dev/null\n')
 HOME_LINE = 'command cd -- "${HOME:?HOME is not set}" || exit\n'
 # A start of 'home' resolves through $HOME; any other is an absolute path written into the program.
 POSITIONAL_LINE = 'command cd -- "${1:?the start directory is not set}" || exit\n'
-# The subshell that runs the command, so the program outlives it; then its status, its end record
-# on both streams, the signal re-raised and the command's status kept.
+# The subshell that runs the command, so the program outlives it, with the watchdog's descriptor
+# closed; then its status, its end record on both streams, the watchdog released, the signal
+# re-raised and the command's status kept.
 SUBSHELL_OPEN = '(\n'
-SUBSHELL_CLOSE = '\n) 2>&59 59>&-\n'
+SUBSHELL_CLOSE = '\n) 2>&59 59>&- 46>&-\n'
 STATUS = ('cluster_mcp_s=$? cluster_mcp_k=\n'
           '(( cluster_mcp_s > 128 )) && cluster_mcp_k=$(kill -l "$cluster_mcp_s")\n'
           'case $cluster_mcp_k in HUP|INT|QUIT|ILL|TRAP|ABRT|BUS|FPE|KILL|USR1|SEGV|USR2|PIPE|ALRM|TERM|XCPU|XFSZ|'
@@ -75,6 +96,7 @@ STATUS = ('cluster_mcp_s=$? cluster_mcp_k=\n'
           '*) cluster_mcp_k= cluster_mcp_r=x$cluster_mcp_s ;; esac\n')
 END_LINE = re.compile(r'printf %s%s%s\. ([0-9a-f]{16}) ([0-9a-f]{16}) "\$cluster_mcp_r"; '
                       r'printf %s%s%s\. \1 \2 "\$cluster_mcp_r" >&59\n')
+RELEASE_LINE = "printf '\\n' >&46\n"
 RERAISE = ('[[ -z $cluster_mcp_k ]] || { ulimit -c 0; trap - "$cluster_mcp_k"; kill -s "$cluster_mcp_k" "$$"; }\n'
            '(exit "$cluster_mcp_s")')
 
@@ -151,8 +173,9 @@ def _word_violations(what: str, arg: str, value: str, unquoted: set[str], into: 
 
 
 def launch_violations(command: list[str] | str, cwd: str | None, start: str | None, prog: str,
-                      marks: launch.Marks) -> list[str]:
-    """Every way `prog` does not run `command` exactly, under the plan's prologue, sentinel and record."""
+                      marks: launch.Marks, deadline: tuple[int, int] | None = None) -> list[str]:
+    """Every way `prog` does not run `command` exactly, under the plan's prologue, sentinel and record;
+    `deadline`, the range of epoch nanoseconds the program's deadline must fall in, when it has one."""
     found: list[str] = []
     if marks.start.decode() in prog:
         found.append('the sentinel appears whole in the program text')
@@ -161,6 +184,17 @@ def launch_violations(command: list[str] | str, cwd: str | None, start: str | No
     if not prog.startswith(PROLOGUE + '\n'):
         return found + ['the program does not open with the prologue']
     at = len(PROLOGUE) + 1
+    if not prog.startswith(WATCHDOG_LINE, at):
+        return found + ['the program does not start the watchdog right after the prologue']
+    at += len(WATCHDOG_LINE)
+    check = DEADLINE_LINE.match(prog, at)
+    if (check is None) != (deadline is None):
+        return found + ['the program does not check its deadline before the command starts' if check is None
+                        else 'the program checks a deadline it was not given']
+    if check is not None:
+        if not deadline[0] <= int(check[1]) <= deadline[1]:
+            found.append(f'the program\'s deadline {check[1]} is not the server\'s, in {deadline}')
+        at = check.end()
     line = SENTINEL_LINE.match(prog, at)
     if not line or (line[1] + line[2]).encode() != marks.start:
         return found + ['the program does not print the sentinel, in two halves, on both streams, then quiet its own stderr']
@@ -183,12 +217,15 @@ def launch_violations(command: list[str] | str, cwd: str | None, start: str | No
         at += len(' || exit\n')
     close = prog.find(SUBSHELL_CLOSE, at)
     if close < 0:
-        return found + ['the subshell does not end, with the caller\'s stderr back, before the end record']
+        return found + ['the subshell does not end, with the caller\'s stderr back and the watchdog\'s descriptor '
+                        'closed, before the end record']
     body, tail = prog[at:close], prog[close + len(SUBSHELL_CLOSE):]
     end = END_LINE.match(tail, len(STATUS)) if tail.startswith(STATUS) else None
     if end is None or (end[1] + end[2]).encode() != marks.end:
         found.append('the program does not print the end record, its nonce in two halves, on both streams')
-    elif tail[end.end():] != RERAISE:
+    elif not tail.startswith(RELEASE_LINE, end.end()):
+        found.append('the program does not release the watchdog right after the end record')
+    elif tail[end.end() + len(RELEASE_LINE):] != RERAISE:
         found.append('the program does not re-raise a signal death and keep the command\'s status')
     if isinstance(command, str):
         if not body.startswith(SCRIPT_PREFIX):
@@ -334,6 +371,20 @@ def test_program_quotes_each_argument_as_one_word(command: list[str] | str, cwd:
 
 
 @pytest.mark.unit
+def test_a_program_given_a_timeout_checks_its_deadline() -> None:
+    # Where the program runs on the server's host, it gets the deadline on the server's clock, taken
+    # when it is rendered, just before the server takes its own.
+    before = time.time_ns()
+    prog, marks = launch.program(['pwd'], None, 'home', timeout=2.5)
+    after = time.time_ns()
+    violations = launch_violations(['pwd'], None, 'home', prog, marks, (before + 2_500_000_000, after + 2_500_000_000))
+    assert violations == [], '\n'.join(violations)
+    planted = prog.replace('(( cluster_mcp_n < ', '(( cluster_mcp_n > ', 1)
+    assert 'does not check its deadline' in ' '.join(launch_violations(['pwd'], None, 'home', planted, marks, (0, 1))), \
+        'the launch checker passes a program whose deadline check is inverted'
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize('cwd', ['sub', 'sub dir', '-', '-P', '~', '~/', '~/a b', '~//etc', '~name', '/abs dir',
                                  '$HOME', 'a\nb', UserPath('rel')])
 def test_program_renders_the_cwd(cwd: str) -> None:
@@ -354,11 +405,11 @@ def _record_line(end: bytes = E) -> str:
 
 
 def _planted(body: str, cwd_line: str = '', *, opening: str = SUBSHELL_OPEN, closing: str = SUBSHELL_CLOSE,
-             ending: str | None = None) -> tuple[str, launch.Marks]:
+             ending: str | None = None, watchdog: str = WATCHDOG_LINE) -> tuple[str, launch.Marks]:
     head, tail = S[:16].decode(), S[16:].decode()
-    ending = STATUS + _record_line() + RERAISE if ending is None else ending
-    return (f'{PROLOGUE}\nprintf %s%s {head} {tail}; printf %s%s {head} {tail} >&2; exec 59>&2 2>/dev/null\n'
-            f'{opening}{cwd_line}{body}{closing}{ending}'), M
+    ending = STATUS + _record_line() + RELEASE_LINE + RERAISE if ending is None else ending
+    return (f'{PROLOGUE}\n{watchdog}printf %s%s {head} {tail}; printf %s%s {head} {tail} >&2; '
+            f'exec 59>&2 2>/dev/null\n{opening}{cwd_line}{body}{closing}{ending}'), M
 
 
 @pytest.mark.unit
@@ -394,6 +445,36 @@ def _planted(body: str, cwd_line: str = '', *, opening: str = SUBSHELL_OPEN, clo
     pytest.param('echo hi', None, None, _planted(SCRIPT_PREFIX + "'echo hi;'"), 'not verbatim', id='script-altered'),
     pytest.param(['pwd'], None, None, (_planted('exec pwd')[0].replace('trap - EXIT ERR DEBUG RETURN; ', '', 1), M),
                  'prologue', id='traps-kept'),
+    pytest.param(['pwd'], None, None, (_planted('exec pwd')[0].replace('+euxvTkPm ', '+euxvTkP ', 1), M),
+                 'prologue', id='job-control-kept'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', watchdog=''), 'does not start the watchdog',
+                 id='no-watchdog'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', watchdog=WATCHDOG_LINE.replace('46>|', '46>', 1)),
+                 'does not start the watchdog', id='watchdog-clobber'),
+    pytest.param(['pwd'], None, None, (_planted('exec pwd')[0].replace('POSIXLY_CORRECT=y; ', '', 1), M),
+                 'prologue', id='builtins-unset-out-of-posix-mode'),
+    pytest.param(['pwd'], None, None, (_planted('exec pwd')[0].replace(' || :; unset -f builtin', '; unset -f builtin', 1),
+                                       M), 'prologue', id='builtins-not-enabled'),
+    pytest.param(['pwd'], None, None,
+                 (_planted('exec pwd')[0].replace('unset -f /bin/cat /bin/date /bin/sleep; ', '', 1), M),
+                 'prologue', id='path-functions-kept'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', watchdog=WATCHDOG_LINE.replace(
+        'kill -s KILL 0; }', 'kill -s TERM 0; kill -s KILL 0; }', 1)), 'does not start the watchdog', id='watchdog-term'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', watchdog=BORN_WITH_TERM),
+                 'does not start the watchdog', id='watchdog-born-with-term'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', watchdog=WATCHDOG_LINE.replace(
+        "); trap - TERM; printf", "); printf", 1)), 'does not start the watchdog', id='watchdog-term-left-ignored'),
+    pytest.param(['pwd'], None, None, (_planted('exec pwd')[0].replace('\\unalias -a; set +euxv', 'set +euxv', 1), M),
+                 'prologue', id='aliases-not-dropped-again'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', closing='\n) 2>&59 59>&-\n'), 'descriptor closed',
+                 id='watchdog-descriptor-kept'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', ending=STATUS + _record_line() + RERAISE),
+                 'does not release the watchdog', id='no-release'),
+    pytest.param(['pwd'], None, None, _planted('exec pwd', ending=STATUS + RELEASE_LINE + _record_line() + RERAISE),
+                 'does not print the end record', id='release-before-record'),
+    pytest.param(['pwd'], None, None,
+                 _planted('exec pwd', ending=STATUS + _record_line() + RERAISE + '\n' + RELEASE_LINE),
+                 'does not release the watchdog', id='release-after-reraise'),
     pytest.param(['pwd'], None, None, ('exec pwd', M), 'prologue', id='no-prologue'),
     pytest.param(['printf', '0123456789abcdeffedcba9876543210'], None, None,
                  _planted('exec printf 0123456789abcdeffedcba9876543210'), 'sentinel appears whole', id='sentinel-whole'),
@@ -406,7 +487,8 @@ def _planted(body: str, cwd_line: str = '', *, opening: str = SUBSHELL_OPEN, clo
     pytest.param(['pwd'], None, None,
                  _planted('exec pwd', ending=STATUS + _record_line().replace(' >&59', ' >&1') + RERAISE),
                  'does not print the end record', id='record-on-stdout-twice'),
-    pytest.param(['pwd'], None, None, _planted('exec pwd', ending=STATUS + _record_line() + '(exit "$cluster_mcp_s")'),
+    pytest.param(['pwd'], None, None,
+                 _planted('exec pwd', ending=STATUS + _record_line() + RELEASE_LINE + '(exit "$cluster_mcp_s")'),
                  'does not re-raise', id='signal-not-reraised'),
     pytest.param(['pwd'], None, None, _planted('exec pwd', closing='\n)\n'), 'does not end, with the caller',
                  id='subshell-stderr-quiet'),
@@ -415,6 +497,18 @@ def test_launch_check_catches_planted_programs(command: list[str] | str, cwd: st
                                                program: tuple[str, launch.Marks], fragment: str) -> None:
     violations = launch_violations(command, cwd, start, *program)
     assert any(fragment in v for v in violations), violations
+
+
+@pytest.mark.unit
+def test_the_watchdog_waits_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The wait between the program's death and the watchdog's KILL is GRACE as it is when the program
+    # is rendered, and so is the wait of a command past its deadline for the server's TERM.
+    monkeypatch.setattr(launch, 'GRACE', 2.5)
+    prog, _ = launch.program(['true'])
+    assert prog.count('{ /bin/sleep 2.5; kill -s KILL 0; }') == 1, f'the watchdog does not wait GRACE (2.5 s): {prog!r}'
+    prog, _ = launch.program(['true'], timeout=5)
+    assert prog.count('{ /bin/sleep 2.5; kill -s TERM $$; kill -s KILL $$; }') == 1, \
+        f'a command past its deadline does not wait GRACE (2.5 s) for the server\'s TERM: {prog!r}'
 
 
 @pytest.mark.unit
@@ -969,6 +1063,43 @@ def test_an_empty_home_fails_a_tilde_path(wire: str, tmp_path: Path) -> None:
     assert b'outside' not in out and code != 0, \
         f'{wire}: with HOME empty, ~{target} does not resolve through $HOME: it read {out!r} ({code})'
     assert b'HOME is not set' in err, err
+
+
+# The watchdog's body as the program forks it, between `>(` and its close.
+WATCHDOG_BODY = (launch.WATCHDOG.format(grace=format(launch.GRACE, 'g'))
+                 .partition('>(')[2].rpartition("); trap - TERM; printf '\\n' >&46")[0])
+
+
+@pytest.mark.integration
+def test_a_watchdog_that_cannot_start_stops_nothing(tmp_path: Path) -> None:
+    # A watchdog whose pipe ends before the program's first line never got its descriptor: it must
+    # exit, stopping nothing. No profile can reach that case through a whole program (every program
+    # needs descriptors up to 59, so a limit that refuses 46 refuses the launch first), so the body
+    # runs alone, its stdin already at end of file, in a group of its own beside a sleeping sibling.
+    assert WATCHDOG_BODY.startswith('exec >/dev/null') and WATCHDOG_BODY.count('kill -s KILL 0') == 1, WATCHDOG_BODY
+    pidfile = tmp_path / 'sibling.pid'
+    script = '/bin/sleep 30 </dev/null >/dev/null 2>&1 & echo $! > "$1"; (' + WATCHDOG_BODY + ') </dev/null'
+    try:
+        start = time.monotonic()
+        out, err, code, _ = _sandboxed([str(SANDBOX), '/bin/bash', '--norc', '-c', script, 'bash', str(pidfile)],
+                                       timeout=10)
+        sibling = int(pidfile.read_text())
+        assert code != TIMEOUT_EXIT_CODE, f'the watchdog did not exit at once: {(out, err, code)!r}'
+        until = start + 2 * launch.GRACE
+        while time.monotonic() < until:
+            try:
+                os.kill(sibling, 0)
+            except ProcessLookupError:
+                pytest.fail(f'a watchdog that never got its descriptor stopped its group '
+                            f'{time.monotonic() - start:.2f} s after it started')
+            time.sleep(0.05)
+    finally:
+        try:
+            sibling_group = os.getpgid(int(pidfile.read_text()))
+            if sibling_group != os.getpgrp():
+                os.killpg(sibling_group, signal.SIGKILL)
+        except (OSError, ValueError):
+            pass
 
 
 # Timeouts: a raw argv through the sandbox, no login initialisation.

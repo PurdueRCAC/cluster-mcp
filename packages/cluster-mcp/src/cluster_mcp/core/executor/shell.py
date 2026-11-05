@@ -71,7 +71,7 @@ class LocalShellExecutor:
     def _run(self, command: Sequence[str] | str, cwd: str | None, timeout: float | None,
              stdin: bytes | None) -> CommandResult:
         # The working directory goes into the program text, where no startup file can change it.
-        prog, marks = launch.program(command, cwd, start=os.getcwd())
+        prog, marks = launch.program(command, cwd, start=os.getcwd(), timeout=timeout)
         out, err, code, note = launch.run_process(launch.bash_argv(prog), stdin, timeout, marks.end)
         out, err, code = launch.separate(out, err, code, marks, note)
         return CommandResult(stdout=launch.decode(out), stderr=launch.decode(err), exit_code=code,

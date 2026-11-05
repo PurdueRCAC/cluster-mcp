@@ -1,0 +1,42 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: timeout-process-cleanup
+escaped_from: pre-factory
+planned: {date: '2026-11-01', phases: 4}
+landed: {date: '2026-11-04', phases: 4, failed_verifies: 7}
+open: null
+runs:
+- {step: feature, start: '2026-11-01T21:20:04-05:00', stop: '2026-11-01T21:26:53-05:00', seconds: 409, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-01T21:31:31-05:00', stop: '2026-11-01T22:56:52-05:00', seconds: 5121, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-01T22:57:23-05:00', stop: '2026-11-01T23:54:35-05:00', seconds: 3432, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-01T23:54:45-05:00', stop: '2026-11-02T00:47:42-05:00', seconds: 3177, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-02T00:47:44-05:00', stop: '2026-11-02T01:44:09-05:00', seconds: 3385, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-02T01:44:11-05:00', stop: '2026-11-02T06:54:16-05:00', seconds: 18605, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-02T06:54:39-05:00', stop: '2026-11-02T07:38:33-05:00', seconds: 2634, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-02T07:38:39-05:00', stop: '2026-11-04T07:51:40-05:00', seconds: 173581, end: error, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-04T07:51:40-05:00', stop: '2026-11-04T08:40:53-05:00', seconds: 2953, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-04T08:41:20-05:00', stop: '2026-11-04T14:22:35-05:00', seconds: 20475, end: question, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-04T14:22:51-05:00', stop: '2026-11-04T17:02:53-05:00', seconds: 9602, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-04T17:04:13-05:00', stop: '2026-11-04T17:58:28-05:00', seconds: 3255, end: question, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-04T18:04:50-05:00', stop: '2026-11-04T20:27:39-05:00', seconds: 8569, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-04T20:52:04-05:00', stop: '2026-11-04T22:11:27-05:00', seconds: 4763, end: gate, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-02'
+  verdict: changes-requested
+  confirmed: {critical: 1, high: 1, medium: 1, low: 2}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-04'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 3, medium: 2, low: 2}
+  plausible: 1
+- cycle: 3
+  date: '2026-11-04'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 1, medium: 0, low: 5}
+  plausible: 2
+- cycle: 4
+  date: '2026-11-04'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

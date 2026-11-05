@@ -127,7 +127,22 @@ It sits ahead of the tool families because they lean on bounded calls (a bounded
 an accident. Its measurement was approved on 2026-10-29.
 
 *Horizon: mid-term; the measurement approved on 2026-10-29 · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
-**Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: unshaped*
+**Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: adopted:timeout-process-cleanup*
+
+## What a timeout still cannot stop
+
+`timeout-process-cleanup`'s watchdog starts after the login initialisation and keys on the deadline's
+TERM reaching the launch. A startup file that hangs leaves what it started running under a non-root
+`delegate` server, and in every mode a process it started that ignores TERM and holds none of the
+call's output (over SSH, one that holds it too, once the login shell has died of the TERM); an SSH
+server that ignores the `signal` request stops nothing; a startup file that shadows the
+launch's builtins past what the prologue undoes can make the stop fail and stop a command early; and
+a step of the server's wall clock while a startup file runs can refuse a command early, or let a late
+one start, which under a non-root `delegate` server runs on. Found by `timeout-process-cleanup`'s
+planning research, 2026-11-01, and its reviews, 2026-11-02 and 2026-11-04.
+
+*Horizon: later · Depends on: timeout-process-cleanup · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5*
+**Seed:** [`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md) · *status: unshaped*
 
 ## A dead SSH link that still reads as connected holds file transfers without limit
 
@@ -193,6 +208,9 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 
 - 2026-10-29: a second loopback test (`test_startup_output_is_separated[tcsh]`, `EOFError`) failed
   once on CI and passed on re-run; the seed records it.
+- 2026-11-02: a third, `test_timeout_stop.py`'s signal-death survival row over an `sh` login shell
+  (every-login-shell runs only), failed once locally under load and passed on re-runs; the seed
+  records it.
 
 *Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
@@ -441,6 +459,8 @@ cases and 2.5–5 s each, it reaches the timeout and is cancelled before it repo
 "all cases about 3 minutes" is stale. `capability-probe` adds 271 cases (931 in all). Pre-existing; it gates
 nothing, so no release waits on it.
 
+- 2026-11-02: `timeout-process-cleanup` adds 101 more (1,032 in all), about 11 minutes per era.
+
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
 **Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
 
@@ -453,8 +473,42 @@ at the probe's deadline, dies with the interpreter between its timeout's SIGTERM
 group behind a login profile that ignores SIGTERM and hangs runs on. `capability-probe`'s startup
 probe adds both instances. Pre-existing.
 
+- 2026-11-02: the call is no longer a group's only signaller: `timeout-process-cleanup`'s watchdog
+  stops the group once the program dies with its command unreported. Both cases remain (a killed
+  server's program has not died; the probe's hang comes before the watchdog exists).
+
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5, REVIEW); `AGENTS.md` § Invariants §2, §3*
 **Seed:** [`issues/local-command-outlives-server.md`](issues/local-command-outlives-server.md) · *status: unshaped*
+
+## A connection reset while a call opens its channel escapes as a raw exception
+
+In `ssh` mode a call opens its channel before the guard that turns a lost connection into a result,
+so a link that resets just then raises Paramiko's `ConnectionResetError` out of `SSHExecutor.run`
+instead of reporting that the command was not run. Seen once against a test server that dropped the
+connection, 2026-11-02. Pre-existing; the SFTP paths were not checked.
+
+*Horizon: later · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
+**Seed:** [`issues/ssh-open-session-reset-raises.md`](issues/ssh-open-session-reset-raises.md) · *status: unshaped*
+
+## A profile's sub-second `TMOUT` may drop the functions a script inherits
+
+A `run_command` script inherits the login's functions through a `read` loop, and a profile's `TMOUT`
+bounds that `read`. bash 4 and later accept a fractional `TMOUT`, so a sub-second one could end the
+loop before `module` is exported. Read from bash's source, not measured (the development host has
+bash 3.2 only). Pre-existing.
+
+*Horizon: later · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
+**Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
+
+## The image's init is pinned by its recipe, not by what it reaps
+
+The shipped image runs `tini` as PID 1 so the orphaned watchdog of each completed `local` call is
+reaped, but only a text check of the `Dockerfile` pins it. A CI job that builds the image and counts
+zombies after many calls would pin the behaviour. Not measured (no container runtime on the
+development host).
+
+*Horizon: later · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (REVIEW cycle 3, B6); `Dockerfile`; `tests/test_packaging.py`*
+**Seed:** [`issues/image-init-reaping.md`](issues/image-init-reaping.md) · *status: unshaped*
 
 ## A sandbox killed with SIGKILL leaves its directory behind
 

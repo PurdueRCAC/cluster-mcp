@@ -262,7 +262,16 @@ This would be mapped using the `alice@purdue.edu` key from the user map.
 
 ### For Multi-User Production
 - Use `delegate` mode with `jwt` or `oidc` auth
-- Run server as dedicated service account with minimal privileges
+- Run server as dedicated service account with minimal privileges. A service account that is not
+  root stops a timed-out command, and what it started, as root does: the stop runs as the mapped
+  user, inside the sudoers rules above, and needs no other right. Two things differ under such an
+  account only, since `sudo` relays the deadline's TERM to the login shell alone: the command's
+  processes get no TERM, only KILL a second after the deadline, so a command that handles TERM gets
+  no chance to stop on its own; and what a login startup file that hangs before the command starts
+  has started runs on (and the login shell too, if it ignores TERM), since nothing sends KILL until
+  the stop exists; so does a command that a login startup file ignoring TERM delays past its
+  deadline, if the server's wall clock steps back meanwhile
+  ([`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md)).
 - Configure restrictive sudoers rules
 - Enable TLS (use reverse proxy like nginx)
 - Audit log all commands (future enhancement)

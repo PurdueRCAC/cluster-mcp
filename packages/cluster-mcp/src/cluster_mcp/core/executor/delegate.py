@@ -139,7 +139,7 @@ class DelegatingExecutor:
 
     def _run(self, command: Sequence[str] | str, cwd: str | None, timeout: float | None,
              stdin: bytes | None) -> CommandResult:
-        prog, marks = launch.program(command, cwd, start='home')
+        prog, marks = launch.program(command, cwd, start='home', timeout=timeout)
         argv = [*SUDO, self._local_user, *launch.bash_argv(prog)]
         out, err, code, note = launch.run_process(argv, stdin, timeout, marks.end)
         out, err, code = launch.separate(out, err, code, marks, note)

@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:timeout-process-cleanup
 kind: fix
 appetite: small
 lane: public

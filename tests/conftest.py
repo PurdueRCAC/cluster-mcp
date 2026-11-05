@@ -373,19 +373,20 @@ def storage_launches(launches: list[list[str]], monkeypatch: pytest.MonkeyPatch)
 # PATH inside a fenced launch: the shim first, then what sudo's secure_path and sshd give.
 SECURE_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
-# The stand-in for `sudo -n -H -u <user>`: it runs the command in a session of its own, as a sudo
-# that cannot share its process group would, and relays only TERM, INT and HUP to it. It dies of the
-# signal that killed the command, as sudo does.
+# The stand-in for `sudo -n -H -u <user>` under a server that is not root: it runs the command in a
+# session of its own, so it is the only process of the launch the server can signal, as a non-root
+# server can signal its own `sudo` and nothing the mapped user runs, and relays only TERM to the
+# command's process, as sudo's no-pty path does (KILL cannot be relayed). It dies of the signal that
+# killed the command, as sudo does.
 RELAY = """\
 import os, signal, subprocess, sys
 child = subprocess.Popen(sys.argv[1:], start_new_session=True)
 def relay(signum, frame):
     try:
-        os.killpg(child.pid, signum)
+        os.kill(child.pid, signum)
     except OSError:
         pass
-for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    signal.signal(signum, relay)
+signal.signal(signal.SIGTERM, relay)
 code = child.wait()
 if code < 0:
     # SIGKILL cannot be caught, so its action is already the default and cannot be set.
@@ -397,12 +398,20 @@ if code < 0:
 sys.exit(code)
 """
 
+# The stand-in for `sudo` under a root server: the same, but the command stays in the stand-in's
+# process group, as no-pty sudo's command stays in sudo's, so the server's signal to the group
+# reaches every process of the launch, as root's does.
+ROOT_RELAY = RELAY.replace('subprocess.Popen(sys.argv[1:], start_new_session=True)', 'subprocess.Popen(sys.argv[1:])')
+assert ROOT_RELAY != RELAY, 'the root stand-in must not start the command in a session of its own'
+
 
 class Executions:
     """The fenced launches of the `executes` fixture, and the homes they run in.
 
     `server_home` is the server process's HOME (what a `local` launch sees); `mapped_home` is the
-    home `sudo -H` gives the mapped user `user` (what a `delegate` launch sees). Tests may write
+    home `sudo -H` gives the mapped user `user` (what a `delegate` launch sees). A delegated launch
+    stands in for a non-root server's `sudo` (`RELAY`) unless a test sets `server_root`, which makes
+    it a root server's (`ROOT_RELAY`). Tests may write
     startup files into either before a launch. A `local` command starts in the server process's
     working directory, which the backend writes into its program: `local_cwd`, a fresh directory
     under the test's tree unless a test sets another (setting it changes this process's working
@@ -415,6 +424,7 @@ class Executions:
         for home in (self.server_home, self.mapped_home, tmp_path / 'server-cwd'):
             home.mkdir(parents=True, exist_ok=True)
         self.user = 'umapped'
+        self.server_root = False
         self._monkeypatch = monkeypatch
         self.local_cwd = (tmp_path / 'server-cwd').resolve()
         self.launched: list[list[str]] = []
@@ -438,7 +448,8 @@ class Executions:
         if argv[:1] == ['sudo']:
             if argv[:5] != ['sudo', '-n', '-H', '-u', self.user]:
                 raise self._refuse(argv, f'a sudo argv that does not start exactly sudo -n -H -u {self.user}')
-            home, user, rest, relay = self.mapped_home, self.user, argv[5:], [sys.executable, '-I', '-c', RELAY]
+            stand_in = ROOT_RELAY if self.server_root else RELAY
+            home, user, rest, relay = self.mapped_home, self.user, argv[5:], [sys.executable, '-I', '-c', stand_in]
         else:
             home, user, rest, relay = self.server_home, getpass.getuser(), argv, []
         if rest[:1] != [launch.BASH]:

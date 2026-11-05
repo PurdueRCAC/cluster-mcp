@@ -111,7 +111,7 @@ CLAIM_ORDER = "for claim in ('sub', 'email', 'preferred_username'):"
 
 SUDO_PREFIX = "SUDO: Final = ('sudo', '-n', '-H', '-u')"
 
-DELEGATE_PROGRAM = "        prog, marks = launch.program(command, cwd, start='home')\n"
+DELEGATE_PROGRAM = "        prog, marks = launch.program(command, cwd, start='home', timeout=timeout)\n"
 
 TIMEOUT_ROWS = ('test_executors.py::test_timeout_returns_the_captured_output[local]',
                 'test_executors.py::test_timeout_returns_the_captured_output[delegate]',
@@ -842,13 +842,13 @@ CASES: tuple[Case, ...] = (
     Case('delegate-tilde-server-home', 'core/executor/delegate.py',
          ((DELEGATE_PROGRAM,
            "        prog, marks = launch.program(command, __import__('os').path.expanduser(cwd) if cwd else cwd,"
-           " start='home')\n"),),
+           " start='home', timeout=timeout)\n"),),
          ('test_executors.py::test_delegate_cwd_resolves_in_the_mapped_home[tilde]',
           'test_executors.py::test_delegate_cwd_resolves_in_the_mapped_home[tilde-sub-dir]',
           'test_literal_args.py::test_literal_argument[delegate-run_command-cwd]'),
          'not the mapped home'),
     Case('delegate-server-cwd', 'core/executor/delegate.py',
-         ((DELEGATE_PROGRAM, '        prog, marks = launch.program(command, cwd)\n'),),
+         ((DELEGATE_PROGRAM, '        prog, marks = launch.program(command, cwd, timeout=timeout)\n'),),
          ('test_executors.py::test_delegate_starts_in_the_mapped_home',),
          'not the mapped home'),
     Case('transfer-as-server', 'core/executor/delegate.py',
@@ -1833,17 +1833,16 @@ CASES: tuple[Case, ...] = (
           'test_launch.py::test_a_taken_parked_descriptor_runs_nothing[49]'),
          'taken: the result is'),
     Case('startup-traps-kept', 'core/executor/launch.py',
-         (("'set +euxvTkP +o errtrace +o posix; trap - EXIT ERR DEBUG RETURN; '",
-           "'set +euxvTkP +o errtrace +o posix; '"),),
+         (("                   'trap - EXIT ERR DEBUG RETURN; '\n", ''),),
          ('test_launch.py::test_startup_output_is_separated[local-argv]',),
          'differs from the quiet home'),
     Case('prologue-unalias-shared-line', 'core/executor/launch.py',
-         ((r"PROLOGUE: Final = ('\\unalias -a\n'" + "\n                   'unset -f builtin",
-           "PROLOGUE: Final = ('unalias -a; '\n                   'unset -f builtin"),),
+         ((r"PROLOGUE: Final = ('\\unalias -a\n'" + "\n                   f'POSIXLY_CORRECT=y",
+           "PROLOGUE: Final = ('unalias -a; '\n                   f'POSIXLY_CORRECT=y"),),
          ('test_launch.py::test_profile_cannot_hijack_the_prologue[local-alias]',),
          'differs from the quiet home'),
     Case('prologue-read-function-kept', 'core/executor/launch.py',
-         (("export declare compgen read kill ulimit exit; '", "export declare compgen kill ulimit exit; '"),),
+         (("export declare compgen read kill ulimit exit unset unalias'", "export declare compgen kill ulimit exit unset unalias'"),),
          ('test_launch.py::test_profile_cannot_hijack_the_prologue[local-read-function]',),
          'differs from the quiet home'),
     Case('stage-reads-bash-env', 'core/executor/launch.py',
@@ -1891,8 +1890,8 @@ CASES: tuple[Case, ...] = (
     # Where a local command starts: the server's working directory, written into the program text,
     # never carried by a positional parameter (bash 4 and later let a startup file rewrite those).
     Case('local-start-dropped', 'core/executor/shell.py',
-         (('        prog, marks = launch.program(command, cwd, start=os.getcwd())\n',
-           '        prog, marks = launch.program(command, cwd)\n'),),
+         (('        prog, marks = launch.program(command, cwd, start=os.getcwd(), timeout=timeout)\n',
+           '        prog, marks = launch.program(command, cwd, timeout=timeout)\n'),),
          ('test_executors.py::test_a_profile_cd_does_not_move_the_start[local]',),
          'a profile cd moved'),
     Case('local-start-positional', 'core/executor/launch.py',
@@ -1906,8 +1905,8 @@ CASES: tuple[Case, ...] = (
     # the program prints a record carrying a per-call nonce and the status on both streams after it,
     # re-raises a signal death, and the result's status is the record's.
     Case('command-exec-in-place', 'core/executor/launch.py',
-         (("                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RERAISE])\n",
-           "                      *lines, STATUS, record_line(end_nonce), RERAISE])\n"),),
+         (("                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RELEASE, RERAISE])\n",
+           "                      *lines, STATUS, record_line(end_nonce), RELEASE, RERAISE])\n"),),
          ('test_launch.py::test_the_call_ends_at_its_records[local]',
           'test_launch.py::test_the_call_ends_at_its_records[ssh-zsh]'),
          "not the command's own output"),
@@ -1963,12 +1962,12 @@ CASES: tuple[Case, ...] = (
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-zsh-glob-options]'),
          'reached the launcher'),
     Case('prologue-keyword-kept', 'core/executor/launch.py',
-         (("'set +euxvTkP +o errtrace", "'set +euxvTP +o errtrace"),),
+         (("'set +euxvTkPm +o errtrace", "'set +euxvTPm +o errtrace"),),
          ('test_launch.py::test_profile_state_does_not_reach_the_launcher[local-keyword]',
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-bash-keyword]'),
          'reached the launcher'),
     Case('prologue-physical-kept', 'core/executor/launch.py',
-         (("'set +euxvTkP +o errtrace", "'set +euxvTk +o errtrace"),),
+         (("'set +euxvTkPm +o errtrace", "'set +euxvTkm +o errtrace"),),
          ('test_launch.py::test_profile_state_does_not_reach_the_launcher[local-physical]',
           'test_launch.py::test_profile_state_does_not_reach_the_launcher[ssh-zsh-physical]'),
          'reached the launcher'),
@@ -4677,6 +4676,622 @@ CASES += (
     startup_alternative('probe-override-value-not-the-empty-string', CLI,
                         ((SKIP_VALUE, "        return variable if value != '' else None\n"),), ONCE),
 )
+
+
+# The stop at a timeout (AGENTS.md § Invariants §3): every decision of the program's watchdog, its
+# arming and release, the prologue's undoing of what a startup file shadows, the deadline's check,
+# the prologue's job-control reset, the names the program sets,
+# and, over `ssh`, the KILL request after the grace, the program given no deadline, and the signal
+# request's wait for a key exchange and its send, mutated to every alternative it could take: each
+# piece dropped and placed at every other line of the program, each statement of the watchdog's line
+# in every other order, the TERM disposition it is forked with and the one taken back after it
+# moved or renamed, its wait made a builtin's, bounded, or looked up
+# through a profile, its trigger changed, a TERM sent beside its KILL, its signal renamed, its group
+# and delay changed, its `sleep` resolved through a profile, its descriptor renumbered, each stream
+# it must not hold kept; the prologue's posix mode, its turning builtins back on and the functions it
+# unsets dropped; the deadline's clock, comparison, value and refusal changed; the KILL request's
+# guard, the open-channel check under the channel's lock and the wait for a key exchange changed.
+# Each is killed by the rows that pin what the decision is for: the stop rows (`still running`), the
+# survival rows (a completed call's job stopped), the profile rows (a call that outlives `TMOUT`, or
+# a profile's shadows, cut short), the grace rows (the output printed while stopping lost, or a
+# second TERM), the non-root row (a TERM, or a KILL before the grace), the late-start rows (a
+# command started after its deadline), the window rows (a deadline while the watchdog is being
+# started), the return-time check, the variable rows, the slow-connect row, the unit
+# and channel rows over `ssh`, and the launch checker where the text alone shows it. A mutant killed
+# by two families of rows, each with its own message, is planted once per family.
+LAUNCH = 'core/executor/launch.py'
+STOP_ROWS = 'test_timeout_stop.py'
+WATCHDOG_SETTINGS = ('local', 'delegate-root', 'delegate', 'ssh-bash')
+# Where the deadline's TERM reaches the command's group.
+GROUP_SETTINGS = ('local', 'delegate-root', 'ssh-bash')
+
+
+def stopped(*rows: str) -> tuple[str, ...]:
+    """The stop rows `rows` (`<setting>-<shape>`) of the stop module."""
+    return tuple(f'{STOP_ROWS}::test_a_timed_out_command_is_stopped[{row}]' for row in rows)
+
+
+def per_setting(test: str, settings: Sequence[str] = WATCHDOG_SETTINGS) -> tuple[str, ...]:
+    """The stop module's `test` in each of `settings`."""
+    return tuple(f'{STOP_ROWS}::{test}[{setting}]' for setting in settings)
+
+
+STILL_RUNNING = 'still running'
+# A stop that never comes, in each mode: an ignoring shape with nothing to KILL it in `local` and a
+# root `delegate`, a tree `sudo` relays nothing to under a non-root `delegate`, an ignoring shape
+# whose launch has died before the KILL request over `ssh`.
+NOTHING_STOPPED = stopped('local-ignores-none', 'delegate-root-ignores-none', 'delegate-tree',
+                          'ssh-bash-ignores-holding')
+# A stop whose last signal does not end a process that ignores every catchable one.
+IGNORERS_KEPT = stopped('local-ignores-none', 'delegate-root-ignores-none', 'delegate-ignores-holding',
+                        'ssh-bash-ignores-holding')
+JOBS_KEPT = per_setting('test_a_completed_command_leaves_its_jobs_running')
+SIGNALLED_JOBS_KEPT = per_setting('test_a_command_that_dies_of_a_signal_leaves_its_jobs_running')
+JOB_STOPPED = "a completed command's background job was stopped"
+NOT_COMPLETED = 'did not complete'
+GRACE_KEPT = per_setting('test_a_stopping_command_gets_its_grace', GROUP_SETTINGS)
+OUTPUT_LOST = 'within GRACE of its TERM, was lost'
+ONE_TERM = 'other than one TERM'
+NON_ROOT = (f'{STOP_ROWS}::test_a_non_root_server_kills_after_the_grace_with_no_term',)
+TERMED = 'got a TERM under a non-root server'
+HELD_OUTPUT = stopped('local-tree', 'ssh-bash-tree')
+LATE = 'later than a launcher without the watchdog'
+PROFILE_UNDONE = f'{STOP_ROWS}::test_a_startup_file_ignoring_term_is_undone[delegate-profile]'
+BASHRC_UNDONE = f'{STOP_ROWS}::test_a_startup_file_ignoring_term_is_undone[ssh-bash-bashrc]'
+HANGING_LOGIN = f'{STOP_ROWS}::test_a_hanging_login_is_stopped_over_ssh'
+# A command whose deadline passes while a startup file that ignores TERM runs: where the program reads
+# the server's clock it never starts.
+LATE_STARTS = per_setting('test_a_command_past_its_deadline_is_stopped', WATCHDOG_SETTINGS[:3])
+LATE_STARTS_SSH = per_setting('test_a_command_past_its_deadline_is_stopped', WATCHDOG_SETTINGS[3:])
+STARTED_LATE = 'started after its deadline'
+# A deadline that comes while the watchdog is being started: in the program, right after the fork,
+# before TERM's default is back, and in the watchdog, before its first statement.
+PROGRAM_WINDOW = tuple(f'{STOP_ROWS}::test_a_deadline_while_the_watchdog_starts[{setting}-program]'
+                       for setting in WATCHDOG_SETTINGS)
+WATCHDOG_WINDOW = tuple(f'{STOP_ROWS}::test_a_deadline_while_the_watchdog_starts[{setting}-watchdog]'
+                        for setting in WATCHDOG_SETTINGS)
+# No name the program sets reaches the command under a profile's `set -a`; over `ssh` a slow connect
+# leaves the command its whole timeout.
+VARIABLES_KEPT = per_setting('test_no_variable_of_the_program_reaches_the_command')
+LEAKED = "the command sees the program's own"
+SLOW_CONNECT = (f'{STOP_ROWS}::test_a_slow_connect_leaves_an_ssh_command_its_whole_timeout',)
+NOT_RUN = 'did not run with its whole timeout'
+RETURNED_LATE = 'past the bound on its return'
+UNSET_SHADOWED = tuple(f'{STOP_ROWS}::test_a_profile_shadowing_unset_stops_nothing[local-{kind}]'
+                       for kind in ('unset-function', 'unset-disabled'))
+TRAP_SHADOWED = tuple(f'{STOP_ROWS}::test_a_profile_shadowing_the_watchdog_is_undone[{setting}-enable-n-trap]'
+                      for setting in GROUP_SETTINGS)
+LAUNCH_TEXT = ('test_launch.py::test_program_quotes_each_argument_as_one_word[hostile]',
+               'test_launch.py::test_program_quotes_each_argument_as_one_word[script]')
+DEADLINE_TEXT = ('test_launch.py::test_a_program_given_a_timeout_checks_its_deadline',)
+WAITS_GRACE = ('test_launch.py::test_the_watchdog_waits_grace',)
+NO_GRACE = 'does not wait GRACE'
+KILL_ORDER = 'test_ssh_exec.py::test_a_timeout_asks_for_kill_after_its_grace'
+KILL_DRAINS = 'test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term'
+CLOSED_ASKED = 'test_ssh_exec.py::test_no_signal_is_asked_for_on_a_closed_channel'
+LOCK_HELD = 'test_ssh_exec.py::test_a_signal_request_goes_while_the_channel_is_held_open'
+KEY_EXCHANGE = 'test_ssh_exec.py::test_a_signal_request_waits_out_a_key_exchange'
+EXCHANGE_STARTS = 'test_ssh_exec.py::test_a_signal_request_never_goes_as_a_key_exchange_starts'
+GIVES_UP = tuple(f'test_ssh_exec.py::test_a_signal_request_gives_up_on_a_key_exchange[{kind}]'
+                 for kind in ('exchange-never-ends', 'transport-gone'))
+CONNECTION_KEPT = f'{STOP_ROWS}::test_a_timed_out_call_leaves_the_connection_usable'
+CONNECTION_LOST = 'the connection was lost'
+# A call that outlives a profile's `TMOUT`, with no timeout and a longer one, in each mode, and one
+# whose profile shadows the watchdog's wait.
+TMOUT_KEPT = tuple(f'{STOP_ROWS}::test_a_profile_tmout_stops_nothing[{setting}-{timed}]'
+                   for setting in WATCHDOG_SETTINGS for timed in ('no-timeout', 'timeout'))
+SHADOWS_KEPT = tuple(f'{STOP_ROWS}::test_a_profile_cannot_cut_the_watchdogs_wait_short[{setting}]'
+                     for setting in ('local', 'delegate'))
+CUT_SHORT = 'did not complete with its output'
+
+# The program's pieces, as `program()` joins them, and the join itself.
+GRACE_RENDERED = "WATCHDOG.format(grace=format(GRACE, 'g'))"
+PIECES = ('PROLOGUE', GRACE_RENDERED, '*checks',
+          "f'printf %s%s {_halves(start_nonce)}; printf %s%s {_halves(start_nonce)} >&2; {QUIET}'",
+          'SUBSHELL[0]', '*lines', 'SUBSHELL[1]', 'STATUS', 'record_line(end_nonce)', 'RELEASE', 'RERAISE')
+PROGRAM_JOIN = ("    text = '\\n'.join([PROLOGUE, WATCHDOG.format(grace=format(GRACE, 'g')), *checks,\n"
+                "                      f'printf %s%s {_halves(start_nonce)}; printf %s%s {_halves(start_nonce)} >&2; {QUIET}',\n"
+                "                      SUBSHELL[0], *lines, SUBSHELL[1], STATUS, record_line(end_nonce), RELEASE, RERAISE])\n")
+# Where a piece can go, named by what it then follows or precedes, as the piece it is placed before
+# (None: at the end).
+PLACES = {'before-prologue': 'PROLOGUE', 'before-watchdog': PIECES[1], 'after-watchdog': '*checks',
+          'after-check': PIECES[3], 'after-sentinel': 'SUBSHELL[0]', 'in-subshell-first': '*lines',
+          'in-subshell-last': 'SUBSHELL[1]', 'after-subshell': 'STATUS', 'after-status': 'record_line(end_nonce)',
+          'after-record': 'RELEASE', 'after-release': 'RERAISE', 'after-reraise': None}
+
+
+def joined(piece: str, before: str | None) -> tuple[tuple[str, str], ...]:
+    """The join with `piece` moved before `before` (None: to the end), or dropped (`before` == piece)."""
+    rest = [p for p in PIECES if p != piece]
+    if before != piece:
+        rest.insert(len(rest) if before is None else rest.index(before), piece)
+    return ((PROGRAM_JOIN, f"    text = '\\n'.join([{', '.join(rest)}])\n"),)
+
+
+# The watchdog's line, as its constant renders it: four statements, then each of them as source text.
+WATCHDOG_SOURCE = (
+    '''WATCHDOG: Final = ("trap '' TERM; exec 46>| >(exec >/dev/null 2>&1; "\n'''
+    r'''                   "[[ $(/bin/cat && printf .) == $'\\n.' ]] && {{ /bin/sleep {grace}; kill -s KILL 0; }}); "''' '\n'
+    '''                   "trap - TERM; printf '\\\\n' >&46")\n''')
+WATCHDOG_STATEMENTS = {
+    'ignore': "trap '' TERM",
+    'fork': ("exec 46>| >(exec >/dev/null 2>&1; [[ $(/bin/cat && printf .) == $'\\n.' ]] && "
+             '{{ /bin/sleep {grace}; kill -s KILL 0; }})'),
+    'restore': 'trap - TERM',
+    'arm': "printf '\\n' >&46",
+}
+# The line as review cycle 3 found it: TERM's default taken back before the fork, and the watchdog
+# ignoring TERM only from its own first statement, so it was born with TERM at its default.
+BORN_WITH_TERM = (
+    '''WATCHDOG: Final = ("trap - TERM; exec 46>| >(trap '' TERM; exec >/dev/null 2>&1; "\n'''
+    r'''                   "[[ $(/bin/cat && printf .) == $'\\n.' ]] && {{ /bin/sleep {grace}; kill -s KILL 0; }}); "''' '\n'
+    '''                   "printf '\\\\n' >&46")\n''')
+
+
+def reordered(order: Sequence[str]) -> tuple[tuple[str, str], ...]:
+    """The watchdog's line with its statements in `order`."""
+    line = '; '.join(WATCHDOG_STATEMENTS[name] for name in order)
+    return ((WATCHDOG_SOURCE, f'WATCHDOG: Final = {line!r}\n'),)
+
+
+def statement_orders() -> list[tuple[str, ...]]:
+    """Every order of the watchdog's statements one move away from its own, each once."""
+    own = tuple(WATCHDOG_STATEMENTS)
+    found: list[tuple[str, ...]] = []
+    for name in own:
+        rest = [n for n in own if n != name]
+        for at in range(len(own)):
+            order = tuple(rest[:at] + [name] + rest[at:])
+            if order != own and order not in found:
+                found.append(order)
+    return found
+
+
+# What each order does: forked before TERM is ignored, or after its default is back, the watchdog is
+# born with TERM at its default and a deadline's TERM before its first statement ends it; TERM left
+# ignored after the fork (its default taken back before the ignore) leaves the program, and the
+# command it starts, ignoring TERM, so a non-root `delegate` server's relayed TERM ends nothing (in
+# the other settings the server's KILL ends the group); armed before the fork, the
+# arming line goes nowhere and the release arms it, so a completed call is stopped. Armed before
+# TERM's default is back, the window in which a TERM is lost spans one `printf` more, which the
+# deadline's check covers as it covers the fork: the sweep's equivalent.
+ORDER_KILLS = {
+    ('fork', 'ignore', 'restore', 'arm'): (WATCHDOG_WINDOW[:1], STILL_RUNNING),
+    ('fork', 'restore', 'ignore', 'arm'): (stopped('delegate-tree'), STILL_RUNNING),
+    ('fork', 'restore', 'arm', 'ignore'): (stopped('delegate-tree'), STILL_RUNNING),
+    ('ignore', 'restore', 'fork', 'arm'): (WATCHDOG_WINDOW[:1], STILL_RUNNING),
+    ('ignore', 'restore', 'arm', 'fork'): (JOBS_KEPT[:1], JOB_STOPPED),
+    ('restore', 'ignore', 'fork', 'arm'): (stopped('delegate-tree'), STILL_RUNNING),
+    ('arm', 'ignore', 'fork', 'restore'): (JOBS_KEPT[:1], JOB_STOPPED),
+    ('ignore', 'arm', 'fork', 'restore'): (JOBS_KEPT[:1], JOB_STOPPED),
+}
+ORDER_EQUIVALENT = ('ignore', 'fork', 'arm', 'restore')
+if sorted([*ORDER_KILLS, ORDER_EQUIVALENT]) != sorted(statement_orders()):
+    raise RuntimeError('the watchdog order cases do not match its statements')
+
+# Where each piece can go but its own place, and what kills it there. The watchdog anywhere but
+# right after the prologue is the launch checker's (before the prologue it would also hold the
+# parked streams; inside the subshell the command would hold its descriptor; after the deadline's
+# check, a program given a timeout shows it). The release before the watchdog's descriptor exists,
+# or inside the subshell, which closes it (or after the command's `exec`), never reaches the
+# watchdog: a completed call is stopped. Right after the arming, or before the command, it releases
+# a watchdog the command's death should have triggered. Before `STATUS` it takes the command's
+# status. Between the status and the end record only the text shows it. The deadline's check
+# anywhere but right after the watchdog is the launch checker's; dropped, a command past its deadline
+# starts.
+WATCHDOG_PLACES = {name: ((LAUNCH_TEXT, 'does not open with the prologue') if name == 'before-prologue'
+                          else (DEADLINE_TEXT, 'does not start the watchdog') if name == 'after-check'
+                          else (LAUNCH_TEXT, 'does not start the watchdog'))
+                   for name in PLACES if name not in ('before-watchdog', 'after-watchdog')}
+RELEASE_PLACES = {
+    'before-prologue': (JOBS_KEPT, JOB_STOPPED),
+    'before-watchdog': (JOBS_KEPT, JOB_STOPPED),
+    'after-watchdog': (NOTHING_STOPPED, STILL_RUNNING),
+    'after-check': (NOTHING_STOPPED, STILL_RUNNING),
+    'after-sentinel': (NOTHING_STOPPED, STILL_RUNNING),
+    'in-subshell-first': (JOBS_KEPT, JOB_STOPPED),
+    'in-subshell-last': (JOBS_KEPT, JOB_STOPPED),
+    'after-subshell': (SIGNALLED_JOBS_KEPT, 'did not die of USR1'),
+    'after-status': (LAUNCH_TEXT, 'does not print the end record'),
+    'after-reraise': (SIGNALLED_JOBS_KEPT, JOB_STOPPED),
+}
+# The ids the plan named for two of the release's places.
+RELEASE_IDS = {'after-sentinel': 'tpc-release-before-command', 'after-reraise': 'tpc-release-after-reraise'}
+CHECK_PLACES = {name: ((DEADLINE_TEXT, 'does not open with the prologue') if name == 'before-prologue'
+                       else (DEADLINE_TEXT, 'does not start the watchdog') if name == 'before-watchdog'
+                       else (DEADLINE_TEXT, 'does not check its deadline'))
+                for name in PLACES if name not in ('after-watchdog', 'after-check')}
+
+# The watchdog's texts: its wait, its trigger, the TERM ignore it is forked with and the default
+# taken back after it, its stop, its open and its arming.
+WAIT = '$(/bin/cat && printf .)'
+TRIGGER = r"== $'\\n.' ]] && "
+FORK_IGNORE = '''("trap '' TERM; exec 46>|'''
+RESTORED = '''"trap - TERM; printf'''
+STOP = '{{ /bin/sleep {grace}; kill -s KILL 0; }}'
+OPENED = 'TERM; exec 46>| >('
+ARMED = '''printf '\\\\n' >&46")\n'''
+RELEASED = '''RELEASE: Final = "printf '\\\\n' >&46"\n'''
+CLOSED = "SUBSHELL: Final = ('(', ') 2>&59 59>&- 46>&-')\n"
+QUIETED = 'exec >/dev/null 2>&1; '
+# The prologue's undoing of what a startup file shadows.
+POSIX_ON = "f'POSIXLY_CORRECT=y; unset -f enable; enable {BUILTINS} || :; unset -f {BUILTINS}; \\\\unalias -a; '"
+BUILTIN_NAMES = "BUILTINS: Final = 'builtin command exec set printf trap cd export declare compgen read kill ulimit exit unset unalias'"
+PATHS_UNSET = "'set +euxvTkPm +o errtrace +o posix; unset -f /bin/cat /bin/date /bin/sleep; unset IFS; '"
+# The deadline's check, and the deadline.
+CLOCK = "'cluster_mcp_n=$(/bin/date +%s%N); '"
+FALLBACK = "'case $cluster_mcp_n in *N) cluster_mcp_n=${{cluster_mcp_n%%[!0-9]*}}000000000 ;; esac; '"
+COMPARED = '''"case $cluster_mcp_n in ''|*[!0-9]*) ;; *) (( cluster_mcp_n < {deadline} )) || "'''
+REFUSED = "'{{ /bin/sleep {grace}; kill -s TERM $$; kill -s KILL $$; }} ;; esac; unset cluster_mcp_n')"
+# The function export's name.
+FUNCTION_NAME = "'done < <(compgen -A function); unset cluster_mcp_fn; '"
+# The program over `ssh`: given no deadline.
+SSH_PROGRAM = "        prog, marks = launch.program(command, cwd, start='home')\n"
+# Over `ssh`, the read after the TERM, bounded by GRACE.
+GRACE_READ = '    end = time.monotonic() + launch.GRACE\n'
+DEADLINE = '    deadline = None if timeout is None else time.time_ns() + math.ceil(timeout * 1e9)\n'
+# The KILL request at a timeout, between the TERM request and the return, unless the channel has ended.
+KILL_REQUEST = ("            _signal(chan, 'TERM')\n"
+                "            _stopped(chan, out, err)\n"
+                "            if not _ended(chan):\n"
+                "                _signal(chan, 'KILL')\n")
+TERM_LINE, GRACE_LINE, GUARD_LINE, GUARDED_KILL = KILL_REQUEST.splitlines(keepends=True)
+KILL_LINE = GUARD_LINE + GUARDED_KILL
+BARE_KILL = "            _signal(chan, 'KILL')\n"
+# `_signal`'s loop: the wait for a key exchange made without the channel's lock, then the
+# open-channel check and the send, holding it, only once the exchange has ended.
+SIGNAL_LOOP = ("        while transport.is_active() and time.monotonic() < give_up:\n"
+               "            transport.clear_to_send.wait(SELECT_WAIT)\n")
+CHECKED = ("            with chan.lock:\n"
+           "                if chan.closed:\n"
+           "                    return\n"
+           "                with transport.clear_to_send_lock:\n"
+           "                    if transport.clear_to_send.is_set():\n"
+           "                        transport._send_message(message)\n"
+           "                        return\n")
+
+
+def kill_request(*lines: str) -> tuple[tuple[str, str], ...]:
+    return ((KILL_REQUEST, ''.join(lines)),)
+
+
+# Every name sshd's `session_signal_req` accepts but KILL, and one it refuses.
+SSH_NAMES = ('TERM', 'HUP', 'INT', 'QUIT', 'USR1', 'USR2', 'STOP')
+
+CASES += (
+    # The watchdog started, at its place.
+    Case('tpc-watchdog-dropped', LAUNCH, joined(GRACE_RENDERED, GRACE_RENDERED), NOTHING_STOPPED, STILL_RUNNING),
+    *(Case(f'tpc-watchdog-{name}', LAUNCH, joined(GRACE_RENDERED, PLACES[name]), *kill)
+      for name, kill in WATCHDOG_PLACES.items()),
+    *(Case(f'tpc-watchdog-order-{"-".join(order)}', LAUNCH, reordered(order), *kill)
+      for order, kill in ORDER_KILLS.items()),
+    # Forked with TERM ignored, so the watchdog is born ignoring it: forked with TERM at its default
+    # (dropped, or another name ignored), the deadline's TERM to the group ends it before it acts; and
+    # as review cycle 3 found it (the default back before the fork, the watchdog ignoring TERM from
+    # its first statement), or with a handler around the fork that bash resets in the watchdog, a
+    # deadline before its first statement ends it.
+    Case('tpc-fork-ignore-dropped', LAUNCH, ((FORK_IGNORE, '("exec 46>|'),),
+         stopped('local-ignores-none', 'delegate-root-ignores-none'), STILL_RUNNING),
+    *(Case(f'tpc-fork-ignore-{name.lower()}', LAUNCH, ((FORK_IGNORE, f'''("trap '' {name}; exec 46>|'''),),
+           stopped('local-ignores-none', 'delegate-root-ignores-none'), STILL_RUNNING) for name in ('INT', 'HUP')),
+    Case('tpc-born-with-term', LAUNCH, ((WATCHDOG_SOURCE, BORN_WITH_TERM),), WATCHDOG_WINDOW[:2] + WATCHDOG_WINDOW[3:],
+         STILL_RUNNING),
+    Case('tpc-handler-at-fork', LAUNCH,
+         ((FORK_IGNORE, '''("trap 'cluster_mcp_t=1' TERM; exec 46>|'''),
+          (RESTORED, '''"trap - TERM; [[ -z ${{cluster_mcp_t-}} ]] || kill -s TERM $$; printf''')),
+         WATCHDOG_WINDOW[:1], STILL_RUNNING),
+    # TERM's default taken back right after the fork, which also undoes a startup file's TERM ignore:
+    # left ignored, the program and the command it starts never take the TERM a non-root server's
+    # `sudo` relays.
+    Case('tpc-restore-dropped', LAUNCH, ((RESTORED, '"printf'),), (PROFILE_UNDONE,), STILL_RUNNING),
+    *(Case(f'tpc-restore-{name.lower()}', LAUNCH, ((RESTORED, f'"trap - {name}; printf'),), (PROFILE_UNDONE,),
+           STILL_RUNNING) for name in ('INT', 'HUP')),
+    # Armed by the program's first line on the pipe.
+    Case('tpc-arm-dropped', LAUNCH, ((ARMED, ':")\n'),), JOBS_KEPT, JOB_STOPPED),
+    Case('tpc-arm-dropped-stop', LAUNCH, ((ARMED, ':")\n'),), NOTHING_STOPPED, STILL_RUNNING),
+    # Armed with another byte: what the wait reads at the program's death is then not the arming line.
+    Case('tpc-arm-unterminated', LAUNCH, ((ARMED, '''printf x >&46")\n'''),), NOTHING_STOPPED, STILL_RUNNING),
+    # Released by its second, after the end records.
+    Case('tpc-release-dropped', LAUNCH, joined('RELEASE', 'RELEASE'), JOBS_KEPT, JOB_STOPPED),
+    *(Case(RELEASE_IDS.get(name, f'tpc-release-{name}'), LAUNCH, joined('RELEASE', PLACES[name]), *kill)
+      for name, kill in RELEASE_PLACES.items()),
+    # Written with `printf`, whose function the prologue unsets: `echo`'s it does not, and a profile's
+    # `echo` function would swallow the line. No row's profile can define one (the command inherits it
+    # too), so the launch checker is what pins the writer.
+    Case('tpc-arm-echo', LAUNCH, ((ARMED, '''echo >&46")\n'''),), LAUNCH_TEXT, 'does not start the watchdog'),
+    Case('tpc-release-echo', LAUNCH, ((RELEASED, 'RELEASE: Final = "echo >&46"\n'),), LAUNCH_TEXT,
+         'does not release the watchdog'),
+    # Released with another byte: any second byte releases the watchdog, so only the text tells.
+    Case('tpc-release-unterminated', LAUNCH, ((RELEASED, 'RELEASE: Final = "printf x >&46"\n'),), LAUNCH_TEXT,
+         'does not release the watchdog'),
+    # The trigger: the arming line alone, read to the pipe's end. Nothing read (no descriptor) or both
+    # lines (a completed call) stops nothing.
+    Case('tpc-unarmed-stops', LAUNCH, ((TRIGGER, r"!= $'\\n\\n.' ]] && "),),
+         ('test_launch.py::test_a_watchdog_that_cannot_start_stops_nothing',),
+         'a watchdog that never got its descriptor stopped its group'),
+    Case('tpc-trigger-inverted', LAUNCH, ((TRIGGER, r"!= $'\\n.' ]] && "),), JOBS_KEPT, JOB_STOPPED),
+    Case('tpc-trigger-on-release', LAUNCH, ((TRIGGER, r"== $'\\n\\n.' ]] && "),), JOBS_KEPT, JOB_STOPPED),
+    Case('tpc-stop-or', LAUNCH, ((TRIGGER, r"== $'\\n.' ]] || "),), JOBS_KEPT, JOB_STOPPED),
+    Case('tpc-stop-unconditional', LAUNCH, ((TRIGGER, r"== $'\\n.' ]]; "),), JOBS_KEPT, JOB_STOPPED),
+    # The wait: to the pipe's end, which only the program's exit brings, through no builtin and no
+    # timeout. `$( )` drops a trailing newline, so without the full stop the arming line reads as
+    # nothing; a wait that ends at the first line stops every call as it starts; one through `read`
+    # ends at a profile's `TMOUT`, and one with a timeout of its own ends at it.
+    Case('tpc-wait-no-stop-mark', LAUNCH, ((WAIT, '$(/bin/cat)'),), NOTHING_STOPPED, STILL_RUNNING),
+    Case('tpc-wait-first-line', LAUNCH, ((WAIT, '$(/bin/dd bs=1 count=1 && printf .)'),), JOBS_KEPT[:1],
+         NOT_COMPLETED),
+    Case('tpc-wait-read', LAUNCH, ((WAIT, r"$(while read -r l; do printf '%s\\n' $l; done && printf .)"),),
+         TMOUT_KEPT, CUT_SHORT),
+    Case('tpc-wait-bounded', LAUNCH, ((WAIT, r"$(while read -r -t 1 l; do printf '%s\\n' $l; done && printf .)"),),
+         TMOUT_KEPT, CUT_SHORT),
+    # Through an absolute path no profile can shadow once the functions over it are unset.
+    Case('tpc-wait-plain-cat', LAUNCH, ((WAIT, '$(cat && printf .)'),), SHADOWS_KEPT, CUT_SHORT),
+    Case('tpc-wait-command-cat', LAUNCH, ((WAIT, '$(command cat && printf .)'),), SHADOWS_KEPT, CUT_SHORT),
+    # The stop: KILL alone, GRACE after the program's death, to the process group. A TERM beside it
+    # is a second TERM where the deadline's reached the group, and the first under a non-root server.
+    Case('tpc-kill-dropped', LAUNCH, ((STOP, '{{ /bin/sleep {grace}; }}'),), IGNORERS_KEPT, STILL_RUNNING),
+    *(Case(f'tpc-kill-{name.lower()}', LAUNCH, ((STOP, f'{{{{ /bin/sleep {{grace}}; kill -s {name} 0; }}}}'),),
+           IGNORERS_KEPT, STILL_RUNNING) for name in ('TERM', 'HUP', 'STOP')),
+    Case('tpc-term-first', LAUNCH, ((STOP, '{{ kill -s TERM 0; /bin/sleep {grace}; kill -s KILL 0; }}'),), NON_ROOT,
+         TERMED),
+    Case('tpc-term-first-grace', LAUNCH, ((STOP, '{{ kill -s TERM 0; /bin/sleep {grace}; kill -s KILL 0; }}'),),
+         GRACE_KEPT[:1], ONE_TERM),
+    Case('tpc-group-self', LAUNCH, ((STOP, '{{ /bin/sleep {grace}; kill -s KILL $$; }}'),), NOTHING_STOPPED,
+         STILL_RUNNING),
+    Case('tpc-group-leader', LAUNCH, ((STOP, '{{ /bin/sleep {grace}; kill -s KILL -$$; }}'),),
+         stopped('delegate-root-ignores-none'), STILL_RUNNING),
+    # GRACE before it, as it is when the program is rendered.
+    Case('tpc-delay-zero', LAUNCH, ((STOP, '{{ /bin/sleep 0; kill -s KILL 0; }}'),), GRACE_KEPT, OUTPUT_LOST),
+    Case('tpc-delay-zero-non-root', LAUNCH, ((STOP, '{{ /bin/sleep 0; kill -s KILL 0; }}'),), NON_ROOT,
+         'before the grace was over'),
+    Case('tpc-delay-doubled', LAUNCH, ((GRACE_RENDERED, "WATCHDOG.format(grace=format(2 * GRACE, 'g'))"),),
+         WAITS_GRACE, NO_GRACE),
+    Case('tpc-delay-halved', LAUNCH, ((GRACE_RENDERED, "WATCHDOG.format(grace=format(GRACE / 2, 'g'))"),),
+         WAITS_GRACE, NO_GRACE),
+    Case('tpc-delay-fixed', LAUNCH, ((STOP, '{{ /bin/sleep 1; kill -s KILL 0; }}'),), WAITS_GRACE, NO_GRACE),
+    # Through an absolute `sleep`: the grace rows' profile defines a `sleep` function and puts a
+    # `sleep` that returns at once first on PATH.
+    Case('tpc-plain-sleep', LAUNCH, ((STOP, '{{ sleep {grace}; kill -s KILL 0; }}'),), GRACE_KEPT, OUTPUT_LOST),
+    # `command sleep` waits only for the fork of the PATH `sleep`: the grace rows' handler prints far
+    # enough into the stop that no setting's row lets that pass for the grace.
+    Case('tpc-command-sleep', LAUNCH, ((STOP, '{{ command sleep {grace}; kill -s KILL 0; }}'),), GRACE_KEPT,
+         OUTPUT_LOST),
+    # Its descriptor: the subshell closes it, and the program arms and releases it on the one it opened.
+    Case('tpc-fd-left-open', LAUNCH, ((CLOSED, "SUBSHELL: Final = ('(', ') 2>&59 59>&-')\n"),),
+         stopped('local-ignores-none'), STILL_RUNNING),
+    Case('tpc-fd-closed-other', LAUNCH, ((CLOSED, "SUBSHELL: Final = ('(', ') 2>&59 59>&- 45>&-')\n"),),
+         stopped('local-ignores-none'), STILL_RUNNING),
+    Case('tpc-fd-opened-other', LAUNCH, ((OPENED, 'TERM; exec 45>| >('),), NOTHING_STOPPED, STILL_RUNNING),
+    Case('tpc-fd-armed-other', LAUNCH, ((ARMED, '''printf '\\\\n' >&45")\n'''),), JOBS_KEPT[:2], JOB_STOPPED),
+    Case('tpc-fd-released-other', LAUNCH, ((RELEASED, '''RELEASE: Final = "printf '\\\\n' >&45"\n'''),),
+         JOBS_KEPT[:2], JOB_STOPPED),
+    # Renumbered everywhere it is named: another free descriptor is the same program, which only the
+    # launch checker tells apart; one the program points elsewhere later (59, which the sentinel
+    # line points at the caller's stderr) takes the pipe from the watchdog, which then stops nothing.
+    *(Case(f'tpc-fd-{fd}', LAUNCH, ((OPENED, f'TERM; exec {fd}>| >('), (ARMED, ARMED.replace('46', fd)),
+                                    (RELEASED, RELEASED.replace('46', fd)), (CLOSED, CLOSED.replace('46', fd))),
+           *((LAUNCH_TEXT, 'does not start the watchdog') if fd == '45'
+             else (stopped('delegate-tree', 'ssh-bash-ignores-holding'), STILL_RUNNING)))
+      for fd in ('45', '59')),
+    Case('tpc-fd-not-kept', LAUNCH, ((OPENED, 'TERM; 46>| >('),), NOTHING_STOPPED, STILL_RUNNING),
+    # It holds no stream of the call: a local timeout would wait for its end of file, then KILL.
+    Case('tpc-holds-output', LAUNCH, ((QUIETED, ''),), HELD_OUTPUT, LATE),
+    Case('tpc-holds-stdout', LAUNCH, ((QUIETED, 'exec 2>/dev/null; '),), HELD_OUTPUT, LATE),
+    Case('tpc-holds-stderr', LAUNCH, ((QUIETED, 'exec >/dev/null; '),), HELD_OUTPUT, LATE),
+    # Without `exec` the redirection lasts one empty command, and the streams are held as before it.
+    Case('tpc-quiet-not-kept', LAUNCH, ((QUIETED, '>/dev/null 2>&1; '),), HELD_OUTPUT, LATE),
+    # It reads its pipe from a process substitution the program writes to.
+    Case('tpc-substitution-reversed', LAUNCH, ((OPENED, 'TERM; exec 46>| <('),), LAUNCH_TEXT,
+         'does not start the watchdog'),
+    # The subshell's redirections in another order: the same subshell, told apart by the text alone.
+    Case('tpc-close-first', LAUNCH, ((CLOSED, "SUBSHELL: Final = ('(', ') 46>&- 2>&59 59>&-')\n"),), LAUNCH_TEXT,
+         "the watchdog's descriptor closed"),
+    # Job control off, so the command stays in the group a profile's `set -m` would move it out of.
+    Case('tpc-monitor-kept', LAUNCH, (("'set +euxvTkPm +o errtrace", "'set +euxvTkP +o errtrace"),),
+         (PROFILE_UNDONE,), STILL_RUNNING),
+    # The prologue: the functions over its builtins unset in posix mode, where `unset` comes before a
+    # function of its name, after every builtin it runs is turned back on (a function named `enable`
+    # unset first); then, out of posix mode, the functions named like its absolute paths.
+    Case('tpc-posix-dropped', LAUNCH, ((POSIX_ON, POSIX_ON.replace('POSIXLY_CORRECT=y; ', '')),), UNSET_SHADOWED[:1],
+         CUT_SHORT),
+    Case('tpc-enable-dropped', LAUNCH, ((POSIX_ON, POSIX_ON.replace('enable {BUILTINS} || :; ', '')),),
+         UNSET_SHADOWED[1:], CUT_SHORT),
+    Case('tpc-enable-dropped-trap', LAUNCH, ((POSIX_ON, POSIX_ON.replace('enable {BUILTINS} || :; ', '')),),
+         TRAP_SHADOWED, STILL_RUNNING),
+    Case('tpc-enable-function-kept', LAUNCH, ((POSIX_ON, POSIX_ON.replace('unset -f enable; ', '')),), TRAP_SHADOWED,
+         STILL_RUNNING),
+    Case('tpc-builtins-unset-dropped', LAUNCH, ((POSIX_ON, POSIX_ON.replace('unset -f {BUILTINS}; ', '')),),
+         UNSET_SHADOWED[:1], CUT_SHORT),
+    Case('tpc-builtins-without-unset', LAUNCH, ((BUILTIN_NAMES, BUILTIN_NAMES.replace(' unset unalias', ' unalias')),),
+         UNSET_SHADOWED, CUT_SHORT),
+    Case('tpc-builtins-without-trap', LAUNCH, ((BUILTIN_NAMES, BUILTIN_NAMES.replace(' trap', '')),), TRAP_SHADOWED,
+         STILL_RUNNING),
+    Case('tpc-paths-unset-dropped', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace('unset -f /bin/cat /bin/date /bin/sleep; ', '')),),
+         SHADOWS_KEPT, CUT_SHORT),
+    Case('tpc-paths-without-cat', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace('/bin/cat ', '')),), SHADOWS_KEPT,
+         CUT_SHORT),
+    Case('tpc-paths-without-sleep', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace(' /bin/sleep', '')),), GRACE_KEPT,
+         OUTPUT_LOST),
+    Case('tpc-paths-without-date', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace(' /bin/date', '')),), LATE_STARTS,
+         STARTED_LATE),
+    Case('tpc-paths-unset-in-posix-mode', LAUNCH,
+         ((POSIX_ON, POSIX_ON.replace('unset -f {BUILTINS}; ', 'unset -f {BUILTINS}; unset -f /bin/cat /bin/date /bin/sleep; ')),
+          (PATHS_UNSET, PATHS_UNSET.replace('unset -f /bin/cat /bin/date /bin/sleep; ', ''))), SHADOWS_KEPT, CUT_SHORT),
+    Case('tpc-paths-not-functions', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace('unset -f /bin/', 'unset /bin/')),),
+         SHADOWS_KEPT, CUT_SHORT),
+    Case('tpc-posix-kept', LAUNCH, ((PATHS_UNSET, PATHS_UNSET.replace(' +o posix;', ';')),), SHADOWS_KEPT[:1],
+         CUT_SHORT),
+    # The deadline's check: placed right after the watchdog, and given in `local` and `delegate`.
+    Case('tpc-check-dropped', LAUNCH, joined('*checks', '*checks'), LATE_STARTS, STARTED_LATE),
+    *(Case(f'tpc-check-{name}', LAUNCH, joined('*checks', PLACES[name]), *kill) for name, kill in CHECK_PLACES.items()),
+    Case('tpc-check-not-given-delegate', 'core/executor/delegate.py',
+         ((DELEGATE_PROGRAM, "        prog, marks = launch.program(command, cwd, start='home')\n"),), LATE_STARTS[1:],
+         STARTED_LATE),
+    Case('tpc-check-not-given-local', 'core/executor/shell.py',
+         (('        prog, marks = launch.program(command, cwd, start=os.getcwd(), timeout=timeout)\n',
+           '        prog, marks = launch.program(command, cwd, start=os.getcwd())\n'),), LATE_STARTS[:1], STARTED_LATE),
+    # Its clock: nanoseconds, through an absolute `date` whose function the prologue unsets.
+    Case('tpc-clock-seconds', LAUNCH, ((CLOCK, CLOCK.replace('+%s%N', '+%s')),), LATE_STARTS, STARTED_LATE),
+    Case('tpc-clock-plain-date', LAUNCH, ((CLOCK, CLOCK.replace('/bin/date', 'date')),), LATE_STARTS, STARTED_LATE),
+    # Its comparison: a command starts only before its deadline.
+    Case('tpc-check-inverted', LAUNCH, ((COMPARED, COMPARED.replace(' < {deadline}', ' > {deadline}')),),
+         JOBS_KEPT[:1], NOT_COMPLETED),
+    Case('tpc-check-always-refuses', LAUNCH, ((COMPARED, COMPARED.replace('(( cluster_mcp_n < {deadline} )) || ', 'false || ')),),
+         JOBS_KEPT[:1], NOT_COMPLETED),
+    Case('tpc-check-never-refuses', LAUNCH, ((COMPARED, COMPARED.replace('(( cluster_mcp_n < {deadline} )) || ', 'true || ')),),
+         LATE_STARTS, STARTED_LATE),
+    # Its refusal: the command never starts, and the program dies.
+    # (Where the deadline's TERM reached the group, the server's KILL ends the waiting program first.)
+    Case('tpc-refusal-lives-on', LAUNCH, ((REFUSED, "'{{ /bin/sleep {grace}; }} ;; esac; unset cluster_mcp_n')"),),
+         LATE_STARTS[2:],
+         STARTED_LATE),
+    Case('tpc-refusal-wait-doubled', LAUNCH, ((REFUSED, REFUSED.replace('/bin/sleep {grace}', '/bin/sleep {grace}; /bin/sleep {grace}')),),
+         WAITS_GRACE, NO_GRACE),
+    # The deadline: the server's, in nanoseconds, taken before `run_process` takes its own.
+    Case('tpc-deadline-now', LAUNCH, ((DEADLINE, DEADLINE.replace(' + math.ceil(timeout * 1e9)', '')),), JOBS_KEPT[:1],
+         NOT_COMPLETED),
+    Case('tpc-deadline-a-second-early', LAUNCH, ((DEADLINE, DEADLINE.replace('math.ceil(timeout * 1e9)', 'math.ceil(timeout * 1e9) - 10**9')),),
+         stopped('local-tree', 'delegate-tree'), 'was not started before the deadline'),
+    Case('tpc-deadline-a-second-late', LAUNCH, ((DEADLINE, DEADLINE.replace('math.ceil(timeout * 1e9)', 'math.ceil(timeout * 1e9) + 10**9')),),
+         LATE_STARTS, STARTED_LATE),
+    Case('tpc-deadline-seconds', LAUNCH, ((DEADLINE, DEADLINE.replace('time.time_ns() + math.ceil(timeout * 1e9)', 'math.ceil(time.time() + timeout)')),),
+         JOBS_KEPT[:1], NOT_COMPLETED),
+    # The KILL request: sent after the grace read, on a channel still open, naming KILL.
+    Case('tpc-ssh-kill-dropped', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE),
+         (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
+    Case('tpc-ssh-kill-dropped-unit', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE),
+         (KILL_ORDER,), "['TERM']"),
+    Case('tpc-ssh-kill-before-term', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+         (KILL_DRAINS, KILL_ORDER), "['KILL', 'TERM']"),
+    Case('tpc-ssh-kill-before-term-output', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+         GRACE_KEPT[2:], OUTPUT_LOST),
+    Case('tpc-ssh-kill-before-grace', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
+         (KILL_ORDER,), 'before the GRACE read was over'),
+    Case('tpc-ssh-kill-before-grace-output', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
+         GRACE_KEPT[2:], OUTPUT_LOST),
+    *(Case(f'tpc-ssh-kill-{name.lower()}', 'core/executor/ssh.py',
+           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")),
+           (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING) for name in SSH_NAMES),
+    *(Case(f'tpc-ssh-kill-{name.lower()}-unit', 'core/executor/ssh.py',
+           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")), (KILL_ORDER,),
+           f"['TERM', '{name}']") for name in SSH_NAMES),
+    # Its guard: no KILL once the channel has ended (a command that died during the read), and one
+    # while the launch may be alive.
+    Case('tpc-ssh-kill-unguarded', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE, BARE_KILL),
+         (KILL_DRAINS,), "['TERM', 'KILL']"),
+    Case('tpc-ssh-kill-guard-inverted', 'core/executor/ssh.py',
+         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL), (KILL_ORDER,), "['TERM']"),
+    Case('tpc-ssh-kill-guard-inverted-behaviour', 'core/executor/ssh.py',
+         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL),
+         (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
+    Case('tpc-ssh-kill-guard-status', 'core/executor/ssh.py',
+         kill_request(TERM_LINE, GRACE_LINE, '            if not chan.exit_status_ready():\n', GUARDED_KILL),
+         (KILL_DRAINS,), "['TERM', 'KILL']"),
+    # `_signal` sends nothing on a closed channel, and checks and sends holding the channel's lock.
+    Case('tpc-ssh-signal-unchecked', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('                if chan.closed:\n                    return\n', '')),),
+         (CLOSED_ASKED,), CONNECTION_LOST),
+    Case('tpc-ssh-signal-active-checked', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('if chan.closed:', 'if not chan.active:')),), (CLOSED_ASKED,), CONNECTION_LOST),
+    Case('tpc-ssh-signal-unlocked', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('with chan.lock:', 'if True:')),), (LOCK_HELD,), "holding the channel's lock"),
+    Case('tpc-ssh-signal-checked-then-sent', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
+                                    '                    if transport.clear_to_send.is_set():\n'
+                                    '                        transport._send_message(message)\n'
+                                    '                        return\n',
+                                    '            with transport.clear_to_send_lock:\n'
+                                    '                if transport.clear_to_send.is_set():\n'
+                                    '                    transport._send_message(message)\n'
+                                    '                    return\n')),),
+         (LOCK_HELD,), "holding the channel's lock"),
+    # ... and only once a key exchange has ended (RFC 4253 §7.1), waiting for it without the channel's
+    # lock, for no longer than Paramiko's own bound, and not at all on a transport that has gone.
+    Case('tpc-ssh-signal-no-key-exchange-wait', 'core/executor/ssh.py',
+         ((SIGNAL_LOOP + CHECKED, SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
+           + CHECKED.replace('                with transport.clear_to_send_lock:\n'
+                             '                    if transport.clear_to_send.is_set():\n'
+                             '                        transport._send_message(message)\n'
+                             '                        return\n',
+                             '                transport._send_message(message)\n'
+                             '                return\n')),),
+         (KEY_EXCHANGE,), 'sent during the key exchange'),
+    Case('tpc-ssh-signal-key-exchange-unchecked', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('                    if transport.clear_to_send.is_set():\n'
+                                    '                        transport._send_message(message)\n'
+                                    '                        return\n',
+                                    '                    transport._send_message(message)\n'
+                                    '                    return\n')),),
+         (KEY_EXCHANGE,), 'sent during the key exchange'),
+    Case('tpc-ssh-signal-wait-locked', 'core/executor/ssh.py',
+         ((SIGNAL_LOOP + CHECKED,
+           SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
+           + CHECKED.replace('            with chan.lock:\n', '            with chan.lock:\n'
+                                                              '                transport.clear_to_send.wait(SELECT_WAIT)\n')),),
+         (KEY_EXCHANGE,), "held the channel's lock"),
+    Case('tpc-ssh-signal-user-message', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
+                                    '                    if transport.clear_to_send.is_set():\n'
+                                    '                        transport._send_message(message)\n'
+                                    '                        return\n',
+                                    '                transport._send_user_message(message)\n'
+                                    '                return\n')),),
+         (KEY_EXCHANGE,), "held the channel's lock"),
+    Case('tpc-ssh-signal-unbounded', 'core/executor/ssh.py',
+         ((SIGNAL_LOOP, SIGNAL_LOOP.replace(' and time.monotonic() < give_up', '')),), GIVES_UP[:1], 'held its caller'),
+    Case('tpc-ssh-signal-transport-unchecked', 'core/executor/ssh.py',
+         ((SIGNAL_LOOP, SIGNAL_LOOP.replace('transport.is_active() and ', '')),), GIVES_UP[1:], 'held its caller'),
+)
+CASES += (
+    # The deadline's check covers the fork as it covers the login initialisation: without it, a
+    # deadline's TERM the program ignored while it forked lets the command start.
+    Case('tpc-check-dropped-fork-window', LAUNCH, joined('*checks', '*checks'), PROGRAM_WINDOW[:3], STARTED_LATE),
+    # No name the program sets reaches the command: its clock reading and the function export's name,
+    # each unset before the command starts.
+    Case('tpc-clock-reading-kept', LAUNCH, ((REFUSED, REFUSED.replace('; unset cluster_mcp_n', '')),),
+         VARIABLES_KEPT[:1], LEAKED),
+    Case('tpc-function-name-kept', LAUNCH, ((FUNCTION_NAME, "'done < <(compgen -A function); '"),), VARIABLES_KEPT[:1],
+         LEAKED),
+    # The names unset, not merely kept out of a profile's `set -a` by turning it off: a name a profile
+    # exported before the program set it is exported all the same.
+    Case('tpc-allexport-off-instead', LAUNCH,
+         ((REFUSED, REFUSED.replace('; unset cluster_mcp_n', '')),
+          (FUNCTION_NAME, "'done < <(compgen -A function); '"),
+          ("'set +euxvTkPm +o errtrace", "'set +aeuxvTkPm +o errtrace")), VARIABLES_KEPT[:1], LEAKED),
+    # The prologue's second alias reset, in posix mode once a function named `unalias` is unset: the
+    # text (leaving posix mode turns alias expansion off for the program's own lines, so no row shows
+    # it; the sweep's equivalent).
+    Case('tpc-aliases-kept-text', LAUNCH, ((POSIX_ON, POSIX_ON.replace(' \\\\unalias -a; ', ' ')),), LAUNCH_TEXT,
+         'does not open with the prologue'),
+    # `run` returns a timed-out call within 2 × GRACE: over `ssh`, a read after the TERM three times as
+    # long holds a command that started late past the bound. (In `local` and `delegate` the program's
+    # watchdog or its deadline's check ends the output before `run_process`'s drains do, in every row
+    # of the suite, so a longer drain shows only behind a login initialisation that hangs ignoring
+    # TERM: a recorded limit.)
+    Case('tpc-return-grace-read-tripled', 'core/executor/ssh.py',
+         ((GRACE_READ, GRACE_READ.replace('+ launch.GRACE', '+ 3 * launch.GRACE')),), LATE_STARTS_SSH, RETURNED_LATE),
+    # Over `ssh` the program is given no deadline: one taken before a slow connect refuses the command.
+    Case('tpc-ssh-deadline-given', 'core/executor/ssh.py',
+         ((SSH_PROGRAM, SSH_PROGRAM.replace("start='home')", "start='home', timeout=timeout)")),), SLOW_CONNECT,
+         NOT_RUN),
+    # `_signal` checks that no key exchange runs and sends in one step under `clear_to_send_lock`, as
+    # the transport thread starts one: without it, an exchange can start between the check and the send.
+    Case('tpc-ssh-signal-exchange-unlocked', 'core/executor/ssh.py',
+         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
+                                    '                    if transport.clear_to_send.is_set():\n'
+                                    '                        transport._send_message(message)\n'
+                                    '                        return\n',
+                                    '                if transport.clear_to_send.is_set():\n'
+                                    '                    transport._send_message(message)\n'
+                                    '                    return\n')),),
+         (EXCHANGE_STARTS,), 'sent as the key exchange started'),
+)
+
+
+# `>|`, not `>`: a profile's `set -C` refuses `>` onto the path bash 3.2 names a process substitution
+# by; a newer bash names it by a pipe, which noclobber allows, so only macOS tells the two apart.
+if sys.platform == 'darwin':
+    CASES += (Case('tpc-clobber', LAUNCH, ((OPENED, 'TERM; exec 46> >('),), (PROFILE_UNDONE,), STILL_RUNNING),)
 
 CASES += tuple(cluster_twin(case, CLUSTER_TWINS[case.id]) for case in CASES if case.id in CLUSTER_TWINS)
 if len(CASES) != len({case.id for case in CASES}):

@@ -177,3 +177,18 @@ def test_compat_root_installs_every_capability() -> None:
     # The development environment the root syncs carries every capability through those extras.
     for dist in EXTRAS.values():
         assert distribution(dist).version == version('cluster-mcp'), dist
+
+
+@pytest.mark.unit
+def test_the_image_runs_an_init_that_reaps_orphans() -> None:
+    # Every call's watchdog, and whatever a command left running, ends after the program that started
+    # it and is reparented to PID 1: the image's PID 1 must be an init that reaps them, never the
+    # server, and the compose file, which runs the same image, must not replace that entry point.
+    dockerfile = (ROOT / 'Dockerfile').read_text()
+    entry = re.findall(r'^ENTRYPOINT (.+)$', dockerfile, re.M)
+    assert entry == ['["/usr/bin/tini", "--", "cluster-mcp"]'], f'the image does not start under tini: {entry}'
+    assert re.search(r'^RUN apt-get update && apt-get install -y --no-install-recommends tini ', dockerfile, re.M), \
+        'the image does not install tini'
+    compose = (ROOT / 'compose.yml').read_text()
+    assert 'entrypoint' not in compose and 'dockerfile: Dockerfile' in compose, \
+        'compose.yml does not run the image\'s own entry point'

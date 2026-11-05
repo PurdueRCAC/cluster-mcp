@@ -40,6 +40,18 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   it passed alone and on a further identical-tree run. The failing assertion was "0 reconnect
   workers ran, not one": the reconnect worker never started, so the miss is not only the
   give-up bound.
+- 2026-11-01: `test_startup_output_is_separated[bash]` failed once in a local full-suite run
+  (macOS, modern era, branch `fix/timeout-process-cleanup` before its first build commit) with the
+  same paramiko `EOFError`, raised by the client's `chan.close()` after a broken pipe; 4589 others
+  passed, and the row passed three times in a row run alone. The base's full run in the same
+  session, both eras, did not show it. First sighting on the bash row.
+- 2026-11-02: a third loopback row, `test_timeout_stop.py`'s
+  `test_a_command_that_dies_of_a_signal_leaves_its_jobs_running[ssh-sh]`, which runs only with
+  `CLUSTER_MCP_TEST_EVERY_KIND=1`, failed once in a run of that module alone (macOS, modern era,
+  branch `fix/timeout-process-cleanup`, its P4 gate), on a host at load 6 with two unrelated
+  processes spinning. The captured log showed paramiko's `Socket exception: Bad file descriptor`;
+  the assertion text was not kept. The row then passed six times alone and the module passed three
+  times whole on the same tree.
 
 ## Why it was deferred
 

@@ -47,3 +47,6 @@ A manual mutation run finishes and reports every case, and § Testing states its
 - Found by: `capability-probe` plan step research, 2026-11-01.
 - 2026-11-01: with its two review remediations, `capability-probe` adds 271 cases, not about 200:
   `tests/mutants.py` defines 931.
+- 2026-11-02: `timeout-process-cleanup` adds 101 cases on macOS (100 elsewhere: `tpc-clobber` is
+  defined on macOS only): `tests/mutants.py` defines 1,032. They run at about 11 minutes per
+  protocol era on a development host, so the gap widens again.
