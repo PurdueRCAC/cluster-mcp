@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'Commands: the liveness monitor, the open-retry, the stall proxy and the documents'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R3
@@ -24,7 +24,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py commands both
+  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
   status: pending
@@ -56,7 +56,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py all both && uv run python -I spec/ssh-half-open-link/verify/ledger-check.py
+  verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/verify/ledger-check.py
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -195,7 +195,7 @@ does, a command running as the link goes silent ends as −1003 within the bound
 slow live link is never cut, each pinned through a stall proxy in both eras and shown to fail on
 develop.
 
-- [ ] **`SilentLink`** in `tests/ssh_server.py` (PLAN §2.4):
+- [x] **`SilentLink`** in `tests/ssh_server.py` (PLAN §2.4):
   - `go_silent()` holds both directions and new connections, closing nothing;
   - `come_back()` (new connections), `resume()` (the held pairs), `rate=`, `forwarded`, `held`,
     `silent_after_handshake`, the step hooks, `close()`, `executor()`;
@@ -203,7 +203,7 @@ develop.
   - the rebind away from 54001–54005.
 
   Its module docstring and AGENTS § Testing's `test_ssh_exec.py` entry describe it.
-- [ ] **`_Liveness`** in `core/executor/ssh.py` (PLAN §2.1):
+- [x] **`_Liveness`** in `core/executor/ssh.py` (PLAN §2.1):
   - the `read_message` instance hook;
   - the priming probe, never judged;
   - the pure `_verdict`, split: a poke's verdict at B, a background probe's at
@@ -218,15 +218,15 @@ develop.
 
   Wire it to `_publish` (made under the lock, started after) and to `close()`. The old monitor
   stops with the connection it watched.
-- [ ] **The poke** on `_ensure_connected`'s fast path, on the monitor of the transport the call
+- [x] **The poke** on `_ensure_connected`'s fast path, on the monitor of the transport the call
   captured.
-- [ ] **`_exec`'s open guarded:**
+- [x] **`_exec`'s open guarded:**
   - a loss (the monitor `dead`, or the transport inactive after `SETTLE`) goes back to
     `_ensure_connected` with the same deadline, and the deadline ends it as the reconnect's −1002;
   - a live failure is raised as today;
   - the open waits `max(OPEN_TIMEOUT, B + 1)`;
   - nothing changes from the exec request on.
-- [ ] **Rows** in `tests/test_ssh_exec.py`, in a new section after "A host that goes down and comes
+- [x] **Rows** in `tests/test_ssh_exec.py`, in a new section after "A host that goes down and comes
   back" (PLAN §6's table; P1's shapes):
   - `test_a_call_on_a_silent_link_reconnects[run|run_command]`: a new connection accepted after the
     call began and within B + 1 s of it;
@@ -252,7 +252,7 @@ develop.
     output trickled through `rate` so probe replies queue behind data; results exact;
   - `test_a_call_beside_a_command_on_a_silent_link_ends_in_time`: the new call, and the stalled one
     with it, end within B + 1 s of the new call's start.
-- [ ] **`tests/test_ssh_liveness.py`** (`unit`, plus `integration` for the Paramiko pair):
+- [x] **`tests/test_ssh_liveness.py`** (`unit`, plus `integration` for the Paramiko pair):
   - `_verdict`'s arithmetic on a fake clock:
     - due at B quiet;
     - a poke probes at once;
@@ -277,9 +277,9 @@ develop.
     call's start, a background verdict of `2B − VERDICT_MARGIN` (at most 3B − 0.55 s after the last
     message heard, in flight), the 3B bound, and the floor at the default bound (29 s, 44 s), and
     name `PROBE_REQUEST` and `VERDICT_MARGIN`.
-- [ ] **`tests/mutants.py`:** re-plant every case whose anchor the edits touch, so
+- [x] **`tests/mutants.py`:** re-plant every case whose anchor the edits touch, so
   `test_mutation_anchor_applies` passes. The sweep's new cases are P3's.
-- [ ] **Documents** (R6, this commit; PLAN §2.3), the command half:
+- [x] **Documents** (R6, this commit; PLAN §2.3), the command half:
   - the footgun's silent-link paragraph;
   - §3's −1003 entry;
   - § Testing;
@@ -292,11 +292,23 @@ develop.
   - `silent_after_handshake` goes silent at a new connection's first probe or channel open, since a
     call's channel open can reach the server before the new monitor's priming probe.
   - The servers' step hooks in P1 are `channel`, `exec` and `probe`.
-  - **Open, for the foreman:** `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run]`
-    cannot fail on develop with `still waiting`, as `silent-gate.py` requires of every "fails" row.
+  - **The gate runs under a recorded wrapper** (the foreman's ruling, 2026-11-05):
+    `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run]` cannot fail
+    on develop with `still waiting`, as the frozen `silent-gate.py` requires of every "fails" row.
     With `OPEN_TIMEOUT` below `B − SETTLE`, develop's open raises Paramiko's
-    `Timeout opening channel.` within a second, before any watchdog. The gate is red on that row
-    alone, in both eras; the phase stays `in_progress`.
+    `Timeout opening channel.` within a second, before any watchdog. That raise is develop failing
+    the row, by a raise rather than a hang. The frozen gate was red on that row alone, in both eras
+    (attempt 1). `remediation/open-timeout-gate.py` runs `silent-gate.py` unchanged. For that row id
+    only, and only in the develop runs, it also accepts a failure carrying `Timeout opening channel`;
+    every other row and check stays the frozen gate's. It was seen red first, in the legacy era:
+    - with the row's develop failure text changed to carry neither phrase;
+    - with the row forced to pass on develop.
+
+    A first try at the first of those did not land: the altered failure kept Paramiko's text
+    through the exception chain, and the wrapper went green. It was redone with the chain dropped.
+    P1's `verify:` and P3's run the wrapper in place of the bare gate wherever they run
+    `commands` rows (P3's `all both`). P2's `transfers both` holds no such row, and keeps the bare
+    gate.
 - **Verify:** the frontmatter's. `silent-gate.py commands both` requires every P1 row to pass here
   in both eras, and on develop's `packages/` every "fails" row to fail with `still waiting` and
   every "passes" row to pass.
@@ -392,6 +404,10 @@ develop. Every recorded item has its seed.
 - [ ] **Every tool, both eras**: `CLUSTER_MCP_TEST_EVERY_KIND=1 silent-gate.py all both`.
 - [ ] **Suite growth per era**: measure the full suite on this tree and on `13c0e83` back to back,
   and the new rows alone. Record both, and CI's two era jobs once pushed.
+- [ ] **The masked pair** (the foreman's ruling at P1, 2026-11-05): "a judged probe still
+  unanswered at an open's failure counts as a loss" and the open timeout
+  `max(OPEN_TIMEOUT, B + 1)` each mask the other's mutant. Either show the pair equivalent by an
+  exact argument, or propose dropping the redundant rule as a TECH amendment, with the reason.
 - [ ] **Standing last-phase items:** the previous cycle's last phase carried no project-level
   obligation beyond the ledger (no `## Times` quote in this repo).
 - **Verify:** the frontmatter's (≈ 10 min, run in the background).
