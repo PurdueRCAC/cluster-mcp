@@ -77,5 +77,5 @@ waits on a dead peer longer than a client will wait for it, whichever tool it is
 - The probe needs no real host: a loopback proxy in front of `tests/ssh_server.py` that stops
   forwarding without closing either socket reproduces it in seconds.
 - Related: `spec/ssh-reconnect-loop/` (the bounded reconnect this complements);
-  `spec/safe-execution/` (−1003 and the connect bound); `issues/timeout-process-cleanup.md`.
+  `spec/safe-execution/` (−1003 and the connect bound); `spec/timeout-process-cleanup/` (landed 2026-11-04).
 - Found by: `ssh-reconnect-loop` planning research, 2026-10-23.

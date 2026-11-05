@@ -50,7 +50,7 @@ the fixture leaves no image attached and no device behind, however a step ends.
 
 ## Notes
 
-- Related: [`timeout-process-cleanup.md`](timeout-process-cleanup.md) (the server's own timed-out
+- Related: [`spec/timeout-process-cleanup/`](../spec/timeout-process-cleanup/) (the server's own timed-out
   commands; a different trigger), [`sandbox-dirs-left-on-kill.md`](sandbox-dirs-left-on-kill.md)
   (another leftover the test harness leaves on the host).
 - Found by: the foreman, 2026-11-01, after the stalled processes were killed.

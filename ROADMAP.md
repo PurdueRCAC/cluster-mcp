@@ -75,22 +75,27 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Eleven cycles, after the rename, the capability extras and the capability probe, that take this
-from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as one supported
-site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace restructure
-landed on `develop` on 2026-10-30 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)),
-keeping the old names through a deprecation window. The capability extras landed on 2026-11-01
+Ten cycles, after the rename, the capability extras, the capability probe and the timeout stop, that
+take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as one
+supported site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace
+restructure landed on `develop` on 2026-10-30
+([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
+deprecation window. The capability extras landed on 2026-11-01
 ([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
 `[slurm]` and `[rcac]` each install a member that registers through one entry-point group, and the
 served instructions are composed from what loaded. The capability probe landed the same day
 ([`spec/capability-probe/`](spec/capability-probe/)): in `ssh` and `local` modes an installed
 capability is served only where the cluster has the commands it declares, looked up once at startup
-within a 10 s bound, while `delegate` mode and `--skip-probes` serve every installed capability.
-What remains builds each capability on the extras mechanism — Slurm first, then LMOD and xdu as the
-new capabilities that prove it generalizes — and finally the site extra that bundles them. Ahead of
-the tool families sit the executor fixes: stopping a timed-out command, its measurement now
-approved, the four that `ssh-reconnect-loop` deferred on the SSH connection, and a reconnect test
-whose wall-clock bound measures load as well as behaviour.
+within a 10 s bound, while `delegate` mode and `--skip-probes` serve every installed capability. The
+timeout stop landed on 2026-11-04
+([`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/)): a timed-out command and
+everything in its process group have exited within 2 × `GRACE` of the deadline in every mode, by a
+watchdog that sends KILL after the grace, with the remaining limits recorded in
+`issues/timeout-stop-limits.md`. What remains builds each capability on the extras mechanism — Slurm
+first, then LMOD and xdu as the new capabilities that prove it generalizes — and finally the site
+extra that bundles them. Ahead of the tool families sit the executor fixes: the four that
+`ssh-reconnect-loop` deferred on the SSH connection, and a reconnect test whose wall-clock bound
+measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -114,21 +119,6 @@ and the window's own tests and README section go with it.
 *Horizon: 0.4.0 at the earliest · Depends on: release 0.2.0 (the window opens there) · Refs: [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/) (GOAL non-goals); `core/deprecation.py`*
 **Seed:** [`issues/remove-legacy-names.md`](issues/remove-legacy-names.md) · *status: unshaped*
 
-## A timed-out command may keep running after its call returns
-
-Every mode now returns a result at the deadline, but whether the command stops is open over SSH
-(OpenSSH may ignore the `signal` request, and closing a non-PTY channel stops nothing) and under a
-non-root `delegate` server (TERM reaches only the command, through `sudo`). Measuring it needs a
-long-running process on a login node, outside the read-only dogfood class, so it waited for
-approval, given on 2026-10-29. Found by `safe-execution`'s planning research, 2026-10-17.
-
-It sits ahead of the tool families because they lean on bounded calls (a bounded `file_find`, a
-`job_wait` considered), which make a timeout a routine outcome on a shared login node rather than
-an accident. Its measurement was approved on 2026-10-29.
-
-*Horizon: mid-term; the measurement approved on 2026-10-29 · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: `AGENTS.md` § Invariants §3; [`spec/safe-execution/`](spec/safe-execution/) PLAN risk 4*
-**Seed:** [`issues/timeout-process-cleanup.md`](issues/timeout-process-cleanup.md) · *status: adopted:timeout-process-cleanup*
-
 ## What a timeout still cannot stop
 
 `timeout-process-cleanup`'s watchdog starts after the login initialisation and keys on the deadline's
@@ -141,7 +131,7 @@ a step of the server's wall clock while a startup file runs can refuse a command
 one start, which under a non-root `delegate` server runs on. Found by `timeout-process-cleanup`'s
 planning research, 2026-11-01, and its reviews, 2026-11-02 and 2026-11-04.
 
-*Horizon: later · Depends on: timeout-process-cleanup · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5*
+*Horizon: later · Depends on: timeout-process-cleanup (cleared: landed on `develop` 2026-11-04) · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5*
 **Seed:** [`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md) · *status: unshaped*
 
 ## A dead SSH link that still reads as connected holds file transfers without limit
