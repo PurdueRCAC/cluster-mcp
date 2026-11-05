@@ -75,9 +75,9 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Ten cycles, after the rename, the capability extras, the capability probe and the timeout stop, that
-take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as one
-supported site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace
+Eleven cycles, after the rename, the capability extras, the capability probe and the timeout stop,
+that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as
+one supported site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace
 restructure landed on `develop` on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
@@ -91,11 +91,12 @@ timeout stop landed on 2026-11-04
 ([`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/)): a timed-out command and
 everything in its process group have exited within 2 × `GRACE` of the deadline in every mode, by a
 watchdog that sends KILL after the grace, with the remaining limits recorded in
-`issues/timeout-stop-limits.md`. What remains builds each capability on the extras mechanism — Slurm
-first, then LMOD and xdu as the new capabilities that prove it generalizes — and finally the site
-extra that bundles them. Ahead of the tool families sit the executor fixes: the four that
-`ssh-reconnect-loop` deferred on the SSH connection, and a reconnect test whose wall-clock bound
-measures load as well as behaviour.
+`issues/timeout-stop-limits.md`. What remains builds the bespoke tools, makes the shell a capability
+a deployment chooses, then builds each capability on the extras mechanism — Slurm first, then LMOD
+and xdu as the new capabilities that prove it generalizes — and finally the site extra that bundles
+them. Ahead of the tool families sit the executor fixes: the four that `ssh-reconnect-loop` deferred
+on the SSH connection, and a reconnect test whose wall-clock bound measures load as well as
+behaviour.
 
 ## The rename left three identity strings behind
 
@@ -231,6 +232,21 @@ patched in a tool about to be replaced.
 
 *Horizon: with tool-surface · Depends on: — · Refs: absorbed by `tool-surface`; [`spec/safe-execution/`](spec/safe-execution/) research 04 §4, PLAN risk 7*
 **Seed:** [`issues/list-directory-parsing.md`](issues/list-directory-parsing.md) · *status: unshaped*
+
+## The shell is a capability a deployment chooses
+
+Every server serves `run_command`, so an operator can't offer the cluster through named tools alone.
+Moving it out of the core into a member installed by a `[shell]` extra makes the shell a choice made
+at installation, like Slurm or the site's storage. The executor stays in the core, the instructions
+stop naming `run_command` when it is absent, and the `rcac-mcp` compatibility distribution pulls
+`[shell]` so existing installs serve what they serve today. Absence is a choice of scope, not
+containment (`file_write` reaches startup files, job scripts run anything), so the docs name the
+combination that does confine: no shell plus `--profile read-only`. It follows `tool-surface`, which
+makes a shell-less server useful, and precedes 0.2.0, the one release where the bare default can be
+set without breaking anyone.
+
+*Horizon: with or right after tool-surface, before 0.2.0 · Depends on: tool-surface (the `file_*` family and profiles), capability-extras (the member mechanism; cleared: landed on `develop` 2026-11-01) · Refs: Part II (hosted `delegate` mode); `issues/site-extras.md`*
+**Seed:** [`issues/shell-extra.md`](issues/shell-extra.md) · *status: unshaped*
 
 ## A job_* family that accepts what a model naturally sends
 

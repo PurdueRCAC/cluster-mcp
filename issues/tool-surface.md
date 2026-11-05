@@ -119,3 +119,9 @@ Open questions for shaping:
 - 2026-10-23: `safe-execution` gave `write_file` a `base64` encoding for binary content and left
   the matching binary read to this family (its GOAL non-goals): `file_read` should return binary
   content the same way, so a byte-exact round trip needs no `run_command`.
+- 2026-11-04: whether a server offers `run_command` at all becomes the deployment's choice, made at
+  installation through a `[shell]` extra ([`shell-extra.md`](shell-extra.md)). The argument above
+  stands as it is meant: leaving the shell out is not containment, and the steering here still
+  applies wherever it is installed. But it is a real choice of scope for an operator serving other
+  users, so this cycle should keep `run_command` and its steering separable from the core's
+  instructions and registration, ready to move into that member.
