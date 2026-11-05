@@ -3,7 +3,7 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/ssh-half-open-link
 base: develop
 current_phase: done
@@ -60,10 +60,10 @@ phases:
   attempts: 3
   verify: uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py && uv run python -I spec/ssh-half-open-link/remediation/F6-finding-id-hygiene.py
 review:
-  last_reviewed_commit: ac4909a8b01e21b90ff50432bf6645b621e6af3f
+  last_reviewed_commit: e2ad380c06d19aa91d93bdffc1296c7fea1257d8
   verdict: changes-requested
-  blocked_reason: 'cycle 2: F-C review id in the suite (hygiene gate blind to F ids); F-A late reconnect onto a re-silenced link outlives 3B'
-  cycle: 2
+  blocked_reason: 'review cycle 3: N1 rule text broader than the code, N2 SFTP-step cap pinned only opt-in, N3 finding id in an identifier; escalated'
+  cycle: 3
 ---
 
 # TECH.md — A dead SSH link that still reads as connected is noticed within a bound

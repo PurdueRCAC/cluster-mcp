@@ -210,3 +210,88 @@ Unmapped changes: none beyond those recorded in cycle 1.
 ### Escalation
 
 This is cycle 2 without convergence. Per code-review Step 6, it goes to Geoffrey before a second remediation.
+
+## Review cycle 3 — changes-requested (2026-11-05)
+
+- **Reviewed commit:** e2ad380c06d19aa91d93bdffc1296c7fea1257d8 · **Mode:** scoped verification of cycle 2's F-A
+  and F-C, as Geoffrey chose: one fresh blind reviewer, in clones at `e2ad380` and `82b1f0e`, given GOAL, the
+  rubric, AGENTS.md § Factory onward and the two findings' text.
+- **CI** run on the reviewed commit: both eras 4984 passed, `gate` green, on attempt 1 (848/871 s of pytest).
+
+### Verification run
+
+- Profile verify on the head, `UV_PYTHON=3.14`: `uv lock --check` exits 0; the full suite 4967 passed / 14
+  skipped per era; `bin/sandbox.sh uv run cluster-mcp --help` exits 0.
+- The reviewer's own probe through `bin/sandbox.sh`, head against `82b1f0e`, seconds from the call's start:
+  - cycle 2's probe as written (B = 15, `run`): 58.17 base, 45.00 head (−1002, nothing received by the server);
+  - late reconnect onto a link that goes silent again, run / write / put: 22.08–22.06 base, 18.00–18.01 head at
+    B = 6; 58.13–58.22 base, 45.00–45.01 head at B = 15; two other placements of the reconnect, and silence at
+    the channel, SFTP subsystem and version steps, all at the bound on the head;
+  - a late reconnect onto a live link completes on both trees (43.03–43.49 s at B = 15).
+- Negative controls: the cap removed fails both default late rows in both eras (10.1 s against 9 s); a late
+  SFTP session left open is caught (`_close_quietly` disabled); 16 of the remediation's mutation cases killed.
+- No `cluster-mcp-open` worker outlives B + 2 s; no call was cut before its deadline.
+
+### Status of cycle 2's findings
+
+| Finding | Status | Evidence |
+|---|---|---|
+| F-A | ✅ fixed as a class | every open before a call's work, command and SFTP paths, cut at the deadline (table above) |
+| F-C | ✅ fixed | the line is gone; the widened check fails on the base tree naming it; no false positives in the 79 files it reads |
+
+### Requirement → evidence matrix (R-IDs the diff touches)
+
+| R-ID | Status | Note |
+|------|--------|------|
+| R1 | ✅ | at the bound for B = 3, 6, 15, every tool; live late reconnects complete; cut calls read −1002 / nothing transferred |
+| R2 | ✅ | untouched; place step silent at its channel: `TransferLost` 6.12 s after the silence |
+| R3 | ✅ | exec after a late reconnect: −1003 17.1 s after the silence, on both trees (unchanged) |
+| R4 | ✅ | `shol-cap-always` killed by the slow-write row; full suite green |
+| R6 | ❌ text | N1: the new rule text is broader than the code |
+| R7 | ✅ | new rows red with the cap removed, both eras |
+
+Unmapped changes: the seed `issues/mutant-child-outlives-timeout.md` and its ROADMAP entry, and the timing note
+in `issues/suite-ci-time-budget.md`. Neither is a defect.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] N1 — The new rule text claims a cap a `write`'s own later commands don't get
+- **Where:** the `executor/ssh.py` footgun in AGENTS.md § Invariants and the `SSHExecutor` docstring
+  (`ssh.py:1274-1279`), pinned verbatim as `OPEN_TEXT`. `_write` runs its mkdir and place steps through `_run`
+  (`ssh.py:1780`, `:1836`), which takes the connection the write itself just reconnected to as found live
+  (`:1623`), so their open is not capped (`:1629`).
+- **Failure scenario:** at B = 6 a write opens its session on a late reconnect at 16.0 s and stages its content;
+  the new link goes silent at the place step's channel open. The write ends at 22.14 s (22.18 s on base), past
+  the 18 s the text promises, with an honest `TransferLost … unchanged …`.
+- **Judge's reading:** the behaviour is in contract: the transfer is in flight, so R2 governs and holds (6.12 s
+  after the silence). The defect is the § Invariants text this diff added and pinned, the same shape as cycle
+  2's "§ Testing broader than the code". MEDIUM stands: no behaviour is wrong.
+
+#### [LOW/CONFIRMED] N2 — The cap on the SFTP subsystem and version steps is pinned only behind an opt-in
+- **Where:** the `[write_file-subsystem]` and `[write_file-version]` late rows run only with
+  `CLUSTER_MCP_TEST_EVERY_KIND=1`, which CI never sets; no mutation case covers the steps.
+- **Failure scenario:** a cap on `_sftp`'s channel open alone, with the subsystem and version steps on the
+  call's thread, passes the default suite (`[write_file]` 9.12 s) and fails both opt-in rows (10.1 / 10.2 s).
+
+#### [LOW/CONFIRMED] N3 — A review-finding id survives in an identifier, so the new § Testing sentence is false
+- **Where:** `tests/test_timeout_stop.py:471` `F3_SETTINGS` (used at 493, 524, 789, 830), pre-existing from
+  `9a41ea1`. `\b` doesn't fall between `3` and `_`, so neither the old nor the widened check sees it
+  (`F3_ROWS` and `R3_ROWS` planted: both missed).
+- **Failure scenario:** the diff's § Testing sentence says no review-finding id appears in the suite, and the
+  gate is green while one does.
+- **Grading:** the reviewer graded it PLAUSIBLE, unable to see `spec/`. The orchestrator confirmed it from the
+  timeout-process-cleanup record, whose review cycle names that F3 for exactly these four settings. The code is
+  pre-existing; the false claim is this diff's.
+
+### Dropped
+
+- None. The exec request after a late reconnect (−1003, 17.1 s after the silence) is R3 and the cycle-2 F-B
+  ruling, unchanged by this diff; the reviewer did not raise it.
+
+### Human-gate triggers
+
+- None new. N1 touches § Invariants text, not a high-blast-radius path's behaviour.
+
+### Escalation
+
+This is cycle 3, the loop's last, without convergence. Per code-review Step 6, it goes to Geoffrey.
