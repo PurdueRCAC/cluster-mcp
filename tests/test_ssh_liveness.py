@@ -30,7 +30,7 @@ from typing import Any, Iterator
 import paramiko
 import pytest
 
-from cluster_mcp.core.executor import ssh
+from cluster_mcp.core.executor import Executor, ssh
 from cluster_mcp.core.executor.ssh import SSHExecutor
 from ssh_server import LOOPBACK, USER, LoopbackSSH, SilentLink, _key
 
@@ -526,6 +526,8 @@ TRANSFER_TEXT = (
 SECTION_2_TRANSFER = ('raises `ssh.TransferLost`', 'may be partly made', 'the staging directory named',
                       "`put`'s remote target, or `get`'s local file, may be truncated")
 README_TRANSFER = ('the transfer may be partly made', 'issues/ssh-write-staging-leftover.md')
+# What the Executor Protocol's `write`, `put` and `get` say, in their Raises, of a transfer cut short.
+PROTOCOL_TRANSFER = ('`ssh.TransferLost`', 'the transfer may be partly made')
 
 # The figures the README states, at the default bound.
 README_FIGURES = ('15 s of quiet', "15 s after a\ncall's start", '29 s after a background probe', '44.45 s',
@@ -550,6 +552,12 @@ def test_liveness_texts_state_the_monitor() -> None:
     assert missing == [], f'a text does not state what a transfer cut short raises and leaves: {missing}'
     section = ' '.join(_section(agents, '### 2. Executor Protocol', '### 3.').split())
     assert [part for part in SECTION_2_TRANSFER if part not in section] == [], 'AGENTS.md §2 does not state TransferLost'
+    protocol = {member: ' '.join((getattr(Executor, member).__doc__ or '').split()) for member in ('write', 'put', 'get')}
+    unstated = [member for member, doc in protocol.items()
+                if not all(part in doc[doc.find('Raises:'):] for part in PROTOCOL_TRANSFER)]
+    assert unstated == [], f'the Executor Protocol\'s Raises does not state a transfer cut short: {unstated}'
+    assert 'a lost connection is the one exception' in protocol['write'], \
+        "the Executor Protocol's write says a failed transfer leaves the target untouched, with no exception"
     readme = (root / 'README.md').read_text()
     assert [part for part in README_TRANSFER if part not in readme] == [], 'the README does not state a transfer cut short'
     assert ssh.TransferLost.__mro__[1] is ConnectionError

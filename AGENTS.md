@@ -1335,8 +1335,9 @@ import has no effect.
     Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
     included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
     it wakes starts no reconnect. The doc pin holds the `SSHExecutor` docstring, this file's
-    `executor/ssh.py` footgun and the README to the monitor's figures, and them and §2 to what a
-    transfer cut short raises and leaves.
+    `executor/ssh.py` footgun and the README to the monitor's figures, and them, §2 and the
+    `Executor` Protocol's `write`, `put` and `get` (their Raises name `ssh.TransferLost` and a
+    transfer that may be partly made) to what a transfer cut short raises and leaves.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
     installed `cluster-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
     exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the

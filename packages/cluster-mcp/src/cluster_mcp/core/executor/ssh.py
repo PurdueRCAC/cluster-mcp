@@ -1617,7 +1617,8 @@ class SSHExecutor:
             OSError: The content could not be staged (the target is a directory or a link whose
                 target's directory does not exist, its path passes through a loop of links
                 (`ELOOP`), its directory is missing or closed, a transfer
-                failed or fell short, with the reason); nothing was written.
+                failed or fell short, with the reason); nothing was written. A `TransferLost`,
+                below, is an `OSError` too, and promises nothing of the kind.
             TransferLost: The connection was lost once the SFTP session had opened: the transfer
                 may be partly made. The target is unchanged while the content is staged, and its
                 staging directory may remain; once the place step may have run, an overwrite is
@@ -1761,8 +1762,9 @@ class SSHExecutor:
         Raises:
             ConnectionError: The lost connection could not be re-established within the bound the
                 class states: `cannot connect to <host>: <cause>; nothing was transferred`.
-            TransferLost: The connection was lost once the SFTP session had opened: the remote
-                target may be truncated or hold part of the file.
+            TransferLost: A `ConnectionError` too, for a connection lost once the SFTP session had
+                opened: the transfer may be partly made, and the remote target may be truncated or
+                hold part of the file.
         """
         deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)
@@ -1798,8 +1800,9 @@ class SSHExecutor:
         Raises:
             ConnectionError: The lost connection could not be re-established within the bound the
                 class states: `cannot connect to <host>: <cause>; nothing was transferred`.
-            TransferLost: The connection was lost once the SFTP session had opened: the local file
-                may be truncated or hold part of the file.
+            TransferLost: A `ConnectionError` too, for a connection lost once the SFTP session had
+                opened: the transfer may be partly made, and the local file may be truncated or hold
+                part of the file.
         """
         deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)

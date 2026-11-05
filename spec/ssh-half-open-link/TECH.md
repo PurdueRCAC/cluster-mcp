@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_timeout_stop.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path.py both && uv run python -I spec/ssh-half-open-link/remediation/F4-starting-call-verdict.py both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -41,7 +41,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both
+  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
   status: in_progress
@@ -490,6 +490,39 @@ hold a concurrent call.
     right at the silence the upload had not yet filled the narrowed path, and a send went through.
     With the send buffer set to 8 MiB instead, as autotuning gives, it fails as on the runners.
     No Linux container runtime is available locally, so CI is the Linux check.
+- **Amended in review cycle 1's remediation (2026-11-05): F2.**
+  - **The class.** Every statement of the Protocol's error contract that promises nothing was written
+    or transferred, or names the exception types a lost transfer raises. Swept, every site:
+    - `executor/base.py`, `write`: its Raises promised "nothing was written" for every `OSError`,
+      and its body said a failed transfer leaves the target untouched; `put` and `get`: their Raises
+      named only the reconnect's `ConnectionError`, "nothing was transferred". Fixed: each Raises
+      names `ssh.TransferLost` and says the transfer may be partly made and what may remain, and
+      `write`'s body names the lost connection as the one exception. Docs only: §2 *[human gate]*,
+      the foreman's ruling as judge (REVIEW.md, Human-gate triggers) that this brings §2's
+      restatement in line with R2. No behaviour and no other member changed.
+    - `executor/ssh.py`, `write`: its `OSError` entry now says a `TransferLost` is one too and
+      promises nothing of the kind; `put` and `get`: their `TransferLost` entries say it is a
+      `ConnectionError` too, and that the transfer may be partly made.
+    - Checked and standing, unchanged: AGENTS.md §2 (states `TransferLost` for `write`, and for `put`
+      and `get`; its "raises `OSError` … and leaves the target untouched" names the staging failures
+      only), §3 (states no transfer contract), § Testing (its "nothing was transferred" and "target
+      untouched" are the reconnect failure's and those rows' own outcomes, both true); the README
+      (its "leaves the file untouched" is the failed transfer's, beside its statement of the lost
+      one); the tool docstrings and the served instructions (they state no contract, so the §9
+      surface pin does not move); `slurm/tools.py` (it wraps the error's own text).
+  - **Durable gate** (stated in AGENTS.md § Testing's `test_ssh_liveness.py` entry, this commit):
+    the doc pin (`test_liveness_texts_state_the_monitor`) now reads the Protocol's
+    `write`, `put` and `get` docstrings for `ssh.TransferLost` and "the transfer may be partly made"
+    in their Raises, and `write`'s exception: red on the reviewed Protocol text (`write`, `put` and
+    `get` all named), green after.
+  - **Checker:** `remediation/F2-transfer-contract.py`: every docstring in the shipped packages
+    that promises nothing was written or transferred states the lost transfer beside it; the
+    Protocol's three Raises; AGENTS.md §2 and §3. Red first on the reviewed tree, nine problems
+    (the three Protocol docstrings twice over, `write`'s body, and `ssh.py`'s `put` and `get`, which
+    named `TransferLost` without "partly made"); green after.
+  - **The gate** adds the checker, and runs `silent-gate.py` with `UV_PYTHON=3.14` (P1's attempt 2).
+    The phase changes no code; its gate is run on the tree P1's sender left, whose write commands
+    (the parent's `mkdir`, the place step) go through it.
 - **Verify:** the frontmatter's.
 - **Touches:** `core/executor/ssh.py`, `tests/ssh_server.py` (the place-step hook),
   `tests/test_ssh_exec.py`, `tests/test_ssh_liveness.py`, `tests/mutants.py`, `AGENTS.md`,
