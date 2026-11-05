@@ -154,6 +154,17 @@ dead or stuck remote end.
 *Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
 **Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: adopted:ssh-half-open-link*
 
+## A live link that delivers nothing for one connect bound reads as dead
+
+The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe has been out for
+one connect bound with nothing at all heard since. A live link on which nothing arrives for that
+long, such as an SFTP upload slower than about 2.2 KB/s, or a quiet command whose login node's
+SSH daemon stalls for 15 s, is cut and reported as lost. The floor is the price of a verdict inside the reconnect bound;
+a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
+
+*Horizon: later · Depends on: ssh-half-open-link · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*
+**Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
+
 ## A write whose host is lost after staging leaves its staging directory behind
 
 Over `ssh` a write stages its content in a fresh 0700 directory beside the target and removes it
