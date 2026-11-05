@@ -123,3 +123,90 @@ README paragraph; 45 `shol-*` mutation cases.
   foreman is judge at human gates. Ruling: the behaviour F2 documents is what GOAL R2 asks for
   (a transfer cut short says what may remain), so the fix brings §2's restatements into line with
   R2 and widens nothing. Reported to Geoffrey with this verdict.
+
+## Review cycle 2 — changes-requested (2026-11-05)
+
+- **Reviewed commit:** ac4909a8b01e21b90ff50432bf6645b621e6af3f · **Mode:** a fresh blind pass over the full
+  spec-excluded diff (the default), the debate variant again: two new reviewers who never saw cycle 1's findings.
+- **CI** run on the reviewed commit: both eras 4961 passed, `gate` green, on attempt 1.
+
+### Verification run
+
+- Both reviewers, in their own clones with `UV_PYTHON=3.14` (CI's interpreter): `test_ssh_liveness.py` +
+  `test_ssh_exec.py` 218 passed per era; the rest of the suite 4726 passed / 14 skipped (both eras for the ship
+  reviewer, handshake era for the block reviewer); `uv lock --check` passes; `bin/sandbox.sh uv run cluster-mcp
+  --help` exits 0.
+- Develop control (the head's tests on `9a32382`): 39–40 rows fail. The 34 behavioural failures read "still
+  waiting …". The others pass on develop or fail on a missing constant: R4 rows (develop doesn't misbehave
+  there), the timeout-first row, and `write_path[free]`.
+- Ship reviewer's own drive through `bin/sandbox.sh` against `SilentLink`:
+  - B = 3: reconnect 3.18 s; gone host −1002 at 9.00 s; `put`/`get` `TransferLost` at 8.19/8.10 s; −1003 at
+    7.86 s (stated 8.45 s); a beside call 3.15 s; a quiet command of 11 s finishes on one connection.
+  - B = 15: reconnect 15.22 s; `put` 44.16 s; −1003 at 43.81 s (stated 44.45 s).
+- Negative controls: 11 author mutants and 3 of the ship reviewer's own were killed by their target rows. One
+  plant survived and is equivalent: dropping the "answered" clear in `step()`, which `_verdict` already ignores
+  through `heard >= out`.
+- The block reviewer's probe rows (a reviewer-local file, not in the repo) cover the two cases below. Its other
+  candidates were dropped under refutation: a TERM queued behind EOF under contention still arrived and ran its
+  trap; `heard` was not starved by transport-thread sends (worst gap 3.46 s against a 5 s floor); Paramiko
+  3.2's internals match.
+
+### Requirement → evidence matrix
+
+| R-ID | Status | Note |
+|------|--------|------|
+| R1 | ❌ one path | F-A: a late reconnect onto a link that goes silent again ends past 3B |
+| R2 | ✅ | 9 shapes; develop fails all 9; `_cut→False` plant fails 4 rows |
+| R3 | ✅ | −1003 within 3B − 0.55; timeout-first −1001; F1's stalled-upload row |
+| R4 | ✅ | including the four beside-a-starting-call rows (cycle 1 F4) |
+| R5 | ✅ | `write_path[held]` fails on develop |
+| R6 | ✅ | the doc pin reads the Protocol's Raises (cycle 1 F2) |
+| R7 | ✅ | develop control above |
+
+Unmapped changes: none beyond those recorded in cycle 1.
+
+### Findings
+
+#### [HIGH/CONFIRMED] F-C — A cycle-scoped review-finding id in the suite
+- **Where:** `tests/mutants.py:5517`: `# Review cycle 1, F1: everything a call sends …`, added in `ac4909a`.
+- **Failure scenario:** the id points into this cycle's `spec/` record and collides with every other cycle's
+  F1. That is the reason § Conventions bans feature-scoped ids. The suite's own check
+  (`tests/test_hygiene.py:616`, `SPEC_ID = r'\b[RPQ][0-9]{1,2}\b'`) does not match F-numbers, so it passes.
+- **Evidence:** `git diff 9a32382 HEAD -- packages tests | grep '^+' | grep -E '\bF[0-9]+\b'` → that one line,
+  found by both reviewers. `git log -S"Review cycle 1, F1"` → `ac4909a`.
+- **Judge's reading:** a review finding id is feature-scoped by the rule's own reason, so this is a § Conventions
+  violation, HIGH under the rubric.
+
+#### [MEDIUM/CONFIRMED] F-A — A call that reconnects late onto a link that goes silent again outlives the bound
+- **Where:** `ssh.py:1503-1507` (the `run` retry loop) and `:1534` (`open_session(timeout=_open_timeout(…))`
+  under `_opening`); `_sftp` has the same shape. `_open_timeout` (`:718`) takes no account of the call's
+  deadline.
+- **Failure scenario:** a call starts on a silent link. The host refuses, then comes back just before the call's
+  last start, and the new link goes silent again (a flapping link). The open on the new transport waits for that
+  connection's own verdict, B after its poke, with no cap at the call's deadline.
+- **Evidence:** the block reviewer's probe uses `SilentLink`, `server.refuse()`, `serve_again()` and
+  `silent_after_handshake=True`, 0.4 s before the last start:
+  - B = 6: `exit=-1002 … ended 22.19 s after the call began …; reconnect bound 18 s`.
+  - B = 15: `ended 58.06 s …; reconnect bound 45 s`.
+  - `test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time` reconnects only early.
+  - AGENTS § Testing's sentence on it is broader than the code.
+- **Touches:** R1. Develop is worse here (it never notices the first silence), so this is incomplete, not a
+  regression.
+
+### Dropped
+
+- **F-B: a link that goes silent while the exec request is in flight** ends at the bound (−1003, 44.13 s at
+  B = 15, inside 3B), not at the call's own timeout. Dropped as consistent with the contract:
+  - §3 runs the ssh timeout "from the command's start", which the client knows only at the exec reply. Until
+    then the timeout has not begun, and the bound governs (GOAL Q6).
+  - Cycle 1's F1 differs: there the timeout had begun and another call's held write path delayed it.
+  - It cites R3's wording, so it is dropped, not deferred.
+
+### Human-gate triggers
+
+- None new: neither confirmed finding touches a high-blast-radius path. Cycle 1's F2 (`executor/base.py`, §2)
+  remains recorded, judged by the foreman under the autonomy decision.
+
+### Escalation
+
+This is cycle 2 without convergence. Per code-review Step 6, it goes to Geoffrey before a second remediation.
