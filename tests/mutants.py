@@ -875,7 +875,7 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_bash_runs_whatever_the_login_shell[zsh]',),
          'pinned interpreter'),
     Case('ssh-stdin-not-closed', 'core/executor/ssh.py',
-         (('                chan.shutdown_write()\n', '                pass\n'),),
+         (('            sends.eof()\n', '            pass\n'),),
          ('test_ssh_exec.py::test_stdin_is_empty_and_ends_at_once[bash]',),
          'EOF'),
     Case('ssh-drain-spins', 'core/executor/ssh.py',
@@ -895,9 +895,9 @@ CASES: tuple[Case, ...] = (
           'test_ssh_exec.py::test_a_startup_cd_does_not_move_the_start[zshenv]'),
          'a startup cd moved'),
     Case('content-on-stdin-over-ssh', 'core/executor/ssh.py',
-         (("                chan.shutdown_write()\n",
-           "                chan.sendall(SSHExecutor.content)\n                SSHExecutor.content = b''\n"
-           "                chan.shutdown_write()\n"),
+         (("            sends.eof()\n",
+           "            chan.sendall(SSHExecutor.content)\n            SSHExecutor.content = b''\n"
+           "            sends.eof()\n"),
           ("        if not path:\n            # As a shell's `>` with an empty name.\n",
            "        SSHExecutor.content = data\n"
            "        return self.run(launch.write_argv(path, append, parent, executable))\n"
@@ -907,14 +907,14 @@ CASES: tuple[Case, ...] = (
           'test_ssh_exec.py::test_a_remote_rc_never_reads_a_writes_content[bashrc]'),
          "content rode a command's stdin"),
     Case('ssh-timeout-no-drain', 'core/executor/ssh.py',
-         (('            _stopped(chan, out, err)\n', ''),),
+         (('            _stopped(chan, out, err, sends)\n', ''),),
          ('test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term',),
          'lost what followed the TERM'),
     # Over ssh the exit status comes ahead of output still queued on a slow link: the read goes on to
     # both end records however slowly they come, and a timeout before them names the status.
     Case('ssh-returns-at-exit-status', 'core/executor/ssh.py',
-         (('        _drain(chan, out, err)\n        if end is not None:\n',
-           '        _drain(chan, out, err)\n'
+         (('        _drain(chan, out, err, sends)\n        if end is not None:\n',
+           '        _drain(chan, out, err, sends)\n'
            "        if chan.exit_status_ready():\n"
            "            return bytes(out), bytes(err), chan.recv_exit_status(), b''\n"
            '        if end is not None:\n'),),
@@ -4690,7 +4690,7 @@ CASES += (
 # and delay changed, its `sleep` resolved through a profile, its descriptor renumbered, each stream
 # it must not hold kept; the prologue's posix mode, its turning builtins back on and the functions it
 # unsets dropped; the deadline's clock, comparison, value and refusal changed; the KILL request's
-# guard, the open-channel check under the channel's lock and the wait for a key exchange changed.
+# guard, the open-channel check under the connection's write path and the wait for a key exchange changed.
 # Each is killed by the rows that pin what the decision is for: the stop rows (`still running`), the
 # survival rows (a completed call's job stopped), the profile rows (a call that outlives `TMOUT`, or
 # a profile's shadows, cut short), the grace rows (the output printed while stopping lost, or a
@@ -4770,6 +4770,9 @@ KILL_ORDER = 'test_ssh_exec.py::test_a_timeout_asks_for_kill_after_its_grace'
 KILL_DRAINS = 'test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term'
 CLOSED_ASKED = 'test_ssh_exec.py::test_no_signal_is_asked_for_on_a_closed_channel'
 LOCK_HELD = 'test_ssh_exec.py::test_a_signal_request_goes_while_the_channel_is_held_open'
+CLOSED_AS_IT_WAITS = 'test_ssh_exec.py::test_a_signal_request_never_follows_a_close_made_as_it_waits'
+WRITE_PATH_HELD = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held]'
+WRITE_PATH_FREE = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[free]'
 KEY_EXCHANGE = 'test_ssh_exec.py::test_a_signal_request_waits_out_a_key_exchange'
 EXCHANGE_STARTS = 'test_ssh_exec.py::test_a_signal_request_never_goes_as_a_key_exchange_starts'
 GIVES_UP = tuple(f'test_ssh_exec.py::test_a_signal_request_gives_up_on_a_key_exchange[{kind}]'
@@ -4930,25 +4933,42 @@ SSH_PROGRAM = "        prog, marks = launch.program(command, cwd, start='home')\
 # Over `ssh`, the read after the TERM, bounded by GRACE.
 GRACE_READ = '    end = time.monotonic() + launch.GRACE\n'
 DEADLINE = '    deadline = None if timeout is None else time.time_ns() + math.ceil(timeout * 1e9)\n'
-# The KILL request at a timeout, between the TERM request and the return, unless the channel has ended.
-KILL_REQUEST = ("            _signal(chan, 'TERM')\n"
-                "            _stopped(chan, out, err)\n"
-                "            if not _ended(chan):\n"
-                "                _signal(chan, 'KILL')\n")
-TERM_LINE, GRACE_LINE, GUARD_LINE, GUARDED_KILL = KILL_REQUEST.splitlines(keepends=True)
-KILL_LINE = GUARD_LINE + GUARDED_KILL
-BARE_KILL = "            _signal(chan, 'KILL')\n"
-# `_signal`'s loop: the wait for a key exchange made without the channel's lock, then the
-# open-channel check and the send, holding it, only once the exchange has ended.
+# The stop at a timeout, as `_collect` hands it to the call's sender: the TERM, the GRACE read, then
+# the KILL, which the sender sends `GRACE` after the TERM went, unless the channel has ended by then.
+KILL_REQUEST = ("            sends.term()\n"
+                "            _stopped(chan, out, err, sends)\n"
+                "            sends.kill()\n")
+TERM_LINE, GRACE_LINE, KILL_LINE = KILL_REQUEST.splitlines(keepends=True)
+KILL_SENT = ("        if not _ended(self.chan):\n"
+             "            _signal(self.chan, 'KILL')\n")
+GUARD_LINE, GUARDED_KILL = KILL_SENT.splitlines(keepends=True)
+BARE_KILL = "        _signal(self.chan, 'KILL')\n"
+KILL_HELD = ("        if self._termed is not None:\n"
+             "            end = self._termed + launch.GRACE\n"
+             "            while not _ended(self.chan) and (left := end - time.monotonic()) > 0:\n"
+             "                time.sleep(min(SELECT_WAIT, left))\n")
+# `_signal`'s loop: the wait for a key exchange made holding no lock, then, holding the connection's
+# write path (`clear_to_send_lock`) and never the channel's lock, the open-channel check and the send,
+# only once the exchange has ended.
 SIGNAL_LOOP = ("        while transport.is_active() and time.monotonic() < give_up:\n"
                "            transport.clear_to_send.wait(SELECT_WAIT)\n")
-CHECKED = ("            with chan.lock:\n"
+CHECKED = ("            if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):\n"
+           "                continue\n"
+           "            try:\n"
            "                if chan.closed:\n"
            "                    return\n"
-           "                with transport.clear_to_send_lock:\n"
-           "                    if transport.clear_to_send.is_set():\n"
-           "                        transport._send_message(message)\n"
-           "                        return\n")
+           "                if transport.clear_to_send.is_set():\n"
+           "                    transport._send_message(message)\n"
+           "                    return\n"
+           "            finally:\n"
+           "                transport.clear_to_send_lock.release()\n")
+UNLOCKED = (CHECKED.replace("            if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):\n"
+                            "                continue\n", '')
+            .replace("                transport.clear_to_send_lock.release()\n", "                pass\n"))
+
+
+def kill_sent(*lines: str) -> tuple[tuple[str, str], ...]:
+    return ((KILL_SENT, ''.join(lines)),)
 
 
 def kill_request(*lines: str) -> tuple[tuple[str, str], ...]:
@@ -5161,82 +5181,81 @@ CASES += (
          (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
     Case('tpc-ssh-kill-dropped-unit', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE),
          (KILL_ORDER,), "['TERM']"),
-    Case('tpc-ssh-kill-before-term', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+    Case('tpc-ssh-kill-before-term', 'core/executor/ssh.py', kill_request(KILL_LINE, TERM_LINE, GRACE_LINE),
          (KILL_DRAINS, KILL_ORDER), "['KILL', 'TERM']"),
-    Case('tpc-ssh-kill-before-term-output', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+    Case('tpc-ssh-kill-before-term-output', 'core/executor/ssh.py', kill_request(KILL_LINE, TERM_LINE, GRACE_LINE),
          GRACE_KEPT[2:], OUTPUT_LOST),
+    # Handed over before the GRACE read, the KILL still goes GRACE after the TERM (the sender's wait),
+    # but that wait holds back the window adjusts the read owes, so a command that prints past the
+    # window as it stops is cut short. The grace rows print too little to tell, so both cases are
+    # killed by the row whose command does.
     Case('tpc-ssh-kill-before-grace', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
-         (KILL_ORDER,), 'before the GRACE read was over'),
+         (WRITE_PATH_FREE,), 'not all it printed'),
     Case('tpc-ssh-kill-before-grace-output', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
-         GRACE_KEPT[2:], OUTPUT_LOST),
+         (WRITE_PATH_FREE,), 'not all it printed'),
     *(Case(f'tpc-ssh-kill-{name.lower()}', 'core/executor/ssh.py',
-           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")),
+           kill_sent(GUARD_LINE, GUARDED_KILL.replace("'KILL'", f"'{name}'")),
            (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING) for name in SSH_NAMES),
     *(Case(f'tpc-ssh-kill-{name.lower()}-unit', 'core/executor/ssh.py',
-           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")), (KILL_ORDER,),
+           kill_sent(GUARD_LINE, GUARDED_KILL.replace("'KILL'", f"'{name}'")), (KILL_ORDER,),
            f"['TERM', '{name}']") for name in SSH_NAMES),
-    # Its guard: no KILL once the channel has ended (a command that died during the read), and one
-    # while the launch may be alive.
-    Case('tpc-ssh-kill-unguarded', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE, BARE_KILL),
+    # Its guard, at the send: no KILL once the channel has ended (a command that died during its
+    # grace), and one while the launch may be alive.
+    Case('tpc-ssh-kill-unguarded', 'core/executor/ssh.py', kill_sent(BARE_KILL),
          (KILL_DRAINS,), "['TERM', 'KILL']"),
     Case('tpc-ssh-kill-guard-inverted', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL), (KILL_ORDER,), "['TERM']"),
+         kill_sent('        if _ended(self.chan):\n', GUARDED_KILL), (KILL_ORDER,), "['TERM']"),
     Case('tpc-ssh-kill-guard-inverted-behaviour', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL),
+         kill_sent('        if _ended(self.chan):\n', GUARDED_KILL),
          (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
     Case('tpc-ssh-kill-guard-status', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if not chan.exit_status_ready():\n', GUARDED_KILL),
+         kill_sent('        if not self.chan.exit_status_ready():\n', GUARDED_KILL),
          (KILL_DRAINS,), "['TERM', 'KILL']"),
-    # `_signal` sends nothing on a closed channel, and checks and sends holding the channel's lock.
+    # `_signal` sends nothing on a closed channel, and checks and sends holding the connection's write
+    # path, never the channel's lock.
     Case('tpc-ssh-signal-unchecked', 'core/executor/ssh.py',
          ((CHECKED, CHECKED.replace('                if chan.closed:\n                    return\n', '')),),
          (CLOSED_ASKED,), CONNECTION_LOST),
     Case('tpc-ssh-signal-active-checked', 'core/executor/ssh.py',
          ((CHECKED, CHECKED.replace('if chan.closed:', 'if not chan.active:')),), (CLOSED_ASKED,), CONNECTION_LOST),
     Case('tpc-ssh-signal-unlocked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('with chan.lock:', 'if True:')),), (LOCK_HELD,), "holding the channel's lock"),
+         ((CHECKED, CHECKED.replace('if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):',
+                                    'if not chan.lock.acquire(timeout=SELECT_WAIT):')
+                    .replace('transport.clear_to_send_lock.release()', 'chan.lock.release()')),),
+         (LOCK_HELD,), 'holding the write path alone'),
     Case('tpc-ssh-signal-checked-then-sent', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '            with transport.clear_to_send_lock:\n'
-                                    '                if transport.clear_to_send.is_set():\n'
-                                    '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
-         (LOCK_HELD,), "holding the channel's lock"),
+         ((SIGNAL_LOOP + CHECKED, SIGNAL_LOOP.replace('        while transport.is_active()',
+                                                      '        while not chan.closed and transport.is_active()')
+           + CHECKED.replace('                if chan.closed:\n                    return\n', '')),),
+         (CLOSED_AS_IT_WAITS,), 'went after a close'),
     # ... and only once a key exchange has ended (RFC 4253 §7.1), waiting for it without the channel's
     # lock, for no longer than Paramiko's own bound, and not at all on a transport that has gone.
     Case('tpc-ssh-signal-no-key-exchange-wait', 'core/executor/ssh.py',
          ((SIGNAL_LOOP + CHECKED, SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
-           + CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                             '                    if transport.clear_to_send.is_set():\n'
-                             '                        transport._send_message(message)\n'
-                             '                        return\n',
+           + CHECKED.replace('                if transport.clear_to_send.is_set():\n'
+                             '                    transport._send_message(message)\n'
+                             '                    return\n',
                              '                transport._send_message(message)\n'
                              '                return\n')),),
          (KEY_EXCHANGE,), 'sent during the key exchange'),
     Case('tpc-ssh-signal-key-exchange-unchecked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
+         ((CHECKED, CHECKED.replace('                if transport.clear_to_send.is_set():\n'
                                     '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
+                                    '                    return\n',
+                                    '                transport._send_message(message)\n'
+                                    '                return\n')),),
          (KEY_EXCHANGE,), 'sent during the key exchange'),
     Case('tpc-ssh-signal-wait-locked', 'core/executor/ssh.py',
-         ((SIGNAL_LOOP + CHECKED,
-           SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
-           + CHECKED.replace('            with chan.lock:\n', '            with chan.lock:\n'
-                                                              '                transport.clear_to_send.wait(SELECT_WAIT)\n')),),
+         ((SIGNAL_LOOP, SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n',
+                                            '            with chan.lock:\n'
+                                            '                transport.clear_to_send.wait(SELECT_WAIT)\n')),),
          (KEY_EXCHANGE,), "held the channel's lock"),
     Case('tpc-ssh-signal-user-message', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '                transport._send_user_message(message)\n'
-                                    '                return\n')),),
-         (KEY_EXCHANGE,), "held the channel's lock"),
+         ((CHECKED, '            if chan.closed:\n'
+                    '                return\n'
+                    '            transport._send_user_message(message)\n'
+                    '            return\n'),),
+         (CLOSED_AS_IT_WAITS,), 'went after a close'),
     Case('tpc-ssh-signal-unbounded', 'core/executor/ssh.py',
          ((SIGNAL_LOOP, SIGNAL_LOOP.replace(' and time.monotonic() < give_up', '')),), GIVES_UP[:1], 'held its caller'),
     Case('tpc-ssh-signal-transport-unchecked', 'core/executor/ssh.py',
@@ -5276,14 +5295,7 @@ CASES += (
          NOT_RUN),
     # `_signal` checks that no key exchange runs and sends in one step under `clear_to_send_lock`, as
     # the transport thread starts one: without it, an exchange can start between the check and the send.
-    Case('tpc-ssh-signal-exchange-unlocked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '                if transport.clear_to_send.is_set():\n'
-                                    '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
+    Case('tpc-ssh-signal-exchange-unlocked', 'core/executor/ssh.py', ((CHECKED, UNLOCKED),),
          (EXCHANGE_STARTS,), 'sent as the key exchange started'),
 )
 

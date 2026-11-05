@@ -24,12 +24,13 @@ reads the closed connection as any lost one.
 
 # Type annotations
 from __future__ import annotations
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any, Final, Optional, Type
 from types import TracebackType
 
 # Standard libs
 import contextlib
+from collections import deque
 import errno
 import os
 import posixpath
@@ -43,8 +44,8 @@ import zlib
 
 # External libs
 from fabric import Config, Connection
-from paramiko import AuthFailure, SFTPClient, Transport
-from paramiko.common import cMSG_CHANNEL_REQUEST, cMSG_GLOBAL_REQUEST
+from paramiko import AuthFailure, Channel, SFTPClient, Transport
+from paramiko.common import cMSG_CHANNEL_REQUEST, cMSG_CHANNEL_WINDOW_ADJUST, cMSG_GLOBAL_REQUEST
 from paramiko.file import BufferedFile
 from paramiko.message import Message
 from paramiko.sftp import CMD_CLOSE
@@ -181,24 +182,21 @@ PROBE: Final = 'head -c 65536 </dev/zero >>"$1"'
 CLOSED: Final = (errno.EACCES, errno.EPERM)
 
 
-def _drain(chan: Any, out: bytearray, err: bytearray) -> None:
-    while chan.recv_ready():
-        out += chan.recv(CHUNK)
-    while chan.recv_stderr_ready():
-        err += chan.recv_stderr(CHUNK)
-
-
 def _signal(chan: Any, name: str) -> None:
     """Ask the server to deliver signal `name` to the command (RFC 4254 §6.9), on an open channel
-    only; best effort.
+    only; best effort. A call makes it through its sender (`_Sends`), never on its own thread.
 
-    The request never goes on a channel the client has closed or begun to close: OpenSSH answers a
-    request on a channel it has freed by dropping the connection (`server_input_channel_req`, "unknown
-    channel"), which every call and transfer shares. Paramiko marks a channel closed under the
-    channel's lock before it sends its own close, whether this side closes it or answers the server's,
-    so the check and the send are made holding that lock, and a close waits for the request to be on
-    the wire. The wait for a key exchange to finish is made without that lock, as Paramiko's own sends
-    make it, since its transport thread takes the lock to deliver what arrives meanwhile.
+    The request never goes on a channel that has closed or begun to close: OpenSSH answers a request
+    on a channel it has freed by dropping the connection (`server_input_channel_req`, "unknown
+    channel"), which every call and transfer shares. Paramiko marks a channel closed before it sends
+    its close, whether this side closes it or answers the server's, and sends that close through the
+    connection's write path (`clear_to_send_lock`), so the check and the send are made holding that
+    lock: a close marked after the check goes on the wire after the request. Neither takes the
+    channel's lock, which the call's reads and the transport thread's delivery take, so a request
+    waiting on the write path holds neither. The wait for a key exchange to finish, and for the write
+    path, is made a step at a time, as Paramiko's own sends make the first, and the request is
+    dropped once the transport has gone or Paramiko's own bound has passed
+    (`clear_to_send_timeout`).
 
     OpenSSH signals the session's whole process group, and only while the session's process (the
     program, which the bootstrap `exec`s into) lives: the program dies of a TERM, and its watchdog
@@ -217,15 +215,107 @@ def _signal(chan: Any, name: str) -> None:
         give_up = time.monotonic() + transport.clear_to_send_timeout
         while transport.is_active() and time.monotonic() < give_up:
             transport.clear_to_send.wait(SELECT_WAIT)
-            with chan.lock:
+            if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):
+                continue
+            try:
                 if chan.closed:
                     return
-                with transport.clear_to_send_lock:
-                    if transport.clear_to_send.is_set():
-                        transport._send_message(message)
-                        return
+                if transport.clear_to_send.is_set():
+                    transport._send_message(message)
+                    return
+            finally:
+                transport.clear_to_send_lock.release()
     except Exception:
         pass
+
+
+class _Sends:
+    """What a call sends on its channel once its exec request is answered, made in order on a thread
+    of its own (`cluster-mcp-send`), never on the call's.
+
+    Every send waits on the connection's one write path, `clear_to_send_lock` and then the socket,
+    which another call can hold for as long as its own send is stuck: an upload on a link gone silent
+    holds it until the liveness monitor's verdict, a slow live one for as long as a packet takes to
+    leave. So the end of stdin, the window adjusts the call's reads owe the server, the TERM and the
+    KILL at a deadline, and the close are handed here in the order the call makes them, and the call
+    waits for them only until its own end (`wait`). The thread starts with the first send and ends
+    once none is left. A send on a transport that has closed fails at once, and is dropped.
+    """
+
+    def __init__(self, chan: Any) -> None:
+        self.chan = chan
+        self._queue: deque[Callable[[], None]] = deque()
+        self._lock = threading.Lock()
+        self._idle = threading.Event()
+        self._idle.set()
+        # When the TERM went, once it has.
+        self._termed: float | None = None
+
+    def eof(self) -> None:
+        """The end of the command's stdin."""
+        self._put(self.chan.shutdown_write)
+
+    def adjust(self, size: int) -> None:
+        """A window adjust of `size` bytes, owed for what the call has read."""
+        message = Message()
+        message.add_byte(cMSG_CHANNEL_WINDOW_ADJUST)
+        message.add_int(self.chan.remote_chanid)
+        message.add_int(size)
+        self._put(lambda: self.chan.transport._send_user_message(message))
+
+    def term(self) -> None:
+        """The TERM request at a deadline (`_signal`)."""
+        self._put(self._term)
+
+    def kill(self) -> None:
+        """The KILL request, `GRACE` after the TERM went and only to a channel that has not ended by
+        then: a TERM that waited on the write path still gets its whole grace."""
+        self._put(self._kill)
+
+    def close(self) -> None:
+        """The channel's close, after everything handed over before it."""
+        self._put(self.chan.close)
+
+    def wait(self, until: float | None) -> None:
+        """Wait until every send handed over has been made or dropped, or until `until` (on the
+        monotonic clock; None waits for them all)."""
+        self._idle.wait(None if until is None else max(0.0, until - time.monotonic()))
+
+    def _term(self) -> None:
+        _signal(self.chan, 'TERM')
+        self._termed = time.monotonic()
+
+    def _kill(self) -> None:
+        if self._termed is not None:
+            end = self._termed + launch.GRACE
+            while not _ended(self.chan) and (left := end - time.monotonic()) > 0:
+                time.sleep(min(SELECT_WAIT, left))
+        if not _ended(self.chan):
+            _signal(self.chan, 'KILL')
+
+    def _put(self, send: Callable[[], None]) -> None:
+        with self._lock:
+            self._queue.append(send)
+            if not self._idle.is_set():
+                return
+            self._idle.clear()
+        try:
+            threading.Thread(target=self._sending, name='cluster-mcp-send', daemon=True).start()
+        except RuntimeError:
+            # A process out of threads sends on the call's own thread, as before there was a sender.
+            self._sending()
+
+    def _sending(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue:
+                    self._idle.set()
+                    return
+                send = self._queue.popleft()
+            try:
+                send()
+            except Exception:
+                pass
 
 
 def _ended(chan: Any) -> bool:
@@ -242,6 +332,26 @@ def _lost(chan: Any) -> bool:
     return chan.closed and not chan.eof_received
 
 
+def _take(chan: Any, stderr: bool, sends: _Sends) -> bytes:
+    """What `chan` holds on one stream, read as Paramiko's `recv` reads it, with the window adjust
+    that read can owe the server handed to `sends`: `recv` would send it on the caller's thread. Any
+    other channel object (a test's) is read by its own `recv`."""
+    if not isinstance(chan, Channel):
+        return chan.recv_stderr(CHUNK) if stderr else chan.recv(CHUNK)
+    data = (chan.in_stderr_buffer if stderr else chan.in_buffer).read(CHUNK)
+    owed = chan._check_add_window(len(data))
+    if owed > 0:
+        sends.adjust(owed)
+    return data
+
+
+def _drain(chan: Any, out: bytearray, err: bytearray, sends: _Sends) -> None:
+    while chan.recv_ready():
+        out += _take(chan, False, sends)
+    while chan.recv_stderr_ready():
+        err += _take(chan, True, sends)
+
+
 def _wait(chan: Any, left: float | None) -> None:
     """Wait for more from the channel, at most `left` seconds, without spinning.
 
@@ -255,18 +365,19 @@ def _wait(chan: Any, left: float | None) -> None:
         select.select([chan], [], [], SELECT_WAIT if left is None else min(SELECT_WAIT, left))
 
 
-def _stopped(chan: Any, out: bytearray, err: bytearray) -> None:
+def _stopped(chan: Any, out: bytearray, err: bytearray, sends: _Sends) -> None:
     """After the TERM at a deadline: keep reading what the command prints as it stops, for `GRACE`."""
     end = time.monotonic() + launch.GRACE
     while True:
-        _drain(chan, out, err)
+        _drain(chan, out, err, sends)
         left = end - time.monotonic()
         if _ended(chan) or left <= 0:
             return
         _wait(chan, left)
 
 
-def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tuple[bytes, bytes, int, bytes]:
+def _collect(chan: Any, timeout: float | None, end: bytes | None = None,
+             sends: _Sends | None = None) -> tuple[bytes, bytes, int, bytes]:
     """Read the channel's stdout and stderr until both have carried their end record; return them,
     the status and a note.
 
@@ -279,19 +390,25 @@ def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tupl
     `CONNECTION_LOST_EXIT_CODE` with `launch.LOST_NOTE`: the command may have run. At the deadline the code is
     `TIMEOUT_EXIT_CODE`: a command whose exit status has arrived is asked nothing and the note
     (`launch.LATE_NOTE`) names that status; otherwise the command is asked to TERM, what it prints
-    as it stops is read for `GRACE`, and then, unless the channel has ended meanwhile (closed, or its
-    output and exit status both in: the launch has exited), it is asked to KILL, which adds no wait;
-    `_signal` sends nothing on a channel that has closed. sshd acts on the KILL only while the launch
-    lives, which after that read means its program ignored TERM from its entry; otherwise it refuses
-    it, and the program's watchdog stops the group. The status beside complete
-    output is the channel's if it has arrived, else -1, as Paramiko reports a signal death or a lost
-    status; the record is the command's.
+    as it stops is read for `GRACE`, and then the KILL is handed over, which adds no wait: it goes
+    `GRACE` after the TERM went, unless the channel has ended by then (closed, or its output and exit
+    status both in: the launch has exited); `_signal` sends nothing on a channel that has closed. sshd
+    acts on the KILL only while the launch lives, which after that read means its program ignored
+    TERM from its entry; otherwise it refuses it, and the program's watchdog stops the group. The
+    status beside complete output is the channel's if it has arrived, else -1, as Paramiko reports a
+    signal death or a lost status; the record is the command's.
+
+    Nothing here sends on the connection: the window adjusts the reads owe, the TERM and the KILL
+    go through the call's sender (`sends`, a fresh one when none is given), so no other call holding
+    the connection's write path holds this one past its deadline. The KILL is handed over only after
+    the `GRACE` read, so its wait never holds back an adjust the read owes.
     """
+    sends = _Sends(chan) if sends is None else sends
     out, err = bytearray(), bytearray()
     deadline = None if timeout is None else time.monotonic() + timeout
     scanned = [0, 0]
     while True:
-        _drain(chan, out, err)
+        _drain(chan, out, err, sends)
         if end is not None:
             for i, buf in enumerate((out, err)):
                 if scanned[i] >= 0:
@@ -300,7 +417,7 @@ def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tupl
             if scanned == [-1, -1]:
                 return bytes(out), bytes(err), chan.recv_exit_status() if chan.exit_status_ready() else -1, b''
         if _ended(chan):
-            _drain(chan, out, err)
+            _drain(chan, out, err, sends)
             if _lost(chan) and not (end is not None and launch.record(out, end) and launch.record(err, end)):
                 return bytes(out), bytes(err), CONNECTION_LOST_EXIT_CODE, launch.LOST_NOTE
             return bytes(out), bytes(err), chan.recv_exit_status(), b''
@@ -309,10 +426,9 @@ def _collect(chan: Any, timeout: float | None, end: bytes | None = None) -> tupl
             if chan.exit_status_ready():
                 note = launch.LATE_NOTE.format(code=chan.recv_exit_status()).encode()
                 return bytes(out), bytes(err), TIMEOUT_EXIT_CODE, note
-            _signal(chan, 'TERM')
-            _stopped(chan, out, err)
-            if not _ended(chan):
-                _signal(chan, 'KILL')
+            sends.term()
+            _stopped(chan, out, err, sends)
+            sends.kill()
             return bytes(out), bytes(err), TIMEOUT_EXIT_CODE, b''
         _wait(chan, None if deadline is None else deadline - now)
 
@@ -1037,7 +1153,11 @@ class SSHExecutor:
     every wait on it ends: a channel open that fails on a lost connection has sent nothing, so the
     call reconnects within its deadline; from the exec request on nothing is retried, and a command
     cut short returns `CONNECTION_LOST_EXIT_CODE`, with or without a timeout, unless its own timeout
-    came first. Nothing merely quiet is cut, since any message proves the link live, while the peer
+    came first. That timeout holds whatever another call holds on the connection: nothing a call sends
+    once its exec request is answered (the end of stdin, the window adjusts its reads owe, the TERM
+    and KILL at a deadline, the close) waits on the call's own thread for the connection's write
+    path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing
+    merely quiet is cut, since any message proves the link live, while the peer
     answers within the background verdict: at the default bound, a quiet command survives the peer
     answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
     44 s.
@@ -1401,6 +1521,13 @@ class SSHExecutor:
         files run can read anything from it. A connection lost once the request has gone returns
         `CONNECTION_LOST_EXIT_CODE`: the command may have run. A request that fails while the
         connection stays up (`SETTLE` after the failure) was refused: it raises.
+
+        Once the request is answered, everything the call sends (the end of stdin, the window
+        adjusts, the TERM and KILL at a deadline, the close) goes through its sender (`_Sends`), and
+        the call waits for those sends no later than its timeout and `GRACE`, so another call
+        holding the connection's write path never holds this one past its own timeout. With no
+        timeout it waits for them, as long as the path is held: on a dead link, until the liveness
+        monitor's verdict closes it.
         """
         try:
             with _opening(transport):
@@ -1409,10 +1536,11 @@ class SSHExecutor:
             if self._closed or not _gone(transport):
                 raise
             return None
+        sends = _Sends(chan)
+        until = None
         try:
             try:
                 chan.exec_command(wire)
-                chan.shutdown_write()
             except (SSHException, EOFError, OSError):
                 # Refused by a live server, the command never ran; but once the request has gone on a
                 # connection that is then lost, it may have. The transport is first let finish closing:
@@ -1421,9 +1549,13 @@ class SSHExecutor:
                 if transport.is_active():
                     raise
                 return b'', b'', CONNECTION_LOST_EXIT_CODE, launch.LOST_NOTE
-            return _collect(chan, timeout, end)
+            sends.eof()
+            if timeout is not None:
+                until = time.monotonic() + timeout + launch.GRACE
+            return _collect(chan, timeout, end, sends)
         finally:
-            chan.close()
+            sends.close()
+            sends.wait(until)
 
     def _sftp(self, deadline: float) -> tuple[Transport, SFTPClient] | str:
         """A transport and an SFTP session open on it, reconnecting no later than `deadline`; or, on

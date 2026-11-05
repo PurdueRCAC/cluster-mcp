@@ -1160,9 +1160,16 @@ import has no effect.
     a command whose records have not come by the deadline is a timeout naming its status, a lost
     status stays `-1`, what the command prints after the TERM at a deadline is read, and KILL is
     asked for after the TERM, only once `GRACE` has been read and only on a channel that has not
-    ended (one that closed during the read gets TERM alone); against the loopback server, a `signal` request on
+    ended (one that closed during the read gets TERM alone); a `signal` request waits out a key
+    exchange holding no lock, gives up at Paramiko's bound, and never follows a close marked while it
+    waited for the write path; against the loopback server, a `signal` request on
     a channel both sides have closed is never sent, so the connection serves the next call, and one
-    on an open channel is written holding the channel's lock; an oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
+    on an open channel is written holding the connection's write path and not the channel's lock;
+    a timed call whose write path another sender takes as its exec request is answered returns at its
+    timeout and `GRACE` with all it read, owing its EOF, window adjust, TERM, KILL and close, and once
+    the path is free the TERM reaches the command and the KILL comes `GRACE` after it; with the path
+    free, all a command prints past the channel's window as it stops is read, and it ends before any
+    KILL (`test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held|free]`); an oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
     a published connection that has gone dead, with Fabric's `Connection` scripted or built for
     real with its `open()` stubbed, under a fake clock (`ssh.time`, and `ssh._await` for the wait
     on an attempt) that only a calling thread moves and that raises `Runaway` past twice the bound,
@@ -1272,7 +1279,18 @@ import has no effect.
     the host back before the verdict it is lost and never sent again
     (`test_a_command_cut_by_a_silent_link_is_never_run_twice[run|sbatch-path]`). A call beside a
     stalled command ends within 3 s of its start, the stalled one with it
-    (`test_a_call_beside_a_command_on_a_silent_link_ends_in_time`). Nothing quiet is cut: a
+    (`test_a_call_beside_a_command_on_a_silent_link_ends_in_time`). A call that starts while the
+    link is silent judges it at its own verdict, B after its start, and that verdict covers the work
+    already in flight: with the link answering again 1 s into the call (B/2), a quiet command and a
+    4 MiB upload stalled at its first write each finish whole beside it on one connection; answering
+    2.8 s in, past the call's verdict but inside the 3 s a background probe would wait, the command
+    is lost and the upload cut within 3 s of the silence, and the call completes on a new connection
+    (`test_a_quiet_command_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`,
+    `test_a_slow_transfer_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`).
+    A command whose own timeout comes while an upload stalled on the silent link holds the write
+    path, under a 3 s connect bound so the verdict comes well after, returns `-1001` at its timeout
+    and `GRACE` (`test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout`).
+    Nothing quiet is cut: a
     connection idle past the bound serves the next call
     (`test_an_idle_connection_is_not_taken_for_a_silent_link`), a command silent past it, or
     trickling its output through a 32 KiB/s hop for longer, gives its whole result on the same
@@ -2017,7 +2035,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   every wait on it ends: a channel open that fails on a lost connection has sent nothing, so the
   call reconnects within its deadline; from the exec request on nothing is retried, and a command
   cut short returns `CONNECTION_LOST_EXIT_CODE`, with or without a timeout, unless its own timeout
-  came first. Nothing merely quiet is cut, since any message proves the link live, while the peer
+  came first. That timeout holds whatever another call holds on the connection: nothing a call sends
+  once its exec request is answered (the end of stdin, the window adjusts its reads owe, the TERM
+  and KILL at a deadline, the close) waits on the call's own thread for the connection's write
+  path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing merely quiet is cut, since any message proves the link live, while the peer
   answers within the background verdict: at the default bound, a quiet command survives the peer
   answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
   44 s. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
@@ -2054,15 +2075,23 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   send no stdin and its EOF at once; wait without spinning; read to both end records, never stopping
   at the exit status (sshd sends it ahead of output still queued on the link); and at the deadline
   return the timeout marker rather than raise, naming an exit status that had arrived
-  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM and then asking for KILL unless
-  the channel has ended (sshd acts on it only while the launch lives: a TERM ignored from the
-  launch's entry; never before the read, which would cut short what a stopping command prints),
+  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM and then handing over the KILL,
+  which goes `GRACE` after the TERM went unless the channel has ended by then (sshd acts on it only
+  while the launch lives: a TERM ignored from the launch's entry; never handed over before the read,
+  whose window adjusts its wait would hold back, cutting short what a stopping command prints),
   never sending a `signal` request on a channel the client has closed or begun to close (sshd drops
-  the connection for one on a channel it has freed; `_signal` checks and sends holding the channel's
-  lock, and waits for a key exchange without it, as Paramiko does, for no longer than Paramiko's own
-  bound), and report a channel that closed
+  the connection for one on a channel it has freed; `_signal` checks and sends holding the
+  connection's write path, `clear_to_send_lock`, through which Paramiko sends every close, never the
+  channel's lock, which the call's reads and the transport thread take; it waits for a key exchange
+  and for the path a step at a time, as Paramiko does, for no longer than Paramiko's own bound), and
+  report a channel that closed
   without its end of output as a lost connection (`CONNECTION_LOST_EXIT_CODE`), never as a command
-  that did not start; `write`, which stages content by SFTP as a 0600 file in a fresh 0700
+  that did not start; the call's sender (`_Sends`, a `cluster-mcp-send` thread per call, started
+  with its first send and ended with its last), which makes every send of a call once its exec
+  request is answered (the EOF, the window adjusts its reads owe, read from Paramiko's buffers by
+  `_take` since `recv` would send them on the caller's thread, the TERM, the KILL and the close), in
+  order, so another call holding the write path never holds this one past its timeout and `GRACE`
+  (with no timeout, the call waits for its sends: on a dead link, until the verdict); `write`, which stages content by SFTP as a 0600 file in a fresh 0700
   directory beside the target, with no pipelined writes and a checked close (`_upload`, `_close`:
   Paramiko 5 drops both reports otherwise), checks its size and `cksum`, has a fixed program
   refuse an unwritable target and move the file into place (keeping the target's mode but setuid
@@ -2434,13 +2463,17 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   no startup file's `TMOUT` (readonly or not), disabled `read`, or function named like a builtin or a
   path the launch runs that the prologue undoes makes it signal a command that has not reached its
   deadline, or has no timeout. Over `ssh` the client asks for
-  TERM, reads for `GRACE`, then, unless the channel has ended meanwhile (closed, or its output and
-  exit status both in), asks for KILL, and closes the channel (`_collect`); the KILL adds no wait. No `signal` request goes on a channel the client
+  TERM, reads for `GRACE`, then hands over the KILL, which goes `GRACE` after the TERM went unless
+  the channel has ended by then (closed, or its output and exit status both in), and closes the
+  channel (`_collect`); the KILL adds no wait. These requests, like everything a call sends once its
+  exec request is answered, go through the call's sender (`ssh._Sends`), never on its own thread, so
+  the call returns at its timeout and `GRACE` whatever another call holds on the connection's write
+  path; a TERM that waited on that path still gets its whole `GRACE` before the KILL. No `signal` request goes on a channel the client
   has closed or begun to close: sshd answers a request on a channel it has freed by dropping the
   connection, which every call and transfer shares, so `_signal` checks and sends holding the
-  channel's lock, under which Paramiko marks a channel closed before it sends its own close; and none
-  goes during a key exchange (RFC 4253 §7.1): `_signal` waits for it to end without that lock, for
-  no longer than Paramiko's own bound. sshd
+  connection's write path (`clear_to_send_lock`), through which Paramiko sends a channel's close
+  after it marks the channel closed; and none goes during a key exchange (RFC 4253 §7.1): `_signal`
+  waits for it to end holding no lock, for no longer than Paramiko's own bound. sshd
   acts on the KILL only while the launch lives, which after the read means the program ignored TERM
   from its entry (the remote login shell's own rc file, `.bashrc` for a bash login shell or
   `.zshenv`, ignored it before the bootstrap ran, and bash cannot undo an ignore it started with),

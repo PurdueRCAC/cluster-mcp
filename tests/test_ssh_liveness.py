@@ -501,7 +501,11 @@ LIVENESS_TEXT = (
     "closes the connection's transports, the outermost gateway hop first, and every wait on it ends: a channel "
     'open that fails on a lost connection has sent nothing, so the call reconnects within its deadline; from the '
     'exec request on nothing is retried, and a command cut short returns `CONNECTION_LOST_EXIT_CODE`, with or '
-    'without a timeout, unless its own timeout came first. Nothing merely quiet is cut, since any message proves '
+    'without a timeout, unless its own timeout came first. That timeout holds whatever another call holds on the '
+    'connection: nothing a call sends once its exec request is answered (the end of stdin, the window adjusts its '
+    "reads owe, the TERM and KILL at a deadline, the close) waits on the call's own thread for the connection's "
+    'write path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing merely '
+    'quiet is cut, since any message proves '
     'the link live, while the peer answers within the background verdict: at the default bound, a quiet command '
     'survives the peer answering nothing for 29 s after a probe, and a transfer while some reply arrives at least '
     'every 44 s.')

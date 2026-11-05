@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -23,11 +23,11 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 1
-  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both
+  attempts: 2
+  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_timeout_stop.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path.py both && uv run python -I spec/ssh-half-open-link/remediation/F4-starting-call-verdict.py both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -44,7 +44,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -311,6 +311,88 @@ develop.
     P1's `verify:` and P3's run the wrapper in place of the bare gate wherever they run
     `commands` rows (P3's `all both`). P2's `transfers both` holds no such row, and keeps the bare
     gate.
+- **Amended in review cycle 1's remediation (2026-11-05): F1 and F4.**
+  - **F1, the class.** The finding's instance was `_signal` (`ssh.py:223` at `b09a991`) taking
+    `clear_to_send_lock` with no bound at a command's timeout, so an upload stalled on the silent
+    link held the call until the verdict. The class, as routed: every send a call's own path makes
+    on the shared transport once its own deadline is running, or after a loss. Swept, every site:
+    - **TERM at the deadline** (`_collect` → `_signal`): fixed, through the call's sender.
+    - **KILL after `GRACE`** (`_collect` → `_signal`): fixed, through the sender, which sends it
+      `GRACE` after the TERM went and only to a channel that has not ended by then (the guard moved
+      from `_collect` to the send, so a TERM that waited on the path keeps its grace).
+    - **`_signal`'s lock order**: it waited for the write path holding the channel's lock, which
+      the call's own reads (`fileno`, `_check_add_window`) and the transport thread's delivery take,
+      so even off the call's thread it would have held the call, and stopped the transport thread
+      reading (a live link could then meet its verdict). Fixed: it checks and sends holding the write
+      path alone, waiting for it a step at a time; Paramiko sends every channel close through that
+      path after it marks the channel closed, so a close marked as the request waits goes first.
+    - **The channel close** (`_exec`'s `finally`): fixed, through the sender.
+    - **The end of stdin** (`_exec`'s `shutdown_write`, after the exec request): fixed, through the
+      sender. It blocked before the timeout's clock started, so a held path pushed the whole timeout
+      back.
+    - **Window adjusts** (Paramiko's `recv` and `recv_stderr` send them on the caller's thread, in
+      `_drain`, before and after the deadline): fixed, `_take` reads Paramiko's buffers and hands the
+      adjust to the sender.
+    - Not in the class, recorded: the exec request itself and the channel open (before the
+      command is sent: its timeout has not begun, "it bounds the command once it has been sent";
+      the verdict bounds them on a dead link, R1 and R5); every SFTP send, `_sftp`'s close after a
+      failed step and `_discard` (a transfer has no timeout of its own: the verdict bounds it on a
+      dead link, R2, and a live one runs to its end, R4); every send after a loss (the transport is
+      closed or inactive, so Paramiko drops it, and one blocked behind the stalled holder fails when
+      the close fails that holder's write); the liveness monitor's probe (counted from hand-over).
+  - **The rule.** `ssh._Sends`, one per call, makes everything the call sends once its exec request
+    is answered (the EOF, the window adjusts, the TERM, the KILL, the close), in order, on a
+    `cluster-mcp-send` thread started with its first send and ended with its last. The call waits
+    for its sends until its timeout and `GRACE` (with none, until they are made: on a dead link the
+    verdict). The KILL is handed over after the `GRACE` read, so its wait never holds back an adjust
+    the read owes.
+  - **Rows**, red first on `b09a991`'s code (this tree's tests, the product as reviewed), legacy era:
+    - `test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout` (3 s
+      connect bound, so the verdict comes 8 s after the silence; timeout 3 s): red, `still waiting
+      4.6 s after the link went silent at upload, allowed 3.59 s and 1.0 s of slack`. Green here.
+    - `test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held]`: another sender takes
+      `clear_to_send_lock` as the exec request is answered and keeps it past the timeout; the call
+      returns at its timeout and `GRACE` with all 600,000 bytes it read; once the path is free, the
+      TERM reaches the command and the KILL comes `GRACE` after it. Red, `held: still waiting 3.0 s
+      after the call began`. `[free]`, the completeness side: the TERM reaches the command at once,
+      all 2,500,000 bytes it prints as it stops (past the 2 MiB window) are read, and no KILL is
+      asked for. Green on both (`b09a991` meets it; its teeth are `tpc-ssh-kill-before-grace`).
+    - `test_a_signal_request_never_follows_a_close_made_as_it_waits` (unit): the open-channel check
+      is made holding the path. `test_a_signal_request_goes_while_the_channel_is_held_open` now
+      asserts the write path held and the channel's lock not held at the send.
+  - **Re-planted** (their anchors moved into the sender, their decisions unchanged): the 37 cases
+    `F1-send-path.py` names. `tpc-ssh-kill-before-grace` and `-output` (the KILL handed over before
+    the read) now target `…write_path_another_call_holds[free]`: with the sender's wait the KILL still
+    comes `GRACE` after the TERM, and only a command printing past the window as it stops tells the
+    two apart. `tpc-ssh-signal-unlocked` plants the channel's lock in place of the write path;
+    `-checked-then-sent` and `-user-message` check the channel outside the path, killed by the new
+    unit row. All 37 killed, legacy, before the gate.
+  - **F4.** `test_a_quiet_command_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`
+    and `test_a_slow_transfer_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`:
+    the link goes silent under a quiet command, or under a 4 MiB upload at its first write, a call
+    starts beside it, and the held connection answers 1 s in (within the call's verdict: both finish
+    on one connection) or 2.8 s in (past it, inside the 3 s a background probe waits: the work is
+    cut within 3 s of the silence, and the call completes on a new connection). The rows pass on
+    `b09a991`, which meets R4's third case; `F4-starting-call-verdict.py` shows their teeth by
+    planting `shol-poke-verdict-zero`'s edit (fails both `answered` rows) and
+    `shol-poke-verdict-background`'s (fails both `unanswered` rows). Both rows sit in P1, the
+    transfer one too: the verdict they pin is the monitor's.
+  - **Documents** (R6, this commit): the footgun (the silent link's R3 sentence, the channel loop,
+    the sender), §3 (the stop over `ssh`), § Testing, the `SSHExecutor`, `_signal`, `_collect` and
+    `_exec` docstrings, and the doc pin (`LIVENESS_TEXT`, word for word).
+  - **Checkers** in `remediation/`: `F1-send-path.py` (the call path makes no send of its own, by
+    its syntax tree; the rows; the 37 re-planted cases killed, per era) and
+    `F4-starting-call-verdict.py`. The static part was seen red on six planted sites: the TERM, the
+    EOF, the close and an adjust made inline, `_take`'s branch dropped, and `_signal` taking the
+    channel's lock. `open-timeout-gate.py` is unchanged.
+  - **Attempt 2: the gate's develop copy pinned to Python 3.14.** The first run of the retuned gate
+    was red outside this phase's work: every row passed on this tree in both eras, but the frozen
+    gate's develop copy, synced fresh, chose CPython 3.15.2, which appeared on the host at 07:06
+    today, and no wheel or build of its dependencies exists for it (`rpds-py`'s `pyo3` refused to
+    build, and a `cryptography` cp315 wheel waited out uv's cache lock), so none of its rows ran.
+    `requires-python` is `>=3.14`, this tree's environment and CI's both run 3.14, and the gate
+    copies its caller's environment, so the step now runs with `UV_PYTHON=3.14`. The frozen gate
+    itself is unchanged; P2's `silent-gate.py` and P3's every-tool run take the same setting.
 - **Verify:** the frontmatter's. `silent-gate.py commands both` requires every P1 row to pass here
   in both eras, and on develop's `packages/` every "fails" row to fail with `still waiting` and
   every "passes" row to pass.

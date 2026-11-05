@@ -27,10 +27,13 @@ The `unit` rows drive the channel loop (`_collect`) with a fake channel: an exit
 before the end of output is waited on, not spun on, and decides nothing; the read ends at both end
 records; a command whose records have not come by the deadline is a timeout, naming its status if
 that has arrived; what a command prints after the TERM at its deadline is read; and the command is
-asked to KILL once that read is over, never before, and only if its channel has not ended. Against
-the loopback server, which drops the connection for a message on a channel it has freed, as sshd
-does, no `signal` request goes on a closed channel, and one on an open channel is written holding
-the channel's lock. An exec string
+asked to KILL once that read is over, never before, and only if its channel has not ended. A
+`signal` request waits out a key exchange holding no lock and never follows a close marked while it
+waited for the write path. Against the loopback server, which drops the connection for a message on
+a channel it has freed, as sshd does, no `signal` request goes on a closed channel, and one on an
+open channel is written holding the connection's write path, not the channel's lock; a timed call
+returns at its timeout whatever another sender holds on that path, and the TERM still reaches its
+command once the path is free. An exec string
 over the per-argument limit is refused before connecting.
 
 The `unit` reconnect rows start from a published connection that has gone dead, under a fake clock
@@ -61,9 +64,12 @@ closing a socket (`SilentLink`), under a 2 s connect bound, each call under a wa
 the moment the link went silent: a call that starts on a silent link reconnects, or with the host
 gone reads as nothing run, within the reconnect bound, a reconnect that goes silent once made
 included; a command running as the link goes silent is lost (`-1003`), with or without a timeout,
-unless its timeout comes first, and is never sent twice; a call beside a stalled one ends in time,
-and ends the stalled one; and an idle connection, a quiet command, one trickling its output through
-a slow hop, and one through a silent spell shorter than a background verdict are never cut.
+unless its timeout comes first, even beside an upload holding the write path, and is never sent
+twice; a call beside a stalled one ends in time, and ends the stalled one; a call that starts while
+the link is silent gives a quiet command or an upload beside it its own verdict, which they ride out
+when the link answers within it and are cut past it; and an idle connection, a quiet command, one
+trickling its output through a slow hop, and one through a silent spell shorter than a background
+verdict are never cut.
 """
 
 from __future__ import annotations
@@ -3042,6 +3048,55 @@ def test_a_call_beside_a_command_on_a_silent_link_ends_in_time(silenced: Callabl
                               'call began:\n' + '\n'.join(violations))
 
 
+# When the link answers again after a call starts beside quiet work: within that call's verdict (B
+# after its start), or past it and still inside a background probe's (2B less the margin), which
+# the work would ride out alone. The quiet command outlasts both.
+ANSWERS = {'answered': SILENT_BOUND / 2, 'unanswered': SILENT_BOUND + 0.8}
+BESIDE_COMMAND = 'sleep 4; printf %s done'
+
+
+def _answer_beside(rig: Silenced, answer: str, since: float) -> tuple[Any, float]:
+    """Start a call beside the quiet work as the link went silent at `since`, the host reachable
+    again for a new connection; let the held connection answer `ANSWERS[answer]` s later; return the
+    call's outcome and when it ended, after `since`."""
+    assert ANSWERS['answered'] < SILENT_BOUND < ANSWERS['unanswered'] < 2 * SILENT_BOUND - ssh.VERDICT_MARGIN
+    rig.link.come_back()
+    call = Watched(_silent_tool(rig.executor, 'run'))
+    _REAL_SLEEP(max(0.0, since + ANSWERS[answer] - _REAL_MONOTONIC()))
+    rig.link.resume()
+    return call.result(rig.link, SILENT_WINDOW, since)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('answer', list(ANSWERS))
+def test_a_quiet_command_beside_a_starting_call_has_that_calls_verdict(answer: str,
+                                                                        silenced: Callable[..., Silenced]) -> None:
+    # A call that starts while the link is silent judges it B after its start, and that verdict
+    # covers the quiet command already running: an answer within it keeps both on the connection,
+    # one past it ends the command as lost, though the command alone would ride it out.
+    rig = silenced()
+    quiet = Watched(lambda: rig.executor.run(BESIDE_COMMAND))
+    _running(rig.server)
+    since = rig.go_silent()
+    outcome, took = _answer_beside(rig, answer, since)
+    kept, kept_took = quiet.result(rig.link, QUIET_FIGURE, since)
+    violations = _completed_violations('run', outcome)
+    if answer == 'answered':
+        if _same(kept) != ('done', '', 0):
+            violations.append(f'the quiet command gave {kept!r}, not its result')
+        if len(rig.link.opened) != 1:
+            violations.append(f'{len(rig.link.opened)} connections were made: an answer within the verdict was missed')
+    else:
+        if (kept.exit_code, kept.stderr.endswith(LOST_NOTE)) != (CONNECTION_LOST_EXIT_CODE, True):
+            violations.append(f'the quiet command gave {kept!r}, not {CONNECTION_LOST_EXIT_CODE}')
+        if kept_took > SILENT_BOUND + SILENT_SLACK:
+            violations.append(f'the quiet command was lost {kept_took:.2f} s after the silence, not at the call\'s verdict')
+        if len(rig.link.opened) != 2:
+            violations.append(f'{len(rig.link.opened)} connections were made, not one new one')
+    assert violations == [], (f'{answer}: the call ended {took:.2f} s and the quiet command {kept_took:.2f} s after '
+                              'the silence:\n' + '\n'.join(violations))
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize('step', ['channel', 'subsystem', 'version'])
 def test_an_sftp_open_cut_by_a_silent_link_reconnects(step: str, silenced: Callable[..., Silenced]) -> None:
@@ -3187,17 +3242,53 @@ def test_a_slow_transfer_is_not_taken_for_a_silent_link(shape: str, silenced: Ca
     assert violations == [], f'{shape} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize('answer', list(ANSWERS))
+def test_a_slow_transfer_beside_a_starting_call_has_that_calls_verdict(answer: str,
+                                                                        silenced: Callable[..., Silenced]) -> None:
+    # An upload whose replies stop coming as it writes, while a call starts: an answer within that
+    # call's verdict lands the upload whole beside it on the connection; one past it cuts the upload,
+    # which alone would wait out a background probe's verdict.
+    rig = silenced()
+    data = _numbered(LARGE)
+    local = rig.local / 'big.bin'
+    local.write_bytes(data)
+    rig.link.silent_at('upload')
+    upload = Watched(lambda: rig.executor.put(str(local), '~/big.bin'))
+    since = _silent_at(rig.link, 'upload')
+    outcome, took = _answer_beside(rig, answer, since)
+    try:
+        moved, moved_took = upload.result(rig.link, QUIET_FIGURE, since)
+    except OSError as exc:
+        moved, moved_took = exc, _REAL_MONOTONIC() - since
+    violations = _completed_violations('run', outcome)
+    landed = (rig.home / 'big.bin').read_bytes() if (rig.home / 'big.bin').exists() else b''
+    if answer == 'answered':
+        if isinstance(moved, BaseException) or landed != data:
+            violations.append(f'the upload gave {moved!r:.300} with {len(landed)} of {len(data)} bytes, not the whole file')
+        if len(rig.link.opened) != 1:
+            violations.append(f'{len(rig.link.opened)} connections were made: an answer within the verdict was missed')
+    else:
+        if not (isinstance(moved, ConnectionError) and PARTLY in str(moved)):
+            violations.append(f'the upload gave {moved!r:.300}, not a lost transfer')
+        if moved_took > SILENT_BOUND + SILENT_SLACK:
+            violations.append(f'the upload was cut {moved_took:.2f} s after the silence, not at the call\'s verdict')
+        if len(rig.link.opened) != 2:
+            violations.append(f'{len(rig.link.opened)} connections were made, not one new one')
+    assert violations == [], (f'{answer}: the call ended {took:.2f} s and the upload {moved_took:.2f} s after the '
+                              'silence:\n' + '\n'.join(violations))
+
+
 # How long a helper's send on the held write path must still be blocked to show it held, and how
 # long the upload has, from the moment the link went silent, to fill what the path can take.
 HELD = 0.5
 HELD_WITHIN = 3.0
 
 
-@pytest.mark.integration
-def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced: Callable[..., Silenced]) -> None:
-    # An upload holds the connection's write path on the silent link, so every other sender queues
-    # behind it: the new call's verdict, counted from its hand-over, still comes, and ends both.
-    rig = silenced()
+def _stall_an_upload(rig: Silenced) -> tuple[Watched, float]:
+    """Start a 4 MiB upload that goes silent at its first write, and return once it holds the
+    connection's write path (a send on it still blocked `HELD` s later), with when the link went
+    silent. A path not held within `HELD_WITHIN` s fails the row, never skips it."""
     local = rig.local / 'big.bin'
     local.write_bytes(_numbered(LARGE))
     transport = rig.executor._conn.transport
@@ -3209,8 +3300,7 @@ def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced
     narrow_sends(transport.sock)
     rig.link.silent_at('upload')
     stalled = Watched(lambda: rig.executor.put(str(local), '~/big.bin'))
-    _silent_at(rig.link, 'upload')
-    rig.link.come_back()
+    since = _silent_at(rig.link, 'upload')
 
     def ignore() -> None:
         with contextlib.suppress(Exception):
@@ -3224,11 +3314,20 @@ def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced
         probe.start()
         probe.join(HELD)
         if probe.is_alive():
-            break
+            return stalled, since
         if _REAL_MONOTONIC() > filled:
             rig.link.close()
             pytest.fail(f'the write path was not held: a send on it still returned within {HELD} s, '
                         f'{HELD_WITHIN} s after the link went silent, so the row proves nothing')
+
+
+@pytest.mark.integration
+def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced: Callable[..., Silenced]) -> None:
+    # An upload holds the connection's write path on the silent link, so every other sender queues
+    # behind it: the new call's verdict, counted from its hand-over, still comes, and ends both.
+    rig = silenced()
+    stalled, _ = _stall_an_upload(rig)
+    rig.link.come_back()
     began = _REAL_MONOTONIC()
     outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_BOUND, began)
     try:
@@ -3240,6 +3339,126 @@ def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced
         violations.append(f'the stalled upload gave {cut!r:.300}, not a lost transfer')
     assert violations == [], (f'the new call ended {took:.2f} s and the upload {cut_took:.2f} s after the new call '
                               'began:\n' + '\n'.join(violations))
+
+
+# The connect bound of the row whose command times out beside a stalled upload: long enough that the
+# connection's verdict (a background probe's, B after the silence and 2B less the margin after that)
+# comes well after the command's own timeout, which comes once the upload holds the write path.
+STALL_BOUND = 3
+STALL_TIMEOUT = 3.0
+
+
+@pytest.mark.integration
+def test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout(
+        silenced: Callable[..., Silenced], monkeypatch: pytest.MonkeyPatch) -> None:
+    # The upload holds the write path until the verdict. The command's own timeout comes first, and
+    # nothing the call sends then (its TERM, its KILL, its close) waits on that path: it returns at
+    # its timeout, after its `GRACE` read.
+    monkeypatch.setattr(ssh, 'CONNECT_TIMEOUT', STALL_BOUND)
+    rig = silenced()
+    began = _REAL_MONOTONIC()
+    timed = Watched(lambda: rig.executor.run(['sleep', '30'], timeout=STALL_TIMEOUT))
+    _running(rig.server)
+    _, since = _stall_an_upload(rig)
+    deadline = began + STALL_TIMEOUT
+    verdict = since + 3 * STALL_BOUND - ssh.VERDICT_MARGIN
+    assert _REAL_MONOTONIC() < deadline < deadline + launch.GRACE + SILENT_SLACK < verdict, \
+        f'the upload held the path {_REAL_MONOTONIC() - began:.2f} s after the command began, past its timeout'
+    outcome, took = timed.result(rig.link, deadline + launch.GRACE - since, since)
+    assert outcome.exit_code == TIMEOUT_EXIT_CODE, \
+        f'the timed command gave {outcome!r} {took:.2f} s after the silence, not a timeout'
+
+
+# The command a timed call runs beside a held write path: output past the window's adjust threshold,
+# then a TERM handler that prints more than the channel's window as it stops, then a wait that only a
+# signal ends. What it prints as it stops is read whole only while the window adjusts its reads owe
+# go out during the `GRACE` read.
+BIG_OUTPUT = 600_000
+STOP_OUTPUT = 2_500_000
+STOPPING = (f"head -c {BIG_OUTPUT} /dev/zero | tr '\\0' z; "
+            f"trap 'head -c {STOP_OUTPUT} /dev/zero | tr \"\\0\" y; exit 0' TERM; while :; do sleep 0.05; done")
+HELD_TIMEOUT = 1.0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('path', ['held', 'free'])
+def test_a_timed_call_never_waits_on_a_write_path_another_call_holds(path: str, serve: Callable[..., LoopbackSSH],
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    # Held: another sender takes the connection's write path (`clear_to_send_lock`) as the exec
+    # request is answered, before the end of stdin, and keeps it past the call's timeout. The call
+    # returns at its timeout with all it read, owing the server its end of stdin, the window's
+    # adjust, the TERM, the KILL and the close; once the path is free the TERM still reaches the
+    # command, and the KILL `GRACE` after it, the command's stop held up by its unread output. Free:
+    # the TERM reaches the command at the deadline, all it prints as it stops is read, and it ends
+    # before any KILL.
+    assert STOP_OUTPUT > WINDOW
+    server = serve('/bin/bash')
+    executor = server.executor()
+    asked: list[tuple[str, float]] = []
+    deliver = server.deliver
+
+    def delivering(channel: paramiko.Channel, name: str) -> bool:
+        asked.append((name, time.monotonic()))
+        return deliver(channel, name)
+
+    monkeypatch.setattr(server, 'deliver', delivering)
+    holding, release = threading.Event(), threading.Event()
+    answered = paramiko.Channel.exec_command
+
+    def hold(lock: Any) -> None:
+        with lock:
+            holding.set()
+            release.wait(30)
+
+    def exec_command(chan: paramiko.Channel, command: str) -> None:
+        answered(chan, command)
+        threading.Thread(target=hold, args=(chan.transport.clear_to_send_lock,), daemon=True).start()
+        assert holding.wait(5), 'the write path was not taken'
+
+    if path == 'held':
+        monkeypatch.setattr(paramiko.Channel, 'exec_command', exec_command)
+    got: list[Any] = []
+
+    def calling() -> None:
+        try:
+            got.append(executor.run(STOPPING, timeout=HELD_TIMEOUT))
+        except BaseException as exc:
+            got.append(exc)
+
+    call = threading.Thread(target=calling, daemon=True)
+    try:
+        began = time.monotonic()
+        call.start()
+        call.join(HELD_TIMEOUT + launch.GRACE + SILENT_SLACK)
+        took = time.monotonic() - began
+        release.set()
+        if call.is_alive():
+            call.join(THREAD_END)
+            pytest.fail(f'{path}: still waiting {took:.1f} s after the call began, its timeout {HELD_TIMEOUT} s, '
+                        f'allowed {launch.GRACE} s of grace and {SILENT_SLACK} s of slack')
+        if isinstance(got[0], BaseException):
+            raise got[0]
+        result = got[0]
+        names = ['TERM', 'KILL'] if path == 'held' else ['TERM']
+        until = time.monotonic() + DROP_SEEN
+        while len(asked) < len(names) and time.monotonic() < until:
+            time.sleep(0.02)
+        # Room for a KILL that should not come.
+        time.sleep(0 if path == 'held' else launch.GRACE + 0.5)
+        stopped = '' if path == 'held' else 'y' * STOP_OUTPUT
+        violations = []
+        if (result.stdout == 'z' * BIG_OUTPUT + stopped, result.exit_code) != (True, TIMEOUT_EXIT_CODE):
+            violations.append(f'gave {len(result.stdout)} bytes ending {result.stdout[-20:]!r}, exit '
+                              f'{result.exit_code}: not all it printed, as a timeout')
+        if [name for name, _ in asked] != names:
+            violations.append(f'the command was asked for {[name for name, _ in asked]}, not {names}')
+        elif path == 'held' and asked[1][1] - asked[0][1] < launch.GRACE - 0.05:
+            violations.append(f'the KILL came {asked[1][1] - asked[0][1]:.2f} s after the late TERM, inside its '
+                              f'{launch.GRACE:g} s grace')
+        assert violations == [], f'{path} (returned {took:.2f} s after it began):\n' + '\n'.join(violations)
+    finally:
+        release.set()
+        executor.close()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -3423,8 +3642,10 @@ def test_a_timeout_drains_what_follows_the_term(monkeypatch: pytest.MonkeyPatch)
     channel = LateChannel(0.5, b'stopping\n')
     sent: list[tuple[str, float]] = []
     monkeypatch.setattr(ssh, '_signal', lambda chan, name: sent.append((name, channel.now())))
+    sends = ssh._Sends(channel)
     try:
-        out, err, code, _ = ssh._collect(channel, 0.3)
+        out, err, code, _ = ssh._collect(channel, 0.3, sends=sends)
+        sends.wait(None)
     finally:
         channel.release()
     assert [name for name, _ in sent] == ['TERM'] and sent[0][1] < 0.5, sent
@@ -3439,8 +3660,10 @@ def test_a_timeout_asks_for_kill_after_its_grace(monkeypatch: pytest.MonkeyPatch
     channel = LateChannel(60.0, b'')
     sent: list[tuple[str, float]] = []
     monkeypatch.setattr(ssh, '_signal', lambda chan, name: sent.append((name, channel.now())))
+    sends = ssh._Sends(channel)
     try:
-        out, err, code, _ = ssh._collect(channel, 0.3)
+        out, err, code, _ = ssh._collect(channel, 0.3, sends=sends)
+        sends.wait(None)
     finally:
         channel.release()
     assert [name for name, _ in sent] == ['TERM', 'KILL'], \
@@ -3492,8 +3715,9 @@ def test_no_signal_is_asked_for_on_a_closed_channel(serve: Callable[..., Loopbac
 @pytest.mark.integration
 def test_a_signal_request_goes_while_the_channel_is_held_open(serve: Callable[..., LoopbackSSH],
                                                               monkeypatch: pytest.MonkeyPatch) -> None:
-    # Paramiko marks a channel closed under the channel's lock before it sends its own close: a request
-    # written while that lock is held, the channel open, is on the wire before any close can be.
+    # Paramiko marks a channel closed before it sends its own close, and sends that close through the
+    # connection's write path: a request checked and written holding that path (`clear_to_send_lock`),
+    # the channel open, is on the wire before any close can be. The channel's own lock is not held.
     server = serve('/bin/bash')
     executor = server.executor()
     try:
@@ -3505,7 +3729,7 @@ def test_a_signal_request_goes_while_the_channel_is_held_open(serve: Callable[..
             m = paramiko.Message(data.asbytes())
             if (m.get_byte(), m.get_int(), m.get_text()) == (paramiko.common.cMSG_CHANNEL_REQUEST, chan.remote_chanid,
                                                             'signal'):
-                seen.append((chan.lock.locked(), chan.closed))
+                seen.append((transport.clear_to_send_lock.locked(), chan.lock.locked(), chan.closed))
             send(data)
 
         monkeypatch.setattr(transport, '_send_message', watched)
@@ -3513,8 +3737,9 @@ def test_a_signal_request_goes_while_the_channel_is_held_open(serve: Callable[..
         until = time.monotonic() + 10
         while not chan.closed and time.monotonic() < until:
             time.sleep(0.02)
-        assert seen == [(True, False)], \
-            f'the signal request was not written holding the channel\'s lock on an open channel: (locked, closed) {seen}'
+        assert seen == [(True, False, False)], \
+            ('the signal request was not written holding the write path alone on an open channel: '
+             f'(path held, channel locked, closed) {seen}')
         assert server.signals == ['TERM'] and chan.closed, \
             f'the server did not end the command on the request: {server.signals}, closed {chan.closed}'
     finally:
@@ -3617,6 +3842,41 @@ def test_a_signal_request_never_goes_as_a_key_exchange_starts() -> None:
     assert transport.clear_to_send.started, 'the signal request never checked for a key exchange'
     assert not sender.is_alive() and chan.sent == [True], \
         f'the signal request was sent as the key exchange started: {chan.sent}, waiting {sender.is_alive()}'
+
+
+class _ClosedAsItWaits:
+    """A transport's `clear_to_send_lock` that a close takes first: the channel is marked closed, and
+    its close sent, while the signal request waits for the write path."""
+
+    def __init__(self, chan: Any) -> None:
+        self.chan, self.lock = chan, threading.Lock()
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        self.chan.closed = True
+        return self.lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self.lock.release()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc: Any) -> None:
+        self.release()
+
+
+@pytest.mark.unit
+def test_a_signal_request_never_follows_a_close_made_as_it_waits() -> None:
+    # A close marked while the request waits for the write path goes out first, through that path: the
+    # request checks the channel once it holds the path, and so never follows the close (OpenSSH drops
+    # the connection for a request on a channel it has freed).
+    chan = _rekeying()
+    chan.transport.clear_to_send.set()
+    chan.transport.clear_to_send_lock = _ClosedAsItWaits(chan)
+    sender = threading.Thread(target=ssh._signal, args=(chan, 'TERM'), daemon=True)
+    sender.start()
+    sender.join(5)
+    assert not sender.is_alive() and chan.sent == [], f'the signal request went after a close: {chan.sent}'
 
 
 @pytest.mark.unit
