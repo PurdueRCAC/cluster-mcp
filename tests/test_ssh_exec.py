@@ -96,7 +96,8 @@ from cluster_mcp.core.executor import launch, ssh
 from cluster_mcp.core.executor.ssh import SSHExecutor
 from cluster_mcp.core.site import SiteContext, SiteFile
 from cluster_mcp.core.tools.shell import run_command
-from ssh_server import LOOPBACK, USER, DroppingSSH, LoopbackSSH, SilentLink, ThrottledSSH, _drop, _key, _Server
+from ssh_server import (LOOPBACK, RECEIVE_BUFFER, SEND_BUFFER, USER, WINDOW, DroppingSSH, LoopbackSSH, SilentLink,
+                        ThrottledSSH, _drop, _key, _Server, narrow_sends)
 from test_executors import (LOGIN_MARKER, PROBE, WRITER, held_violations, timed, timeout_violations,
                             writer_violations)
 from test_launch import HOSTILE, LEAVES_A_WRITER, SEPARATION_CASES, chatty_home
@@ -3181,8 +3182,10 @@ def test_a_slow_transfer_is_not_taken_for_a_silent_link(shape: str, silenced: Ca
     assert violations == [], f'{shape} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
 
 
-# How long a helper's send on the held write path must still be blocked to show it held.
+# How long a helper's send on the held write path must still be blocked to show it held, and how
+# long the upload has, from the moment the link went silent, to fill what the path can take.
 HELD = 0.5
+HELD_WITHIN = 3.0
 
 
 @pytest.mark.integration
@@ -3193,6 +3196,12 @@ def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced
     local = rig.local / 'big.bin'
     local.write_bytes(_numbered(LARGE))
     transport = rig.executor._conn.transport
+    # What the held path can take before a send blocks: the client's send buffer and the hop's
+    # receive buffer, each doubled at most by the kernel, set rather than autotuned. The upload is
+    # far larger, and the channel's window too, so the send blocks on the socket, never the window.
+    holds = 2 * (SEND_BUFFER + RECEIVE_BUFFER)
+    assert 4 * holds < WINDOW < LARGE, (holds, WINDOW, LARGE)
+    narrow_sends(transport.sock)
     rig.link.silent_at('upload')
     stalled = Watched(lambda: rig.executor.put(str(local), '~/big.bin'))
     _silent_at(rig.link, 'upload')
@@ -3202,12 +3211,19 @@ def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced
         with contextlib.suppress(Exception):
             transport.send_ignore()
 
-    probe = threading.Thread(target=ignore, daemon=True)
-    probe.start()
-    probe.join(HELD)
-    if not probe.is_alive():
-        rig.link.close()
-        pytest.fail(f'the write path was not held: a send on it returned within {HELD} s, so the row proves nothing')
+    # The upload goes on filling the path after the link goes silent: a send that returns found room
+    # still, and the next is tried, until one stays blocked or the upload has had its time.
+    filled = _REAL_MONOTONIC() + HELD_WITHIN
+    while True:
+        probe = threading.Thread(target=ignore, daemon=True)
+        probe.start()
+        probe.join(HELD)
+        if probe.is_alive():
+            break
+        if _REAL_MONOTONIC() > filled:
+            rig.link.close()
+            pytest.fail(f'the write path was not held: a send on it still returned within {HELD} s, '
+                        f'{HELD_WITHIN} s after the link went silent, so the row proves nothing')
     began = _REAL_MONOTONIC()
     outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_BOUND, began)
     try:

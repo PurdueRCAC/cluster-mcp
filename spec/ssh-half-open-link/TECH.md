@@ -40,6 +40,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
@@ -393,6 +394,19 @@ hold a concurrent call.
   - `test_a_write_spends_one_reconnect_window[parent|place]` and
     `test_a_write_command_past_its_last_start_starts_no_attempt` now expect the lost transfer, as
     PLAN §2.2 rules for a write's own command once its session has opened.
+  - **After the commit (attempt 1, CI on `527cd4c`):** on the Linux runners
+    `test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time` failed its own
+    precondition in both eras, "the write path was not held". Linux autotunes a socket's buffers to
+    4 MiB, so the 4 MiB upload never filled the path (PLAN §5's unmeasured risk). The row now fixes
+    the buffers rather than leaning on the platform's: the hop's listener sets the 16 KiB receive
+    buffer before it listens, so an accepted connection starts with a small window, and the row
+    fixes the client socket's send buffer at 16 KiB (`narrow_sends`). It states its arithmetic:
+    what the path can take, twice each buffer, is under a quarter of the 2 MiB channel window, which
+    is under the upload. The precondition stays a failure, never a skip. It now gives the upload up
+    to 3 s from the silence to fill the path, trying a send each 0.5 s until one stays blocked:
+    right at the silence the upload had not yet filled the narrowed path, and a send went through.
+    With the send buffer set to 8 MiB instead, as autotuning gives, it fails as on the runners.
+    No Linux container runtime is available locally, so CI is the Linux check.
 - **Verify:** the frontmatter's.
 - **Touches:** `core/executor/ssh.py`, `tests/ssh_server.py` (the place-step hook),
   `tests/test_ssh_exec.py`, `tests/test_ssh_liveness.py`, `tests/mutants.py`, `AGENTS.md`,

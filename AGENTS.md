@@ -1294,8 +1294,10 @@ import has no effect.
     nothing (`test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put|get|write-lookup|write-stage|write-upload|write-mkdir|write-place|write-place-gone|sbatch]`).
     A slow transfer through a 32 KiB/s hop, longer than the bound, lands whole on one connection
     (`test_a_slow_transfer_is_not_taken_for_a_silent_link[put|get|write]`), and a call beside a 4 MiB
-    upload stalled on the silent link, the row first showing the write path held (a send on it still
-    blocked 0.5 s later, a failure otherwise), ends within 3 s, the upload with it
+    upload stalled on the silent link, the row first showing the write path held (the hop's receive
+    buffer and the client's send buffer fixed at 16 KiB, never autotuned, and a send on the path
+    still blocked 0.5 s later within 3 s of the silence, a failure otherwise), ends within 3 s, the
+    upload with it
     (`test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time`). A write whose parent's
     `mkdir` or place step cannot reconnect raises the lost transfer naming the cause, the target
     untouched (`test_a_write_spends_one_reconnect_window[parent|place]`,

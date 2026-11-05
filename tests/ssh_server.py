@@ -68,8 +68,9 @@ waits for comes. `come_back()` forwards new connections again (the old ones stay
 `resume()` lets the held connections forward again, after a silent spell of a set length; `rate`
 limits forwarding at the TCP level, so a reply queues behind the data ahead of it, as behind sshd;
 `silent_at` goes silent at a server step, and `silent_after_handshake` once a new connection is
-made (at its first probe or channel open). The receive buffer of each accepted connection is 16 KiB, so an upload holds
-the client's write path long before the channel's window.
+made (at its first probe or channel open). The receive buffer of each accepted connection is 16 KiB,
+set on the listener, and `narrow_sends` fixes a client socket's send buffer at 16 KiB, so an upload
+holds the client's write path long before the channel's window, on any platform.
 """
 
 from __future__ import annotations
@@ -812,9 +813,18 @@ class DroppingSSH(LoopbackSSH):
 # The ports a test must never take: the developer's own servers listen there.
 RESERVED_PORTS = range(54001, 54006)
 
-# The receive buffer of each connection the silent link accepts: small, so an upload fills the
-# client's send path well below the channel's 2 MiB window, as an un-ACKed path does.
+# The receive buffer of each connection the silent link accepts, and the send buffer a row gives a
+# client's socket: small and fixed, so an upload fills the client's send path well below the
+# channel's 2 MiB window, as an un-ACKed path does, whatever the platform's autotuning (Linux grows
+# both to 4 MiB unless they are set; it doubles a value set, for its own bookkeeping). The receive
+# buffer is set on the listener, so an accepted connection's advertised window starts small too.
 RECEIVE_BUFFER = 16384
+SEND_BUFFER = 16384
+
+
+def narrow_sends(sock: socket.socket) -> None:
+    """Fix `sock`'s send buffer at `SEND_BUFFER`, so a stalled send fills it and blocks."""
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER)
 
 # How long a pump waits for its socket at a time, and how often a held one looks again.
 PUMP_WAIT = 0.05
@@ -872,6 +882,7 @@ class SilentLink:
     def _bind() -> socket.socket:
         while True:
             listener = socket.socket()
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER)
             listener.bind((LOOPBACK, 0))
             if listener.getsockname()[1] not in RESERVED_PORTS:
                 listener.listen(8)
