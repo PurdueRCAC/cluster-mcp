@@ -243,7 +243,8 @@ stop naming `run_command` when it is absent, and the `rcac-mcp` compatibility di
 containment (`file_write` reaches startup files, job scripts run anything), so the docs name the
 combination that does confine: no shell plus `--profile read-only`. It follows `tool-surface`, which
 makes a shell-less server useful, and precedes 0.2.0, the one release where the bare default can be
-set without breaking anyone.
+set without breaking anyone. Ruled 2026-11-04: a bare install serves no shell, and the docs present
+`[shell]` as the obvious opt-in for a user running their own server.
 
 *Horizon: with or right after tool-surface, before 0.2.0 · Depends on: tool-surface (the `file_*` family and profiles), capability-extras (the member mechanism; cleared: landed on `develop` 2026-11-01) · Refs: Part II (hosted `delegate` mode); `issues/site-extras.md`*
 **Seed:** [`issues/shell-extra.md`](issues/shell-extra.md) · *status: unshaped*

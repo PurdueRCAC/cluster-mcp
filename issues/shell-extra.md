@@ -59,16 +59,14 @@ changing it later would.
 
 Open questions for shaping:
 
-1. **The bare default.** Does `pip install cluster-mcp` serve a shell? Leaving it out matches
-   "a bare install is the core" (capability-extras Q1) and is the cautious default for hosted use.
-   Keeping it in matches what a single user running their own server expects, and every
-   quick-start would then add `[shell]`. Recommended: leave it out, and put `[shell]` in every
-   single-user quick-start.
+1. **The bare default.** *Ruled by Geoffrey, 2026-11-04:* a bare `pip install cluster-mcp` serves
+   no shell. The docs present `[shell]` as the obvious opt-in most users will want: every
+   single-user quick-start installs it, and the README says what leaving it out means.
 2. **The shipped image.** The container image installs every member. Does it ship with the shell,
    and if so, how does an operator of that image leave it out: a second image, a build argument, or
    a narrowing profile (`--profile no-shell`)?
-3. **The distribution's name.** `cluster-mcp-shell` (member) and `[shell]` (extra), or something
-   that says the shell is arbitrary (`[run-command]`)?
+3. **The distribution's name.** *Ruled by Geoffrey, 2026-11-04:* the extra is `[shell]`. The
+   member's distribution name follows the others (`cluster-mcp-shell`).
 4. **Startup files.** Without the shell, should `file_write` refuse to write the account's login
    startup files, which would close the cheapest way back to an arbitrary command? It narrows a
    general tool for one case, and the account can still write them by other routes (job scripts),
@@ -86,6 +84,9 @@ Open questions for shaping:
 - **R4** — No runtime option SHALL serve a tool whose member is not installed.
 - **R5** — The docs SHALL state what the shell's absence does and does not prevent (startup files,
   job scripts) and which installation and profile together confine an agent to named tools.
+- **R6** — A bare installation of `cluster-mcp` SHALL serve no shell. The README's quick-starts for
+  a user running their own server SHALL install `[shell]`, and the README SHALL present it as the
+  opt-in such a user will want.
 
 ## Notes
 
