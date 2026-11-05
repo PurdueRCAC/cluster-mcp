@@ -1310,9 +1310,10 @@ import has no effect.
     before it and never moves the probe out, the priming probe is never judged, a hand-over
     counts while the sender is stuck, and while a call waits on an open no answer clears its poke,
     each probe then judged a bound after it went. A lost transfer names the host, says it may be
-    partly made, and says what may remain. The hook stamps nothing on a read that raises; the bound is
+    partly made, and says what may remain; a lost session (a send on its closed channel) is never
+    read as the server's answer by `_upload`, `_is_dir` or `_loops`. The hook stamps nothing on a read that raises; the bound is
     the connection's own (`_bound`); a fake connection gets no monitor; the close goes outermost hop
-    first on a fake gateway chain; a poke reaches the monitor of the transport given. On a real
+    first on a fake gateway chain; an open pokes the monitor of the transport it opens on. On a real
     Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
     included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
     it wakes starts no reconnect. The doc pin holds the `SSHExecutor` docstring, this file's
@@ -2033,9 +2034,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   wrapper on the transport's `packetizer.read_message` (the one call site where `Transport.run`
   reads every message after the handshake, in 3.2 and 5.0), which stamps a read that returns and
   nothing on one that raises, and misses the read in progress as it goes in, hence the unjudged
-  priming probe; the decision is the pure `_verdict`, and the poke is latched until a probe handed
-  over at or after it is answered, while a call waits on an open (`opening`) until the open ends,
-  and never moves the probe already out; the judge thread
+  priming probe; the decision is the pure `_verdict`; a call pokes as its channel or session opens
+  (`opening`, the one poke, made by every open that follows `_ensure_connected`), its poke latched
+  until the open ends and then until a probe handed over at or after it is answered, and a poke
+  never moves the probe already out; the judge thread
   (`cluster-mcp-liveness`) takes no transport lock and hands each probe to the sender thread
   (`cluster-mcp-probe`), which sends it through `_send_user_message` as `_signal` sends, swallows
   every error and has at most one send in flight, the probe counting from its hand-over so a send
@@ -2044,8 +2046,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   made with the connection it watches under the lock, started once the lock is let go, stopped
   with it, and only a Paramiko `Transport` is watched. A channel open waits `_open_timeout`,
   `max(OPEN_TIMEOUT, B + OPEN_MARGIN)`, so the monitor's close comes first on a dead link; its
-  failure is a loss by state (`_gone`: the monitor's verdict, the transport inactive `SETTLE` after it, or its judged probe
-  unanswered), never by exception type; and a call that `close()` woke (`_closed`) raises as it
+  failure is a loss by state (`_gone`: the monitor's verdict, or the transport inactive `SETTLE`
+  after it), never by exception type; and a call that `close()` woke (`_closed`) raises as it
   would have and starts no reconnect. The connect bound (`_bounded`: the TCP connect,
   banner and auth timeouts default to `CONNECT_TIMEOUT` through Fabric's config, so an ssh_config
   `ConnectTimeout` still wins, and a startup against an unreachable host is answered within it); the channel loop (`_collect`), which must

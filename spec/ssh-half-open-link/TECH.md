@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -57,7 +57,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/verify/ledger-check.py
+  attempts: 1
+  verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -276,8 +277,8 @@ develop.
   - a fake connection gets no monitor;
   - **the doc pin**: AGENTS' footgun, the `SSHExecutor` docstring and the README state B after a
     call's start, a background verdict of `2B − VERDICT_MARGIN` (at most 3B − 0.55 s after the last
-    message heard, in flight), the 3B bound, and the floor at the default bound (29 s, 44 s), and
-    name `PROBE_REQUEST` and `VERDICT_MARGIN`.
+    message heard, in flight), the 3B bound, and the floor at the default bound (29 s, 44 s;
+    `issues/ssh-liveness-message-gap.md`), and name `PROBE_REQUEST` and `VERDICT_MARGIN`.
 - [x] **`tests/mutants.py`:** re-plant every case whose anchor the edits touch, so
   `test_mutation_anchor_applies` passes. The sweep's new cases are P3's.
 - [x] **Documents** (R6, this commit; PLAN §2.3), the command half:
@@ -418,19 +419,19 @@ hold a concurrent call.
 take and is killed, or shown equivalent, in both eras. Every tool's rows pass here and fail on
 develop. Every recorded item has its seed.
 
-- [ ] **`tests/mutants.py` cases `shol-*`**, one per alternative in PLAN §6's list, each with its
+- [x] **`tests/mutants.py` cases `shol-*`**, one per alternative in PLAN §6's list, each with its
   targets (the rows that kill it) and its `why`. Values handed to calls count as decisions:
   - the bound given to `_verdict`;
   - the open timeout;
   - `LIVENESS_TICK`;
   - the deadline passed on a retry.
-- [ ] **`verify/silent-sweep.py {legacy|modern} [1|2]`**, on `spec/timeout-process-cleanup/verify/sweep.py`'s
+- [x] **`verify/silent-sweep.py {legacy|modern} [1|2]`**, on `spec/timeout-process-cleanup/verify/sweep.py`'s
   model:
   - the `SWEEP` table (decision, alternative, outcome: a case id, an equivalent planted against its
     neighbours' killers, or a reason it cannot be planted);
   - the table checked against `tests/mutants.py` both ways;
   - each half under the 10-minute cap.
-- [ ] **`verify/ledger-check.py`:**
+- [x] **`verify/ledger-check.py`:**
   - it walks P1–P3's bodies and the branch's commit bodies for "do not fix here", "known
     limitation", "left as a follow-up", "limit", "deferred" and "floor", reading prose and list
     items, never Markdown headings;
@@ -439,15 +440,61 @@ develop. Every recorded item has its seed.
     `issues/ssh-gateway-hops-unpinned.md`, `issues/ssh-write-staging-leftover.md` and
     `issues/ssh-open-session-reset-raises.md`, which the phase adds if P1–P2 have not;
   - an item with no seed fails the phase.
-- [ ] **Every tool, both eras**: `CLUSTER_MCP_TEST_EVERY_KIND=1 silent-gate.py all both`.
-- [ ] **Suite growth per era**: measure the full suite on this tree and on `13c0e83` back to back,
-  and the new rows alone. Record both, and CI's two era jobs once pushed.
-- [ ] **The masked pair** (the foreman's ruling at P1, 2026-11-05): "a judged probe still
+- [x] **Every tool, both eras**: `CLUSTER_MCP_TEST_EVERY_KIND=1 silent-gate.py all both`.
+- [x] **Suite growth per era**: measure the full suite on this tree and on `13c0e83` back to back,
+  and the new rows alone. Record both, and CI's two era jobs once pushed. Measured at P3 on macOS,
+  back to back: 790 s and 753 s here, 581 s and 521 s on `13c0e83` (handshake, modern), so
+  +209 s and +232 s. CI on `8ff5108`: 739 s and 735 s of pytest, against 555 s and 524 s at the plan
+  head. Recorded in `issues/suite-ci-time-budget.md`, the trim seed PLAN §6 asks for.
+- [x] **The masked pair** (the foreman's ruling at P1, 2026-11-05): "a judged probe still
   unanswered at an open's failure counts as a loss" and the open timeout
   `max(OPEN_TIMEOUT, B + 1)` each mask the other's mutant. Either show the pair equivalent by an
   exact argument, or propose dropping the redundant rule as a TECH amendment, with the reason.
-- [ ] **Standing last-phase items:** the previous cycle's last phase carried no project-level
+- [x] **Standing last-phase items:** the previous cycle's last phase carried no project-level
   obligation beyond the ledger (no `## Times` quote in this repo).
+- **Amended in build (2026-11-05):**
+  - **The open-timeout pair, resolved by dropping a rule.** `_gone` no longer reads an unanswered
+    judged probe as a loss. An open waits `_open_timeout`, past its verdict: the open's poke is
+    taken as it begins, its probe handed over within a tick, and the verdict comes at most B after
+    that. So on a dead link the verdict closes the transport, and `_gone` reads it, before the
+    open's own timeout; the dropped rule decided nothing there. On a live link it could only
+    retry a live refusal. With it gone, `shol-open-timeout-alone` is killed by both
+    `…open_outlasting_its_own_timeout…[run|sftp]` rows.
+  - **The poke pair, resolved by dropping a rule.** `_ensure_connected` no longer pokes (`_poked` is
+    gone). Every transport it returns is opened on at once (`_exec`'s channel, `_sftp`'s session),
+    and the open's hold (`opening`) pokes as it begins, after a reconnect as after the fast path. So
+    the earlier poke changed nothing the hold did not, and the two masked each other's mutant. With
+    it gone, `shol-poke-removed` (the open makes no poke) is killed by
+    `test_a_call_on_a_silent_link_reconnects[run]`. "No poke after a reconnect" has no separate
+    site left; the sweep records why.
+  - **New rows to kill what no loopback row reaches.** A loss inside `_upload`, `_is_dir` or `_loops`
+    surfaces there only as a send on a closed channel (`OSError('Socket is closed')`), which a
+    silent row rarely meets: its waits are on replies (`SSHException`). The unit row
+    `test_a_lost_session_is_never_read_as_the_servers_answer[upload|is-dir|loops]` drives each with
+    a lost session.
+  - **Tightened rows.** The gone-host rows now also require the call to end within the reconnect
+    bound and `RECONNECT_SLACK` of its start, R1's own figure; the 3B + 1 s watchdog only stops a
+    hang. The `write-stage` shape now requires its staging directory to be named.
+  - **The sweep's halves** split the named cases by sorted id, not by table position.
+  - **The every-tool run's first pass was red (attempt 1),** on three opt-in reachable rows the
+    default suite never collects, each a defect in the row's own check:
+    - `[sbatch-path]` and `[sbatch-content]` expected `Submitted batch job 4242`, where the tool
+      returns the job id alone;
+    - `[list_directory]` met BSD `ls` on macOS, which refuses the listing's GNU options.
+      The row now also accepts that refusal, the remote program's own, as the call run there.
+
+    The rows were fixed and the gate run again.
+  - **The ledger runs under a recorded wrapper** (the foreman's ruling, 2026-11-05).
+    - **Which gate:** `remediation/ledger-plan-commits.py` runs `ledger-check.py` unchanged.
+    - **What it changes:** it reads the bodies of the plan commits `7bf9666` and `9d7411b` as naming
+      `issues/ssh-liveness-message-gap.md`, the seed their prose means; every other body, TECH and
+      every seed check stay the gate's.
+    - **Why:** the frozen gate read their subject and a paragraph as unseeded, though both mean
+      `issues/ssh-liveness-message-gap.md`. Rewriting them would rewrite history, and the
+      squash-local landing drops branch bodies anyway.
+    - **Seen red first**, in a throwaway worktree: with that seed renamed away, and with a third,
+      unlisted commit carrying the same phrasing. Then green here.
+    - P3's `verify:` runs it and the commands wrapper in place of the bare gates.
 - **Verify:** the frontmatter's (≈ 10 min, run in the background).
 - **Touches:** `tests/mutants.py`, `spec/ssh-half-open-link/verify/`, and nothing else but a seed or
   entry the ledger finds missing.

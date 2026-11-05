@@ -5288,6 +5288,221 @@ CASES += (
 )
 
 
+# The silent-link sweep's files and targets.
+SSH = 'core/executor/ssh.py'
+SSH_EXEC = 'test_ssh_exec.py'
+LIVENESS = 'test_ssh_liveness.py'
+CASES += (
+    # A link that dies silently (`ssh._Liveness`): every decision of the monitor and of the call
+    # paths that read its verdict, planted at each alternative it can take. `spec/ssh-half-open-link/
+    # verify/silent-sweep.py` names every case and runs it in both protocol eras.
+    #
+    # The activity hook stamps every message read, nothing on a read that raises, and goes in at the
+    # monitor's start; the first probe primes it and is never judged.
+    Case('shol-hook-removed', SSH, (('        _hook(self.transport.packetizer, self)\n', ''),),
+         (f'{SSH_EXEC}::test_an_idle_connection_is_not_taken_for_a_silent_link',), 'taken for dead'),
+    Case('shol-hook-replies-only', SSH,
+         (('        message = read()\n        monitor.heard = _liveness_clock()\n',
+           '        message = read()\n        if message[0] in (81, 82):\n'
+           '            monitor.heard = _liveness_clock()\n'),),
+         (f'{SSH_EXEC}::test_a_quiet_command_is_not_taken_for_a_silent_link[slow-link]',), 'taken for dead'),
+    Case('shol-hook-stamps-a-raise', SSH,
+         (('        message = read()\n        monitor.heard = _liveness_clock()\n        return message\n',
+           '        try:\n            return read()\n        finally:\n'
+           '            monitor.heard = _liveness_clock()\n'),),
+         (f'{LIVENESS}::test_the_hook_stamps_nothing_on_a_read_that_raises',), 'stamped as heard'),
+    Case('shol-priming-dropped', SSH, (('        primed = False\n', '        primed = True\n'),),
+         (f'{SSH_EXEC}::test_an_idle_connection_is_not_taken_for_a_silent_link',), 'taken for dead'),
+    # The verdict (`_verdict`): the quiet period, a poke's verdict, a background probe's verdict, the
+    # margin, which of the two comes first, and what counts as an answer.
+    Case('shol-quiet-zero', SSH, (('or now - heard >= bound:', 'or now - heard >= 0:'),),
+         (f'{LIVENESS}::test_a_probe_is_due_after_a_bound_of_quiet_and_at_once_for_a_poke',),
+         'a probe went before a bound of quiet'),
+    Case('shol-quiet-3b', SSH, (('or now - heard >= bound:', 'or now - heard >= 3 * bound:'),),
+         (f'{LIVENESS}::test_a_probe_is_due_after_a_bound_of_quiet_and_at_once_for_a_poke',),
+         'no probe went after a bound of quiet'),
+    Case('shol-poke-verdict-zero', SSH, (('max(out, poked) + bound)', 'max(out, poked))'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'judged dead before the poke was a bound old'),
+    Case('shol-poke-verdict-background', SSH,
+         (('max(out, poked) + bound)', 'max(out, poked) + 2 * bound - VERDICT_MARGIN)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-poke-verdict-3b', SSH, (('max(out, poked) + bound)', 'max(out, poked) + 3 * bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-poke-term-alone', SSH, (('max(out, poked) + bound)', 'poked + bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'judged dead before the probe was a bound old'),
+    Case('shol-background-b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'judged dead before its verdict'),
+    Case('shol-background-2b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + 2 * bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'a background probe outlived its verdict'),
+    Case('shol-background-3b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + 3 * bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'a background probe outlived its verdict'),
+    Case('shol-margin-zero', SSH, (('VERDICT_MARGIN: Final = 1.0', 'VERDICT_MARGIN: Final = 0.0'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'the stated background verdict is 29 s'),
+    Case('shol-min-as-max', SSH, (('due = min(due, max(out, poked) + bound)', 'due = max(due, max(out, poked) + bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-answer-not-before', SSH, (('    if out is not None and heard < out:\n', '    if out is not None and heard <= out:\n'),),
+         (f'{LIVENESS}::test_anything_heard_since_the_probe_went_is_an_answer',), 'still judged dead'),
+    # The bound handed to the verdict: the connection's own (`_bound`), never `CONNECT_TIMEOUT`.
+    Case('shol-bound-connect-timeout', SSH, (('        self.bound = _bound(conn)\n', '        self.bound = CONNECT_TIMEOUT\n'),),
+         (f'{LIVENESS}::test_the_monitor_takes_the_connections_own_bound',), 'gave the monitor a'),
+    Case('shol-bound-doubled', SSH,
+         (('_verdict(self.heard, self.out, self.poked, now, self.bound)',
+           '_verdict(self.heard, self.out, self.poked, now, 2 * self.bound)'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    # The poke: made by every open (`opening`), latched while the open waits and then until a probe
+    # handed over at or after it is answered, and never moving the probe out.
+    Case('shol-poke-removed', SSH,
+         (('            self.waiting += 1\n        self.poke()\n', '            self.waiting += 1\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_reconnects[run]',), 'still waiting'),
+    Case('shol-latch-cleared-on-answer', SSH,
+         (('if self.poked is not None and self.out >= self.poked and not self.waiting:', 'if not self.waiting:'),),
+         (f'{LIVENESS}::test_a_poke_stays_latched_past_an_answer_to_an_earlier_probe',), 'consumed the poke'),
+    Case('shol-hold-not-kept', SSH,
+         (('if self.poked is not None and self.out >= self.poked and not self.waiting:',
+           'if self.poked is not None and self.out >= self.poked:'),),
+         (f'{LIVENESS}::test_a_call_waiting_on_an_open_keeps_its_poke',), 'cleared the waiting poke'),
+    Case('shol-poke-moves-out', SSH,
+         (('            if self.poked is None:\n                self.poked = _liveness_clock()\n',
+           '            if self.poked is None:\n                self.poked = _liveness_clock()\n'
+           '            if self.out is not None:\n                self.out = _liveness_clock()\n'),),
+         (f'{LIVENESS}::test_a_poke_never_moves_the_probe_out',), 'moved the probe already out'),
+    # The close: every transport, the outermost hop first.
+    Case('shol-close-dropped', SSH,
+         (('        for transport in reversed(_transports(self.conn)):\n', '        for transport in ():\n'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    Case('shol-close-innermost-first', SSH,
+         (('        for transport in reversed(_transports(self.conn)):\n', '        for transport in _transports(self.conn):\n'),),
+         (f'{LIVENESS}::test_a_dead_verdict_closes_the_outermost_hop_first',), 'not the outermost first'),
+    # Two threads: the judge never sends, a probe counts from its hand-over, and a hand-over counts
+    # while the sender is still busy.
+    Case('shol-judge-sends', SSH,
+         (('        if action == \'probe\':\n            self._send.set()\n        return action\n',
+           '        if action == \'probe\':\n            message = Message()\n'
+           '            message.add_byte(cMSG_GLOBAL_REQUEST)\n            message.add_string(PROBE_REQUEST)\n'
+           '            message.add_boolean(True)\n            self.transport._send_user_message(message)\n'
+           '        return action\n'),),
+         (f'{SSH_EXEC}::test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time',), 'still waiting'),
+    Case('shol-out-after-send', SSH,
+         (("            if action == 'probe':\n                self.out = now\n",
+           "            if action == 'probe':\n                pass\n"),
+          ('                self.transport._send_user_message(message)\n            except Exception:\n',
+           '                self.transport._send_user_message(message)\n'
+           '                with self._lock:\n                    self.out = _liveness_clock()\n'
+           '            except Exception:\n')),
+         (f'{LIVENESS}::test_a_probe_handed_over_while_the_sender_is_stuck_counts',), 'did not count'),
+    Case('shol-handover-refused-busy', SSH,
+         (("            if action == 'probe':\n                self.out = now\n",
+           "            if action == 'probe' and getattr(self, 'busy', False):\n                action = None\n"
+           "            elif action == 'probe':\n                self.out = now\n"),
+          ('                self.transport._send_user_message(message)\n            except Exception:\n                pass\n',
+           '                self.busy = True\n                self.transport._send_user_message(message)\n'
+           '            except Exception:\n                pass\n            self.busy = False\n')),
+         (f'{LIVENESS}::test_a_probe_handed_over_while_the_sender_is_stuck_counts',), 'did not count'),
+    # The tick, and the monitor's own clock.
+    Case('shol-tick-long', SSH, (('LIVENESS_TICK: Final = 0.1', 'LIVENESS_TICK: Final = 5.0'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    # The open: it waits past the call's verdict; a failure that is a loss goes back to reconnecting
+    # within the same deadline, never once the executor is closed, and never once the request went.
+    Case('shol-open-timeout-alone', SSH,
+         (('    return max(OPEN_TIMEOUT, (CONNECT_TIMEOUT if monitor is None else monitor.bound) + OPEN_MARGIN)\n',
+           '    return OPEN_TIMEOUT\n'),),
+         tuple(f'{SSH_EXEC}::test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[{opens}]'
+               for opens in ('run', 'sftp')), 'Timeout opening channel'),
+    Case('shol-retry-removed', SSH,
+         (('            if self._closed or not _gone(transport):\n                raise\n            return None\n',
+           '            raise\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run_command]',), 'it must say'),
+    Case('shol-retry-past-exec', SSH,
+         (("                return b'', b'', CONNECTION_LOST_EXIT_CODE, launch.LOST_NOTE\n",
+           '                return None\n'),),
+         (f'{SSH_EXEC}::test_a_command_cut_by_a_silent_link_is_never_run_twice[run]',), 'not once'),
+    Case('shol-retry-fresh-deadline', SSH,
+         (('            ran = self._exec(transport, wire, timeout, marks.end)\n',
+           '            ran = self._exec(transport, wire, timeout, marks.end)\n'
+           '            deadline = time.monotonic() + self._window\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run]',), 'past its'),
+    Case('shol-closed-ignored', SSH,
+         (('            if self._closed or not _gone(transport):\n                raise\n            return None\n',
+           '            if not _gone(transport):\n                raise\n            return None\n'),),
+         (f'{LIVENESS}::test_close_leaves_no_monitor_and_starts_no_reconnect',), 'close() woke'),
+    Case('shol-sftp-retry-removed', SSH,
+         (('                if self._closed or not _gone(transport):\n                    raise\n\n',
+           '                raise\n\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'it must say'),
+    Case('shol-sftp-retry-channel-only', SSH,
+         (('                with _opening(transport):\n'
+           '                    chan = transport.open_session(timeout=_open_timeout(transport))\n'
+           '                    chan.invoke_subsystem(\'sftp\')\n'
+           '                    return transport, SFTPClient(chan)\n'
+           '            except (SSHException, EOFError, OSError):\n',
+           '                with _opening(transport):\n'
+           '                    chan = transport.open_session(timeout=_open_timeout(transport))\n'
+           '            except (SSHException, EOFError, OSError):\n'
+           '                chan = None\n'
+           '            if chan is not None:\n'
+           '                chan.invoke_subsystem(\'sftp\')\n'
+           '                return transport, SFTPClient(chan)\n'
+           '            if False:\n'),),
+         (f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[subsystem]',
+          f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[version]'), 'still waiting'),
+    Case('shol-sftp-fresh-deadline', SSH,
+         (('                if self._closed or not _gone(transport):\n                    raise\n\n',
+           '                if self._closed or not _gone(transport):\n                    raise\n'
+           '                deadline = time.monotonic() + self._window\n\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'past its'),
+    # A transfer cut short: decided by state, raised naming the host, the write's own commands' losses
+    # raised the same way.
+    Case('shol-lost-transfer-unnamed', SSH,
+         (("super().__init__(f'the connection to {host} was lost during", "super().__init__(f'the connection was lost during"),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put]',), 'not a lost transfer'),
+    Case('shol-lost-transfer-by-type', SSH,
+         (("                sftp.get(remote, local)\n            except (OSError, EOFError, SSHException) as exc:\n",
+           "                sftp.get(remote, local)\n            except OSError as exc:\n"),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[get]',),
+         'Server connection dropped'),
+    Case('shol-reason-on-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        raise Short(',
+           '    except OSError as exc:\n        raise Short('),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[upload]',),
+         "read a lost session as the server's answer"),
+    Case('shol-is-dir-swallows-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        return False\n\n\ndef _loops',
+           '    except OSError as exc:\n        return False\n\n\ndef _loops'),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[is-dir]',),
+         "read a lost session as the server's answer"),
+    Case('shol-loops-swallows-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        return False\n    return False\n',
+           '    except OSError as exc:\n        return False\n    return False\n'),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[loops]',),
+         "read a lost session as the server's answer"),
+    Case('shol-staging-loss-unnamed', SSH,
+         (('            if _cut(sftp, exc):\n                exc.left = _remains(unchanged, directory)  # type: ignore[union-attr]\n'
+           '                raise\n            if not isinstance(exc, OSError):\n',
+           '            if not isinstance(exc, OSError):\n'),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[write-stage]',),
+         'was not named'),
+    Case('shol-mkdir-loss-returned', SSH, (('            if _lost_to(made, transport):\n', '            if False:\n'),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[write-mkdir]',),
+         'not a lost transfer'),
+    Case('shol-place-loss-returned', SSH, (('            if _lost_to(placed, transport):\n', '            if False:\n'),),
+         tuple(f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[{shape}]'
+               for shape in ('write-place', 'write-place-gone')), 'not a lost transfer'),
+    Case('shol-live-not-started-lost', SSH,
+         (('    return result.exit_code == CONNECTION_LOST_EXIT_CODE or (result.exit_code == NOT_STARTED_EXIT_CODE\n'
+           '                                                            and _down(transport))\n',
+           '    return result.exit_code in (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE)\n'),),
+         (f'{SSH_EXEC}::test_a_failed_ssh_write_leaves_nothing_behind',), 'TransferLost'),
+)
+
 # `>|`, not `>`: a profile's `set -C` refuses `>` onto the path bash 3.2 names a process substitution
 # by; a newer bash names it by a pipe, which noclobber allows, so only macOS tells the two apart.
 if sys.platform == 'darwin':

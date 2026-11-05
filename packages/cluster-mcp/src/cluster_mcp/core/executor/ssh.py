@@ -593,14 +593,6 @@ def _monitor_of(transport: Any) -> _Liveness | None:
     return getattr(transport, WATCHED, None)
 
 
-def _poked(transport: Any) -> Any:
-    """`transport`, its liveness monitor told that a call is about to use it."""
-    monitor = _monitor_of(transport)
-    if monitor is not None:
-        monitor.poke()
-    return transport
-
-
 def _opening(transport: Any) -> contextlib.AbstractContextManager[None]:
     """While a call waits on a channel or session to open on `transport` (`_Liveness.opening`)."""
     monitor = _monitor_of(transport)
@@ -618,18 +610,16 @@ def _gone(transport: Any) -> bool:
     """Whether a failure on `transport` was its connection's loss, decided by state, never by the
     exception's type (the waiters of a closed transport see `EOFError`, `SSHException` or `OSError`).
 
-    It was when the liveness monitor found the link dead, when the transport is no longer active
-    `SETTLE` after the failure (Paramiko wakes a wait before it marks a lost connection inactive), or
-    when the monitor's judged probe is still unanswered: the link is unproven, and the verdict on it
-    is near.
+    It was when the liveness monitor found the link dead, or when the transport is no longer active
+    `SETTLE` after the failure (Paramiko wakes a wait before it marks a lost connection inactive). An
+    open on a watched connection waits past its verdict (`_open_timeout`), so on a dead link the
+    verdict always comes first.
     """
     monitor = _monitor_of(transport)
     if monitor is not None and monitor.dead:
         return True
     transport.join(SETTLE)
-    if not transport.is_active():
-        return True
-    return monitor is not None and monitor.unanswered()
+    return not transport.is_active()
 
 
 def _down(transport: Any) -> bool:
@@ -758,8 +748,9 @@ class _Liveness:
         self._send.set()
 
     def poke(self) -> None:
-        """A call is about to use the connection: a probe goes at once, unless one is out already,
-        and the call's verdict comes one bound after this poke at the latest."""
+        """A call is about to use the connection (it opens a channel or a session, `opening`): a probe
+        goes at once, unless one is out already, and the call's verdict comes one bound after this
+        poke at the latest."""
         with self._lock:
             if self.poked is None:
                 self.poked = _liveness_clock()
@@ -775,19 +766,12 @@ class _Liveness:
         """
         with self._lock:
             self.waiting += 1
-            if self.poked is None:
-                self.poked = _liveness_clock()
-        self._wake.set()
+        self.poke()
         try:
             yield
         finally:
             with self._lock:
                 self.waiting -= 1
-
-    def unanswered(self) -> bool:
-        """Whether a judged probe is out with nothing heard since it was handed over."""
-        with self._lock:
-            return self.out is not None and self.heard < self.out
 
     def step(self, now: float) -> str | None:
         """One decision at `now`, `_verdict`'s, made on the state as the messages heard leave it.
@@ -1276,9 +1260,9 @@ class SSHExecutor:
         up, the message `cannot connect to <host>: <cause>`.
 
         A live connection's transport is returned at once, captured here so another call's reconnect
-        cannot swap it out. Every transport returned pokes its connection's liveness monitor
-        (`_poked`), so a link that has gone silent is judged dead at most one connect bound after the
-        call began. Otherwise the call joins the connect attempt in flight, or starts one on
+        cannot swap it out; the call's open on it then pokes its liveness monitor (`_opening`), so a
+        link that has gone silent is judged dead at most one connect bound after the call began.
+        Otherwise the call joins the connect attempt in flight, or starts one on
         a worker thread named `cluster-mcp-reconnect` when there is none, and waits on it
         `ATTEMPT_POLL` at a time, checking its own deadline between waits. After a failure it sleeps
         its backoff, which ends no later than its last start (`FINAL_ATTEMPT_LEAD` before the
@@ -1294,7 +1278,7 @@ class SSHExecutor:
         """
         transport = _live(self._conn)
         if transport is not None:
-            return _poked(transport)
+            return transport
         delay = INITIAL_RECONNECT_DELAY
         cause: BaseException = TimeoutError('timed out')
         # Whether the call has just slept a backoff, which ends no later than its last start.
@@ -1305,7 +1289,7 @@ class SSHExecutor:
                 if pending is None:
                     transport = _live(self._conn)
                     if transport is not None:
-                        return _poked(transport)
+                        return transport
                 if not scheduled and time.monotonic() >= deadline - FINAL_ATTEMPT_LEAD:
                     return connect_failure_message(self._host, cause)
                 scheduled = False
@@ -1330,7 +1314,7 @@ class SSHExecutor:
                 if time.monotonic() >= deadline and self._leave(pending):
                     return connect_failure_message(self._host, cause)
             if pending.error is None:
-                return _poked(pending.transport)
+                return pending.transport
             if not isinstance(pending.error, Exception):
                 raise pending.error
             if pending.aborted:

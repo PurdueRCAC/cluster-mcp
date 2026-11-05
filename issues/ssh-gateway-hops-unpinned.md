@@ -46,3 +46,4 @@ A change that stops the abort or the release short of the last hop fails the sui
 
 - Related: `spec/ssh-reconnect-loop/` (REVIEW.md cycle 3); `issues/ssh-half-open-link.md`.
 - Found by: `ssh-reconnect-loop` review, cycle 3, 2026-10-27; filed by the foreman.
+- 2026-11-05: `spec/ssh-half-open-link/` closes a dead connection's transports outermost hop first, pinned only on a fake gateway chain (`test_a_dead_verdict_closes_the_outermost_hop_first`); the close order on a real ProxyJump chain is unmeasured, as this seed says of the abort and release.

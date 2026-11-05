@@ -100,8 +100,8 @@ def _sending(monitor: ssh._Liveness) -> None:
 
 @pytest.mark.unit
 def test_a_probe_is_due_after_a_bound_of_quiet_and_at_once_for_a_poke() -> None:
-    assert ssh._verdict(0.0, None, None, B - 0.01, B) is None
-    assert ssh._verdict(0.0, None, None, B, B) == 'probe'
+    assert ssh._verdict(0.0, None, None, B - 0.01, B) is None, 'a probe went before a bound of quiet'
+    assert ssh._verdict(0.0, None, None, B, B) == 'probe', 'no probe went after a bound of quiet'
     assert ssh._verdict(0.0, None, 0.5, 0.5, B) == 'probe', 'a poke must send a probe at once'
 
 
@@ -110,7 +110,7 @@ def test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin() -> None
     out = 10.0
     due = out + 2 * B - MARGIN
     assert ssh._verdict(out - 1, out, None, due - 0.01, B) is None, 'judged dead before its verdict'
-    assert ssh._verdict(out - 1, out, None, due, B) == 'dead'
+    assert ssh._verdict(out - 1, out, None, due, B) == 'dead', 'a background probe outlived its verdict'
     assert due - out == 29.0, 'the stated background verdict is 29 s at the default bound'
 
 
@@ -118,13 +118,13 @@ def test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin() -> None
 def test_a_waiting_call_has_its_verdict_one_bound_after_its_poke() -> None:
     out, poked = 10.0, 14.0
     assert ssh._verdict(out - 1, out, poked, poked + B - 0.01, B) is None, 'judged dead before the poke was a bound old'
-    assert ssh._verdict(out - 1, out, poked, poked + B, B) == 'dead'
+    assert ssh._verdict(out - 1, out, poked, poked + B, B) == 'dead', 'a waiting call outlived its verdict'
     # A poke that predates the probe (the probe it asked for): the verdict is a bound after the probe.
-    assert ssh._verdict(9.0, out, 9.5, out + B - 0.01, B) is None
-    assert ssh._verdict(9.0, out, 9.5, out + B, B) == 'dead'
+    assert ssh._verdict(9.0, out, 9.5, out + B - 0.01, B) is None, 'judged dead before the probe was a bound old'
+    assert ssh._verdict(9.0, out, 9.5, out + B, B) == 'dead', 'a waiting call outlived the verdict on its probe'
     # Whichever comes first: a poke late in a background probe's wait never puts its verdict off.
     late = out + 2 * B - MARGIN - 1
-    assert ssh._verdict(9.0, out, late, out + 2 * B - MARGIN, B) == 'dead'
+    assert ssh._verdict(9.0, out, late, out + 2 * B - MARGIN, B) == 'dead', 'a late poke put the verdict off'
 
 
 @pytest.mark.unit
@@ -214,7 +214,7 @@ def test_a_probe_handed_over_while_the_sender_is_stuck_counts(clock: Clock) -> N
         assert transport.started.wait(THREAD_END), 'the sender never began the priming probe'
         clock.now += 1
         monitor.poke()
-        assert monitor.step(clock.now) == 'probe'
+        assert monitor.step(clock.now) == 'probe', 'a probe handed over to a stuck sender did not count'
         assert monitor.out == clock.now, 'a probe handed over to a stuck sender did not count'
         clock.now += B
         assert monitor.step(clock.now) == 'dead', 'the stuck probe never met its verdict'
@@ -314,8 +314,12 @@ def test_a_dead_verdict_closes_the_outermost_hop_first() -> None:
 @pytest.mark.unit
 def test_a_poke_reaches_the_monitor_of_the_transport_given(clock: Clock) -> None:
     one, other = _monitor(clock), _monitor(clock)
-    assert ssh._poked(one.transport) is one.transport
-    assert (one.poked, other.poked) == (clock.now, None), 'the poke reached another monitor'
+    with ssh._opening(one.transport):
+        assert (one.poked, other.poked, one.waiting, other.waiting) == (clock.now, None, 1, 0), \
+            'an open poked another monitor, or not its own'
+    assert one.waiting == 0
+    with ssh._opening(SimpleNamespace()):
+        pass
 
 
 # What a transfer cut short says it may leave, by what was cut.
@@ -336,6 +340,48 @@ def test_a_lost_transfer_names_the_host_and_what_may_remain(cut: str) -> None:
                          f'partly made: {remains}')
     assert ssh._remains('~/x is unchanged', None) == '~/x is unchanged'
     assert ssh._remains('~/x is unchanged', 'd') == '~/x is unchanged, and its staging directory d may remain'
+
+
+class LostSession:
+    """An SFTP session whose connection is gone: every request fails as a send on a closed channel
+    does, with no errno (Paramiko's `Socket is closed`)."""
+
+    def __init__(self) -> None:
+        transport = SimpleNamespace(is_active=lambda: False, join=lambda timeout=None: None)
+        self.channel = SimpleNamespace(closed=True, get_transport=lambda: transport)
+
+    def get_channel(self) -> SimpleNamespace:
+        return self.channel
+
+    def _closed(self, *args: Any, **kwargs: Any) -> Any:
+        raise OSError('Socket is closed')
+
+    stat = lstat = normalize = readlink = chmod = _closed
+
+    def open(self, *args: Any) -> SimpleNamespace:
+        return SimpleNamespace(set_pipelined=self._closed, write=self._closed, flush=self._closed,
+                               close=lambda: None)
+
+
+# Each SFTP step that reads a failure as the server's answer, and the call that meets a lost session.
+LOSS_SITES = {
+    'upload': lambda sftp: ssh._upload(sftp, 'staged', b'data'),
+    'is-dir': lambda sftp: ssh._is_dir(sftp, 'somewhere'),
+    'loops': lambda sftp: ssh._loops(sftp, 'a/b'),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('site', list(LOSS_SITES))
+def test_a_lost_session_is_never_read_as_the_servers_answer(site: str) -> None:
+    # The loss is decided before the step's own reading of a failure: a short transfer (whose cause
+    # the write would then ask a reconnect for), a path that is not a directory, a path with no loop.
+    try:
+        got: Any = LOSS_SITES[site](LostSession())
+    except OSError as exc:
+        got = exc
+    if not (type(got) is OSError and str(got) == 'Socket is closed'):
+        pytest.fail(f"{site} read a lost session as the server's answer: {got!r}")
 
 
 # -- Against the loopback server.

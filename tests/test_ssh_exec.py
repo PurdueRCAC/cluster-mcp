@@ -2784,23 +2784,27 @@ def _completed_violations(tool: str, outcome: Any, rig: Silenced | None = None) 
         ok = not outcome.is_error and rig is not None and (rig.home / 'uploaded.txt').read_text() == SILENT_DATA
     elif tool == 'download_file':
         ok = not outcome.is_error and rig is not None and (rig.local / 'downloaded.txt').read_text() == SILENT_DATA
-    elif tool == 'sbatch-content':
-        ok = not outcome.is_error and f'Submitted batch job {argv_echo.JOB_ID}' in outcome.text
     elif tool == 'run_command':
         ok = not outcome.is_error and _command_result(outcome).get('stdout') == 'back'
-    elif tool == 'sbatch-path':
-        ok = not outcome.is_error and f'Submitted batch job {argv_echo.JOB_ID}' in outcome.text
+    elif tool in ('sbatch-path', 'sbatch-content'):
+        ok = not outcome.is_error and outcome.text.strip() == argv_echo.JOB_ID
     elif tool == 'read_file':
         ok = not outcome.is_error and outcome.text == SILENT_DATA
     else:
-        ok = not outcome.is_error and 'entry' in outcome.text
+        # The listing runs GNU `ls`; where the host's `ls` is BSD's (macOS) it refuses the options, and
+        # that refusal, the remote program's own, shows the call ran there all the same.
+        ran = 'entry' in outcome.text or 'Failed to list directory: ls: ' in outcome.text
+        ok = ran and (not outcome.is_error or 'Failed to list directory: ls: ' in outcome.text)
     return [] if ok else [f'{tool} gave {outcome!r:.400}, not its call run to its end']
 
 
-def _not_run_violations(tool: str, outcome: Any) -> list[str]:
-    """Every way `outcome` is not `tool`'s report of a call that could not reconnect, naming the host."""
+def _not_run_violations(tool: str, outcome: Any, took: float = 0.0) -> list[str]:
+    """Every way `outcome` is not `tool`'s report of a call that could not reconnect, naming the host,
+    within the reconnect bound (and `RECONNECT_SLACK`) of the call's start, `took` seconds before."""
     if tool == 'run':
-        return not_run_violations(outcome, 'timed out', 0.0, SILENT_WINDOW, host=LOOPBACK)
+        return not_run_violations(outcome, 'timed out', took, SILENT_WINDOW, host=LOOPBACK)
+    if took > SILENT_WINDOW + RECONNECT_SLACK:
+        return [f'{tool} gave up {took:.1f} s after it began, past its {SILENT_WINDOW} s bound']
     if tool == 'run_command':
         got = _command_result(outcome)
         ok = (not outcome.is_error and got.get('exit_code') == NOT_STARTED_EXIT_CODE
@@ -2836,7 +2840,7 @@ def test_a_call_on_a_silent_link_to_a_gone_host_is_not_run(tool: str, silenced: 
     rig = silenced()
     since = rig.go_silent()
     outcome, took = Watched(_silent_tool(rig.executor, tool, rig.local)).result(rig.link, SILENT_WINDOW, since)
-    violations = _not_run_violations(tool, outcome)
+    violations = _not_run_violations(tool, outcome, took)
     if rig.server.received:
         violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
     if rig.link.held < 1:
@@ -3143,7 +3147,8 @@ def test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made(shape: str, si
                 violations.append('a write cut at its place step does not say the target is old or new')
         elif target.read_text() != BEFORE or 'is unchanged' not in text:
             violations.append('a write cut while staging changed the target, or did not say it is unchanged')
-        if shape in ('write-upload', 'write-place', 'write-place-gone') and not (staging and _staging_left(rig.home)):
+        if shape in ('write-stage', 'write-upload', 'write-place', 'write-place-gone') and not (
+                staging and _staging_left(rig.home)):
             violations.append(f'the staging directory left was not named ({staging}) or is not there '
                               f'({_staging_left(rig.home)})')
     if shape == 'sbatch':

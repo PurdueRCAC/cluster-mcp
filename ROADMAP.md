@@ -202,6 +202,8 @@ never builds a chain: its fake connection has no gateway, so a change that stops
 passes. The bound still holds; a hop could be left running unnoticed. Found by
 `ssh-reconnect-loop`'s final review, 2026-10-27, as a missing pin.
 
+- 2026-11-05: `spec/ssh-half-open-link/`'s liveness close goes outermost hop first, pinned on a fake chain only; the seed records it.
+
 *Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
 **Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
 
@@ -218,9 +220,22 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
   records it.
 - 2026-11-05: the reconnect row failed once more with "0 reconnect workers ran" in a local full run
   during `spec/ssh-half-open-link/` P2, and passed three times alone; the seed records it.
+- 2026-11-05: `test_a_reconnect_worker_that_cannot_start_frees_the_attempt` failed on CI a second time
+  (0.3 s against a 0.1 s bound); under the same load it fails as often on `develop` as on
+  `spec/ssh-half-open-link/`'s branch; the seed records both rates.
 
 *Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
+
+## Each CI era job spends more than PLAN's growth threshold on real-time loopback rows
+
+`ssh-half-open-link` added 41 real-time loopback rows at a 2 s connect bound. Each era's
+pytest on CI went from 555 s and 524 s to 739 s and 735 s, about 12 and 13.8 minutes of each job's
+20-minute timeout, past PLAN's +180 s threshold. Directions to weigh: a parallel runner, each era
+split into two jobs, shorter built-in waits. It must land before more cycles add tests.
+
+*Horizon: near-term · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
+**Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
 
@@ -509,6 +524,8 @@ In `ssh` mode a call opens its channel before the guard that turns a lost connec
 so a link that resets just then raises Paramiko's `ConnectionResetError` out of `SSHExecutor.run`
 instead of reporting that the command was not run. Seen once against a test server that dropped the
 connection, 2026-11-02. Pre-existing; the SFTP paths were not checked.
+
+- 2026-11-05: `spec/ssh-half-open-link/` now reconnects a channel or SFTP-session open that a lost connection cut short; a reset at that instant is still unpinned; the seed records it.
 
 *Horizon: later · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
 **Seed:** [`issues/ssh-open-session-reset-raises.md`](issues/ssh-open-session-reset-raises.md) · *status: unshaped*
