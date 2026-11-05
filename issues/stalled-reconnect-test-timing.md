@@ -52,6 +52,11 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   processes spinning. The captured log showed paramiko's `Socket exception: Bad file descriptor`;
   the assertion text was not kept. The row then passed six times alone and the module passed three
   times whole on the same tree.
+- 2026-11-04: `test_ssh_exec.py`'s `test_a_reconnect_worker_that_cannot_start_frees_the_attempt`
+  failed once in a local full-suite run (macOS, modern era, the `timeout-process-cleanup` squash
+  before it landed), at load about 4.5 with another session's gates running; the assertion text was
+  not kept. It passed five times alone, the modern era passed whole on the identical tree, and CI
+  passed it in both eras. First sighting of that row; the branch does not touch it.
 
 ## Why it was deferred
 
