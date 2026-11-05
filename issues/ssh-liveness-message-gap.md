@@ -9,22 +9,28 @@ lane: public
 
 ## Problem
 
-`ssh-half-open-link` notices a silent SSH link by what arrives from the peer: it sends a probe when
-nothing has been heard for one connect bound (15 s by default), and calls the link dead when that
-probe has been out for one more connect bound with nothing at all heard since
-(`spec/ssh-half-open-link/PLAN.md` §2.1). Any message counts, so a quiet command or a slow download
-is never cut: a probe's reply proves the link live, and data does too.
+`ssh-half-open-link` notices a silent SSH link by what arrives from the peer. Any message counts, a
+probe's reply included, so nothing merely quiet is cut while the peer answers
+(`spec/ssh-half-open-link/PLAN.md` §2.1). The verdict is split:
+- a probe sent when a call starts is judged after one connect bound (15 s by default), to leave the
+  reconnect room;
+- a background probe, sent after one bound of quiet, is judged after two bounds less a second (29 s).
 
-The floor is a live link on which *nothing* arrives for a whole connect bound. An SFTP upload hears
-once per write request (32 KiB, Paramiko's `MAX_REQUEST_SIZE`), and a probe queues in the client's
-send buffer behind the upload's data, so an uplink slower than about 2.2 KB/s (32 KiB per 15 s)
-can go a whole bound with nothing heard, and the transfer is cut and reported as possibly partly made
-(measured by `spec/ssh-half-open-link/research/01-paramiko-silent-link.md` §5). Commands are bound
-by it too. A quiet command (`sbatch --wait`, a long compile) is reported lost when the peer cannot
-answer a probe within the bound: a login node's SSH daemon stalled for 15 s, or an outage of about
-13 s, which TCP would ride out, but whose retransmission backoff resends the probe only after the
-bound has passed (the plan's adversarial review, finding 8). It scales with
-the bound: a longer ssh_config `ConnectTimeout` lowers the floor.
+The floor is a live link on which nothing arrives for that long. At the default bound:
+- **A quiet command** (`sbatch --wait`, a long compile) is reported lost when the peer answers
+  nothing for 29 s after a probe. That is an outage of more than about 25 s that begins as the probe
+  is sent (TCP's retransmission backoff resends it at about 0.2, 0.6, 1.4, 3, 6.2, 12.6 and 25.4 s,
+  then 51 s), or more than about 40 s that begins at the last message heard. A login node's SSH
+  daemon stalled for 29 s reads the same way.
+- **A transfer** is cut when no reply arrives for 44 s. An SFTP upload is heard once per write
+  request (32 KiB, Paramiko's `MAX_REQUEST_SIZE`), so an uplink slower than about 0.75 KB/s is cut
+  and reported as possibly partly made.
+- **While another call starts on the connection**, its own verdict at one bound applies to every
+  call: a 15 s answer, an upload above about 2.2 KB/s.
+
+All three scale with the bound: a longer ssh_config `ConnectTimeout` lowers the floor. Measured
+in `spec/ssh-half-open-link/research/01-paramiko-silent-link.md` §5; the split and its figures are
+PLAN §4.2.
 
 **Pre-existing:** no. It is the recorded limit of the detection `ssh-half-open-link` adds; before
 it, such a link was never cut, and a dead one was never noticed.
@@ -32,8 +38,9 @@ it, such a link was never cut, and a dead one was never noticed.
 ## Why it was deferred
 
 The GOAL bounds detection inside the reconnect bound (3 × the connect bound), so any detector has
-a longest gap it can wait out. Waiting two bounds instead of one halves the floor but leaves the
-reconnect one bound instead of two. No application-level signal sees TCP's acknowledgements, which
+a longest gap it can wait out. The split verdict already gives the background probe the longest
+wait the in-flight bound allows (two bounds less a second); only a call's own probe is judged at
+one bound, so that the reconnect keeps two. No application-level signal sees TCP's acknowledgements, which
 would tell a slow uplink from a dead one. The plan recorded it as its R4 deviation (PLAN §3,
 Deviation 3) for the PLAN/TECH sign-off.
 

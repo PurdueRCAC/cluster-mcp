@@ -1,6 +1,6 @@
 # PLAN — A dead SSH link that still reads as connected is noticed within a bound
 
-> **Status:** Draft for review · **Last updated:** 2026-11-05
+> **Status:** Signed off at the PLAN/TECH gate with the foreman's rulings (Deviations 1 and 2 accepted; Deviation 3 amended to the split verdict, §2.1) · **Last updated:** 2026-11-05
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/). Every design element traces to a GOAL R-ID.
@@ -17,10 +17,12 @@ back to the existing reconnect, inside its own deadline. A command in flight rep
 `CONNECTION_LOST_EXIT_CODE`. A transfer in flight raises an error naming the host that says the
 transfer may be partly made.
 
-Detection costs at most one connect bound (B) after a call's start. That leaves the reconnect
-`2B − FINAL_ATTEMPT_LEAD` to start an attempt: 28 s by default. In flight, detection costs at most
-2B after the last message heard. Both sit inside the reconnect bound and scale with it
-(Q1). Nothing that is merely quiet is cut, since any message proves the link live, a probe's reply
+The verdict is split by who is waiting. A probe a call's start sent is judged after one connect
+bound (B): only R1 has to leave room for a reconnect, and it leaves `2B − FINAL_ATTEMPT_LEAD` to
+start one (28 s by default). A background probe, sent after B of quiet with no call starting, is
+judged after `2B − VERDICT_MARGIN` (29 s by default). Nothing reconnects after an in-flight call
+ends, so that call needs only to end within the bound after the link went silent: at most 3B −
+0.55 s. Both sit inside the reconnect bound and scale with it (Q1). Nothing that is merely quiet is cut, since any message proves the link live, a probe's reply
 included (R4).
 
 The change is centred on `core/executor/ssh.py`, plus a stall proxy in `tests/ssh_server.py` and
@@ -36,13 +38,18 @@ code, but it sits on a high-blast-radius path, and the sweeps carry most of the 
   sends; sshd and Paramiko's server answer an unknown request that wants a reply with
   `REQUEST_FAILURE` (research 01 §2).
 - `LIVENESS_TICK: Final = 0.1`: the most the monitor sleeps between decisions.
-- No new figure for the timing. The quiet period before a probe and the wait before a verdict are
-  both the connection's connect bound `B = _bound(conn)`, taken when it is published, so the bound
-  `AGENTS.md` already states (3B) is the only one there is.
+- `VERDICT_MARGIN: Final = 1.0`: what a background verdict leaves of the bound for the mechanics
+  after it. Those are at most 0.45 s: the probe's due time and the verdict, each seen up to a tick
+  late (`out` is stamped by the judge at hand-over, so the sender's own timing adds nothing), the
+  close (≤ 0.05 s measured), the wake (≤ 0.1 s), and `_collect`'s poll (`SELECT_WAIT`, 0.1 s).
+- Every other figure is the connection's connect bound `B = _bound(conn)`, taken when it is
+  published: the quiet period before a background probe, B; a poke's verdict, B; a background
+  verdict, `2B − VERDICT_MARGIN`. The bound `AGENTS.md` already states (3B) stays the only bound.
 
 **`_Liveness(conn, host)`**, one per published connection, created in `_publish` under the lock and
 started once the lock is let go. It holds `heard` (when the last message arrived), `out` (when the
-judged probe still unanswered was sent, or None), `dead` (set once, never cleared) and its threads.
+judged probe still unanswered was sent, or None), `poked` (below), `dead` (set once, never cleared)
+and its threads.
 
 - **The activity hook.** It installs an instance attribute on `transport.packetizer`:
   `read_message`, wrapping the class's method, which stamps `heard` after every message read and
@@ -58,7 +65,13 @@ judged probe still unanswered was sent, or None), `dead` (set once, never cleare
 - **The decision** is a pure function of the state and the time, `_verdict(heard, out, poked, now,
   bound)`, returning `probe`, `dead` or nothing. `poked` is when the oldest call still waiting on a
   fresh probe poked, else None. The unit rows drive it with a fake clock:
-  - `dead` when `out` is set, `now - out >= bound`, and `heard < out`;
+  - `dead` when `out` is set, `heard < out`, and `now >= min(out + 2·bound − VERDICT_MARGIN,
+    max(out, poked) + bound)`, the second term only while `poked` is set. So a background probe is
+    judged after `2B − VERDICT_MARGIN`, and a call that starts while one is out has its verdict B
+    after its poke. Nothing heard since `out` means nothing heard since the poke either. **A call that
+    starts during an in-flight stall therefore ends the in-flight call too, at its own B verdict.**
+    That is the cost of the split, and it is accepted: the in-flight call would end within the bound
+    anyway, and sooner;
   - otherwise, when `out` is set and `heard >= out`, the probe is answered and `out` is cleared.
     The poke is cleared only by a probe handed over at or after it. If `out` predates `poked`, a
     new probe goes at once (adversarial review 2: a reply already in transit when the link went
@@ -189,7 +202,8 @@ staged file, which is still there on the host.
   - the hook and what counts as heard;
   - the probe, and when one is due;
   - the verdict and the close;
-  - the bound arithmetic (B after a call's start, 2B after the last message heard, both within 3B);
+  - the bound arithmetic: B after a call's start; 3B − 0.55 s at most after the last message heard,
+    in flight; a call starting during a stall ends the stalled call at its own B verdict;
   - the retry boundary;
   - what R2 and R3 report;
   - the recorded floor in §3 Deviation 3.
@@ -214,6 +228,7 @@ port in 54001–54005. It has one pump thread per direction per connection, whic
   detector: probe replies queued 12.7 s behind data at 64 KiB/s.
 - The receive buffer of the proxy's accepted socket is pinned to 16 KiB, so an upload holds the
   client's write path below the 2 MiB channel window.
+- `resume()` lets the held pairs forward again, so a row can make a silent spell of a set length.
 - `forwarded` counts bytes, and `held` counts the new connections held while silent (the gone-host
   rows assert an attempt reached it).
 - `silent_after_handshake` lets a new connection finish its handshake and then go silent (the
@@ -240,9 +255,9 @@ port in 54001–54005. It has one pump thread per direction per connection, whic
 | R-ID | Design element(s) that satisfy it |
 |------|-----------------------------------|
 | R1   | The poke on every transport `_ensure_connected` returns; the latched poke; the verdict within B; the close; `_exec`'s and `_sftp`'s open-retry back into `_ensure_connected` with the call's deadline; the open timeout `max(OPEN_TIMEOUT, B + 1)`. Every tool through `run`, `write`, `put`, `get` |
-| R2   | The judge's quiet-period probe and verdict (2B after the last message heard); `TransferLost` with the host and what may remain; `_reason` and `_discard` skipped; the place step's −1003 raised the same way |
+| R2   | The judge's quiet-period probe and its background verdict (`2B − VERDICT_MARGIN` after it, at most 3B − 0.55 s after the last message heard); `TransferLost` with the host and what may remain; `_reason` and `_discard` skipped; the place step's −1003 raised the same way |
 | R3   | The same verdict and close; `_collect`'s existing lost-channel branch, now reached with or without a timeout |
-| R4   | Any message counts as heard; the priming probe; no verdict while messages arrive; the rate-limited proxy rows |
+| R4   | Any message counts as heard; the priming probe; no verdict while messages arrive; the background verdict's longer wait; the rate-limited proxy rows and the silent-spell row |
 | R5   | The judge never takes a transport lock; `out` stamped at hand-over; the close frees a stuck `write_all` and every sender queued behind it |
 | R6   | §2.3, in P1's and P2's commits, and the doc-pin row |
 | R7   | `SilentLink` in `tests/ssh_server.py`; the `silent` rows in both eras; `silent-gate.py` proving each R1–R5 row fails on develop |
@@ -289,7 +304,7 @@ If a ruling differs, the plan changes.
 |-----------|-----------|--------------------------------------|
 | **1. R3, a timeout before the link is noticed.** R3: "the call SHALL end no later than the earlier of its own timeout and the bound … If its end was not received, it SHALL be reported as `CONNECTION_LOST_EXIT_CODE`". The design: a call whose own timeout comes first ends at it, as §3's timeout contract says, and reports `TIMEOUT_EXIT_CODE` unless the link was already noticed dead (then −1003). | At the timeout there is no evidence yet that the link is dead. §3 (CRITICAL) says −1001 "whenever the command's end records have not both arrived by the deadline". The GOAL's outcome says calls are "reported as what they are". | Waiting at the timeout for a verdict breaks "no later than its own timeout". Reporting −1003 on no evidence would call a quiet live link lost, against R4. |
 | **2. R1, "complete over a new connection" within the bound.** The design bounds the noticing and the reconnect (both inside 3B from the call's start, as the reconnect footgun's bound is read today). The command then runs for its own time, under its own timeout. | A command's own run time is not the link's. The reconnect bound already "holds for each executor call" in this sense. | Counting the command's run against 45 s would cut a live long command, against R4. |
-| **3. R4, the floor.** R4: "a command that prints nothing for longer than the bound, and a transfer whose replies are slow but arrive, SHALL run to their end". The design holds both while the peer answers some message within one connect bound, TCP's retransmission backoff included. An SFTP upload is heard once per 32 KiB request, so above about 2.2 KB/s at the default bound (research 01 §5). A quiet command is cut if the login node's SSH daemon cannot answer a probe for 15 s, or an outage of about 13 s outlasts the bound because TCP's backoff resends the probe only after it (adversarial review 8). A link quieter than one answer per bound cannot be told from a dead one inside R1–R3's bound. | R1–R3 demand a verdict within 3B. Any detector then has a floor: the longest gap it can wait out. B is the gap that leaves two bounds for the reconnect. | A longer wait (2B) halves the floor but leaves R1 one bound for the reconnect. No app-level signal sees TCP's ACKs. Recorded: `issues/ssh-liveness-message-gap.md` and its `ROADMAP.md` entry, filed with this plan. |
+| **3. R4, the floor** (amended at sign-off: the split verdict). R4: "a command that prints nothing for longer than the bound, and a transfer whose replies are slow but arrive, SHALL run to their end". The design holds both while the peer answers within the background verdict, `2B − VERDICT_MARGIN` (29 s by default), TCP's retransmission backoff included. At the default bound:<br>- a quiet command rides out an outage of about 25 s that begins as a probe is sent (Linux's backoff resends at about 0.2, 0.6, 1.4, 3, 6.2, 12.6 and 25.4 s), or about 40 s that begins at the last message heard; a login node's SSH daemon may stall up to 29 s;<br>- a transfer runs while some reply arrives at least every `3B − VERDICT_MARGIN` (44 s): an SFTP upload, heard once per 32 KiB request, above about 0.75 KB/s.<br>While another call starts on the connection, both floors are its poke's B instead: a 15 s answer, an upload above about 2.2 KB/s. | R1–R3 demand a verdict within 3B. Any detector then has a floor: the longest gap it can wait out. Only R1 must leave room for a reconnect, so only a call's own probe is judged at B. | One verdict at B for every probe (the draft) leaves the floor at half: an outage of about 12.6 s, an upload above about 1.1 KB/s. The draft's "2.2 KB/s" counted only the verdict's window, not the quiet period before the probe, and is corrected here. One verdict at `2B − VERDICT_MARGIN` for every probe leaves R1 no time to reconnect. No app-level signal sees TCP's ACKs. Recorded: `issues/ssh-liveness-message-gap.md` and its `ROADMAP.md` entry. |
 | **4. Two threads per connection** (the judge and the sender). | A send blocks on a dead link's full buffer while holding the write lock (research 01 §2, 03 §1), and the verdict must not block with it (R5). | One thread that sends and judges hangs with its send. A blocking probe at each call's start cannot wake an in-flight SFTP wait or a `_collect` with no timeout (R2, R3). |
 | **5. Private Paramiko surface**: the instance wrapper on `packetizer.read_message`, and `_send_user_message`. | No public API sees inbound traffic or sends a request that wants a reply without blocking (research 01 §2–3). `_signal` already sends this way. | `set_keepalive` detects nothing (01 §1). `global_request(wait=True)` has no timeout and replaces the event kex waits on. `transport_factory` must be threaded through `_bounded` and every hop. `packetizer_class` is above the 3.2 floor. A row pins that the wrapper sees messages on the installed Paramiko. A silent change there would turn a quiet live link dead, and the R4 rows catch that. |
 | **6. Probing while idle.** | It is the simplest shape: no per-call bookkeeping in four paths. | Probing only while a call is in flight needs a busy count on `run`, `write`, `put` and `get`, and changes no graded behaviour. |
@@ -389,9 +404,42 @@ The reviewer also confirmed, by measurement or reading, that these are sound:
 - `time.monotonic` across a laptop's sleep;
 - the fake-clock rows' safety with a separate clock.
 
+### 4.2 Sign-off amendment: the split verdict (2026-11-05)
+
+The foreman accepted Deviations 1 and 2 as written, and asked for a split verdict to be weighed for
+Deviation 3. It holds, so it is adopted:
+- **R1:** a call's poke is still judged at B, and a background probe out when a call starts is
+  judged B after the poke.
+- **R2, R3:** an in-flight call ends at most `B + 2B − VERDICT_MARGIN + 0.45 s` = 3B − 0.55 s after
+  the last message heard, inside the bound with 0.55 s to spare. The scheduling lateness measured
+  at load 30–35 was 0.01 s.
+- **R4:** the floor roughly doubles (Deviation 3).
+- **R5:** the concurrent call pokes and ends within B.
+- **§3:** the timeout contract is untouched.
+- **The reconnect footgun:** untouched; it has nothing after an in-flight end.
+- **Cost:** a call starting during a stall ends the stalled call at its B verdict, stated in §2.1
+  and the footgun.
+
+Changed:
+- §1 and §2.1 (`VERDICT_MARGIN`, the `dead` rule);
+- §2.3's arithmetic and Deviation 3's figures;
+- §6's watchdog figures;
+- the R5 row's assertion;
+- the idle row (past 3B);
+- a new R4 row, the silent spell;
+- the mutant list;
+- `SilentLink.resume()`;
+- TECH;
+- `silent-gate.py` (the spell row runs on this tree only);
+- the seed's figures.
+
+The draft's "2.2 KB/s" floor counted only the verdict's window. The draft's true floor was about
+1.1 KB/s, and the split's is about 0.75 KB/s.
+
 ## 5. Risks & open questions
 
-- **Readings at sign-off:** Deviations 1–3.
+- **Readings at sign-off:** settled. Deviations 1 and 2 were accepted; Deviation 3 was amended to the split verdict (§4.2), and its R4 wording goes into the GOAL.
+- **0.55 s of the bound to spare in flight.** The background verdict's mechanics measured 0.45 s at most. A host loaded past what the research measured (scheduling lateness 0.01 s at load 30–35) could eat the rest; `VERDICT_MARGIN` is the one figure to raise.
 - **Load flakes.** Real-time loopback rows are the class `issues/stalled-reconnect-test-timing.md`
   tracks (seven sightings). Every new row measures from `go_silent` returning and allows its figure
   plus 1.0 s (the worst measured alone, at load 30–35, was 0.009 s). It puts the measured times in
@@ -417,23 +465,26 @@ The reviewer also confirmed, by measurement or reading, that these are sound:
 comes back", with `silent` in every name. They are `integration`, run against `SilentLink`, with
 `CONNECT_TIMEOUT` patched to 2 (B = 2 s, bound 6 s, and 1.9 s to start a reconnect after a
 verdict; at B = 1 there would be none, adversarial review 1). Each runs its call on a thread with its own
-watchdog, the figure plus 1.0 s from `go_silent`. On overrun it fails with
-`still waiting <t> s after the link went silent`, then releases the call with `link.close()`. So
-develop's hangs read as failures, never as a stuck suite.
+watchdog, the figure plus 1.0 s from `go_silent`: B + 1 s for a call's start, 3B + 1 s in flight.
+On overrun it fails with `still waiting <t> s after the link went silent`, then releases the call
+with `link.close()`. So develop's hangs read as failures, never as a stuck suite. The integration
+rows' slack cannot tell `2B − VERDICT_MARGIN` from `2B` at B = 2, so the verdict's exact values are
+pinned by the unit rows (`_verdict` on a fake clock), and the integration rows pin the behaviour.
 
 | Row | R-ID | On develop |
 |---|---|---|
-| `test_a_call_on_a_silent_link_reconnects[<tool>]`: host back, exact result, a new connection accepted after the call began | R1 | fails |
+| `test_a_call_on_a_silent_link_reconnects[<tool>]`: host back, exact result, a new connection accepted after the call began and within B + 1 s of it | R1 | fails |
 | `test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[<tool>]`: −1002 (or the tool's not-run text), `cannot connect to 127.0.0.1: timed out`, nothing received, an attempt held by the proxy | R1 | fails |
 | `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run\|sftp]`: `OPEN_TIMEOUT` patched below `B − SETTLE` | R1 | fails |
 | `test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`: the proxy goes silent once the new connection's handshake is done | R1 | fails |
 | `test_an_sftp_open_cut_by_a_silent_link_reconnects[channel\|subsystem\|version]` | R1 | fails |
 | `test_a_command_cut_by_a_silent_link_is_never_run_twice[run\|sbatch-path]`: host back before the verdict, −1003, the wire received once | R3 | fails |
-| `test_an_idle_connection_is_not_taken_for_a_silent_link`: idle past 2B, then a call on the same connection | R4 | passes |
-| `test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout\|later-timeout]`: −1003 and `LOST_NOTE` within 2B + 1 s | R3 | fails |
+| `test_an_idle_connection_is_not_taken_for_a_silent_link`: idle past 3B, then a call on the same connection | R4 | passes |
+| `test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout\|later-timeout]`: −1003 and `LOST_NOTE` within 3B + 1 s | R3 | fails |
+| `test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`: the server's hook goes silent as a background probe arrives, and `resume()` lets the held bytes through 2.5 s later (past B, inside `2B − VERDICT_MARGIN` = 3 s); the command's result exact, the same connection | R4 | not run there: develop sends no probe for the hook to fire on |
 | `test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`: −1001 at its timeout | R3 (Deviation 1) | passes |
 | `test_a_quiet_command_is_not_taken_for_a_silent_link[quiet\|slow-link]`: `sleep` past 3B, and trickled output through `rate`, results exact | R4 | passes |
-| `test_a_call_beside_a_command_on_a_silent_link_ends_in_time` | R5 | fails |
+| `test_a_call_beside_a_command_on_a_silent_link_ends_in_time`: the new call and the stalled one both end within B + 1 s of the new call's start | R5 | fails |
 | `test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put\|get\|write-lookup\|write-stage\|write-upload\|write-mkdir\|write-place\|write-place-gone\|sbatch]`: silent at a server hook's step, named in the watchdog | R2 | fails |
 | `test_a_slow_transfer_is_not_taken_for_a_silent_link[put\|get\|write]` | R4 | passes |
 | `test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time`: asserts the write path is held | R5 | fails |
@@ -468,7 +519,9 @@ It imports names the fix adds, so develop's tree never runs it.
   - the hook removed or stamping replies only;
   - the priming probe dropped;
   - the quiet period at 0 or at 3B;
-  - the verdict's wait at 0 or at 3B, `heard < out` as `<=`, or "the reply to this probe";
+  - the poke's verdict at 0, at `2B − VERDICT_MARGIN` or at 3B; the background verdict at B, at
+    2B or at 3B; `VERDICT_MARGIN` at 0; the `min` as a `max`; the poke's term from `poked` alone,
+    not `max(out, poked)`; `heard < out` as `<=`; or "the reply to this probe";
   - the poke removed;
   - the close dropped, or not outermost first;
   - the judge sending inline;

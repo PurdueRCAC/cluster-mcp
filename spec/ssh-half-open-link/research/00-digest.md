@@ -79,6 +79,10 @@ recommendation.
     silent; 2.0 s for a thread to end; measured times in every violation message (03 §3: the worst
     lateness alone at load 30–35 was 0.009 s).
 
+**Amended at the PLAN/TECH sign-off (2026-11-05).** Decision 5's single verdict became a split one:
+a call's probe is judged at B, and a background probe at `2B − VERDICT_MARGIN` (PLAN §2.1, §4.2).
+The in-flight figure becomes at most 3B − 0.55 s after the last message heard.
+
 ## Contradictions resolved
 
 - 01 suggested a quiet period Q with `Q + B ≤ 45`; 03 left it open. The plan takes `Q = B`: one

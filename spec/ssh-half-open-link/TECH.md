@@ -145,7 +145,8 @@ Cycle-specific:
 - **Every silent row:**
   - `integration`, with `CONNECT_TIMEOUT` patched to 2 (B = 2 s, the bound 6 s; at 1 no reconnect
     can start after a verdict, PLAN §4.1 finding 1);
-  - the call on a thread under a watchdog (its figure plus 1.0 s from `go_silent` returning). The
+  - the call on a thread under a watchdog: its figure plus 1.0 s from `go_silent` returning (B + 1 s
+    for a call's start, 3B + 1 s in flight; the verdict's exact values are the unit rows'). The
     watchdog fails with `still waiting <t> s after the link went silent`, adding `at <step>` for a
     row that goes silent at a server hook's step. It says so only while the call's thread is alive;
     otherwise the thread's own exception is re-raised. Then it releases the call by `link.close()`;
@@ -167,14 +168,15 @@ Cycle-specific:
   develop copy and sync 5.2 s (dry run). A mutant child took 3.2–3.7 s on a fake-clock target, plus
   the row's real time on a loopback one. Projected, from research 03's row times:
   - **P1** ≈ 8 min: the files ≈ 4 min with the new rows, and `silent-gate.py commands both`
-    ≈ 2 min per era (17 rows here; develop's failing rows each wait out their watchdog, about 7 s).
+    ≈ 2.5 min per era (18 rows here; develop's failing in-flight rows each wait out a 7 s
+    watchdog, its call-start rows a 3 s one).
   - **P2** ≈ 9 min.
   - **P3** ≈ 15 min: four sweep halves ≈ 2.5 min each, and the every-tool gate ≈ 3 min per era.
 
   The suite grows ≈ +150 s per era (≈ 25%; PLAN §6). Gates longer than the 10-minute
   command cap run in the background, and build waits on them.
 - **Deferrals in this cycle** go to `issues/ssh-liveness-message-gap.md` (filed with the plan: R4's
-  floor, PLAN §3 Deviation 3) and its `ROADMAP.md` entry. Each of these gets a dated, append-only
+  floor, PLAN §3 Deviation 3, as amended at sign-off) and its `ROADMAP.md` entry. Each of these gets a dated, append-only
   note on its existing seed and entry:
   - the ProxyJump close order unmeasured: `issues/ssh-gateway-hops-unpinned.md`;
   - the staging left on a cut write: `issues/ssh-write-staging-leftover.md`;
@@ -194,7 +196,8 @@ develop.
 
 - [ ] **`SilentLink`** in `tests/ssh_server.py` (PLAN §2.4):
   - `go_silent()` holds both directions and new connections, closing nothing;
-  - `come_back()`, `rate=`, `forwarded`, `close()`, `executor()`;
+  - `come_back()` (new connections), `resume()` (the held pairs), `rate=`, `forwarded`, `held`,
+    `silent_after_handshake`, the step hooks, `close()`, `executor()`;
   - the 16 KiB receive buffer on accepted sockets;
   - the rebind away from 54001–54005.
 
@@ -202,7 +205,9 @@ develop.
 - [ ] **`_Liveness`** in `core/executor/ssh.py` (PLAN §2.1):
   - the `read_message` instance hook;
   - the priming probe, never judged;
-  - the pure `_verdict`;
+  - the pure `_verdict`, split: a poke's verdict at B, a background probe's at
+    `2B − VERDICT_MARGIN` (`VERDICT_MARGIN = 1.0`), a call starting while one is out judged B after
+    its poke (PLAN §2.1, §4.2);
   - the judge thread (`cluster-mcp-liveness`, `LIVENESS_TICK`, no transport lock) and the sender
     thread (`cluster-mcp-probe`, `PROBE_REQUEST` with want_reply true through
     `_send_user_message`, errors swallowed, one send in flight, `out` stamped at hand-over);
@@ -223,7 +228,7 @@ develop.
 - [ ] **Rows** in `tests/test_ssh_exec.py`, in a new section after "A host that goes down and comes
   back" (PLAN §6's table; P1's shapes):
   - `test_a_call_on_a_silent_link_reconnects[run|run_command]`: a new connection accepted after the
-    call began;
+    call began and within B + 1 s of it;
   - `test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run|run_command|sbatch-path|read_file|list_directory]`:
     the tool's not-run text, with `cannot connect to 127.0.0.1: timed out`, nothing received by the
     server, at least one attempt held by the proxy;
@@ -233,19 +238,25 @@ develop.
     connection's handshake is done;
   - `test_a_command_cut_by_a_silent_link_is_never_run_twice[run|sbatch-path]`: `come_back()` before
     the verdict, −1003, the wire received once;
-  - `test_an_idle_connection_is_not_taken_for_a_silent_link`: idle past 2B, then a call on the same
+  - `test_an_idle_connection_is_not_taken_for_a_silent_link`: idle past 3B, then a call on the same
     connection, the server's connection count unchanged;
+  - `test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`: the server's hook goes
+    silent as a background probe arrives; `resume()` 2.5 s later (past B, inside the 3 s background
+    verdict); the result exact, on the same connection. It runs on this tree only: develop sends no
+    probe;
   - `test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout|later-timeout]`: −1003 and
-    `LOST_NOTE` within 2B + 1 s of `go_silent`;
+    `LOST_NOTE` within 3B + 1 s of `go_silent`;
   - `test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`: −1001, Deviation 1;
   - `test_a_quiet_command_is_not_taken_for_a_silent_link[quiet|slow-link]`: a `sleep` past 3B, and
     output trickled through `rate` so probe replies queue behind data; results exact;
-  - `test_a_call_beside_a_command_on_a_silent_link_ends_in_time`.
+  - `test_a_call_beside_a_command_on_a_silent_link_ends_in_time`: the new call, and the stalled one
+    with it, end within B + 1 s of the new call's start.
 - [ ] **`tests/test_ssh_liveness.py`** (`unit`, plus `integration` for the Paramiko pair):
   - `_verdict`'s arithmetic on a fake clock:
     - due at B quiet;
     - a poke probes at once;
-    - dead only at `out + B` with `heard < out`;
+    - with `heard < out`: dead at `out + 2B − VERDICT_MARGIN` for a background probe, and at
+      `max(out, poked) + B` while a poke waits, whichever is first; never before either;
     - any message clears;
     - an answered probe clears;
     - a poke stays latched past a probe that predates it;
@@ -262,7 +273,9 @@ develop.
   - the poke reaching the captured transport's monitor;
   - a fake connection gets no monitor;
   - **the doc pin**: AGENTS' footgun, the `SSHExecutor` docstring and the README state B after a
-    call's start and 2B after the last message, within the 3B bound, and name `PROBE_REQUEST`.
+    call's start, a background verdict of `2B − VERDICT_MARGIN` (at most 3B − 0.55 s after the last
+    message heard, in flight), the 3B bound, and the floor at the default bound (29 s, 44 s), and
+    name `PROBE_REQUEST` and `VERDICT_MARGIN`.
 - [ ] **`tests/mutants.py`:** re-plant every case whose anchor the edits touch, so
   `test_mutation_anchor_applies` passes. The sweep's new cases are P3's.
 - [ ] **Documents** (R6, this commit; PLAN §2.3), the command half:
@@ -307,7 +320,7 @@ hold a concurrent call.
   - `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[sftp]`;
   - `test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file|upload_file|download_file|sbatch-content]`;
   - `test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put|get|write-lookup|write-stage|write-upload|write-mkdir|write-place|write-place-gone|sbatch]`:
-    - the host named and `may be partly made`, within 2B + 1 s of `go_silent`;
+    - the host named and `may be partly made`, within 3B + 1 s of `go_silent`;
     - each goes silent from a server hook at its step: the target's lookup, the staging `mkdir`, an
       SFTP write, the parent `mkdir`'s exec, the place step's exec (with the host back, or gone),
       a read;

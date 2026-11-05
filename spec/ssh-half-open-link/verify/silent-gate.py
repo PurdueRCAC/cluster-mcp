@@ -20,6 +20,7 @@ For each era:
    `<failure>`, never an error or a skip) with its watchdog's message, `still waiting`, and, for a
    row that goes silent at a named step, that step's name (`at <step>`), so develop is shown to
    hang in the step the row targets. A row marked to pass must pass, so the copy demonstrably ran.
+   A row marked here-only is not run there: it needs a probe develop never sends.
 
 Every child's exit status is checked: a failed sync or a pytest that could not start is reported as
 itself. Paths are taken from the worktree's top level. The children's environment is a copy of this
@@ -51,7 +52,7 @@ EVERY_KIND = os.environ.get('CLUSTER_MCP_TEST_EVERY_KIND') == '1'
 DROPPED = ('VIRTUAL_ENV', 'UV_PROJECT', 'UV_PROJECT_ENVIRONMENT', 'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP',
            'PYTHONSAFEPATH', 'CLUSTER_MCP_TEST_ERA', 'CLUSTER_MCP_ERA_LOG')
 
-FAILS, PASSES = 'fails', 'passes'
+FAILS, PASSES, HERE_ONLY = 'fails', 'passes', 'here only'
 
 COMMAND_TOOLS = ['run', 'run_command', 'sbatch-path', 'read_file', 'list_directory']
 TRANSFER_TOOLS = ['write_file', 'upload_file', 'download_file', 'sbatch-content']
@@ -80,6 +81,7 @@ def _rows(mode: str) -> dict[str, tuple[str, str | None]]:
         for shape in ('quiet', 'slow-link'):
             rows[f'test_a_quiet_command_is_not_taken_for_a_silent_link[{shape}]'] = (PASSES, None)
         rows['test_an_idle_connection_is_not_taken_for_a_silent_link'] = (PASSES, None)
+        rows['test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict'] = (HERE_ONLY, None)
         rows['test_a_call_beside_a_command_on_a_silent_link_ends_in_time'] = (FAILS, None)
     if mode in ('transfers', 'all'):
         for tool in TRANSFER_TOOLS if EVERY_KIND else ['write_file']:
@@ -197,7 +199,8 @@ def main(mode: str, eras: str) -> int:
                 outcome, _ = here.get(row, ('not run', ''))
                 if outcome != 'passed':
                     problems.append(f'{era}: {row}: expected to pass on this tree, got {outcome}')
-            there = _develop(top, scratch, era, list(rows), problems)
+            there = _develop(top, scratch, era, [row for row, (expected, _) in rows.items() if expected != HERE_ONLY],
+                             problems)
             for row, (expected, step) in rows.items():
                 outcome, message = there.get(row, ('not run', ''))
                 if expected == FAILS and (outcome != 'failure' or STOP not in message
@@ -208,7 +211,7 @@ def main(mode: str, eras: str) -> int:
                     problems.append(f'{era}: {row}: expected to pass on {BASE} (the copy must run), got {outcome}')
             for row in sorted(rows):
                 print(f'{era:6} here {here.get(row, ("not run",))[0]:8} '
-                      f'{BASE} {there.get(row, ("not run",))[0]:8} {row}')
+                      f'{BASE} {there.get(row, ("not run",))[0] if rows[row][0] != HERE_ONLY else "-":8} {row}')
         left = subprocess.run(['pgrep', '-f', token], capture_output=True, text=True).stdout.split()
     if left:
         problems.append(f'processes of this gate still running: {" ".join(left)}')

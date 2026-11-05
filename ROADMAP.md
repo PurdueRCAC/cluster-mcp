@@ -158,8 +158,9 @@ dead or stuck remote end.
 
 The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe has been out for
 one connect bound with nothing at all heard since. A live link on which nothing arrives for that
-long, such as an SFTP upload slower than about 2.2 KB/s, or a quiet command whose login node's
-SSH daemon stalls for 15 s, is cut and reported as lost. The floor is the price of a verdict inside the reconnect bound;
+long, such as a quiet command whose peer answers nothing for 29 s (an outage of about 25 s), or an
+SFTP upload slower than about 0.75 KB/s, is cut and reported as lost. While another call starts on
+the connection, the floor is that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
 a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 
 *Horizon: later · Depends on: ssh-half-open-link · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*
