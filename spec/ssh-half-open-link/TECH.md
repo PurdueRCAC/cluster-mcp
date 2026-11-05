@@ -3,7 +3,7 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/ssh-half-open-link
 base: develop
 current_phase: done
@@ -60,10 +60,10 @@ phases:
   attempts: 1
   verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: b09a9914203f1e158440dd7d497444a4558f15c7
+  verdict: changes-requested
+  blocked_reason: F2 base.py contract docs; F1 timeout held by another call's write path; F3/F4 R4 floor text and row
+  cycle: 1
 ---
 
 # TECH.md — A dead SSH link that still reads as connected is noticed within a bound
