@@ -1271,8 +1271,16 @@ import has no effect.
     with the host gone it reads as nothing run, naming `cannot connect to 127.0.0.1: timed out`,
     within the bound, nothing reaching the server and an attempt held by the hop
     (`test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run|run_command|sbatch-path|read_file|list_directory]`),
-    and so does one whose reconnect goes silent once made
-    (`test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`). A command running as the
+    and so does one whose reconnect goes silent once made, early in its window
+    (`test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`) or at its last start, the
+    host back 0.2 s before it, under a 3 s connect bound (a 9 s reconnect bound), where an open left
+    to its own verdict would end a second past the bound: the open is cut at the call's deadline,
+    and the call ends within the bound and `RECONNECT_SLACK` of its start, its watchdog only
+    stopping a hang
+    (`test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time[run|write_file]`, every
+    tool, and a write going silent at its SFTP subsystem or version step, with
+    `CLUSTER_MCP_TEST_EVERY_KIND=1`); a late reconnect onto a live link still runs the call
+    (`test_a_late_reconnect_onto_a_live_link_runs_the_call[run|write_file]`). A command running as the
     link goes silent gives `-1003` with its note within the bound, with no timeout or a later one
     (`test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout|later-timeout]`), and `-1001` when
     its timeout comes first (`test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`); with
@@ -1334,8 +1342,11 @@ import has no effect.
     first on a fake gateway chain; an open pokes the monitor of the transport it opens on. On a real
     Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
     included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
-    it wakes starts no reconnect. The doc pin holds the `SSHExecutor` docstring, this file's
-    `executor/ssh.py` footgun and the README to the monitor's figures, and them, §2 and the
+    it wakes starts no reconnect. An open on a worker (`_Within`) that has not ended by its call's
+    deadline gives the call nothing, at that deadline, and is closed when it ends; one that ends in
+    time is the call's, its failure raised there, and none starts past the deadline. The doc pin holds the `SSHExecutor` docstring, this file's
+    `executor/ssh.py` footgun and the README to the monitor's figures, the first two to where an open
+    after a reconnect waits, and them, §2 and the
     `Executor` Protocol's `write`, `put` and `get` (their Raises name `ssh.TransferLost` and a
     transfer that may be partly made) to what a transfer cut short raises and leaves.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
@@ -2042,7 +2053,12 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing merely quiet is cut, since any message proves the link live, while the peer
   answers within the background verdict: at the default bound, a quiet command survives the peer
   answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
-  44 s. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
+  44 s. A call's first open, on the connection it found live, waits for its own verdict, B after it
+  begins. Every later open, after a reconnect or a loss, runs on a worker thread
+  (`cluster-mcp-open`) that the call waits for no later than its deadline, its sends on the write
+  path included, so neither a link that goes silent again after a late reconnect nor a write path
+  another call holds there keeps the call past the 3B bound: an open not made by then gives
+  `cannot connect to <host>: timed out`, and nothing was sent. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
   subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
   judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
   `ConnectionError` naming the host that says the transfer may be partly made and what may remain:
@@ -2069,7 +2085,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   with it, and only a Paramiko `Transport` is watched. A channel open waits `_open_timeout`,
   `max(OPEN_TIMEOUT, B + OPEN_MARGIN)`, so the monitor's close comes first on a dead link; its
   failure is a loss by state (`_gone`: the monitor's verdict, or the transport inactive `SETTLE`
-  after it), never by exception type; and a call that `close()` woke (`_closed`) raises as it
+  after it, decided inside the open, so on a worker it is the worker's wait), never by exception
+  type; an open on a worker (`_Within`) that ends after its call stopped waiting is closed; and a call that `close()` woke (`_closed`) raises as it
   would have and starts no reconnect. The connect bound (`_bounded`: the TCP connect,
   banner and auth timeouts default to `CONNECT_TIMEOUT` through Fabric's config, so an ssh_config
   `ConnectTimeout` still wins, and a startup against an unreachable host is answered within it); the channel loop (`_collect`), which must

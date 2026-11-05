@@ -32,6 +32,7 @@ from types import TracebackType
 import contextlib
 from collections import deque
 import errno
+import functools
 import os
 import posixpath
 import secrets
@@ -738,6 +739,114 @@ def _gone(transport: Any) -> bool:
     return not transport.is_active()
 
 
+class _OpenLost:
+    """What an open whose failure was its connection's loss (`_gone`) gives in place of a channel or
+    a session: it sent nothing, so its call may reconnect. `cause` is the open's own failure, which a
+    call that `close()` woke raises. It is a value, never raised, so raising its cause chains nothing
+    back to it."""
+
+    def __init__(self, cause: BaseException) -> None:
+        self.cause = cause
+
+    def close(self) -> None:
+        """Nothing to close: the open made nothing."""
+
+
+def _channel(transport: Any) -> Channel | _OpenLost:
+    """A session channel opened on `transport`, waiting `_open_timeout`, holding the call's poke; or,
+    for a failure that was the connection's loss (`_gone`), `_OpenLost`. Any other failure raises."""
+    try:
+        with _opening(transport):
+            return transport.open_session(timeout=_open_timeout(transport))
+    except (SSHException, EOFError, OSError) as exc:
+        if _gone(transport):
+            return _OpenLost(exc)
+        raise
+
+
+def _session(transport: Any) -> SFTPClient | _OpenLost:
+    """An SFTP session opened on `transport` in three steps, each a wait on the peer: the channel
+    (waiting `_open_timeout`), the `sftp` subsystem and the version exchange, all made holding the
+    call's poke (`_opening`). A step that fails closes the channel opened for it; a failure that was
+    the connection's loss (`_gone`) gives `_OpenLost`, and any other raises."""
+    chan = None
+    try:
+        with _opening(transport):
+            chan = transport.open_session(timeout=_open_timeout(transport))
+            chan.invoke_subsystem('sftp')
+            return SFTPClient(chan)
+    except (SSHException, EOFError, OSError) as exc:
+        if chan is not None:
+            with contextlib.suppress(Exception):
+                chan.close()
+        if _gone(transport):
+            return _OpenLost(exc)
+        raise
+
+
+def _close_quietly(opened: Any) -> None:
+    """Close a channel or an SFTP session that came after the call stopped waiting for it."""
+    with contextlib.suppress(Exception):
+        opened.close()
+
+
+class _Within:
+    """An open run on a worker thread (`cluster-mcp-open`) that the call waits for no later than its
+    deadline (`result`).
+
+    Every wait the open makes is the worker's: its sends on the connection's write path, its replies,
+    and the settle that decides whether a failure was a loss (`_gone`). So a link that goes silent
+    once more, or a write path another call holds, never holds the call past its deadline. An open that ends after the call stopped waiting is closed (`_close_quietly`), and
+    its failure dropped: the call has already given up.
+    """
+
+    def __init__(self, opening: Callable[[], Any]) -> None:
+        self._opening = opening
+        self._lock = threading.Lock()
+        self._done = threading.Event()
+        self._left = False
+        self._ok = False
+        self._value: Any = None
+
+    def result(self, until: float) -> Any:
+        """The open's result, or None when it has not ended by `until`; its failure is raised here."""
+        if time.monotonic() >= until:
+            return None
+        try:
+            threading.Thread(target=self._run, name='cluster-mcp-open', daemon=True).start()
+        except RuntimeError:
+            # A process out of threads opens on the call's own thread, bounded by its verdict as the
+            # first open is.
+            return self._opening()
+        if not self._done.wait(max(0.0, until - time.monotonic())):
+            with self._lock:
+                if not self._done.is_set():
+                    self._left = True
+                    return None
+        if not self._ok:
+            raise self._value
+        return self._value
+
+    def _run(self) -> None:
+        try:
+            value, ok = self._opening(), True
+        except BaseException as exc:
+            value, ok = exc, False
+        with self._lock:
+            if not self._left:
+                self._value, self._ok = value, ok
+                self._done.set()
+                return
+        if ok:
+            _close_quietly(value)
+
+
+def _within(until: float | None, opening: Callable[[], Any]) -> Any:
+    """`opening()`'s result: on the call's own thread with no deadline (`until` None), else on a
+    worker the call waits for no later than `until` (`_Within`), None when it has not ended by then."""
+    return opening() if until is None else _Within(opening).result(until)
+
+
 def _down(transport: Any) -> bool:
     """Whether `transport` is known lost now: its monitor found the link dead, or it is inactive."""
     monitor = _monitor_of(transport)
@@ -1162,6 +1271,13 @@ class SSHExecutor:
     answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
     44 s.
 
+    A call's first open, on the connection it found live, waits for its own verdict, B after it
+    begins. Every later open, after a reconnect or a loss, runs on a worker thread
+    (`cluster-mcp-open`) that the call waits for no later than its deadline, its sends on the write
+    path included, so neither a link that goes silent again after a late reconnect nor a write path
+    another call holds there keeps the call past the 3B bound: an open not made by then gives
+    `cannot connect to <host>: timed out`, and nothing was sent.
+
     A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
     subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
     judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
@@ -1449,6 +1565,10 @@ class SSHExecutor:
             delay = min(delay * 2, MAX_RECONNECT_DELAY)
             scheduled = True
 
+    def _timed_out(self) -> str:
+        """The message of a call whose open its deadline cut short: nothing was sent."""
+        return connect_failure_message(self._host, TimeoutError('timed out'))
+
     def _not_run(self, message: str) -> CommandResult:
         """The result of a command that was not run because the call could not reconnect."""
         return CommandResult('', f'cluster-mcp: {message}; the command was not run\n', NOT_STARTED_EXIT_CODE,
@@ -1498,27 +1618,34 @@ class SSHExecutor:
         prog, marks = launch.program(command, cwd, start='home')
         wire = launch.ssh_command(prog)
         # A channel that could not open on a lost connection sent nothing, so the call goes back to
-        # reconnecting, within the same deadline.
+        # reconnecting, within the same deadline. Only the open on the connection the call found live
+        # waits for its own verdict; every later one, after a reconnect or a loss, ends at the deadline.
+        found = _live(self._conn)
         ran = None
         while ran is None:
             transport = self._ensure_connected(deadline)
             if isinstance(transport, str):
                 return self._not_run(transport)
-            ran = self._exec(transport, wire, timeout, marks.end)
+            ran = self._exec(transport, wire, timeout, marks.end, None if transport is found else deadline)
+            found = None
+        if isinstance(ran, str):
+            return self._not_run(ran)
         out, err, code, note = ran
         out, err, code = launch.separate(out, err, code, marks, note)
         return CommandResult(stdout=launch.decode(out), stderr=launch.decode(err), exit_code=code,
                              hostname=self._host)
 
-    def _exec(self, transport: Transport, wire: str, timeout: float | None,
-              end: bytes) -> tuple[bytes, bytes, int, bytes] | None:
+    def _exec(self, transport: Transport, wire: str, timeout: float | None, end: bytes,
+              until: float | None = None) -> tuple[bytes, bytes, int, bytes] | str | None:
         """Run the exec string `wire` on a fresh session channel and collect its output.
 
         A channel open that fails because the connection was lost (`_gone`) returns None: nothing
         was sent, and the call may reconnect, unless the executor was closed, when it raises. One
-        that fails on a live connection raises. The open waits `_open_timeout`. The end of stdin goes
-        at once: the channel carries no byte to the command, so nothing the remote login shell's rc
-        files run can read anything from it. A connection lost once the request has gone returns
+        that fails on a live connection raises. The open waits `_open_timeout`; given the call's
+        deadline `until`, it runs on a worker the call waits for no later than then (`_within`), and
+        one that has not opened by then returns the message `cannot connect to <host>: timed out`:
+        nothing was sent. The end of stdin goes at once: the channel carries no byte to the command,
+        so nothing the remote login shell's rc files run can read anything from it. A connection lost once the request has gone returns
         `CONNECTION_LOST_EXIT_CODE`: the command may have run. A request that fails while the
         connection stays up (`SETTLE` after the failure) was refused: it raises.
 
@@ -1529,13 +1656,13 @@ class SSHExecutor:
         timeout it waits for them, as long as the path is held: on a dead link, until the liveness
         monitor's verdict closes it.
         """
-        try:
-            with _opening(transport):
-                chan = transport.open_session(timeout=_open_timeout(transport))
-        except (SSHException, EOFError, OSError):
-            if self._closed or not _gone(transport):
-                raise
+        chan = _within(until, functools.partial(_channel, transport))
+        if isinstance(chan, _OpenLost):
+            if self._closed:
+                raise chan.cause
             return None
+        if chan is None:
+            return self._timed_out()
         sends = _Sends(chan)
         until = None
         try:
@@ -1563,28 +1690,28 @@ class SSHExecutor:
 
         The session opens in three steps, each a wait on the peer: the channel (waiting
         `_open_timeout`), the `sftp` subsystem, and the version exchange, all made holding the
-        connection's liveness monitor's poke (`_opening`). A loss at any of them (`_gone`) has sent no
+        connection's liveness monitor's poke (`_session`). A loss at any of them (`_gone`) has sent no
         file operation, so the call reconnects within its deadline, unless the executor was closed;
-        a failure on a live connection raises.
+        a failure on a live connection raises. Only the open on the connection the call found live
+        waits for its own verdict: every later one, after a reconnect or a loss, runs on a worker the
+        call waits for no later than its deadline (`_within`), and one that has not opened by then
+        gives `cannot connect to <host>: timed out`.
         """
+        found = _live(self._conn)
         while True:
             transport = self._ensure_connected(deadline)
             if isinstance(transport, str):
                 return transport
-            chan = None
-            try:
-                with _opening(transport):
-                    chan = transport.open_session(timeout=_open_timeout(transport))
-                    chan.invoke_subsystem('sftp')
-                    return transport, SFTPClient(chan)
-            except (SSHException, EOFError, OSError):
-                if chan is not None:
-                    try:
-                        chan.close()
-                    except Exception:
-                        pass
-                if self._closed or not _gone(transport):
-                    raise
+            until = None if transport is found else deadline
+            found = None
+            session = _within(until, functools.partial(_session, transport))
+            if isinstance(session, _OpenLost):
+                if self._closed:
+                    raise session.cause
+                continue
+            if session is None:
+                return self._timed_out()
+            return transport, session
 
     def write(self, path: str, data: bytes, append: bool = False, parent: str | None = None,
               executable: bool = False) -> CommandResult:

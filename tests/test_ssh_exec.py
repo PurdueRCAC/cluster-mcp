@@ -2804,13 +2804,14 @@ def _completed_violations(tool: str, outcome: Any, rig: Silenced | None = None) 
     return [] if ok else [f'{tool} gave {outcome!r:.400}, not its call run to its end']
 
 
-def _not_run_violations(tool: str, outcome: Any, took: float = 0.0) -> list[str]:
+def _not_run_violations(tool: str, outcome: Any, took: float = 0.0, window: float = SILENT_WINDOW) -> list[str]:
     """Every way `outcome` is not `tool`'s report of a call that could not reconnect, naming the host,
-    within the reconnect bound (and `RECONNECT_SLACK`) of the call's start, `took` seconds before."""
+    within the reconnect bound `window` (and `RECONNECT_SLACK`) of the call's start, `took` seconds
+    before."""
     if tool == 'run':
-        return not_run_violations(outcome, 'timed out', took, SILENT_WINDOW, host=LOOPBACK)
-    if took > SILENT_WINDOW + RECONNECT_SLACK:
-        return [f'{tool} gave up {took:.1f} s after it began, past its {SILENT_WINDOW} s bound']
+        return not_run_violations(outcome, 'timed out', took, window, host=LOOPBACK)
+    if took > window + RECONNECT_SLACK:
+        return [f'{tool} gave up {took:.1f} s after it began, past its {window} s bound']
     if tool == 'run_command':
         got = _command_result(outcome)
         ok = (not outcome.is_error and got.get('exit_code') == NOT_STARTED_EXIT_CODE
@@ -2892,6 +2893,78 @@ def test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time(silenced: C
     if rig.server.received:
         violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
     assert violations == [], f'ended {took:.2f} s after the link went silent:\n' + '\n'.join(violations)
+
+
+# A late reconnect: the host comes back just before the call's last start, so the reconnect lands
+# within `FINAL_ATTEMPT_LEAD` of the call's deadline. Under a 3 s connect bound an open after it that
+# waited for its own verdict would end a second past the 9 s bound (at 2 s, never past the slack), so
+# the silent rows take that bound. `LATE_RETURN` is how long before the last start the host returns.
+LATE_BOUND = 3
+LATE_WINDOW = ssh.RECONNECT_FACTOR * LATE_BOUND
+LATE_RETURN = 0.2
+# The tools a late row calls; with `CLUSTER_MCP_TEST_EVERY_KIND=1` every tool, and a write whose new
+# link goes silent at its SFTP subsystem or version step.
+LATE_TOOLS = [*SILENT_COMMAND_TOOLS, *SILENT_TRANSFER_TOOLS, 'write_file-subsystem', 'write_file-version'] \
+    if EVERY_KIND else ['run', 'write_file']
+
+
+def _late(rig: Silenced, window: float, call: Callable[[], Any]) -> tuple[Watched, float]:
+    """Start `call` on `rig`'s silent link with the host down, and bring the host back `LATE_RETURN` s
+    before the call's last start; the call, and when it began."""
+    rig.go_silent()
+    rig.server.refuse()
+    rig.link.come_back()
+    began = _REAL_MONOTONIC()
+    watched = Watched(call)
+    _REAL_SLEEP(max(0.0, began + window - ssh.FINAL_ATTEMPT_LEAD - LATE_RETURN - _REAL_MONOTONIC()))
+    rig.server.serve_again()
+    return watched, began
+
+
+def _late_violations(rig: Silenced, began: float, window: float) -> list[str]:
+    """Every way the call's reconnect on `rig` was not one late connection, made after the host came
+    back and with less than a connect bound of its window left, so the row tests what it names."""
+    late = [round(at - began, 2) for at in rig.link.opened[1:]]
+    if len(late) != 1 or late[0] < window - ssh.FINAL_ATTEMPT_LEAD - LATE_RETURN:
+        return [f'the reconnects landed {late} s after the call began, not one at its last start '
+                f'({window - ssh.FINAL_ATTEMPT_LEAD} s)']
+    return []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('tool', LATE_TOOLS)
+def test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time(
+        tool: str, silenced: Callable[..., Silenced], executes: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The open after the reconnect is cut at the call's deadline, not left to its own verdict.
+    monkeypatch.setattr(ssh, 'CONNECT_TIMEOUT', LATE_BOUND)
+    rig = silenced()
+    called, _, step = tool.rpartition('-') if tool.endswith(('-subsystem', '-version')) else (tool, '', '')
+    # Only the new connection reaches the server: the first stays silent, so its requests never do.
+    if step:
+        rig.link.silent_at(step)
+    else:
+        rig.link.silent_after_handshake = True
+    watched, began = _late(rig, LATE_WINDOW, _silent_tool(rig.executor, called, rig.local))
+    # The watchdog only stops a hang: an open left to its own verdict ends a bound past the window.
+    outcome, took = watched.result(rig.link, LATE_WINDOW + LATE_BOUND, began)
+    violations = _not_run_violations(called, outcome, took, LATE_WINDOW) + _late_violations(rig, began, LATE_WINDOW)
+    if rig.link.step != (step or 'handshake'):
+        violations.append(f'the new link went silent at {rig.link.step}, not at {step or "its handshake"}')
+    if rig.server.received:
+        violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
+    assert violations == [], f'{tool} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('tool', ['run', 'write_file'])
+def test_a_late_reconnect_onto_a_live_link_runs_the_call(tool: str, silenced: Callable[..., Silenced],
+                                                         executes: Any) -> None:
+    # The reconnect lands with under a connect bound of the window left: the open there still runs.
+    rig = silenced()
+    watched, began = _late(rig, SILENT_WINDOW, _silent_tool(rig.executor, tool, rig.local))
+    outcome, took = watched.result(rig.link, SILENT_WINDOW, began)
+    violations = _completed_violations(tool, outcome, rig) + _late_violations(rig, began, SILENT_WINDOW)
+    assert violations == [], f'{tool} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
 
 
 def _running(server: LoopbackSSH, count: int = 1) -> None:

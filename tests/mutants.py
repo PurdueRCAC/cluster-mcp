@@ -5305,6 +5305,15 @@ CASES += (
 SSH = 'core/executor/ssh.py'
 SSH_EXEC = 'test_ssh_exec.py'
 LIVENESS = 'test_ssh_liveness.py'
+# Where `_run` and `_sftp` give an open its deadline, and the rows that tell where it ends.
+OPEN_UNTIL = 'None if transport is found else deadline'
+RUN_OPEN = f'            ran = self._exec(transport, wire, timeout, marks.end, {OPEN_UNTIL})\n'
+SFTP_OPEN = f'            until = {OPEN_UNTIL}\n'
+LATE_RUN, LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time[{tool}]'
+                        for tool in ('run', 'write_file'))
+LIVE_LATE_RUN, LIVE_LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_live_link_runs_the_call[{tool}]'
+                                  for tool in ('run', 'write_file'))
+SLOW_WRITE = f'{SSH_EXEC}::test_a_slow_transfer_is_not_taken_for_a_silent_link[write]'
 CASES += (
     # A link that dies silently (`ssh._Liveness`): every decision of the monitor and of the call
     # paths that read its verdict, planted at each alternative it can take. `spec/ssh-half-open-link/
@@ -5431,47 +5440,81 @@ CASES += (
          tuple(f'{SSH_EXEC}::test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[{opens}]'
                for opens in ('run', 'sftp')), 'Timeout opening channel'),
     Case('shol-retry-removed', SSH,
-         (('            if self._closed or not _gone(transport):\n                raise\n            return None\n',
-           '            raise\n'),),
+         (('            if self._closed:\n                raise chan.cause\n            return None\n',
+           '            raise chan.cause\n'),),
          (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run_command]',), 'it must say'),
     Case('shol-retry-past-exec', SSH,
          (("                return b'', b'', CONNECTION_LOST_EXIT_CODE, launch.LOST_NOTE\n",
            '                return None\n'),),
          (f'{SSH_EXEC}::test_a_command_cut_by_a_silent_link_is_never_run_twice[run]',), 'not once'),
     Case('shol-retry-fresh-deadline', SSH,
-         (('            ran = self._exec(transport, wire, timeout, marks.end)\n',
-           '            ran = self._exec(transport, wire, timeout, marks.end)\n'
+         (('            ran = self._exec(transport, wire, timeout, marks.end, None if transport is found else deadline)\n',
+           '            ran = self._exec(transport, wire, timeout, marks.end, None if transport is found else deadline)\n'
            '            deadline = time.monotonic() + self._window\n'),),
          (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run]',), 'past its'),
     Case('shol-closed-ignored', SSH,
-         (('            if self._closed or not _gone(transport):\n                raise\n            return None\n',
-           '            if not _gone(transport):\n                raise\n            return None\n'),),
+         (('            if self._closed:\n                raise chan.cause\n            return None\n',
+           '            return None\n'),),
          (f'{LIVENESS}::test_close_leaves_no_monitor_and_starts_no_reconnect',), 'close() woke'),
     Case('shol-sftp-retry-removed', SSH,
-         (('                if self._closed or not _gone(transport):\n                    raise\n\n',
-           '                raise\n\n'),),
+         (('                if self._closed:\n                    raise session.cause\n                continue\n',
+           '                raise session.cause\n'),),
          (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'it must say'),
     Case('shol-sftp-retry-channel-only', SSH,
-         (('                with _opening(transport):\n'
-           '                    chan = transport.open_session(timeout=_open_timeout(transport))\n'
-           '                    chan.invoke_subsystem(\'sftp\')\n'
-           '                    return transport, SFTPClient(chan)\n'
-           '            except (SSHException, EOFError, OSError):\n',
-           '                with _opening(transport):\n'
-           '                    chan = transport.open_session(timeout=_open_timeout(transport))\n'
-           '            except (SSHException, EOFError, OSError):\n'
-           '                chan = None\n'
-           '            if chan is not None:\n'
+         (('            chan.invoke_subsystem(\'sftp\')\n'
+           '            return SFTPClient(chan)\n'
+           '    except (SSHException, EOFError, OSError) as exc:\n'
+           '        if chan is not None:\n',
+           '            try:\n'
            '                chan.invoke_subsystem(\'sftp\')\n'
-           '                return transport, SFTPClient(chan)\n'
-           '            if False:\n'),),
+           '                return SFTPClient(chan)\n'
+           '            except (SSHException, EOFError, OSError) as exc:\n'
+           '                raise RuntimeError(f\'not retried: {exc!r}\') from exc\n'
+           '    except (SSHException, EOFError, OSError) as exc:\n'
+           '        if chan is not None:\n'),),
          (f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[subsystem]',
-          f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[version]'), 'still waiting'),
+          f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[version]'), 'not retried'),
     Case('shol-sftp-fresh-deadline', SSH,
-         (('                if self._closed or not _gone(transport):\n                    raise\n\n',
-           '                if self._closed or not _gone(transport):\n                    raise\n'
-           '                deadline = time.monotonic() + self._window\n\n'),),
+         (('                    raise session.cause\n                continue\n',
+           '                    raise session.cause\n'
+           '                deadline = time.monotonic() + self._window\n                continue\n'),),
          (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'past its'),
+    # The open after a reconnect or a loss: on a worker the call waits for no later than its deadline
+    # (`_within`), the call's own, never one taken as the open starts; the first open, on the
+    # connection the call found live, waits for its own verdict, so a write's later command past its
+    # deadline still opens; and one cut by the deadline gives up rather than reconnect again.
+    *(Case(f'shol-cap-{name}', SSH, ((RUN_OPEN, RUN_OPEN.replace(OPEN_UNTIL, until)),), (target,), why)
+      for name, until, target, why in (
+          ('removed', 'None', LATE_RUN, 'past its'),
+          ('first-only', 'deadline if transport is found else None', LATE_RUN, 'past its'),
+          ('from-the-open', 'None if transport is found else time.monotonic() + self._window', LATE_RUN, 'past its'),
+          ('at-the-last-start', 'None if transport is found else deadline - FINAL_ATTEMPT_LEAD', LIVE_LATE_RUN,
+           'not its call run to its end'),
+          ('always', 'deadline', SLOW_WRITE, 'not the whole transfer'))),
+    Case('shol-cap-cut-retried', SSH,
+         (('        if chan is None:\n            return self._timed_out()\n', '        if chan is None:\n            return None\n'),),
+         (LATE_RUN,), 'past its'),
+    *(Case(f'shol-sftp-cap-{name}', SSH, ((SFTP_OPEN, SFTP_OPEN.replace(OPEN_UNTIL, until)),), (target,), why)
+      for name, until, target, why in (
+          ('removed', 'None', LATE_WRITE, 'past its'),
+          ('first-only', 'deadline if transport is found else None', LATE_WRITE, 'past its'),
+          ('from-the-open', 'None if transport is found else time.monotonic() + self._window', LATE_WRITE,
+           'past its'),
+          ('at-the-last-start', 'None if transport is found else deadline - FINAL_ATTEMPT_LEAD', LIVE_LATE_WRITE,
+           'not its call run to its end'))),
+    Case('shol-sftp-cap-cut-retried', SSH,
+         (('            if session is None:\n                return self._timed_out()\n',
+           '            if session is None:\n                continue\n'),),
+         (LATE_WRITE,), 'past its'),
+    Case('shol-within-waits-past-the-deadline', SSH,
+         (('        if not self._done.wait(max(0.0, until - time.monotonic())):\n',
+           '        if not self._done.wait(None):\n'),),
+         (f'{LIVENESS}::test_an_open_that_ends_after_its_call_gave_up_is_closed',), 'never released'),
+    Case('shol-within-late-open-kept', SSH, (('        if ok:\n            _close_quietly(value)\n', ''),),
+         (f'{LIVENESS}::test_an_open_that_ends_after_its_call_gave_up_is_closed',), 'was left open'),
+    Case('shol-within-started-past-the-deadline', SSH,
+         (('        if time.monotonic() >= until:\n            return None\n        try:\n', '        try:\n'),),
+         (f'{LIVENESS}::test_an_open_that_ends_in_time_is_the_calls',), 'started past'),
     # A transfer cut short: decided by state, raised naming the host, the write's own commands' losses
     # raised the same way.
     Case('shol-lost-transfer-unnamed', SSH,

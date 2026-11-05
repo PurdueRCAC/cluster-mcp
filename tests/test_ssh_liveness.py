@@ -322,6 +322,61 @@ def test_a_poke_reaches_the_monitor_of_the_transport_given(clock: Clock) -> None
         pass
 
 
+class Opened:
+    """What an open on a worker gives: it records its close."""
+
+    def __init__(self) -> None:
+        self.closed = threading.Event()
+
+    def close(self) -> None:
+        self.closed.set()
+
+
+# Real seconds a worker's open is given, past its call's deadline, to end and be closed.
+WORKER_END = 2.0
+
+
+@pytest.mark.unit
+def test_an_open_that_ends_after_its_call_gave_up_is_closed() -> None:
+    release, opened = threading.Event(), Opened()
+
+    def opening() -> Opened:
+        assert release.wait(WORKER_END), 'the open was never released'
+        return opened
+
+    began = time.monotonic()
+    got = ssh._Within(opening).result(began + 0.2)
+    took = time.monotonic() - began
+    release.set()
+    assert got is None and 0.2 <= took < 0.2 + 0.5, f'a call waited {took:.2f} s on an open, for {got!r}, not 0.2 s'
+    assert opened.closed.wait(WORKER_END), 'an open that ended after its call gave up on it was left open'
+
+
+@pytest.mark.unit
+def test_an_open_that_ends_in_time_is_the_calls() -> None:
+    opened = Opened()
+
+    def opening() -> Opened:
+        time.sleep(0.2)
+        return opened
+
+    def failing() -> None:
+        time.sleep(0.2)
+        raise EOFError('the open failed')
+
+    began = time.monotonic()
+    assert ssh._Within(opening).result(began + 5.0) is opened, 'an open made in time was not handed to its call'
+    assert time.monotonic() - began < 1.0 and not opened.closed.is_set(), 'the call waited past its open, or closed it'
+    with pytest.raises(EOFError, match='the open failed'):
+        ssh._Within(failing).result(time.monotonic() + 5.0)
+    assert ssh._within(None, lambda: opened) is opened
+    started: list[None] = []
+    assert ssh._Within(lambda: started.append(None)).result(time.monotonic() - 0.1) is None
+    time.sleep(0.2)
+    assert started == [], 'an open was started past its call\'s deadline'
+
+
+
 # What a transfer cut short says it may leave, by what was cut.
 TRANSFER_TEXTS = {
     'upload': ('upload', 'x.txt may be truncated or hold part of the file'),
@@ -510,6 +565,15 @@ LIVENESS_TEXT = (
     'survives the peer answering nothing for 29 s after a probe, and a transfer while some reply arrives at least '
     'every 44 s.')
 
+# Where a call's open waits once it has reconnected, as the SSHExecutor docstring and the AGENTS.md
+# footgun state it.
+OPEN_TEXT = (
+    "A call's first open, on the connection it found live, waits for its own verdict, B after it begins. Every "
+    'later open, after a reconnect or a loss, runs on a worker thread (`cluster-mcp-open`) that the call waits for '
+    'no later than its deadline, its sends on the write path included, so neither a link that goes silent again '
+    'after a late reconnect nor a write path another call holds there keeps the call past the 3B bound: an open '
+    'not made by then gives `cannot connect to <host>: timed out`, and nothing was sent.')
+
 # A transfer the silent link cuts, as the SSHExecutor docstring and the AGENTS.md footgun state it.
 TRANSFER_TEXT = (
     "A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp` subsystem and "
@@ -548,6 +612,8 @@ def test_liveness_texts_state_the_monitor() -> None:
     }
     missing = [name for name, text in texts.items() if LIVENESS_TEXT not in ' '.join(text.split())]
     assert missing == [], f'a text does not state the silent link as the monitor does: {missing}'
+    missing = [name for name, text in texts.items() if OPEN_TEXT not in ' '.join(text.split())]
+    assert missing == [], f'a text does not state where an open after a reconnect waits: {missing}'
     missing = [name for name, text in texts.items() if TRANSFER_TEXT not in ' '.join(text.split())]
     assert missing == [], f'a text does not state what a transfer cut short raises and leaves: {missing}'
     section = ' '.join(_section(agents, '### 2. Executor Protocol', '### 3.').split())
