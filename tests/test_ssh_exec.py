@@ -2360,6 +2360,17 @@ def test_a_failed_attempt_releases_its_connection(serve: Callable[..., LoopbackS
     assert violations == [], '\n'.join(violations)
 
 
+def lost_write_violations(outcome: Any, cause: str) -> list[str]:
+    """Every way `outcome` is not a write whose own command could not reconnect: a `ConnectionError`
+    naming the host, saying the transfer may be partly made, the target unchanged, and the cause."""
+    text = str(outcome)
+    said = (f'the connection to {LOOPBACK} was lost during the write; the transfer may be partly made',
+            'is unchanged', f'cannot connect to {LOOPBACK}: {cause}')
+    if not isinstance(outcome, ConnectionError) or not all(part in text for part in said):
+        return [f'the write gave {outcome!r:.400}, not a lost transfer saying {said}']
+    return []
+
+
 # Which of a write's own commands meets the lost host: the parent's `mkdir`, the program that puts
 # the file in place, or the probe that asks why a transfer failed; and the fake seconds the write
 # has spent by then.
@@ -2415,10 +2426,9 @@ def test_a_write_spends_one_reconnect_window(step: str, serve: Callable[..., Loo
     if step == 'probe':
         if not isinstance(outcome, OSError):
             violations.append(f'a write whose transfer failed gave {outcome!r}, not the OSError naming it')
-    elif not isinstance(outcome, CommandResult):
-        violations.append(f'the write raised {outcome!r}')
     else:
-        violations += not_run_violations(outcome, 'connection refused', 0, RECONNECT_BOUND, host=LOOPBACK)
+        # The session had opened: a write whose own command cannot reconnect may be partly made.
+        violations += lost_write_violations(outcome, 'connection refused')
     if target.exists():
         violations.append('a write that could not reconnect changed the target')
     if spent > RECONNECT_BOUND + RECONNECT_SLACK:
@@ -2467,14 +2477,17 @@ def test_a_write_command_past_its_last_start_starts_no_attempt(serve: Callable[.
         monkeypatch.setattr(SSHExecutor, '_run', losing)
         monkeypatch.setattr(SSHExecutor, '_new', tracked)
         clock = _fake_time(monkeypatch, executor)
-        outcome = executor.write('~/x', b'content\n')
+        try:
+            outcome: Any = executor.write('~/x', b'content\n')
+        except OSError as exc:
+            outcome = exc
         spent = clock.elapsed()
     finally:
         executor.close()
     violations = []
     if not (met and any(ssh.VERIFY in str(part) for part in met[0])):
         violations.append(f'the first command the write ran was {met!r:.300}, not its placing program')
-    violations += not_run_violations(outcome, 'timed out', 0, RECONNECT_BOUND, host=LOOPBACK)
+    violations += lost_write_violations(outcome, 'timed out')
     if made:
         violations.append(f'a write command past its last start started {len(made)} connect attempts')
     if spent > WRITE_LATE + RECONNECT_SLACK:
@@ -2640,6 +2653,11 @@ class Silenced:
     def home(self) -> Path:
         return Path(self.server.home)
 
+    @property
+    def local(self) -> Path:
+        """The server's own side of a transfer: where an upload is read from, a download written."""
+        return self.home.parent / 'local'
+
     def go_silent(self) -> float:
         """Make the link silent; return when it went (real seconds)."""
         self.link.go_silent()
@@ -2670,6 +2688,8 @@ def silenced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callab
         (home / 'data.txt').write_text(SILENT_DATA)
         (home / 'listed').mkdir(exist_ok=True)
         (home / 'listed' / 'entry').write_text('')
+        (home.parent / 'local').mkdir(exist_ok=True)
+        (home.parent / 'local' / 'upload.txt').write_text(SILENT_DATA)
         server = LoopbackSSH(home, '/bin/bash', tmp_path)
         link = SilentLink(server, rate=rate)
         try:
@@ -2725,11 +2745,15 @@ class Watched:
         return self.got[0], self.ended - since
 
 
-def _silent_tool(executor: SSHExecutor, tool: str) -> Callable[[], Any]:
-    """The call a silent row makes for `tool`: `run` itself, or the tool through an in-process server."""
+def _silent_tool(executor: SSHExecutor, tool: str, local: Path | None = None) -> Callable[[], Any]:
+    """The call a silent row makes for `tool`: `run` or `write` itself, or the tool through an
+    in-process server, its local paths in `local`."""
     if tool == 'run':
         return lambda: executor.run(RECOVERY_COMMAND)
-    name, args = SILENT_TOOLS[tool]
+    if tool == 'write':
+        return lambda: executor.write('~/written.txt', SILENT_DATA.encode())
+    name, given = SILENT_TOOLS[tool]
+    args = {key: value.replace('{local}', str(local)) for key, value in given.items()}
     return lambda: _tool(executor, name, args)
 
 
@@ -2739,14 +2763,28 @@ SILENT_TOOLS: dict[str, tuple[str, dict[str, str]]] = {
     'sbatch-path': ('sbatch', {'script_path': '~/job.sh'}),
     'read_file': ('read_file', {'path': '~/data.txt'}),
     'list_directory': ('list_directory', {'path': '~/listed'}),
+    'write_file': ('write_file', {'path': '~/written.txt', 'content': SILENT_DATA}),
+    'upload_file': ('upload_file', {'local_path': '{local}/upload.txt', 'remote_path': '~/uploaded.txt'}),
+    'download_file': ('download_file', {'remote_path': '~/data.txt', 'local_path': '{local}/downloaded.txt'}),
+    'sbatch-content': ('sbatch', {'script_content': '#!/bin/bash\necho hi\n'}),
 }
-SILENT_COMMAND_TOOLS = ['run', *SILENT_TOOLS]
+SILENT_COMMAND_TOOLS = ['run', 'run_command', 'sbatch-path', 'read_file', 'list_directory']
+SILENT_TRANSFER_TOOLS = ['write_file', 'upload_file', 'download_file', 'sbatch-content']
 
 
-def _completed_violations(tool: str, outcome: Any) -> list[str]:
-    """Every way `outcome` is not `tool`'s call run to its end."""
+def _completed_violations(tool: str, outcome: Any, rig: Silenced | None = None) -> list[str]:
+    """Every way `outcome` is not `tool`'s call run to its end (its files in `rig`'s trees)."""
     if tool == 'run':
         ok = _same(outcome) == ('back|again', '', 0)
+    elif tool in ('write', 'write_file'):
+        ok = (getattr(outcome, 'exit_code', None) == 0 if tool == 'write' else not outcome.is_error)
+        ok = ok and rig is not None and (rig.home / 'written.txt').read_text() == SILENT_DATA
+    elif tool == 'upload_file':
+        ok = not outcome.is_error and rig is not None and (rig.home / 'uploaded.txt').read_text() == SILENT_DATA
+    elif tool == 'download_file':
+        ok = not outcome.is_error and rig is not None and (rig.local / 'downloaded.txt').read_text() == SILENT_DATA
+    elif tool == 'sbatch-content':
+        ok = not outcome.is_error and f'Submitted batch job {argv_echo.JOB_ID}' in outcome.text
     elif tool == 'run_command':
         ok = not outcome.is_error and _command_result(outcome).get('stdout') == 'back'
     elif tool == 'sbatch-path':
@@ -2767,20 +2805,22 @@ def _not_run_violations(tool: str, outcome: Any) -> list[str]:
         ok = (not outcome.is_error and got.get('exit_code') == NOT_STARTED_EXIT_CODE
               and str(got.get('stderr')).startswith(f'cluster-mcp: {GONE}'))
     else:
-        said = 'The job was not submitted' if tool == 'sbatch-path' else 'the command was not run'
-        ok = outcome.is_error and GONE in outcome.text and said in outcome.text
-        ok = ok and not (tool == 'sbatch-path' and 'may have been submitted' in outcome.text)
+        said = {'sbatch-path': 'The job was not submitted', 'sbatch-content': 'The job was not submitted',
+                'upload_file': 'nothing was transferred', 'download_file': 'nothing was transferred'}
+        ok = outcome.is_error and GONE in outcome.text and said.get(tool, 'the command was not run') in outcome.text
+        ok = ok and 'may have been submitted' not in outcome.text
     return [] if ok else [f'{tool} read as {outcome!r:.400}: it must say {GONE!r} and that nothing was run']
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize('tool', SILENT_COMMAND_TOOLS if EVERY_KIND else ['run', 'run_command'])
+@pytest.mark.parametrize('tool', [*SILENT_COMMAND_TOOLS, *SILENT_TRANSFER_TOOLS] if EVERY_KIND
+                         else ['run', 'run_command', 'write_file'])
 def test_a_call_on_a_silent_link_reconnects(tool: str, silenced: Callable[..., Silenced], executes: Any) -> None:
     rig = silenced()
     since = rig.go_silent()
     rig.link.come_back()
-    outcome, took = Watched(_silent_tool(rig.executor, tool)).result(rig.link, SILENT_BOUND, since)
-    violations = _completed_violations(tool, outcome)
+    outcome, took = Watched(_silent_tool(rig.executor, tool, rig.local)).result(rig.link, SILENT_BOUND, since)
+    violations = _completed_violations(tool, outcome, rig)
     fresh = [round(at - since, 2) for at in rig.link.opened[1:]]
     if not (len(fresh) == 1 and 0 <= fresh[0] <= SILENT_BOUND + SILENT_SLACK):
         violations.append(f'new connections were made {fresh} s after the call began, not one within '
@@ -2789,12 +2829,12 @@ def test_a_call_on_a_silent_link_reconnects(tool: str, silenced: Callable[..., S
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize('tool', SILENT_COMMAND_TOOLS)
+@pytest.mark.parametrize('tool', [*SILENT_COMMAND_TOOLS, *SILENT_TRANSFER_TOOLS])
 def test_a_call_on_a_silent_link_to_a_gone_host_is_not_run(tool: str, silenced: Callable[..., Silenced],
                                                            executes: Any) -> None:
     rig = silenced()
     since = rig.go_silent()
-    outcome, took = Watched(_silent_tool(rig.executor, tool)).result(rig.link, SILENT_WINDOW, since)
+    outcome, took = Watched(_silent_tool(rig.executor, tool, rig.local)).result(rig.link, SILENT_WINDOW, since)
     violations = _not_run_violations(tool, outcome)
     if rig.server.received:
         violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
@@ -2802,11 +2842,15 @@ def test_a_call_on_a_silent_link_to_a_gone_host_is_not_run(tool: str, silenced: 
         violations.append('no reconnect attempt reached the gone host, so none was made')
     if argv_echo.calls(rig.home):
         violations.append('sbatch ran')
+    written = [name for name in ('written.txt', 'uploaded.txt') if (rig.home / name).exists()]
+    written += ['downloaded.txt'] if (rig.local / 'downloaded.txt').exists() else []
+    if written:
+        violations.append(f'a call that was not run left {written}')
     assert violations == [], f'{tool} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize('opens', ['run'])
+@pytest.mark.parametrize('opens', ['run', 'sftp'])
 def test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects(
         opens: str, silenced: Callable[..., Silenced], monkeypatch: pytest.MonkeyPatch) -> None:
     # The open's own timeout comes before the call's verdict, and before `SETTLE` after it: the open
@@ -2815,8 +2859,9 @@ def test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects(
     monkeypatch.setattr(ssh, 'OPEN_TIMEOUT', (SILENT_BOUND - ssh.SETTLE) / 2)
     since = rig.go_silent()
     rig.link.come_back()
-    outcome, took = Watched(_silent_tool(rig.executor, opens)).result(rig.link, SILENT_BOUND, since)
-    violations = _completed_violations(opens, outcome)
+    call = 'run' if opens == 'run' else 'write'
+    outcome, took = Watched(_silent_tool(rig.executor, call)).result(rig.link, SILENT_BOUND, since)
+    violations = _completed_violations(call, outcome, rig)
     if len(rig.link.opened) != 2:
         violations.append(f'the server was reached by {len(rig.link.opened)} connections, not a new one')
     assert violations == [], f'{opens} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
@@ -2990,6 +3035,190 @@ def test_a_call_beside_a_command_on_a_silent_link_ends_in_time(silenced: Callabl
         violations.append(f'the stalled command gave {cut!r}, not {CONNECTION_LOST_EXIT_CODE}')
     assert violations == [], (f'the new call ended {took:.2f} s and the stalled one {cut_took:.2f} s after the new '
                               'call began:\n' + '\n'.join(violations))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('step', ['channel', 'subsystem', 'version'])
+def test_an_sftp_open_cut_by_a_silent_link_reconnects(step: str, silenced: Callable[..., Silenced]) -> None:
+    # The link goes silent at one step of a write's SFTP session open, the host back at once: no file
+    # operation has gone, so the write reconnects and lands whole.
+    rig = silenced()
+    rig.link.silent_at(step)
+    watched = Watched(_silent_tool(rig.executor, 'write'))
+    since = _silent_at(rig.link, step)
+    rig.link.come_back()
+    outcome, took = watched.result(rig.link, SILENT_BOUND, since)
+    violations = _completed_violations('write', outcome, rig)
+    if len(rig.link.opened) != 2:
+        violations.append(f'{len(rig.link.opened)} connections were made, not one new one')
+    assert violations == [], f'{step} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+# What the target held before a transfer cut short: a cut write must leave it as it was.
+BEFORE = 'the target before the transfer\n'
+# A transfer too large to finish on what the hop forwarded before it went silent.
+LARGE = 4 * 1024 * 1024
+LOST_DURING = f'the connection to {LOOPBACK} was lost during the'
+PARTLY = 'the transfer may be partly made'
+
+# Each transfer a silent link cuts: the server step it goes silent at (an exec's by what its program
+# runs), what that step is called, and whether the host is back at once.
+CUT_TRANSFERS: dict[str, tuple[str, str | None, str, bool]] = {
+    'put': ('upload', None, 'upload', False),
+    'get': ('download', None, 'download', False),
+    'write-lookup': ('lookup', None, 'lookup', False),
+    'write-stage': ('stage', None, 'stage', False),
+    'write-upload': ('upload', None, 'upload', False),
+    'write-mkdir': ('exec', 'mkdir -p --', 'mkdir', False),
+    'write-place': ('exec', 'cksum', 'place', True),
+    'write-place-gone': ('exec', 'cksum', 'place', False),
+    'sbatch': ('upload', None, 'upload', False),
+}
+
+
+def _staging_named(text: str) -> str | None:
+    """The staging directory a lost write's message names, if any."""
+    found = re.search(r'its staging directory (\S+) may remain', text)
+    return found.group(1) if found else None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('shape', list(CUT_TRANSFERS))
+def test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made(shape: str, silenced: Callable[..., Silenced],
+                                                                  executes: Any) -> None:
+    rig = silenced()
+    step, detail, named, back = CUT_TRANSFERS[shape]
+    target = rig.home / ('new/x.txt' if shape == 'write-mkdir' else 'x.txt')
+    if shape != 'write-mkdir':
+        target.write_text(BEFORE)
+    # A large upload or download outlasts what the hop forwarded; a write's content need not.
+    data = _numbered(LARGE if shape in ('put', 'get') else 64 * 1024)
+    local = rig.local / 'big.bin'
+    if shape == 'put':
+        local.write_bytes(data)
+        call: Callable[[], Any] = lambda: rig.executor.put(str(local), '~/x.txt')
+    elif shape == 'get':
+        (rig.home / 'big.bin').write_bytes(data)
+        local.write_text(BEFORE)
+        call = lambda: rig.executor.get('~/big.bin', str(local))
+    elif shape == 'sbatch':
+        call = lambda: _tool(rig.executor, 'sbatch', {'script_content': '#!/bin/bash\n' + 'echo hi\n' * 1000})
+    else:
+        parent = '~/new' if shape == 'write-mkdir' else None
+        path = '~/new/x.txt' if parent else '~/x.txt'
+        call = lambda: rig.executor.write(path, data, parent=parent)
+    rig.link.silent_at(step, detail, named)
+
+    def calling() -> list[Any]:
+        # The raise a lost transfer gives is its outcome, so it comes back as a value.
+        try:
+            return [call()]
+        except OSError as exc:
+            return [exc]
+
+    watched = Watched(calling)
+    since = _silent_at(rig.link, named)
+    if back:
+        rig.link.come_back()
+    (outcome,), took = watched.result(rig.link, SILENT_WINDOW, since)
+    text = outcome.text if shape == 'sbatch' else str(outcome)
+    violations = []
+    lost = shape == 'sbatch' or isinstance(outcome, ConnectionError)
+    if not (lost and LOST_DURING in text and PARTLY in text):
+        violations.append(f'gave {outcome!r:.500}, not a lost transfer naming the host and saying {PARTLY!r}')
+    if shape == 'put' and not (target.exists() and target.stat().st_size < LARGE and 'x.txt' in text):
+        violations.append('the upload says the target may be truncated, but it is whole or gone')
+    if shape == 'get' and not (local.exists() and local.stat().st_size < LARGE and str(local) in text):
+        violations.append(f'the download names {str(local)!r} as partly made, but it is whole or gone, or unnamed')
+    if shape.startswith('write'):
+        staging = _staging_named(text)
+        if shape == 'write-mkdir':
+            if target.exists() or 'is unchanged' not in text:
+                violations.append('a write cut at its parent mkdir changed the target, or said it might have')
+        elif shape.startswith('write-place'):
+            if target.read_text() not in (BEFORE, data.decode()):
+                violations.append('a write cut at its place step left the target neither old nor new')
+            if 'is either the old file or the new one' not in text:
+                violations.append('a write cut at its place step does not say the target is old or new')
+        elif target.read_text() != BEFORE or 'is unchanged' not in text:
+            violations.append('a write cut while staging changed the target, or did not say it is unchanged')
+        if shape in ('write-upload', 'write-place', 'write-place-gone') and not (staging and _staging_left(rig.home)):
+            violations.append(f'the staging directory left was not named ({staging}) or is not there '
+                              f'({_staging_left(rig.home)})')
+    if shape == 'sbatch':
+        if not outcome.is_error or 'Failed to write job script' not in text or argv_echo.calls(rig.home):
+            violations.append('sbatch, its script cut short, must say the script failed and submit nothing')
+    assert violations == [], f'{shape} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+# A slow transfer: its size, past the reconnect bound at the slow hop's rate.
+SLOW_TRANSFER = 7 * SLOW_RATE
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('shape', ['put', 'get', 'write'])
+def test_a_slow_transfer_is_not_taken_for_a_silent_link(shape: str, silenced: Callable[..., Silenced]) -> None:
+    # Each reply arrives a write or a read at a time through the slow hop, never a bound apart.
+    rig = silenced(rate=SLOW_RATE)
+    data = _numbered(SLOW_TRANSFER)
+    local, remote = rig.local / 'slow.bin', rig.home / 'slow.bin'
+    (local if shape == 'put' else remote).write_bytes(data)
+    calls: dict[str, Callable[[], Any]] = {
+        'put': lambda: rig.executor.put(str(local), '~/slow.bin'),
+        'get': lambda: rig.executor.get('~/slow.bin', str(local)),
+        'write': lambda: rig.executor.write('~/slow.bin', data),
+    }
+    began = _REAL_MONOTONIC()
+    outcome, took = Watched(calls[shape]).result(rig.link, QUIET_FIGURE, began)
+    landed = (remote if shape != 'get' else local).read_bytes()
+    violations = []
+    if landed != data or (shape == 'write' and outcome.exit_code != 0):
+        violations.append(f'{len(landed)} of {len(data)} bytes landed, {outcome!r:.200}: not the whole transfer')
+    if len(rig.link.opened) != 1:
+        violations.append(f'{len(rig.link.opened)} connections were made: a slow live transfer was taken for dead')
+    if took < SILENT_WINDOW:
+        violations.append(f'it took {took:.1f} s, not longer than the {SILENT_WINDOW} s bound, so it proves nothing')
+    assert violations == [], f'{shape} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
+
+
+# How long a helper's send on the held write path must still be blocked to show it held.
+HELD = 0.5
+
+
+@pytest.mark.integration
+def test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time(silenced: Callable[..., Silenced]) -> None:
+    # An upload holds the connection's write path on the silent link, so every other sender queues
+    # behind it: the new call's verdict, counted from its hand-over, still comes, and ends both.
+    rig = silenced()
+    local = rig.local / 'big.bin'
+    local.write_bytes(_numbered(LARGE))
+    transport = rig.executor._conn.transport
+    rig.link.silent_at('upload')
+    stalled = Watched(lambda: rig.executor.put(str(local), '~/big.bin'))
+    _silent_at(rig.link, 'upload')
+    rig.link.come_back()
+
+    def ignore() -> None:
+        with contextlib.suppress(Exception):
+            transport.send_ignore()
+
+    probe = threading.Thread(target=ignore, daemon=True)
+    probe.start()
+    probe.join(HELD)
+    if not probe.is_alive():
+        rig.link.close()
+        pytest.fail(f'the write path was not held: a send on it returned within {HELD} s, so the row proves nothing')
+    began = _REAL_MONOTONIC()
+    outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_BOUND, began)
+    try:
+        cut, cut_took = stalled.result(rig.link, SILENT_BOUND, began)
+    except OSError as exc:
+        cut, cut_took = exc, _REAL_MONOTONIC() - began
+    violations = _completed_violations('run', outcome)
+    if not (isinstance(cut, ConnectionError) and PARTLY in str(cut)):
+        violations.append(f'the stalled upload gave {cut!r:.300}, not a lost transfer')
+    assert violations == [], (f'the new call ended {took:.2f} s and the upload {cut_took:.2f} s after the new call '
+                              'began:\n' + '\n'.join(violations))
 
 
 # ---------------------------------------------------------------------------------------------

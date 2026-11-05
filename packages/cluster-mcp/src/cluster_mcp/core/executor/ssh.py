@@ -29,6 +29,7 @@ from typing import Any, Final, Optional, Type
 from types import TracebackType
 
 # Standard libs
+import contextlib
 import errno
 import os
 import posixpath
@@ -600,6 +601,12 @@ def _poked(transport: Any) -> Any:
     return transport
 
 
+def _opening(transport: Any) -> contextlib.AbstractContextManager[None]:
+    """While a call waits on a channel or session to open on `transport` (`_Liveness.opening`)."""
+    monitor = _monitor_of(transport)
+    return contextlib.nullcontext() if monitor is None else monitor.opening()
+
+
 def _open_timeout(transport: Any) -> float:
     """How long a channel open on `transport` waits: `OPEN_TIMEOUT`, or `OPEN_MARGIN` past its
     monitor's bound (a call's verdict) when that is longer."""
@@ -623,6 +630,73 @@ def _gone(transport: Any) -> bool:
     if not transport.is_active():
         return True
     return monitor is not None and monitor.unanswered()
+
+
+def _down(transport: Any) -> bool:
+    """Whether `transport` is known lost now: its monitor found the link dead, or it is inactive."""
+    monitor = _monitor_of(transport)
+    return (monitor is not None and monitor.dead) or not transport.is_active()
+
+
+def _cut(sftp: SFTPClient, exc: BaseException) -> bool:
+    """Whether `exc`, raised by a step of an SFTP session, came from its connection's loss.
+
+    Decided by state, never by the exception's type: a lost session's waits raise `EOFError`,
+    `SSHException` or an `OSError` such as `Socket is closed`. An `OSError` carrying an errno other
+    than a connection's is the server's own answer, so the link was live; `Short` was decided on a
+    live link. Otherwise the loss is the monitor's verdict, or the transport inactive. An `OSError`
+    on a channel still open is the server's answer too (OpenSSH reports a full filesystem as a bare
+    `Failure`), since a lost connection closes its channels; any other failure waits `SETTLE` for the
+    transport to go inactive (Paramiko wakes a wait before it marks a lost connection inactive).
+    """
+    if isinstance(exc, Short) or (isinstance(exc, OSError) and exc.errno is not None
+                                  and not isinstance(exc, ConnectionError)):
+        return False
+    channel = sftp.get_channel()
+    transport = channel.get_transport()
+    if _down(transport):
+        return True
+    if isinstance(exc, OSError) and not channel.closed:
+        return False
+    transport.join(SETTLE)
+    return not transport.is_active()
+
+
+class TransferLost(ConnectionError):
+    """A transfer whose connection was lost once its SFTP session had opened: it may be partly made.
+
+    The text names the host, says the transfer may be partly made, and says what may remain.
+    """
+
+    def __init__(self, host: str, during: str, remains: str) -> None:
+        super().__init__(f'the connection to {host} was lost during the {during}; the transfer may be partly '
+                         f'made: {remains}')
+
+
+class _Lost(Exception):
+    """Inside `write`: a later command of the write found the connection lost; `left` says what may remain."""
+
+    def __init__(self, left: str) -> None:
+        super().__init__(left)
+        self.left = left
+
+
+def _remains(what: str, directory: str | None) -> str:
+    """`what`, and the staging directory `directory` that may remain, when one was made."""
+    return what if directory is None else f'{what}, and its staging directory {directory} may remain'
+
+
+def _lost_to(result: CommandResult, transport: Any) -> bool:
+    """Whether a write's own command met its connection lost: it may have run (`-1003`), or it was
+    not run (`-1002`) because the write's connection is gone and no reconnect came. A `-1002` on a
+    live connection is a program that did not start, the write's own failure."""
+    return result.exit_code == CONNECTION_LOST_EXIT_CODE or (result.exit_code == NOT_STARTED_EXIT_CODE
+                                                            and _down(transport))
+
+
+def _said(result: CommandResult) -> str:
+    """What a write's own command reported, without the server's prefix."""
+    return result.stderr.strip().removeprefix('cluster-mcp: ')
 
 
 class _Liveness:
@@ -653,6 +727,8 @@ class _Liveness:
         self.heard = _liveness_clock()
         self.out: float | None = None
         self.poked: float | None = None
+        # How many calls are waiting on a channel or session to open (`opening`).
+        self.waiting = 0
         self.dead = False
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -689,6 +765,25 @@ class _Liveness:
                 self.poked = _liveness_clock()
         self._wake.set()
 
+    @contextlib.contextmanager
+    def opening(self) -> Iterator[None]:
+        """A call waits on a channel or an SFTP session to open: the poke stays while it waits.
+
+        An open takes several waits on the peer, and a reply to one of them can answer the probe the
+        call's poke sent before the next wait has begun; so while a call waits, an answer clears
+        nothing, and the next probe goes at once, each judged a bound after it is handed over.
+        """
+        with self._lock:
+            self.waiting += 1
+            if self.poked is None:
+                self.poked = _liveness_clock()
+        self._wake.set()
+        try:
+            yield
+        finally:
+            with self._lock:
+                self.waiting -= 1
+
     def unanswered(self) -> bool:
         """Whether a judged probe is out with nothing heard since it was handed over."""
         with self._lock:
@@ -704,7 +799,7 @@ class _Liveness:
         """
         with self._lock:
             if self.out is not None and self.heard >= self.out:
-                if self.poked is not None and self.out >= self.poked:
+                if self.poked is not None and self.out >= self.poked and not self.waiting:
                     self.poked = None
                 self.out = None
             action = _verdict(self.heard, self.out, self.poked, now, self.bound)
@@ -756,7 +851,9 @@ class _Liveness:
 def _is_dir(sftp: SFTPClient, path: str) -> bool:
     try:
         return stat.S_ISDIR(sftp.stat(path).st_mode or 0)
-    except OSError:
+    except OSError as exc:
+        if _cut(sftp, exc):
+            raise
         return False
 
 
@@ -789,7 +886,9 @@ def _loops(sftp: SFTPClient, path: str) -> bool:
             if names.startswith('/'):
                 done = '/'
             todo.extend(reversed([part for part in names.split('/') if part]))
-    except OSError:
+    except OSError as exc:
+        if _cut(sftp, exc):
+            raise
         return False
     return False
 
@@ -816,7 +915,9 @@ def _staging(sftp: SFTPClient, path: str) -> tuple[str, str | None, bool]:
         if resolved is None or not _is_dir(sftp, posixpath.dirname(resolved) or '/'):
             try:
                 names = sftp.readlink(path) or '?'
-            except OSError:
+            except OSError as exc:
+                if _cut(sftp, exc):
+                    raise
                 names = '?'
             raise FileNotFoundError(errno.ENOENT, f'No such file or directory: the symbolic link names {names!r}, '
                                     'whose directory does not exist', path)
@@ -830,15 +931,18 @@ def _staging(sftp: SFTPClient, path: str) -> tuple[str, str | None, bool]:
     return path, f'{stat.S_IMODE(mode) & ~SET_ID:o}', not stat.S_ISREG(mode)
 
 
-def _stage(sftp: SFTPClient, near: str) -> tuple[str, str]:
-    """Make a fresh private directory in `near`; return it and the path of the file to stage there.
+def _stage_in(near: str) -> str:
+    """A fresh name for a staging directory in `near`."""
+    return posixpath.join(near, STAGE_PREFIX + secrets.token_hex(8))
+
+
+def _stage(sftp: SFTPClient, directory: str) -> str:
+    """Make the private directory `directory`; return the path of the file to stage there.
 
     The directory is made mode 0700, so no other user can reach what it holds.
     """
-    directory = posixpath.join(near, STAGE_PREFIX + secrets.token_hex(8))
     sftp.mkdir(directory, 0o700)
-    staged = posixpath.join(directory, STAGED)
-    return directory, staged
+    return posixpath.join(directory, STAGED)
 
 
 class Short(OSError):
@@ -875,6 +979,8 @@ def _upload(sftp: SFTPClient, staged: str, data: bytes) -> None:
         _close(sftp, handle)
         size = sftp.stat(staged).st_size
     except OSError as exc:
+        if _cut(sftp, exc):
+            raise
         raise Short(exc.strerror or str(exc) or 'Failure') from exc
     if size != len(data):
         raise Short(f'{size} of {len(data)} bytes arrived')
@@ -898,11 +1004,12 @@ _REVERSED: Final = bytes(int(f'{i:08b}'[::-1], 2) for i in range(256))
 
 
 def _discard(sftp: SFTPClient, directory: str, *staged: str) -> None:
-    """Remove a staging directory and what is left in it (the checksum, once a move has taken the file)."""
+    """Remove a staging directory and what is left in it (the checksum, once a move has taken the file),
+    best effort: a session lost meanwhile leaves it."""
     for remove, target in (*((sftp.remove, path) for path in staged), (sftp.rmdir, directory)):
         try:
             remove(target)
-        except OSError:
+        except (OSError, EOFError, SSHException):
             pass
 
 
@@ -950,6 +1057,17 @@ class SSHExecutor:
     answers within the background verdict: at the default bound, a quiet command survives the peer
     answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
     44 s.
+
+    A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
+    subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
+    judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
+    `ConnectionError` naming the host that says the transfer may be partly made and what may remain:
+    for `put`, the remote target, truncated or holding part of the file; for `get`, the local file,
+    likewise; for `write`, the target unchanged and the staging directory that may remain, or, when
+    its parent's `mkdir` or its place step meets the loss, what that step can leave (an overwrite is
+    the old file or the new one, an append or a write-through may be partial). The loss is decided by
+    state before any handler that would read it as the server's answer, and a lost write leaves its
+    staging directory (`issues/ssh-write-staging-leftover.md`).
     """
 
     _host: str
@@ -1301,7 +1419,8 @@ class SSHExecutor:
         connection stays up (`SETTLE` after the failure) was refused: it raises.
         """
         try:
-            chan = transport.open_session(timeout=_open_timeout(transport))
+            with _opening(transport):
+                chan = transport.open_session(timeout=_open_timeout(transport))
         except (SSHException, EOFError, OSError):
             if self._closed or not _gone(transport):
                 raise
@@ -1321,6 +1440,35 @@ class SSHExecutor:
             return _collect(chan, timeout, end)
         finally:
             chan.close()
+
+    def _sftp(self, deadline: float) -> tuple[Transport, SFTPClient] | str:
+        """A transport and an SFTP session open on it, reconnecting no later than `deadline`; or, on
+        giving up, the message `cannot connect to <host>: <cause>`.
+
+        The session opens in three steps, each a wait on the peer: the channel (waiting
+        `_open_timeout`), the `sftp` subsystem, and the version exchange, all made holding the
+        connection's liveness monitor's poke (`_opening`). A loss at any of them (`_gone`) has sent no
+        file operation, so the call reconnects within its deadline, unless the executor was closed;
+        a failure on a live connection raises.
+        """
+        while True:
+            transport = self._ensure_connected(deadline)
+            if isinstance(transport, str):
+                return transport
+            chan = None
+            try:
+                with _opening(transport):
+                    chan = transport.open_session(timeout=_open_timeout(transport))
+                    chan.invoke_subsystem('sftp')
+                    return transport, SFTPClient(chan)
+            except (SSHException, EOFError, OSError):
+                if chan is not None:
+                    try:
+                        chan.close()
+                    except Exception:
+                        pass
+                if self._closed or not _gone(transport):
+                    raise
 
     def write(self, path: str, data: bytes, append: bool = False, parent: str | None = None,
               executable: bool = False) -> CommandResult:
@@ -1342,7 +1490,9 @@ class SSHExecutor:
         leaves the target untouched; the remote filesystem is then asked the reason (`PROBE`). The
         staging directory is removed afterwards, except when the host is lost after the content is
         staged: removing it needs the connection, so the directory (mode 0700, the user's own) can
-        then remain beside the target, or in the login home. A lost connection is
+        then remain beside the target, or in the login home. A connection lost once the SFTP
+        session has opened, a silent one included, raises `TransferLost` naming what may remain,
+        and so does one the parent's `mkdir` or the place step meets. A lost connection is
         re-established first, and every command the write runs shares one deadline, so a write
         spends at most one reconnect window; one that cannot reconnect writes nothing to the target
         and returns `NOT_STARTED_EXIT_CODE`, as `run` does.
@@ -1352,60 +1502,114 @@ class SSHExecutor:
                 target's directory does not exist, its path passes through a loop of links
                 (`ELOOP`), its directory is missing or closed, a transfer
                 failed or fell short, with the reason); nothing was written.
+            TransferLost: The connection was lost once the SFTP session had opened: the transfer
+                may be partly made. The target is unchanged while the content is staged, and its
+                staging directory may remain; once the place step may have run, an overwrite is
+                the old file or the new one, and an append or a write-through may be partial.
         """
         deadline = time.monotonic() + self._window
         if not path:
             # As a shell's `>` with an empty name.
             raise FileNotFoundError(errno.ENOENT, 'No such file or directory', path)
-        transport = self._ensure_connected(deadline)
-        if isinstance(transport, str):
-            return self._not_run(transport)
-        with transport.open_sftp_client() as sftp:
-            # A parent that is already a directory needs no command, and no login shell's start.
-            if parent is not None and not _is_dir(sftp, _remote(parent)):
-                made = self._run(launch.fixed_argv(MAKE_PARENT, 'cluster-mcp-write', UserPath(parent)),
-                                 deadline=deadline)
-                if made.exit_code != 0:
-                    return made
-            remote = _remote(path)
+        reached = self._sftp(deadline)
+        if isinstance(reached, str):
+            return self._not_run(reached)
+        transport, sftp = reached
+        with sftp:
             try:
-                target, mode, through = _staging(sftp, remote)
-                near = '.' if through else posixpath.dirname(target) or '.'
-                try:
-                    directory, staged = _stage(sftp, near)
-                except OSError as exc:
-                    if exc.errno not in CLOSED or mode is None or through:
-                        raise
-                    # A writable file in a directory closed to new entries: written through, as before.
-                    through = True
-                    directory, staged = _stage(sftp, '.')
-            except OSError:
-                # SFTP reports a loop as a missing file or a bare failure: name it, as `cat >` does.
-                if _loops(sftp, remote):
-                    raise OSError(errno.ELOOP, 'Too many levels of symbolic links', path) from None
+                return self._write(sftp, transport, path, data, append, parent, executable, deadline)
+            except _Lost as lost:
+                raise TransferLost(self._host, 'write', lost.left) from lost
+            except (OSError, EOFError, SSHException) as exc:
+                if not _cut(sftp, exc):
+                    raise
+                # What a lost connection may leave, as far as the write had gone.
+                raise TransferLost(self._host, 'write', getattr(exc, 'left', f'{path} is unchanged')) from exc
+
+    def _write(self, sftp: SFTPClient, transport: Transport, path: str, data: bytes, append: bool,
+               parent: str | None, executable: bool, deadline: float) -> CommandResult:
+        """`write`'s body, on its open SFTP session `sftp`: a loss of the connection on the way is
+        raised as `_Lost`, or as the step's own exception carrying what it may leave (`left`)."""
+        unchanged = f'{path} is unchanged'
+        # A parent that is already a directory needs no command, and no login shell's start.
+        if parent is not None and not _is_dir(sftp, _remote(parent)):
+            made = self._run(launch.fixed_argv(MAKE_PARENT, 'cluster-mcp-write', UserPath(parent)),
+                             deadline=deadline)
+            if _lost_to(made, transport):
+                maybe = 'its parent directory may have been made, and ' if made.exit_code == CONNECTION_LOST_EXIT_CODE else ''
+                raise _Lost(f'{maybe}{unchanged} ({_said(made)})')
+            if made.exit_code != 0:
+                return made
+        remote = _remote(path)
+        directory = None
+        try:
+            target, mode, through = _staging(sftp, remote)
+            near = '.' if through else posixpath.dirname(target) or '.'
+            try:
+                directory = _stage_in(near)
+                staged = _stage(sftp, directory)
+            except OSError as exc:
+                if exc.errno not in CLOSED or mode is None or through:
+                    raise
+                # A writable file in a directory closed to new entries: written through, as before.
+                through = True
+                directory = _stage_in('.')
+                staged = _stage(sftp, directory)
+        except (OSError, EOFError, SSHException) as exc:
+            if _cut(sftp, exc):
+                exc.left = _remains(unchanged, directory)  # type: ignore[union-attr]
                 raise
-            expected = posixpath.join(directory, EXPECTED)
+            if not isinstance(exc, OSError):
+                raise
+            # SFTP reports a loop as a missing file or a bare failure: name it, as `cat >` does.
+            if _loops(sftp, remote):
+                raise OSError(errno.ELOOP, 'Too many levels of symbolic links', path) from None
+            raise
+        expected = posixpath.join(directory, EXPECTED)
+        lost = False
+        try:
             try:
-                try:
-                    _upload(sftp, staged, data)
-                    _upload(sftp, expected, cksum(data).encode('ascii'))
-                except Short as exc:
-                    raise Short(f'the transfer of {len(data)} bytes to {target!r} failed: '
-                                f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None
-                if append:
-                    script = PLACE_APPEND
+                _upload(sftp, staged, data)
+                _upload(sftp, expected, cksum(data).encode('ascii'))
+            except Short as exc:
+                raise Short(f'the transfer of {len(data)} bytes to {target!r} failed: '
+                            f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None
+            except (OSError, EOFError, SSHException) as exc:
+                lost = _cut(sftp, exc)
+                if lost:
+                    exc.left = _remains(unchanged, directory)  # type: ignore[union-attr]
+                raise
+            if append:
+                script = PLACE_APPEND
+            elif through:
+                script = PLACE_THROUGH
+            elif mode is not None:
+                script = WRITABLE + PLACE
+            else:
+                script = PLACE
+            if executable:
+                script += PLACE_EXECUTABLE
+            placed = self._run(launch.fixed_argv(VERIFY + script, 'cluster-mcp-write', UserPath(staged),
+                                                 UserPath(target), mode or '=rw', UserPath(expected)),
+                               deadline=deadline)
+            if _lost_to(placed, transport):
+                lost = True
+                if placed.exit_code == NOT_STARTED_EXIT_CODE:
+                    became = unchanged
+                elif append:
+                    became = f'{target} may hold part of what was appended'
                 elif through:
-                    script = PLACE_THROUGH
-                elif mode is not None:
-                    script = WRITABLE + PLACE
+                    became = f'{target} may be truncated or hold part of the file'
                 else:
-                    script = PLACE
-                if executable:
-                    script += PLACE_EXECUTABLE
-                return self._run(launch.fixed_argv(VERIFY + script, 'cluster-mcp-write', UserPath(staged),
-                                                   UserPath(target), mode or '=rw', UserPath(expected)),
-                                 deadline=deadline)
-            finally:
+                    became = f'{target} is either the old file or the new one'
+                if executable and placed.exit_code == CONNECTION_LOST_EXIT_CODE:
+                    became += ', and may not be executable yet'
+                raise _Lost(f'{_remains(became, directory)} ({_said(placed)})')
+            return placed
+        finally:
+            # The removal needs the session: on a lost one the staging directory is left
+            # (`issues/ssh-write-staging-leftover.md`).
+            if not lost and not _down(transport):
                 _discard(sftp, directory, staged, expected)
 
     def _reason(self, staged: str, deadline: float) -> str | None:
@@ -1441,18 +1645,27 @@ class SSHExecutor:
         Raises:
             ConnectionError: The lost connection could not be re-established within the bound the
                 class states: `cannot connect to <host>: <cause>; nothing was transferred`.
+            TransferLost: The connection was lost once the SFTP session had opened: the remote
+                target may be truncated or hold part of the file.
         """
         deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)
-        transport = self._ensure_connected(deadline)
-        if isinstance(transport, str):
-            raise ConnectionError(f'{transport}; nothing was transferred')
-        with transport.open_sftp_client() as sftp:
-            remote = _remote(remote_path)
-            if _is_dir(sftp, remote):
-                remote = posixpath.join(remote, os.path.basename(local))
-            sftp.put(local, remote)
-            return sftp.normalize(remote)
+        reached = self._sftp(deadline)
+        if isinstance(reached, str):
+            raise ConnectionError(f'{reached}; nothing was transferred')
+        _, sftp = reached
+        remote = _remote(remote_path)
+        with sftp:
+            try:
+                if _is_dir(sftp, remote):
+                    remote = posixpath.join(remote, os.path.basename(local))
+                sftp.put(local, remote)
+                return sftp.normalize(remote)
+            except (OSError, EOFError, SSHException) as exc:
+                if not _cut(sftp, exc):
+                    raise
+                raise TransferLost(self._host, 'upload',
+                                   f'{remote} may be truncated or hold part of the file') from exc
 
     def get(self, remote_path: str, local_path: str) -> str:
         """
@@ -1469,17 +1682,26 @@ class SSHExecutor:
         Raises:
             ConnectionError: The lost connection could not be re-established within the bound the
                 class states: `cannot connect to <host>: <cause>; nothing was transferred`.
+            TransferLost: The connection was lost once the SFTP session had opened: the local file
+                may be truncated or hold part of the file.
         """
         deadline = time.monotonic() + self._window
         local = launch.expand_local(local_path)
-        transport = self._ensure_connected(deadline)
-        if isinstance(transport, str):
-            raise ConnectionError(f'{transport}; nothing was transferred')
-        with transport.open_sftp_client() as sftp:
-            remote = _remote(remote_path)
-            if os.path.isdir(local):
-                local = os.path.join(local, posixpath.basename(remote))
-            sftp.get(remote, local)
+        reached = self._sftp(deadline)
+        if isinstance(reached, str):
+            raise ConnectionError(f'{reached}; nothing was transferred')
+        _, sftp = reached
+        remote = _remote(remote_path)
+        if os.path.isdir(local):
+            local = os.path.join(local, posixpath.basename(remote))
+        with sftp:
+            try:
+                sftp.get(remote, local)
+            except (OSError, EOFError, SSHException) as exc:
+                if not _cut(sftp, exc):
+                    raise
+                raise TransferLost(self._host, 'download',
+                                   f'{local} may be truncated or hold part of the file') from exc
         return os.path.abspath(local)
 
     def __enter__(self) -> SSHExecutor:

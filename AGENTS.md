@@ -1231,7 +1231,7 @@ import has no effect.
     (`test_a_write_spends_one_reconnect_window[parent|place|probe]`, which
     `ssh-write-parent-own-deadline`, `-place-own-deadline` and `-probe-own-deadline` each turn red);
     one whose placing program meets it 44 s into the write, past its last start, starts no attempt
-    and gives `-1002` naming `timed out` at once (`test_a_write_command_past_its_last_start_starts_no_attempt`,
+    and gives up naming `timed out` at once, raised as the lost transfer since its session had opened (`test_a_write_command_past_its_last_start_starts_no_attempt`,
     which `ssh-reconnect-starts-past-last-start` also turns red). An attempt whose authentication
     outlasts a 1 s auth timeout, the server holding it, leaves no transport active once it has
     failed, and the next attempt runs the command (`test_a_failed_attempt_releases_its_connection`,
@@ -1251,7 +1251,8 @@ import has no effect.
     of the loopback server: a hop that can stop forwarding both ways and hold new connections the
     same way, closing no socket (`go_silent()`), forward new connections again (`come_back()`) or the
     held ones (`resume()`), limit its rate (`rate=`), go silent as the server reaches a step
-    (`silent_at`: an exec request, a probe) or once a new connection is made
+    (`silent_at`: a channel, subsystem or exec request, a probe, the SFTP version exchange, or an SFTP
+    lookup, mkdir, write or read; an exec by the program it carries) or once a new connection is made
     (`silent_after_handshake`), with a 16 KiB receive buffer on what it accepts and a port never in
     54001–54005. Each runs under a 2 s connect bound (a 6 s reconnect bound), its call on a thread
     under a watchdog of its figure plus 1 s from the moment the link went silent, which fails with
@@ -1277,20 +1278,44 @@ import has no effect.
     trickling its output through a 32 KiB/s hop for longer, gives its whole result on the same
     connection (`test_a_quiet_command_is_not_taken_for_a_silent_link[quiet|slow-link]`), and so does
     one through a silent spell that begins as a background probe arrives and ends 2.5 s later
-    (`test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`).
+    (`test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`). The transfer rows go
+    silent at a server step of an SFTP request or an exec (`lookup`, `stage`, `upload`, `download`,
+    and the write's `mkdir` and place programs), each named in the watchdog's message. A write
+    whose SFTP session open meets the silence, at its channel, subsystem or version step, reconnects
+    and lands whole (`test_an_sftp_open_cut_by_a_silent_link_reconnects[channel|subsystem|version]`,
+    and `[sftp]` of the open-timeout row); `write_file` reconnects too
+    (`test_a_call_on_a_silent_link_reconnects[write_file]`, every transfer tool with
+    `CLUSTER_MCP_TEST_EVERY_KIND=1`), and with the host gone every transfer tool reads as nothing
+    run (`…to_a_gone_host_is_not_run[write_file|upload_file|download_file|sbatch-content]`). A transfer
+    in flight as the link goes silent raises the lost transfer within the bound, naming the host,
+    saying it may be partly made, and stating what may remain as it is found: `put`'s target
+    truncated, `get`'s local file, a write's target unchanged and its staging directory named, or
+    at the place step the old file or the new one; `sbatch` says the script failed and submits
+    nothing (`test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put|get|write-lookup|write-stage|write-upload|write-mkdir|write-place|write-place-gone|sbatch]`).
+    A slow transfer through a 32 KiB/s hop, longer than the bound, lands whole on one connection
+    (`test_a_slow_transfer_is_not_taken_for_a_silent_link[put|get|write]`), and a call beside a 4 MiB
+    upload stalled on the silent link, the row first showing the write path held (a send on it still
+    blocked 0.5 s later, a failure otherwise), ends within 3 s, the upload with it
+    (`test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time`). A write whose parent's
+    `mkdir` or place step cannot reconnect raises the lost transfer naming the cause, the target
+    untouched (`test_a_write_spends_one_reconnect_window[parent|place]`,
+    `test_a_write_command_past_its_last_start_starts_no_attempt`).
   - `tests/test_ssh_liveness.py` (`unit`, with `integration` rows on the loopback server): the
     liveness monitor. On a fake clock, `_verdict` gives a probe after a bound of quiet and at once
     for a poke, and with nothing heard since the probe went, dead at 2B − `VERDICT_MARGIN` for a
     background probe or one bound after a waiting poke, whichever is first, never before; any
     message heard clears the probe, a poke stays latched past an answer to a probe handed over
-    before it and never moves the probe out, the priming probe is never judged, and a hand-over
-    counts while the sender is stuck. The hook stamps nothing on a read that raises; the bound is
+    before it and never moves the probe out, the priming probe is never judged, a hand-over
+    counts while the sender is stuck, and while a call waits on an open no answer clears its poke,
+    each probe then judged a bound after it went. A lost transfer names the host, says it may be
+    partly made, and says what may remain. The hook stamps nothing on a read that raises; the bound is
     the connection's own (`_bound`); a fake connection gets no monitor; the close goes outermost hop
     first on a fake gateway chain; a poke reaches the monitor of the transport given. On a real
     Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
     included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
     it wakes starts no reconnect. The doc pin holds the `SSHExecutor` docstring, this file's
-    `executor/ssh.py` footgun and the README to the monitor's figures.
+    `executor/ssh.py` footgun and the README to the monitor's figures, and them and §2 to what a
+    transfer cut short raises and leaves.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
     installed `cluster-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
     exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the
@@ -1992,13 +2017,23 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   came first. Nothing merely quiet is cut, since any message proves the link live, while the peer
   answers within the background verdict: at the default bound, a quiet command survives the peer
   answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
-  44 s. A link quieter than that is taken for dead, the recorded floor
+  44 s. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
+  subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
+  judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
+  `ConnectionError` naming the host that says the transfer may be partly made and what may remain:
+  for `put`, the remote target, truncated or holding part of the file; for `get`, the local file,
+  likewise; for `write`, the target unchanged and the staging directory that may remain, or, when
+  its parent's `mkdir` or its place step meets the loss, what that step can leave (an overwrite is
+  the old file or the new one, an append or a write-through may be partial). The loss is decided by
+  state before any handler that would read it as the server's answer, and a lost write leaves its
+  staging directory (`issues/ssh-write-staging-leftover.md`). A link quieter than that is taken for dead, the recorded floor
   (`issues/ssh-liveness-message-gap.md`). What it rests on: the activity hook is an instance
   wrapper on the transport's `packetizer.read_message` (the one call site where `Transport.run`
   reads every message after the handshake, in 3.2 and 5.0), which stamps a read that returns and
   nothing on one that raises, and misses the read in progress as it goes in, hence the unjudged
   priming probe; the decision is the pure `_verdict`, and the poke is latched until a probe handed
-  over at or after it is answered, and never moves the probe already out; the judge thread
+  over at or after it is answered, while a call waits on an open (`opening`) until the open ends,
+  and never moves the probe already out; the judge thread
   (`cluster-mcp-liveness`) takes no transport lock and hands each probe to the sender thread
   (`cluster-mcp-probe`), which sends it through `_send_user_message` as `_signal` sends, swallows
   every error and has at most one send in flight, the probe counting from its hand-over so a send
@@ -2159,7 +2194,15 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   closed to new entries, is written through instead, staged in the login home; the staging
   directory is removed afterwards, except when the host is lost after the content is staged:
   removing it needs the connection, so it can then remain (mode 0700, the user's own) beside the
-  target or in the login home, a known limitation (`issues/ssh-write-staging-leftover.md`). A
+  target or in the login home, a known limitation (`issues/ssh-write-staging-leftover.md`). Over
+  `ssh` a connection lost once the write's SFTP session has opened, a silent link included, raises
+  `ssh.TransferLost`, a `ConnectionError` (so an `OSError`, which the tools report as a failed
+  write) naming the host and saying the transfer may be partly made, with what may remain: while
+  the content is staged, the target unchanged and the staging directory named; at the parent's
+  `mkdir` or the place step (whose `-1003`, or `-1002` on the lost connection, is raised this
+  way), what that step can leave, an overwrite being the old file or the new one and an append or a
+  write-through possibly partial. `sbatch`'s job script is written this way, and no job is
+  submitted after it. A
   write refuses what `cat >` refuses: an existing target the
   user may not write (`[ -w ]`: a read-only file, another user's file in a group-writable
   directory) fails with `Permission denied`, a symbolic link whose target's directory does not
@@ -2230,7 +2273,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   resolves through symlinks (`/bin/ls` comes back `/usr/bin/ls`). A directory destination receives
   the file under its own name. A leading `~`/`~/` is the home of whoever touches that file: on the
   command side the user commands run as; on the server's side the server process's user (`ssh`,
-  `local`), except in `delegate`, where both sides are the mapped user on one host.
+  `local`), except in `delegate`, where both sides are the mapped user on one host. Over `ssh` a
+  connection lost once the SFTP session has opened raises `ssh.TransferLost` naming the host and
+  saying the transfer may be partly made: `put`'s remote target, or `get`'s local file, may be
+  truncated or hold part of the file (the tools report the error).
 - **Three implementations move together:** `SSHExecutor`, `LocalShellExecutor`, `DelegatingExecutor`.
   Adding or changing a Protocol member means editing all three in the same commit — there is no base
   class to inherit a default from, and `runtime_checkable` `isinstance` checks **method presence

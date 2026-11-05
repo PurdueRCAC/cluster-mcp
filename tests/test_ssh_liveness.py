@@ -229,6 +229,32 @@ def test_a_probe_handed_over_while_the_sender_is_stuck_counts(clock: Clock) -> N
 
 
 @pytest.mark.unit
+def test_a_call_waiting_on_an_open_keeps_its_poke(clock: Clock) -> None:
+    # A reply to one step of an open answers the probe, but the call still waits on the next step:
+    # the poke stays, the next probe goes at once, and each is judged a bound after it went.
+    monitor = _monitor(clock)
+    clock.now += 1
+    with monitor.opening():
+        assert monitor.step(clock.now) == 'probe'
+        clock.now += 0.01
+        monitor.heard = clock.now
+        clock.now += 0.01
+        assert monitor.step(clock.now) == 'probe', 'an answer during an open cleared the waiting poke'
+        out = monitor.out
+        clock.now += B - 0.01
+        assert monitor.step(clock.now) is None
+        clock.now += 0.01
+        assert monitor.step(clock.now) == 'dead' and clock.now == out + B
+    second = _monitor(clock)
+    with second.opening():
+        second.step(clock.now)
+    clock.now += 0.01
+    second.heard = clock.now
+    clock.now += 0.01
+    assert second.step(clock.now) is None and second.poked is None, 'the poke outlived the open'
+
+
+@pytest.mark.unit
 def test_the_hook_stamps_nothing_on_a_read_that_raises(clock: Clock) -> None:
     def read() -> Any:
         raise paramiko.ssh_exception.SSHException('a pending key exchange')
@@ -290,6 +316,26 @@ def test_a_poke_reaches_the_monitor_of_the_transport_given(clock: Clock) -> None
     one, other = _monitor(clock), _monitor(clock)
     assert ssh._poked(one.transport) is one.transport
     assert (one.poked, other.poked) == (clock.now, None), 'the poke reached another monitor'
+
+
+# What a transfer cut short says it may leave, by what was cut.
+TRANSFER_TEXTS = {
+    'upload': ('upload', 'x.txt may be truncated or hold part of the file'),
+    'download': ('download', '/tmp/got may be truncated or hold part of the file'),
+    'write': ('write', '~/x is unchanged, and its staging directory ./.cluster-mcp-0 may remain'),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('cut', list(TRANSFER_TEXTS))
+def test_a_lost_transfer_names_the_host_and_what_may_remain(cut: str) -> None:
+    during, remains = TRANSFER_TEXTS[cut]
+    lost = ssh.TransferLost('login.example', during, remains)
+    assert isinstance(lost, ConnectionError) and isinstance(lost, OSError)
+    assert str(lost) == (f'the connection to login.example was lost during the {during}; the transfer may be '
+                         f'partly made: {remains}')
+    assert ssh._remains('~/x is unchanged', None) == '~/x is unchanged'
+    assert ssh._remains('~/x is unchanged', 'd') == '~/x is unchanged, and its staging directory d may remain'
 
 
 # -- Against the loopback server.
@@ -414,6 +460,23 @@ LIVENESS_TEXT = (
     'survives the peer answering nothing for 29 s after a probe, and a transfer while some reply arrives at least '
     'every 44 s.')
 
+# A transfer the silent link cuts, as the SSHExecutor docstring and the AGENTS.md footgun state it.
+TRANSFER_TEXT = (
+    "A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp` subsystem and "
+    "the version exchange) holding the call's poke, so each probe sent while it waits is judged B after it went. "
+    'Once the session has opened, a loss raises `TransferLost`, a `ConnectionError` naming the host that says the '
+    'transfer may be partly made and what may remain: for `put`, the remote target, truncated or holding part of '
+    'the file; for `get`, the local file, likewise; for `write`, the target unchanged and the staging directory '
+    "that may remain, or, when its parent's `mkdir` or its place step meets the loss, what that step can leave (an "
+    'overwrite is the old file or the new one, an append or a write-through may be partial). The loss is decided '
+    "by state before any handler that would read it as the server's answer, and a lost write leaves its staging "
+    'directory (`issues/ssh-write-staging-leftover.md`).')
+
+# What AGENTS.md §2 and the README say of a transfer cut short.
+SECTION_2_TRANSFER = ('raises `ssh.TransferLost`', 'may be partly made', 'the staging directory named',
+                      "`put`'s remote target, or `get`'s local file, may be truncated")
+README_TRANSFER = ('the transfer may be partly made', 'issues/ssh-write-staging-leftover.md')
+
 # The figures the README states, at the default bound.
 README_FIGURES = ('15 s of quiet', "15 s after a\ncall's start", '29 s after a background probe', '44.45 s',
                   'within 29 s', 'every 44 s', '45 s')
@@ -433,7 +496,13 @@ def test_liveness_texts_state_the_monitor() -> None:
     }
     missing = [name for name, text in texts.items() if LIVENESS_TEXT not in ' '.join(text.split())]
     assert missing == [], f'a text does not state the silent link as the monitor does: {missing}'
+    missing = [name for name, text in texts.items() if TRANSFER_TEXT not in ' '.join(text.split())]
+    assert missing == [], f'a text does not state what a transfer cut short raises and leaves: {missing}'
+    section = ' '.join(_section(agents, '### 2. Executor Protocol', '### 3.').split())
+    assert [part for part in SECTION_2_TRANSFER if part not in section] == [], 'AGENTS.md §2 does not state TransferLost'
     readme = (root / 'README.md').read_text()
+    assert [part for part in README_TRANSFER if part not in readme] == [], 'the README does not state a transfer cut short'
+    assert ssh.TransferLost.__mro__[1] is ConnectionError
     absent = [figure for figure in README_FIGURES if ' '.join(figure.split()) not in ' '.join(readme.split())]
     assert absent == [], f'the README does not state {absent}'
     bound = ssh.CONNECT_TIMEOUT

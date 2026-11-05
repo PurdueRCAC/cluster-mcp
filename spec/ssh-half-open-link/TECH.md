@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -324,10 +324,10 @@ reconnect does; one in flight ends within the bound with an error naming the hos
 be partly made; a slow live transfer runs to its end; a transfer stalled on the write path cannot
 hold a concurrent call.
 
-- [ ] **`_sftp(transport, deadline)`** replaces the three `open_sftp_client()` calls (PLAN §2.2).
+- [x] **`_sftp(transport, deadline)`** replaces the three `open_sftp_client()` calls (PLAN §2.2).
   It runs `open_session(timeout=max(OPEN_TIMEOUT, B + 1))`, `invoke_subsystem('sftp')` and the
   `SFTPClient`. A loss anywhere in it reconnects within the call's deadline.
-- [ ] **`TransferLost(ConnectionError)`**, raised for a loss once the session is open, with the
+- [x] **`TransferLost(ConnectionError)`**, raised for a loss once the session is open, with the
   host, "the transfer may be partly made", and what may remain:
   - `put`: the remote target, truncated or partial;
   - `get`: the local file;
@@ -339,7 +339,7 @@ hold a concurrent call.
   block's `except OSError`. It covers `EOFError` and `SSHException` as well as `OSError`.
   `_reason` and `_discard` are skipped on a lost link. A −1003 or −1002 from the parent `mkdir` or
   the place step is raised as `TransferLost` with that step's text.
-- [ ] **Rows** (PLAN §6's table; P2's shapes):
+- [x] **Rows** (PLAN §6's table; P2's shapes):
   - `test_a_call_on_a_silent_link_reconnects[write_file]`;
   - `test_an_sftp_open_cut_by_a_silent_link_reconnects[channel|subsystem|version]`;
   - `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[sftp]`;
@@ -358,10 +358,10 @@ hold a concurrent call.
     flight under `go_silent`. The row first asserts the write path is held (a helper thread's
     `send_ignore` still blocked after 0.5 s), failing, never skipping, when it is not. Then a
     concurrent `run` ends within the bound.
-- [ ] **Units** in `tests/test_ssh_liveness.py`: `TransferLost`'s text per shape, and the doc pin
+- [x] **Units** in `tests/test_ssh_liveness.py`: `TransferLost`'s text per shape, and the doc pin
   widened to §2's transfer text.
-- [ ] **`tests/mutants.py`:** re-plant the touched anchors.
-- [ ] **Documents** (R6, this commit), the transfer half:
+- [x] **`tests/mutants.py`:** re-plant the touched anchors.
+- [x] **Documents** (R6, this commit), the transfer half:
   - §2's `write`, `put` and `get` (`TransferLost`, and what each leaves);
   - the footgun's transfer sentences;
   - the README's transfer lines;
@@ -369,6 +369,30 @@ hold a concurrent call.
 
   `issues/ssh-write-staging-leftover.md` and its `ROADMAP.md` entry get a dated note: a cut write
   now names its staging directory.
+- **Amended in build (2026-11-05):**
+  - The session opens through `SSHExecutor._sftp(deadline)`, which returns the transport and the
+    session (or the give-up message), so the three call sites keep one loop.
+  - A call holds its poke through its whole open (`_Liveness.opening`, around `_exec`'s channel
+    open and `_sftp`'s three steps): while it waits, an answer clears nothing and the next probe goes
+    at once. A reply to one step of an open arrives after the call's probe was handed over and so
+    answers it, before the next step's wait begins; a poke sent before each step raced its own
+    probe, and the `subsystem` and `version` rows met the background verdict, too late to
+    reconnect. P3's sweep weighs the `_ensure_connected` poke beside this hold the same way as the
+    open-timeout pair.
+  - A `-1002` from a write's own command is a loss only when the write's connection is down
+    (`_lost_to`): on a live one it is a program that did not start, as before.
+  - Loss in a transfer is decided by `_cut`: an `OSError` carrying a non-connection errno is the
+    server's answer and `Short` was decided on a live link; anything else is a loss when the
+    monitor's verdict is in or the transport is inactive. An `OSError` on a channel still open is
+    the server's answer too (OpenSSH's bare `Failure` for a full filesystem), so only the rest wait
+    `SETTLE`: a first build waited on every bare `Failure`, and the full-volume rows took 1–2 s more
+    each.
+  - The server steps are `channel`, `subsystem`, `version`, `lookup`, `stage`, `upload`,
+    `download`, and an exec matched by the program it carries (`silent_at(..., named=...)` names
+    the write's `mkdir` and `place`).
+  - `test_a_write_spends_one_reconnect_window[parent|place]` and
+    `test_a_write_command_past_its_last_start_starts_no_attempt` now expect the lost transfer, as
+    PLAN §2.2 rules for a write's own command once its session has opened.
 - **Verify:** the frontmatter's.
 - **Touches:** `core/executor/ssh.py`, `tests/ssh_server.py` (the place-step hook),
   `tests/test_ssh_exec.py`, `tests/test_ssh_liveness.py`, `tests/mutants.py`, `AGENTS.md`,

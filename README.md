@@ -60,7 +60,12 @@ call's start or 29 s after a background probe. A call that starts on it then rec
 up as above; a command running on it returns `-1003` at most 44.45 s after the last message heard.
 A quiet command or a slow transfer is never cut while the cluster answers: at the default bound it
 must answer a probe within 29 s, and a transfer must hear some reply at least every 44 s (an upload
-above about 0.75 KB/s).
+above about 0.75 KB/s). A file transfer the lost link cuts short fails with an error naming the
+host that says the transfer may be partly made and what may remain: an upload's target or a
+download's local file may be truncated; a `write_file` (or an `sbatch` job script) leaves its target
+unchanged while staging, or, once it was being put in place, the old file or the new one, and may
+leave its private staging directory (`.cluster-mcp-…`) beside it
+([`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md)).
 
 ### The cluster's rules, in the instructions
 

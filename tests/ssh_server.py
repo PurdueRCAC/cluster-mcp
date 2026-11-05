@@ -55,8 +55,11 @@ Any of them can go down and come back, as a host that reboots does: `refuse()` s
 new connection is refused, and cuts every connection it holds as a lost link does; `serve_again()`
 listens on the same port once more. A server calls its `on_step` hook, when one is set, with the
 step and its detail as a request arrives, before it is answered: `'channel'` with the kind of a
-channel to open, `'exec'` with the exec string, and `'probe'` with the name of a global request
-(which it refuses, as sshd refuses one it does not know).
+channel to open, `'subsystem'` with its name, `'version'` as an SFTP client's version request
+arrives, `'exec'` with the program an exec string carries (decoded), `'probe'` with the name of a
+global request (which it refuses, as sshd refuses one it does not know), and for SFTP requests
+`'lookup'` (a stat), `'stage'` (a mkdir), `'upload'` (a write) and `'download'` (a read), each with
+its path.
 
 `SilentLink` is a hop in front of any of them on which the link can die silently, as a NAT entry that
 expires or a host powered off does: `go_silent()` stops forwarding both ways, and holds new
@@ -71,6 +74,7 @@ the client's write path long before the channel's window.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import os
 import select
@@ -134,7 +138,15 @@ class _Handle(paramiko.SFTPHandle):
         except OSError as exc:
             return paramiko.SFTPServer.convert_errno(exc.errno)
 
+    # The server this file is served by, which a step's hook reaches through it.
+    owner: Any = None
+
+    def read(self, offset: int, length: int) -> Any:
+        self.owner.step('download', self.filename)
+        return super().read(offset, length)
+
     def write(self, offset: int, data: bytes) -> int:
+        self.owner.step('upload', self.filename)
         if self.flip and offset == 0 and data and os.path.basename(self.filename) == 'content':
             data = bytes([data[0] ^ 1]) + data[1:]
         # As a filesystem that runs out: the bytes that fit land, and the write fails (or, with no
@@ -183,9 +195,11 @@ class _SFTP(paramiko.SFTPServerInterface):
             return paramiko.SFTPServer.convert_errno(exc.errno)
 
     def stat(self, path: str) -> Any:
+        self.owner.step('lookup', path)
         return self._stat(path, os.stat)
 
     def lstat(self, path: str) -> Any:
+        self.owner.step('lookup', path)
         return self._stat(path, os.lstat)
 
     def open(self, path: str, flags: int, attr: Any) -> Any:
@@ -203,6 +217,7 @@ class _SFTP(paramiko.SFTPServerInterface):
         else:
             mode = 'rb'
         handle = _Handle(flags)
+        handle.owner = self.owner
         handle.limit, handle.flip = self.owner.write_limit, self.owner.write_flip
         handle.filename = real
         handle.readfile = handle.writefile = os.fdopen(fd, mode)
@@ -224,6 +239,7 @@ class _SFTP(paramiko.SFTPServerInterface):
         return self._do(path, lambda real: os.chmod(real, attr.st_mode & 0o7777))
 
     def mkdir(self, path: str, attr: Any) -> int:
+        self.owner.step('stage', path)
         return self._do(path, lambda real: os.mkdir(real, _mode(attr, 0o777)))
 
     def rmdir(self, path: str) -> int:
@@ -246,6 +262,22 @@ class _Subsystem(paramiko.SFTPServer):
     """Paramiko's SFTP server, but for one fault: with `close_failure`, the close of a staged content
     file is answered with a failure once the file is closed, as a filesystem that defers its writes
     (NFS, a quota checked at close) reports one that did not land."""
+
+    def _send_server_version(self) -> int:
+        # The step is taken once the client's version request has been read: the client is then
+        # past the subsystem's reply, waiting on the session's last step before it opens.
+        read = self._read_packet
+
+        def version_read() -> Any:
+            got = read()
+            self.server.owner.step('version', '')
+            return got
+
+        self._read_packet = version_read  # type: ignore[method-assign]
+        try:
+            return super()._send_server_version()
+        finally:
+            del self._read_packet
 
     def _process(self, t: int, request_number: int, msg: paramiko.Message) -> None:
         if t == paramiko.sftp.CMD_CLOSE and self.server.owner.close_failure:
@@ -288,13 +320,25 @@ class _Server(paramiko.ServerInterface):
         self.owner.step('probe', kind, self.transport)
         return False
 
+    def check_channel_subsystem_request(self, channel: paramiko.Channel, name: str) -> bool:
+        self.owner.step('subsystem', name, self.transport)
+        return super().check_channel_subsystem_request(channel, name)
+
     def check_channel_exec_request(self, channel: paramiko.Channel, command: bytes) -> bool:
-        self.owner.step('exec', command.decode(), self.transport)
+        self.owner.step('exec', _program(command.decode()), self.transport)
         self.owner.received.append(command.decode())
         if self.owner.before_the_reply(channel, command.decode()):
             return True
         threading.Thread(target=self.owner.execute, args=(channel, command.decode()), daemon=True).start()
         return True
+
+
+def _program(wire: str) -> str:
+    """The program an exec string carries (its last word, base64), or the string itself."""
+    try:
+        return base64.b64decode(wire.rsplit(None, 1)[-1], validate=True).decode('utf-8')
+    except (ValueError, IndexError):
+        return wire
 
 
 # How long the feeder waits, after the client's end of stdin, to tell a closed channel from an EOF.
@@ -507,8 +551,8 @@ class LoopbackSSH:
         return True
 
     def step(self, name: str, detail: str, transport: paramiko.Transport | None = None) -> None:
-        """A request at step `name` has arrived on `transport` (`'channel'`, `'exec'`, `'probe'`):
-        call the `on_step` hook, if set."""
+        """A request at step `name` has arrived (on `transport`, when known): call the `on_step`
+        hook, if set."""
         hook = self.on_step
         if hook is not None:
             hook(name, detail, transport)
@@ -816,7 +860,7 @@ class SilentLink:
         self._pairs: list[_Pair] = []
         self._held: list[socket.socket] = []
         self._closed = False
-        self._steps: dict[str, str | None] = {}
+        self._steps: dict[str, tuple[str | None, str]] = {}
         self._lock = threading.Lock()
         self._listener = self._bind()
         self.port = self._listener.getsockname()[1]
@@ -938,9 +982,10 @@ class SilentLink:
     def silent_after_handshake(self, value: bool) -> None:
         self._handshake_after = len(self.server._transports) if value else None
 
-    def silent_at(self, step: str, detail: str | None = None) -> None:
-        """Go silent as the server reaches `step` (with `detail` in its detail, when given), once."""
-        self._steps[step] = detail
+    def silent_at(self, step: str, detail: str | None = None, named: str | None = None) -> None:
+        """Go silent as the server reaches `step` (with `detail` in its detail, when given), once,
+        recording the step as `named` (the step itself by default)."""
+        self._steps[step] = (detail, named or step)
 
     def _at_step(self, step: str, detail: str, transport: paramiko.Transport | None) -> None:
         after = self._handshake_after
@@ -950,9 +995,8 @@ class SilentLink:
             self.step = 'handshake'
             self.go_silent()
             return
-        if step in self._steps and (self._steps[step] is None or self._steps[step] in detail):
-            del self._steps[step]
-            self.step = step
+        if step in self._steps and (self._steps[step][0] is None or self._steps[step][0] in detail):
+            self.step = self._steps.pop(step)[1]
             self.go_silent()
 
     def executor(self) -> SSHExecutor:

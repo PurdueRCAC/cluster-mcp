@@ -57,6 +57,12 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   before it landed), at load about 4.5 with another session's gates running; the assertion text was
   not kept. It passed five times alone, the modern era passed whole on the identical tree, and CI
   passed it in both eras. First sighting of that row; the branch does not touch it.
+- 2026-11-05: `spec/ssh-half-open-link/` P2: `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`
+  failed once in a local full-suite run (macOS, handshake era, load about 2.3 with another session's
+  suites running) with "0 reconnect workers ran, not one", as on 2026-10-30; 4880 others passed. It
+  passed three times run alone (7.1 s, 10.3 s, 3.1 s). The branch adds a liveness monitor to every
+  published connection (threads `cluster-mcp-liveness` and `cluster-mcp-probe`, never counted as
+  reconnect workers); the row's own window is unchanged.
 
 ## Why it was deferred
 

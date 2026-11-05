@@ -175,6 +175,8 @@ untouched, or, if the host is back at once, succeeds and leaves the checksum fil
 found by `ssh-reconnect-loop`'s review, 2026-10-26, which corrected the texts and deferred the
 cleanup.
 
+- 2026-11-05: `spec/ssh-half-open-link/` P2: such a write now raises `TransferLost` naming the staging directory left; the cleanup is still this seed's.
+
 *Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md) · *status: unshaped*
 
@@ -214,6 +216,8 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 - 2026-11-02: a third, `test_timeout_stop.py`'s signal-death survival row over an `sh` login shell
   (every-login-shell runs only), failed once locally under load and passed on re-runs; the seed
   records it.
+- 2026-11-05: the reconnect row failed once more with "0 reconnect workers ran" in a local full run
+  during `spec/ssh-half-open-link/` P2, and passed three times alone; the seed records it.
 
 *Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
