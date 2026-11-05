@@ -4773,6 +4773,7 @@ LOCK_HELD = 'test_ssh_exec.py::test_a_signal_request_goes_while_the_channel_is_h
 CLOSED_AS_IT_WAITS = 'test_ssh_exec.py::test_a_signal_request_never_follows_a_close_made_as_it_waits'
 WRITE_PATH_HELD = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held]'
 WRITE_PATH_FREE = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[free]'
+STALLED_TIMEOUT = 'test_ssh_exec.py::test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout'
 KEY_EXCHANGE = 'test_ssh_exec.py::test_a_signal_request_waits_out_a_key_exchange'
 EXCHANGE_STARTS = 'test_ssh_exec.py::test_a_signal_request_never_goes_as_a_key_exchange_starts'
 GIVES_UP = tuple(f'test_ssh_exec.py::test_a_signal_request_gives_up_on_a_key_exchange[{kind}]'
@@ -5513,6 +5514,26 @@ CASES += (
            '                                                            and _down(transport))\n',
            '    return result.exit_code in (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE)\n'),),
          (f'{SSH_EXEC}::test_a_failed_ssh_write_leaves_nothing_behind',), 'TransferLost'),
+    # Review cycle 1, F1: everything a call sends once its exec request is answered goes through its
+    # sender (`_Sends`), and the call waits for it only until its timeout and GRACE. Each made on the
+    # call's own thread instead holds the call while another sender holds the write path.
+    Case('shol-term-on-the-call', SSH, (('            sends.term()\n', "            _signal(chan, 'TERM')\n"),),
+         (WRITE_PATH_HELD, STALLED_TIMEOUT), 'still waiting'),
+    Case('shol-kill-on-the-call', SSH,
+         (('            sends.kill()\n', "            if not _ended(chan):\n                _signal(chan, 'KILL')\n"),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-eof-on-the-call', SSH, (('            sends.eof()\n', '            chan.shutdown_write()\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-close-on-the-call', SSH,
+         (('            sends.close()\n            sends.wait(until)\n',
+           '            sends.wait(until)\n            chan.close()\n'),), (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-adjust-on-the-call', SSH, (('    if not isinstance(chan, Channel):\n', '    if True:\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-wait-past-the-deadline', SSH, (('            sends.wait(until)\n', '            sends.wait(None)\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    # The KILL's grace counts from when the TERM went: counted from the call's read, a TERM that waited
+    # on the write path is followed at once by the KILL.
+    Case('shol-kill-grace-from-the-read', SSH, ((KILL_HELD, ''),), (WRITE_PATH_HELD,), 'inside its'),
 )
 
 # `>|`, not `>`: a profile's `set -C` refuses `>` onto the path bash 3.2 names a process substitution

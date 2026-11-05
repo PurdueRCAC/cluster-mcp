@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -57,8 +57,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 1
-  verify: uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/verify/silent-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py
+  attempts: 3
+  verify: uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py
 review:
   last_reviewed_commit: b09a9914203f1e158440dd7d497444a4558f15c7
   verdict: changes-requested
@@ -610,6 +610,41 @@ develop. Every recorded item has its seed.
     - **Seen red first**, in a throwaway worktree: with that seed renamed away, and with a third,
       unlisted commit carrying the same phrasing. Then green here.
     - P3's `verify:` runs it and the commands wrapper in place of the bare gates.
+- **Amended in review cycle 1's remediation (2026-11-05): F3 and F1's sweep.**
+  - **F3, the class.** Every statement of the liveness verdict's floor (`issues/ssh-liveness-message-gap.md`). Swept, every live site
+    (AGENTS.md, README.md, ROADMAP.md, `issues/`, the packages' docstrings and comments): only the
+    floor seed's title and its ROADMAP entry (heading and body) said a link is called dead once a
+    probe has been out for one connect bound. The seed is this cycle's own and not on `develop`, so
+    both are corrected in place (code-build Step 2.3): the background probe's verdict at two connect
+    bounds less `VERDICT_MARGIN` (29 s), the starting call's at one bound after its start (15 s).
+    The seed's body already said so. `GOAL.md` is locked and its R4 already states 29 s.
+  - **F3's checker:** `remediation/F3-floor-statement.py`, for `issues/ssh-liveness-message-gap.md`: no live site states the verdict as one
+    connect bound, in any of four phrasings; the seed's title is its ROADMAP heading, and the entry
+    states both verdicts; the figures are the code's. Red first: four phrasings found in ROADMAP.md
+    and the seed, and the entry stated neither verdict's form; green after.
+  - **F1's sweep.** The routing asks for the sender's rule as `shol-` cases. Seven are planted, each
+    killed in both eras: the TERM, the KILL, the end of stdin, the close and a window adjust made on
+    the call's own thread; the call's wait for its sends running past its timeout; and the KILL's
+    grace counted from the call's read rather than from when the TERM went. One alternative is an
+    equivalent, planted and run against its neighbours' killers: the call not waiting for its sends
+    at all.
+  - **The frozen sweep runs under a recorded wrapper,** `remediation/F1-send-path-sweep.py`, in place
+    of `verify/silent-sweep.py`. Which gate: `verify/silent-sweep.py`, unchanged. Why: it checks its
+    table against `tests/mutants.py` both ways, so with the new `shol-` cases planted it is red on
+    "a case the sweep does not name", once per case (seen red first, before the wrapper). What it
+    changes: it appends the rows for F1's decisions to the gate's `SWEEP`, then runs the gate's own
+    `main`; every earlier row, the halves and every check are the gate's.
+  - `open-timeout-gate.py` and `ledger-plan-commits.py` are unchanged.
+  - **The gate** runs the wrapper's four halves in place of the frozen sweep's, the every-tool run
+    with `UV_PYTHON=3.14` (P1's attempt 2), the ledger wrapper, and F3's checker. A cheap pass ran
+    the seven new cases in the legacy era first: all killed.
+  - **Attempts 2 and 3: the run's own wording.** Twice the ledger read a sentence of this amendment
+    as a deferral naming no seed: before the gate, the two F3 items, and then, at the gate's sixth
+    step, the note recording that. Each now names `issues/ssh-liveness-message-gap.md` or no longer
+    uses the ledger's words. The third run re-ran only the ledger and F3's checker, the two steps
+    that read this file: the first five (the wrapper's four halves, 52 cases killed and 6 equivalents
+    shown per era, and the every-tool run) were green on the identical code and tests in the second
+    run, and read nothing this edit changed.
 - **Verify:** the frontmatter's (≈ 10 min, run in the background).
 - **Touches:** `tests/mutants.py`, `spec/ssh-half-open-link/verify/`, and nothing else but a seed or
   entry the ledger finds missing.

@@ -154,13 +154,15 @@ dead or stuck remote end.
 *Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
 **Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: adopted:ssh-half-open-link*
 
-## A live link that delivers nothing for one connect bound reads as dead
+## A live link that answers nothing for longer than its liveness verdict reads as dead
 
-The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe has been out for
-one connect bound with nothing at all heard since. A live link on which nothing arrives for that
-long, such as a quiet command whose peer answers nothing for 29 s (an outage of about 25 s), or an
-SFTP upload slower than about 0.75 KB/s, is cut and reported as lost. While another call starts on
-the connection, the floor is that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
+The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe goes unanswered,
+with nothing at all heard since, past its verdict: a background probe two connect bounds less
+`VERDICT_MARGIN` after it went (29 s at the default bound), and, while a call starts, one bound after
+that call's start (15 s). A live link on which nothing arrives for that long, such as a quiet command
+whose peer answers nothing for 29 s (an outage of about 25 s), or an SFTP upload slower than about
+0.75 KB/s, is cut and reported as lost. While another call starts on the connection, the floor is
+that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
 a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 
 *Horizon: later · Depends on: ssh-half-open-link · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*

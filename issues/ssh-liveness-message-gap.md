@@ -5,7 +5,7 @@ appetite: small
 lane: public
 ---
 
-# A live link that delivers nothing for one connect bound reads as dead
+# A live link that answers nothing for longer than its liveness verdict reads as dead
 
 ## Problem
 
