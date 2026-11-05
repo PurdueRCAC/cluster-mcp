@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P1
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'Commands: the liveness monitor, the open-retry, the stall proxy and the documents'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R3
@@ -27,7 +27,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_timeout_stop.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path.py both && uv run python -I spec/ssh-half-open-link/remediation/F4-starting-call-verdict.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -497,9 +497,17 @@ develop.
     `sbatch` (`KeyError`). Every other part of the step held: the nine other late kinds and both
     step kinds failed on `82b1f0e` past the 9 s bound (10.1–10.5 s) and passed here; the live and
     early rows passed on both; the fourteen cases were killed in both eras. Fixed: only the
-    `-subsystem` and `-version` suffixes name a step. The three affected rows pass here; the gate's
-    full re-run (every step, Step 4) waits on the foreman, since this attempt brings P1 to the
-    circuit breaker's three.
+    `-subsystem` and `-version` suffixes name a step (`039bf45`, committed with the phases still in
+    progress). This attempt brought P1 to the circuit breaker's three; the foreman ruled, as judge,
+    that it is Step 4's in-run case and cleared the breaker for this remediation only (P1's first
+    two attempts and P3's three are earlier cycles' defects).
+  - **The gate's re-run, every step, on `039bf45`: green.** The union pytest run 1670 passed, none
+    skipped, 538 s; the modern liveness rows; `open-timeout-gate.py commands both` (403 s);
+    `silent-gate.py transfers both` (491 s); `F1-send-path.py both` (37 re-planted cases killed per
+    era, 383 s); `F4-starting-call-verdict.py both`; `F2-transfer-contract.py`;
+    `F5-late-reconnect-cap.py both` (752 s): all 14 rows pass here in each era; on `82b1f0e` the 11
+    late kinds fail past the 9 s bound in each era (10.12–10.54 s) and the 3 live and early rows
+    pass; the 14 cases killed in each era.
 - **Verify:** the frontmatter's. `silent-gate.py commands both` requires every P1 row to pass here
   in both eras, and on develop's `packages/` every "fails" row to fail with `still waiting` and
   every "passes" row to pass.
