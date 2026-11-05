@@ -50,6 +50,18 @@ SSH config sets `ConnectTimeout`). Check
 that `--ssh-host` names the SSH host or `~/.ssh/config` alias you use with `ssh`, not the MCP
 server's name.
 
+Once running, the server keeps one connection to the cluster. A call that finds it lost reconnects,
+and gives up with the same `cannot connect to <host>: <cause>` at most 45 s after it began (three
+times the connect bound; a longer `ConnectTimeout` raises it). A link that dies silently, with no
+reset (a laptop asleep through a network change, an expired NAT entry, a login node powered off),
+is noticed too: the server probes the cluster after 15 s of quiet, and at once when a call starts,
+and takes the link for dead when a probe goes unanswered with nothing heard since, 15 s after a
+call's start or 29 s after a background probe. A call that starts on it then reconnects, or gives
+up as above; a command running on it returns `-1003` at most 44.45 s after the last message heard.
+A quiet command or a slow transfer is never cut while the cluster answers: at the default bound it
+must answer a probe within 29 s, and a transfer must hear some reply at least every 44 s (an upload
+above about 0.75 KB/s).
+
 ### The cluster's rules, in the instructions
 
 Cluster administrators can publish rules for agents as Markdown files in `/etc/agents.d`. At
@@ -146,8 +158,8 @@ it started that ignores the TERM signal and holds none of the command's output (
 holds it too, once the login shell has died of the TERM); over ssh, a command on a server that
 ignores the SSH `signal` request; and, under such a startup file, whatever ignores TERM and holds
 none of the command's output ([`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md)). Over
-ssh, a connection lost before the command's end was reported gives `-1003`: the command may have
-run, and may still be running.
+ssh, a connection lost before the command's end was reported, a link gone silent included, gives
+`-1003`: the command may have run, and may still be running.
 
 ### Which capabilities are served
 

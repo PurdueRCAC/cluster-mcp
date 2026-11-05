@@ -55,6 +55,15 @@ that joins an attempt aborted in its authentication starts a fresh one; and a wr
 command meets the lost host spends one window, and starts no attempt past its last start. Each
 tool reports a reconnect that gave up as nothing run, within one window, and one never changes the
 cluster context the server serves.
+
+The silent-link rows put a hop in front of the loopback server that stops forwarding without
+closing a socket (`SilentLink`), under a 2 s connect bound, each call under a watchdog counted from
+the moment the link went silent: a call that starts on a silent link reconnects, or with the host
+gone reads as nothing run, within the reconnect bound, a reconnect that goes silent once made
+included; a command running as the link goes silent is lost (`-1003`), with or without a timeout,
+unless its timeout comes first, and is never sent twice; a call beside a stalled one ends in time,
+and ends the stalled one; and an idle connection, a quiet command, one trickling its output through
+a slow hop, and one through a silent spell shorter than a background verdict are never cut.
 """
 
 from __future__ import annotations
@@ -87,7 +96,7 @@ from cluster_mcp.core.executor import launch, ssh
 from cluster_mcp.core.executor.ssh import SSHExecutor
 from cluster_mcp.core.site import SiteContext, SiteFile
 from cluster_mcp.core.tools.shell import run_command
-from ssh_server import LOOPBACK, USER, DroppingSSH, LoopbackSSH, ThrottledSSH, _drop, _key, _Server
+from ssh_server import LOOPBACK, USER, DroppingSSH, LoopbackSSH, SilentLink, ThrottledSSH, _drop, _key, _Server
 from test_executors import (LOGIN_MARKER, PROBE, WRITER, held_violations, timed, timeout_violations,
                             writer_violations)
 from test_launch import HOSTILE, LEAVES_A_WRITER, SEPARATION_CASES, chatty_home
@@ -2587,6 +2596,400 @@ def test_a_reconnect_failure_never_changes_the_cluster_context(uri: str, rig: Re
                                   f'not the startup read {RECONNECT_SITE.text!r}')
     assert violations == [], '\n'.join(violations)
     assert guard.refused == []
+
+
+# ---------------------------------------------------------------------------------------------
+# A link that dies silently (`SilentLink`): no reset comes, so the connection still reads as
+# connected. A call that starts on it reconnects, or fails as a failed reconnect does; a command
+# running on it ends as lost; a call beside a stalled one ends too; and nothing that is merely quiet
+# is cut. Every row runs under a 2 s connect bound (a 6 s reconnect bound), its call on a thread under
+# a watchdog that counts from the moment the link went silent: its figure plus `SILENT_SLACK`.
+
+# The connect bound the silent rows patch in, and the reconnect bound it gives.
+SILENT_BOUND = 2
+SILENT_WINDOW = ssh.RECONNECT_FACTOR * SILENT_BOUND
+# Real seconds past a row's figure before its watchdog fails it, and that a thread gets to end.
+SILENT_SLACK = 1.0
+THREAD_END = 2.0
+# The threads a connection's liveness monitor runs.
+MONITOR_THREADS = ('cluster-mcp-liveness', 'cluster-mcp-probe')
+# What the rows read and list, and the text a call that cannot reconnect names.
+SILENT_DATA = 'what the silent rows read\n'
+GONE = f'cannot connect to {LOOPBACK}: timed out'
+# How long after its exec request arrives a row's command is taken to be running.
+RUNNING = 0.3
+# The command a quiet row runs: silent for longer than the reconnect bound, then one word.
+QUIET_COMMAND = f'sleep {SILENT_WINDOW + 1}; printf %s done'
+EVERY_KIND = os.environ.get('CLUSTER_MCP_TEST_EVERY_KIND') == '1'
+# The slow link: its rate each way, and the output that takes longer than the reconnect bound on it.
+SLOW_RATE = 32 * 1024
+SLOW_BYTES = 256 * 1024
+# Real seconds a quiet row's command may take, at most.
+QUIET_FIGURE = 4 * SILENT_WINDOW
+# How long the silent spell lasts: past a call's verdict, inside a background probe's.
+SPELL = SILENT_BOUND + 0.5
+
+
+class Silenced:
+    """One silent row's loopback server, its silent link and its executor (through the link)."""
+
+    def __init__(self, server: LoopbackSSH, link: SilentLink, executor: SSHExecutor) -> None:
+        self.server, self.link, self.executor = server, link, executor
+
+    @property
+    def home(self) -> Path:
+        return Path(self.server.home)
+
+    def go_silent(self) -> float:
+        """Make the link silent; return when it went (real seconds)."""
+        self.link.go_silent()
+        return self.link.silenced or _REAL_MONOTONIC()
+
+
+@pytest.fixture
+def silenced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., Silenced]]:
+    """Start a loopback server behind a silent link under a 2 s connect bound, and an executor
+    through it; stop them after. A liveness thread's exception fails the row."""
+    monkeypatch.setattr(ssh, 'CONNECT_TIMEOUT', SILENT_BOUND)
+    broken: list[str] = []
+    hook = threading.excepthook
+
+    def caught(args: Any) -> None:
+        if args.thread is not None and args.thread.name in MONITOR_THREADS:
+            broken.append(f'{args.thread.name}: {args.exc_type.__name__}: {args.exc_value}')
+        hook(args)
+
+    monkeypatch.setattr(threading, 'excepthook', caught)
+    made: list[Silenced] = []
+
+    def start(rate: int | None = None) -> Silenced:
+        home = (tmp_path / 'home').resolve()
+        home.mkdir(exist_ok=True)
+        argv_echo.install(home, 'sbatch')
+        (home / 'job.sh').write_text('#!/bin/bash\necho hi\n')
+        (home / 'data.txt').write_text(SILENT_DATA)
+        (home / 'listed').mkdir(exist_ok=True)
+        (home / 'listed' / 'entry').write_text('')
+        server = LoopbackSSH(home, '/bin/bash', tmp_path)
+        link = SilentLink(server, rate=rate)
+        try:
+            executor = link.executor()
+        except BaseException:
+            link.close()
+            server.close()
+            raise
+        made.append(Silenced(server, link, executor))
+        return made[-1]
+
+    try:
+        yield start
+    finally:
+        for each in made:
+            each.executor.close()
+            each.link.close()
+            each.server.close()
+    assert broken == [], f'a liveness thread raised: {broken}'
+
+
+class Watched:
+    """A call on a thread of its own, started now, and when it ended."""
+
+    def __init__(self, call: Callable[[], Any]) -> None:
+        self.got: list[Any] = []
+        self.ended: float | None = None
+        self.thread = threading.Thread(target=self._calling, args=(call,), daemon=True)
+        self.thread.start()
+
+    def _calling(self, call: Callable[[], Any]) -> None:
+        try:
+            self.got.append(call())
+        except BaseException as exc:
+            self.got.append(exc)
+        self.ended = _REAL_MONOTONIC()
+
+    def result(self, link: SilentLink, figure: float, since: float) -> tuple[Any, float]:
+        """The call's outcome, and when it ended in seconds after `since`, the moment the link went
+        silent. A call still running `figure` + `SILENT_SLACK` s after `since` fails the row, naming
+        the step the link went silent at, and is then released by cutting the link."""
+        self.thread.join(max(0.0, since + figure + SILENT_SLACK - _REAL_MONOTONIC()))
+        if self.thread.is_alive():
+            waited = _REAL_MONOTONIC() - since
+            link.close()
+            self.thread.join(THREAD_END)
+            at = f' at {link.step}' if link.step else ''
+            pytest.fail(f'still waiting {waited:.1f} s after the link went silent{at}, allowed {figure} s and '
+                        f'{SILENT_SLACK} s of slack')
+        if isinstance(self.got[0], BaseException):
+            raise self.got[0]
+        assert self.ended is not None
+        return self.got[0], self.ended - since
+
+
+def _silent_tool(executor: SSHExecutor, tool: str) -> Callable[[], Any]:
+    """The call a silent row makes for `tool`: `run` itself, or the tool through an in-process server."""
+    if tool == 'run':
+        return lambda: executor.run(RECOVERY_COMMAND)
+    name, args = SILENT_TOOLS[tool]
+    return lambda: _tool(executor, name, args)
+
+
+# Each tool a silent row calls through an in-process server, and what it is given.
+SILENT_TOOLS: dict[str, tuple[str, dict[str, str]]] = {
+    'run_command': ('run_command', {'command': 'printf %s back'}),
+    'sbatch-path': ('sbatch', {'script_path': '~/job.sh'}),
+    'read_file': ('read_file', {'path': '~/data.txt'}),
+    'list_directory': ('list_directory', {'path': '~/listed'}),
+}
+SILENT_COMMAND_TOOLS = ['run', *SILENT_TOOLS]
+
+
+def _completed_violations(tool: str, outcome: Any) -> list[str]:
+    """Every way `outcome` is not `tool`'s call run to its end."""
+    if tool == 'run':
+        ok = _same(outcome) == ('back|again', '', 0)
+    elif tool == 'run_command':
+        ok = not outcome.is_error and _command_result(outcome).get('stdout') == 'back'
+    elif tool == 'sbatch-path':
+        ok = not outcome.is_error and f'Submitted batch job {argv_echo.JOB_ID}' in outcome.text
+    elif tool == 'read_file':
+        ok = not outcome.is_error and outcome.text == SILENT_DATA
+    else:
+        ok = not outcome.is_error and 'entry' in outcome.text
+    return [] if ok else [f'{tool} gave {outcome!r:.400}, not its call run to its end']
+
+
+def _not_run_violations(tool: str, outcome: Any) -> list[str]:
+    """Every way `outcome` is not `tool`'s report of a call that could not reconnect, naming the host."""
+    if tool == 'run':
+        return not_run_violations(outcome, 'timed out', 0.0, SILENT_WINDOW, host=LOOPBACK)
+    if tool == 'run_command':
+        got = _command_result(outcome)
+        ok = (not outcome.is_error and got.get('exit_code') == NOT_STARTED_EXIT_CODE
+              and str(got.get('stderr')).startswith(f'cluster-mcp: {GONE}'))
+    else:
+        said = 'The job was not submitted' if tool == 'sbatch-path' else 'the command was not run'
+        ok = outcome.is_error and GONE in outcome.text and said in outcome.text
+        ok = ok and not (tool == 'sbatch-path' and 'may have been submitted' in outcome.text)
+    return [] if ok else [f'{tool} read as {outcome!r:.400}: it must say {GONE!r} and that nothing was run']
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('tool', SILENT_COMMAND_TOOLS if EVERY_KIND else ['run', 'run_command'])
+def test_a_call_on_a_silent_link_reconnects(tool: str, silenced: Callable[..., Silenced], executes: Any) -> None:
+    rig = silenced()
+    since = rig.go_silent()
+    rig.link.come_back()
+    outcome, took = Watched(_silent_tool(rig.executor, tool)).result(rig.link, SILENT_BOUND, since)
+    violations = _completed_violations(tool, outcome)
+    fresh = [round(at - since, 2) for at in rig.link.opened[1:]]
+    if not (len(fresh) == 1 and 0 <= fresh[0] <= SILENT_BOUND + SILENT_SLACK):
+        violations.append(f'new connections were made {fresh} s after the call began, not one within '
+                          f'{SILENT_BOUND + SILENT_SLACK} s')
+    assert violations == [], f'{tool} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('tool', SILENT_COMMAND_TOOLS)
+def test_a_call_on_a_silent_link_to_a_gone_host_is_not_run(tool: str, silenced: Callable[..., Silenced],
+                                                           executes: Any) -> None:
+    rig = silenced()
+    since = rig.go_silent()
+    outcome, took = Watched(_silent_tool(rig.executor, tool)).result(rig.link, SILENT_WINDOW, since)
+    violations = _not_run_violations(tool, outcome)
+    if rig.server.received:
+        violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
+    if rig.link.held < 1:
+        violations.append('no reconnect attempt reached the gone host, so none was made')
+    if argv_echo.calls(rig.home):
+        violations.append('sbatch ran')
+    assert violations == [], f'{tool} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('opens', ['run'])
+def test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects(
+        opens: str, silenced: Callable[..., Silenced], monkeypatch: pytest.MonkeyPatch) -> None:
+    # The open's own timeout comes before the call's verdict, and before `SETTLE` after it: the open
+    # waits past the verdict, so the call reconnects rather than raise Paramiko's timeout.
+    rig = silenced()
+    monkeypatch.setattr(ssh, 'OPEN_TIMEOUT', (SILENT_BOUND - ssh.SETTLE) / 2)
+    since = rig.go_silent()
+    rig.link.come_back()
+    outcome, took = Watched(_silent_tool(rig.executor, opens)).result(rig.link, SILENT_BOUND, since)
+    violations = _completed_violations(opens, outcome)
+    if len(rig.link.opened) != 2:
+        violations.append(f'the server was reached by {len(rig.link.opened)} connections, not a new one')
+    assert violations == [], f'{opens} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+def test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time(silenced: Callable[..., Silenced]) -> None:
+    rig = silenced()
+    since = rig.go_silent()
+    rig.link.come_back()
+    rig.link.silent_after_handshake = True
+    outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_WINDOW, since)
+    violations = _not_run_violations('run', outcome)
+    if len(rig.link.opened) != 2 or rig.link.step != 'handshake':
+        violations.append(f'{len(rig.link.opened)} connections were made and the link went silent at '
+                          f'{rig.link.step}, not one reconnect that went silent once made')
+    if rig.server.received:
+        violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
+    assert violations == [], f'ended {took:.2f} s after the link went silent:\n' + '\n'.join(violations)
+
+
+def _running(server: LoopbackSSH, count: int = 1) -> None:
+    """Wait until `count` exec requests have reached `server`, and then `RUNNING` more."""
+    limit = _REAL_MONOTONIC() + DROP_SEEN
+    while len(server.received) < count:
+        if _REAL_MONOTONIC() > limit:
+            raise AssertionError(f'no exec request reached the server within {DROP_SEEN} s')
+        _REAL_SLEEP(0.01)
+    _REAL_SLEEP(RUNNING)
+
+
+def _silent_at(link: SilentLink, step: str) -> float:
+    """Wait until `link` has gone silent at the server's `step`; return when it went (real seconds)."""
+    limit = _REAL_MONOTONIC() + DROP_SEEN
+    while link.step != step:
+        if _REAL_MONOTONIC() > limit:
+            raise AssertionError(f'the link did not go silent at {step} within {DROP_SEEN} s')
+        _REAL_SLEEP(0.01)
+    assert link.silenced is not None
+    return link.silenced
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('tool', ['run', 'sbatch-path'])
+def test_a_command_cut_by_a_silent_link_is_never_run_twice(tool: str, silenced: Callable[..., Silenced],
+                                                           executes: Any) -> None:
+    # The host is reachable again before the verdict: the command may have run, so it is reported
+    # lost and never sent again.
+    rig = silenced()
+    call = (lambda: rig.executor.run(['sh', '-c', 'touch -- "$HOME/ran"; sleep 30'])) if tool == 'run' \
+        else _silent_tool(rig.executor, tool)
+    rig.link.silent_at('exec')
+    watched = Watched(call)
+    since = _silent_at(rig.link, 'exec')
+    rig.link.come_back()
+    outcome, took = watched.result(rig.link, SILENT_WINDOW, since)
+    violations = []
+    if tool == 'run':
+        if (outcome.exit_code, outcome.stderr.endswith(LOST_NOTE)) != (CONNECTION_LOST_EXIT_CODE, True):
+            violations.append(f'the command cut short gave {outcome!r}, not {CONNECTION_LOST_EXIT_CODE} with {LOST_NOTE!r}')
+        if not (rig.home / 'ran').exists():
+            violations.append('the command never ran, so the row proves nothing')
+    elif not outcome.is_error or 'may have been submitted' not in outcome.text:
+        violations.append(f'the submission cut short read as {outcome!r:.300}: it must say the job may have been '
+                          'submitted')
+    if len(rig.server.received) != 1 or (tool == 'sbatch-path' and len(argv_echo.calls(rig.home)) != 1):
+        violations.append(f'the command reached the server {len(rig.server.received)} times '
+                          f'(sbatch ran {len(argv_echo.calls(rig.home))}), not once')
+    assert violations == [], f'{tool} (ended {took:.2f} s after the link went silent):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+def test_an_idle_connection_is_not_taken_for_a_silent_link(silenced: Callable[..., Silenced]) -> None:
+    rig = silenced()
+    _REAL_SLEEP(SILENT_WINDOW + SILENT_SLACK)
+    began = _REAL_MONOTONIC()
+    outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_BOUND, began)
+    violations = _completed_violations('run', outcome)
+    if len(rig.link.opened) != 1:
+        violations.append(f'{len(rig.link.opened)} connections were made: an idle live connection was taken for dead')
+    assert violations == [], f'ended {took:.2f} s after it began:\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('timed', ['no-timeout', 'later-timeout'])
+def test_a_command_on_a_link_that_goes_silent_is_lost(timed: str, silenced: Callable[..., Silenced]) -> None:
+    rig = silenced()
+    # A timeout that outlasts the row's watchdog, so a call that never notices the link waits it out.
+    timeout = None if timed == 'no-timeout' else SILENT_WINDOW + SILENT_SLACK + 3
+    watched = Watched(lambda: rig.executor.run(['sleep', '30'], timeout=timeout))
+    _running(rig.server)
+    since = rig.go_silent()
+    outcome, took = watched.result(rig.link, SILENT_WINDOW, since)
+    assert (outcome.exit_code, outcome.stderr.endswith(LOST_NOTE)) == (CONNECTION_LOST_EXIT_CODE, True), \
+        (f'{timed}: a command on a link that went silent gave {outcome!r} {took:.2f} s later, not '
+         f'{CONNECTION_LOST_EXIT_CODE} with {LOST_NOTE!r}')
+
+
+@pytest.mark.integration
+def test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout(silenced: Callable[..., Silenced]) -> None:
+    # Its timeout comes before the link is noticed dead: it is a timeout, as on a live link.
+    rig = silenced()
+    timeout = 1.0
+    watched = Watched(lambda: rig.executor.run(['sleep', '30'], timeout=timeout))
+    _running(rig.server)
+    since = rig.go_silent()
+    outcome, took = watched.result(rig.link, timeout + launch.GRACE, since)
+    assert outcome.exit_code == TIMEOUT_EXIT_CODE, \
+        f'a command whose timeout came first gave {outcome!r} {took:.2f} s after the link went silent, not a timeout'
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('link', ['quiet', 'slow-link'])
+def test_a_quiet_command_is_not_taken_for_a_silent_link(link: str, silenced: Callable[..., Silenced]) -> None:
+    # Quiet: nothing printed for longer than the reconnect bound. Slow: the output trickles in through
+    # a slow link for longer than that, so every probe's reply queues behind it, as behind sshd.
+    rig = silenced(rate=None if link == 'quiet' else SLOW_RATE)
+    command = QUIET_COMMAND if link == 'quiet' else f'head -c {SLOW_BYTES} /dev/zero | tr "\\0" z'
+    expected = 'done' if link == 'quiet' else 'z' * SLOW_BYTES
+    began = _REAL_MONOTONIC()
+    outcome, took = Watched(lambda: rig.executor.run(command)).result(rig.link, QUIET_FIGURE, began)
+    violations = []
+    if (outcome.stdout == expected, outcome.stderr, outcome.exit_code) != (True, '', 0):
+        violations.append(f'gave {len(outcome.stdout)} bytes, {outcome.stderr!r}, exit {outcome.exit_code}: '
+                          'not the whole result')
+    if len(rig.link.opened) != 1:
+        violations.append(f'{len(rig.link.opened)} connections were made: a quiet live link was taken for dead')
+    if took < SILENT_WINDOW:
+        violations.append(f'it took {took:.1f} s, not longer than the {SILENT_WINDOW} s bound, so it proves nothing')
+    assert violations == [], f'{link} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+def test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict(silenced: Callable[..., Silenced]) -> None:
+    # The link goes silent as a background probe arrives and comes back `SPELL` later, held bytes and
+    # all: past a call's verdict, inside the background probe's, so the quiet command runs on.
+    rig = silenced()
+    assert SILENT_BOUND < SPELL < 2 * SILENT_BOUND - ssh.VERDICT_MARGIN
+    watched = Watched(lambda: rig.executor.run(QUIET_COMMAND))
+    _running(rig.server)
+    rig.link.silent_at('probe', ssh.PROBE_REQUEST)
+    limit = _REAL_MONOTONIC() + 2 * SILENT_BOUND
+    while rig.link.step != 'probe':
+        assert _REAL_MONOTONIC() < limit, f'no background probe arrived within {2 * SILENT_BOUND} s'
+        _REAL_SLEEP(0.01)
+    since = rig.link.silenced or _REAL_MONOTONIC()
+    _REAL_SLEEP(max(0.0, since + SPELL - _REAL_MONOTONIC()))
+    rig.link.resume()
+    outcome, took = watched.result(rig.link, QUIET_FIGURE, since)
+    violations = []
+    if _same(outcome) != ('done', '', 0):
+        violations.append(f'the quiet command gave {outcome!r}, not its result')
+    if len(rig.link.opened) != 1:
+        violations.append(f'{len(rig.link.opened)} connections were made: a {SPELL} s silent spell was taken for dead')
+    assert violations == [], f'ended {took:.2f} s after the spell began:\n' + '\n'.join(violations)
+
+
+@pytest.mark.integration
+def test_a_call_beside_a_command_on_a_silent_link_ends_in_time(silenced: Callable[..., Silenced]) -> None:
+    # The new call's verdict ends the stalled command too, at once.
+    rig = silenced()
+    stalled = Watched(lambda: rig.executor.run(['sleep', '30']))
+    _running(rig.server)
+    rig.go_silent()
+    rig.link.come_back()
+    began = _REAL_MONOTONIC()
+    outcome, took = Watched(_silent_tool(rig.executor, 'run')).result(rig.link, SILENT_BOUND, began)
+    cut, cut_took = stalled.result(rig.link, SILENT_BOUND, began)
+    violations = _completed_violations('run', outcome)
+    if (cut.exit_code, cut.stderr.endswith(LOST_NOTE)) != (CONNECTION_LOST_EXIT_CODE, True):
+        violations.append(f'the stalled command gave {cut!r}, not {CONNECTION_LOST_EXIT_CODE}')
+    assert violations == [], (f'the new call ended {took:.2f} s and the stalled one {cut_took:.2f} s after the new '
+                              'call began:\n' + '\n'.join(violations))
 
 
 # ---------------------------------------------------------------------------------------------

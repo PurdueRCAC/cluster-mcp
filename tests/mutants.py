@@ -1096,8 +1096,8 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_reconnect_refused_authentication_fails_at_once',),
          'was retried'),
     Case('ssh-reconnect-late-success-leaks', 'core/executor/ssh.py',
-         (('                pending.transport, dropped = self._publish(conn)\n',
-           '                pending.transport, dropped = self._publish(conn) if pending.waiters else (None, None)\n'),),
+         (('                pending.transport, dropped, watch = self._publish(conn)\n',
+           '                pending.transport, dropped, watch = self._publish(conn) if pending.waiters else (None, None, None)\n'),),
          ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
          'leaked'),
     Case('ssh-reconnect-attempt-per-call', 'core/executor/ssh.py',
@@ -1141,7 +1141,7 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_call_at_its_deadline_takes_an_outcome_that_has_come',),
          'reported a failure'),
     Case('ssh-reconnect-publish-replaces-live', 'core/executor/ssh.py',
-         (('        if current is not None:\n            return current, conn\n', ''),),
+         (('        if current is not None:\n            return current, conn, None\n', ''),),
          ('test_ssh_exec.py::test_a_reconnect_keeps_a_connection_published_meanwhile',),
          'closed or replaced'),
     Case('ssh-reconnect-bound-unfloored', 'core/executor/ssh.py',
@@ -1203,15 +1203,15 @@ CASES: tuple[Case, ...] = (
     # again. A reconnect that gives up reads as nothing run at every tool: sbatch says nothing was
     # submitted, sacct stops at its failed whoami, and the cluster context is never cached from it.
     Case('ssh-reconnect-gives-up-for-good', 'core/executor/ssh.py',
-         (('        transport = self._ensure_connected(deadline)\n'
-           '        if isinstance(transport, str):\n'
-           '            return self._not_run(transport)\n'
-           '        out, err, code, note',
-           "        transport = getattr(self, '_gave_up', None) or self._ensure_connected(deadline)\n"
-           '        if isinstance(transport, str):\n'
-           '            self._gave_up = transport\n'
-           '            return self._not_run(transport)\n'
-           '        out, err, code, note'),),
+         (('            transport = self._ensure_connected(deadline)\n'
+           '            if isinstance(transport, str):\n'
+           '                return self._not_run(transport)\n'
+           '            ran = self._exec',
+           "            transport = getattr(self, '_gave_up', None) or self._ensure_connected(deadline)\n"
+           '            if isinstance(transport, str):\n'
+           '                self._gave_up = transport\n'
+           '                return self._not_run(transport)\n'
+           '            ran = self._exec'),),
          ('test_ssh_exec.py::test_a_failed_reconnect_leaves_the_server_serving',),
          'after the host returned'),
     Case('sbatch-not-started-reads-as-failed', 'slurm/tools.py',
@@ -1261,8 +1261,8 @@ CASES: tuple[Case, ...] = (
          ('test_executors.py::test_backend_satisfies_executor_protocol[delegate]',),
          'does not satisfy Executor'),
     Case('ssh-close-renamed', 'core/executor/ssh.py',
-         (('    def close(self) -> None:\n        """Close the SSH connection."""',
-           '    def disconnect(self) -> None:\n        """Close the SSH connection."""'),),
+         (('    def close(self) -> None:\n        """Close the SSH connection, and stop its liveness monitor.',
+           '    def disconnect(self) -> None:\n        """Close the SSH connection, and stop its liveness monitor.'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[ssh]',),
          'does not satisfy Executor'),
     Case('ssh-write-renamed', 'core/executor/ssh.py',

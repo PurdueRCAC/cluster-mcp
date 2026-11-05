@@ -1247,6 +1247,50 @@ import has no effect.
     (`test_a_reconnect_failure_never_changes_the_cluster_context`). The mutation cases
     `ssh-reconnect-gives-up-for-good`, `sbatch-not-started-reads-as-failed`, `sacct-whoami-unchecked`
     and `context-served-from-a-failed-read` each turn one of these rows red.
+    The silent-link rows (`silent` in every name) put `tests/ssh_server.py`'s `SilentLink` in front
+    of the loopback server: a hop that can stop forwarding both ways and hold new connections the
+    same way, closing no socket (`go_silent()`), forward new connections again (`come_back()`) or the
+    held ones (`resume()`), limit its rate (`rate=`), go silent as the server reaches a step
+    (`silent_at`: an exec request, a probe) or once a new connection is made
+    (`silent_after_handshake`), with a 16 KiB receive buffer on what it accepts and a port never in
+    54001–54005. Each runs under a 2 s connect bound (a 6 s reconnect bound), its call on a thread
+    under a watchdog of its figure plus 1 s from the moment the link went silent, which fails with
+    `still waiting <t> s after the link went silent` and then cuts the link; a liveness thread's
+    exception fails the row. A call that starts on a silent link reconnects, over one new connection
+    made within 3 s (`test_a_call_on_a_silent_link_reconnects[run|run_command]`, every command tool
+    with `CLUSTER_MCP_TEST_EVERY_KIND=1`), also when the open's own timeout is shorter than the
+    verdict (`test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run]`);
+    with the host gone it reads as nothing run, naming `cannot connect to 127.0.0.1: timed out`,
+    within the bound, nothing reaching the server and an attempt held by the hop
+    (`test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run|run_command|sbatch-path|read_file|list_directory]`),
+    and so does one whose reconnect goes silent once made
+    (`test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`). A command running as the
+    link goes silent gives `-1003` with its note within the bound, with no timeout or a later one
+    (`test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout|later-timeout]`), and `-1001` when
+    its timeout comes first (`test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`); with
+    the host back before the verdict it is lost and never sent again
+    (`test_a_command_cut_by_a_silent_link_is_never_run_twice[run|sbatch-path]`). A call beside a
+    stalled command ends within 3 s of its start, the stalled one with it
+    (`test_a_call_beside_a_command_on_a_silent_link_ends_in_time`). Nothing quiet is cut: a
+    connection idle past the bound serves the next call
+    (`test_an_idle_connection_is_not_taken_for_a_silent_link`), a command silent past it, or
+    trickling its output through a 32 KiB/s hop for longer, gives its whole result on the same
+    connection (`test_a_quiet_command_is_not_taken_for_a_silent_link[quiet|slow-link]`), and so does
+    one through a silent spell that begins as a background probe arrives and ends 2.5 s later
+    (`test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`).
+  - `tests/test_ssh_liveness.py` (`unit`, with `integration` rows on the loopback server): the
+    liveness monitor. On a fake clock, `_verdict` gives a probe after a bound of quiet and at once
+    for a poke, and with nothing heard since the probe went, dead at 2B − `VERDICT_MARGIN` for a
+    background probe or one bound after a waiting poke, whichever is first, never before; any
+    message heard clears the probe, a poke stays latched past an answer to a probe handed over
+    before it and never moves the probe out, the priming probe is never judged, and a hand-over
+    counts while the sender is stuck. The hook stamps nothing on a read that raises; the bound is
+    the connection's own (`_bound`); a fake connection gets no monitor; the close goes outermost hop
+    first on a fake gateway chain; a poke reaches the monitor of the transport given. On a real
+    Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
+    included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
+    it wakes starts no reconnect. The doc pin holds the `SSHExecutor` docstring, this file's
+    `executor/ssh.py` footgun and the README to the monitor's figures.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
     installed `cluster-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
     exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the
@@ -1932,7 +1976,40 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   and an `AuthFailure` is one only when every source it tried was refused. Paramiko before 3.2
   raises the refusal's text for a closed link, so `pyproject.toml` declares `paramiko>=3.2`
   (`PARAMIKO_FLOOR`; `test_the_declared_paramiko_floor_matches_the_classifier` keeps the two
-  equal). The connect bound (`_bounded`: the TCP connect,
+  equal). The silent link (`_Liveness`). A link that dies with no reset still reads as connected,
+  so a liveness monitor watches each published connection. It stamps every message the peer sends, and sends a probe
+  (`PROBE_REQUEST`, a global request that wants a reply) once nothing has been heard for the
+  connect bound B, and at once when a call starts using the connection; the first probe is never
+  judged. A probe with nothing at all heard since it went is judged dead B after the poke of a
+  call that started while it was out, so a call that starts on a silent link notices it at most B
+  after its start, and a background probe after 2B − `VERDICT_MARGIN` (29 s with the default
+  bound), so a call in flight ends at most 3B − 0.55 s after the last message heard, inside the 3B
+  bound. A call that starts during a stall ends the stalled call too, at its own verdict. On a dead
+  verdict the monitor closes the connection's transports, the outermost gateway hop first, and
+  every wait on it ends: a channel open that fails on a lost connection has sent nothing, so the
+  call reconnects within its deadline; from the exec request on nothing is retried, and a command
+  cut short returns `CONNECTION_LOST_EXIT_CODE`, with or without a timeout, unless its own timeout
+  came first. Nothing merely quiet is cut, since any message proves the link live, while the peer
+  answers within the background verdict: at the default bound, a quiet command survives the peer
+  answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
+  44 s. A link quieter than that is taken for dead, the recorded floor
+  (`issues/ssh-liveness-message-gap.md`). What it rests on: the activity hook is an instance
+  wrapper on the transport's `packetizer.read_message` (the one call site where `Transport.run`
+  reads every message after the handshake, in 3.2 and 5.0), which stamps a read that returns and
+  nothing on one that raises, and misses the read in progress as it goes in, hence the unjudged
+  priming probe; the decision is the pure `_verdict`, and the poke is latched until a probe handed
+  over at or after it is answered, and never moves the probe already out; the judge thread
+  (`cluster-mcp-liveness`) takes no transport lock and hands each probe to the sender thread
+  (`cluster-mcp-probe`), which sends it through `_send_user_message` as `_signal` sends, swallows
+  every error and has at most one send in flight, the probe counting from its hand-over so a send
+  stuck behind a full buffer still meets its verdict; the monitor reads its own clock
+  (`_liveness_clock`), never `time` or `_await`, which the fake-clock reconnect rows replace; it is
+  made with the connection it watches under the lock, started once the lock is let go, stopped
+  with it, and only a Paramiko `Transport` is watched. A channel open waits `_open_timeout`,
+  `max(OPEN_TIMEOUT, B + OPEN_MARGIN)`, so the monitor's close comes first on a dead link; its
+  failure is a loss by state (`_gone`: the monitor's verdict, the transport inactive `SETTLE` after it, or its judged probe
+  unanswered), never by exception type; and a call that `close()` woke (`_closed`) raises as it
+  would have and starts no reconnect. The connect bound (`_bounded`: the TCP connect,
   banner and auth timeouts default to `CONNECT_TIMEOUT` through Fabric's config, so an ssh_config
   `ConnectTimeout` still wins, and a startup against an unreachable host is answered within it); the channel loop (`_collect`), which must
   send no stdin and its EOF at once; wait without spinning; read to both end records, never stopping
@@ -2197,7 +2274,12 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   - **`CONNECTION_LOST_EXIT_CODE = -1003`** (`ssh` only): the connection was lost before both end
     records arrived, so the command may have run, and may have finished: the channel closed without
     its end of output (as the transport closes it when the link goes), or the link went once the
-    exec request was sent. stdout and stderr keep whatever arrived, and stderr ends with
+    exec request was sent. A link that went silent, with no reset, is one: the liveness monitor
+    closes the connection at its verdict (the `executor/ssh.py` footgun), and a command running
+    then, with or without a timeout, returns this code within the reconnect bound after the last
+    message heard, unless its own timeout came first (then it is `TIMEOUT_EXIT_CODE`, the timeout
+    contract below). A channel open that the loss cut short sent nothing: that call reconnects
+    instead, and gives `NOT_STARTED_EXIT_CODE` only when it cannot. stdout and stderr keep whatever arrived, and stderr ends with
     `cluster-mcp: the connection was lost; the command may have run` (`launch.LOST_NOTE`). It is
     never `-1002`: a command whose start sentinel had not arrived when the link went may still have
     run. `sbatch` reports it as a submission that may have happened, never as a failure, so an

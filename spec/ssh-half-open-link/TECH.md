@@ -11,7 +11,7 @@ last_updated: '2026-11-05'
 phases:
 - id: P1
   name: 'Commands: the liveness monitor, the open-retry, the stall proxy and the documents'
-  status: pending
+  status: in_progress
   satisfies:
   - R1
   - R3
@@ -23,6 +23,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && uv run python -I spec/ssh-half-open-link/verify/silent-gate.py commands both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
@@ -284,6 +285,18 @@ develop.
   - § Testing;
   - the README's reconnect paragraph and its −1003 line;
   - the `SSHExecutor` and `run` docstrings.
+- **Amended in build (2026-11-05):**
+  - The gone-host rows and `test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time` take
+    the reconnect bound (3B) as their watchdog figure, not B: such a call ends only once its
+    reconnect gives up, about 2B after its start on a correct build.
+  - `silent_after_handshake` goes silent at a new connection's first probe or channel open, since a
+    call's channel open can reach the server before the new monitor's priming probe.
+  - The servers' step hooks in P1 are `channel`, `exec` and `probe`.
+  - **Open, for the foreman:** `test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run]`
+    cannot fail on develop with `still waiting`, as `silent-gate.py` requires of every "fails" row.
+    With `OPEN_TIMEOUT` below `B − SETTLE`, develop's open raises Paramiko's
+    `Timeout opening channel.` within a second, before any watchdog. The gate is red on that row
+    alone, in both eras; the phase stays `in_progress`.
 - **Verify:** the frontmatter's. `silent-gate.py commands both` requires every P1 row to pass here
   in both eras, and on develop's `packages/` every "fails" row to fail with `still waiting` and
   every "passes" row to pass.
