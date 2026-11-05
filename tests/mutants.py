@@ -5557,9 +5557,9 @@ CASES += (
            '                                                            and _down(transport))\n',
            '    return result.exit_code in (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE)\n'),),
          (f'{SSH_EXEC}::test_a_failed_ssh_write_leaves_nothing_behind',), 'TransferLost'),
-    # Review cycle 1, F1: everything a call sends once its exec request is answered goes through its
-    # sender (`_Sends`), and the call waits for it only until its timeout and GRACE. Each made on the
-    # call's own thread instead holds the call while another sender holds the write path.
+    # Everything a call sends once its exec request is answered goes through its sender (`_Sends`),
+    # and the call waits for it only until its timeout and GRACE. Each made on the call's own thread
+    # instead holds the call while another sender holds the write path.
     Case('shol-term-on-the-call', SSH, (('            sends.term()\n', "            _signal(chan, 'TERM')\n"),),
          (WRITE_PATH_HELD, STALLED_TIMEOUT), 'still waiting'),
     Case('shol-kill-on-the-call', SSH,

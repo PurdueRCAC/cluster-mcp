@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -58,7 +58,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 3
-  verify: uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py
+  verify: uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py && uv run python -I spec/ssh-half-open-link/remediation/F6-finding-id-hygiene.py
 review:
   last_reviewed_commit: ac4909a8b01e21b90ff50432bf6645b621e6af3f
   verdict: changes-requested
@@ -763,9 +763,66 @@ develop. Every recorded item has its seed.
     that read this file: the first five (the wrapper's four halves, 52 cases killed and 6 equivalents
     shown per era, and the every-tool run) were green on the identical code and tests in the second
     run, and read nothing this edit changed.
+- **Amended in review cycle 2's remediation (2026-11-05): F-A's sweep and F-C.**
+  - **F-A's sweep.** The fourteen cases P1's amendment lists (`shol-cap-*`, `shol-sftp-cap-*`,
+    `shol-within-*`) are named in the sweep by `remediation/F5-late-reconnect-sweep.py`, which runs
+    `remediation/F1-send-path-sweep.py` unchanged with the cap's rows appended to the frozen gate's
+    `SWEEP` first. Why a wrapper: the frozen gate checks its table against `tests/mutants.py` both
+    ways, so with the cases planted it reads each as one the sweep does not name. One alternative is
+    an equivalent, planted and run against its neighbours' killers: the cap on `_sftp`'s first open
+    too (an SFTP session opens only as a call begins, its window ahead, and a silent link there meets
+    the open's own verdict first). One is not planted: a worker that cannot start (it needs a process
+    out of threads; the fallback is `_Sends`'s). `F1-send-path-sweep.py`, `open-timeout-gate.py` and
+    `ledger-plan-commits.py` are unchanged.
+  - **F-C, the class.** The instance was a comment in `tests/mutants.py` naming review cycle 1's
+    first finding by its id, which `tests/test_hygiene.py`'s `SPEC_ID` (`R`, `P`, `Q` only) did not
+    match. The class: every id that restarts per feature or per review cycle, in a comment, docstring
+    or message of the package or the suite. Swept, every site (`packages/`, `tests/`; the cycle's
+    diff against `develop` and the whole tree):
+    - `tests/mutants.py`, the sender cases' comment: the id removed, the comment unchanged otherwise.
+    - No other review-finding, phase or requirement id: the widened check finds nothing else in the
+      tree. Outside the class, left unchanged by the foreman's ruling: three comments on `develop`
+      that say a line is "as review cycle 3 found it" (`tests/test_launch.py`, `tests/mutants.py`),
+      which carry no id; the silent sweep's comment naming its gate's path,
+      `spec/ssh-half-open-link/verify/silent-sweep.py`, a record that merges with the cycle.
+  - **The check, widened**: `SPEC_ID` matches a review-finding id too, `F` and one or two digits, or
+    `F`, a hyphen and a capital (review cycle 2's style). Narrowed so the tree's own text is not
+    read as one: three or more digits (flake8's `F401`) and an id joined to a name by a hyphen (a
+    checker's file name, `F1-contribution-refusal.sh`, which `tests/test_startup.py` cites from
+    `develop`) are not ids; hex (`0xF1`) and `F-Droid` never matched. The planted cases add a
+    finding id each way and those four as not-ids. Red first: with the check widened and the
+    comment not yet changed, `test_no_spec_ids_in_the_package_or_the_suite` failed on exactly that
+    line (`tests/mutants.py:5560`), the planted cases passing; green once the id was removed. The
+    widened check on the reviewed tree (`82b1f0e`, every `.py` under `packages/` and `tests/`)
+    finds the cited line and nothing else; the pattern as reviewed finds nothing there.
+  - **The rule**, in both its restatements, this commit: AGENTS.md § Testing (the hygiene entry)
+    and § Conventions (comments) now name review-finding ids beside `R#`, `P#`, `Q#`.
+  - **Checker:** `remediation/F6-finding-id-hygiene.py` (review cycle 2, F-C): the suite's check
+    and its planted cases pass; red on the reviewed tree as above; no false positive on the
+    tree's text; both restatements of the rule name review-finding ids. Seen red on a planted gap:
+    § Conventions with "a review-finding id" taken out (`AGENTS.md § Conventions states the id rule
+    without review-finding ids`), then restored and compared.
+  - **A seed filed** at the foreman's ruling: `issues/mutant-child-outlives-timeout.md` and its
+    ROADMAP entry (Part III). `tests/mutants.py`'s `run_child` uses `subprocess.run(timeout=300)`,
+    which kills the sandbox wrapper and leaves the pytest below it running when the timeout fires;
+    seen in P1's cheap mutant pass. The fix (a session of its own, its group killed) is that seed's.
+  - **The gate** adds `F6-finding-id-hygiene.py` and runs `F5-late-reconnect-sweep.py`'s four
+    halves in place of `F1-send-path-sweep.py`'s (the F5 wrapper runs F1's). Green, every step, on
+    the tree this commit holds but for this paragraph and the seed's note below: each half 33 cases
+    killed (66 per era), half 2 showing 7 of 7 equivalents, `equivalent-sftp-cap-always` among them
+    (legacy 177 s and 304 s, modern 177 s and 315 s); the every-tool run (944 s); the ledger
+    wrapper; F3's checker; F6's checker. The ledger and F3's checker, the two steps that read this
+    file and the seeds, were run again after these notes.
+  - **Suite time, base and branch back to back** (the foreman's ask, for the CI trim cycle next):
+    `82b1f0e` against this tree on this Mac, base first, load about 2: handshake 740 s to 768 s
+    (+28 s, 3.7%), modern 730 s to 776 s (+46 s, 6.3%), 4967 passed and 14 skipped per era here
+    (the skips are `conftest.py`'s bash 4.1 rows, which CI's runner has). A first handshake pair,
+    its base run begun at load 5.7, read 769 s and 770 s and was re-run once. Recorded in
+    `issues/suite-ci-time-budget.md`, a dated note.
 - **Verify:** the frontmatter's (≈ 10 min, run in the background).
 - **Touches:** `tests/mutants.py`, `spec/ssh-half-open-link/verify/`, and nothing else but a seed or
-  entry the ledger finds missing.
+  entry the ledger finds missing. Review cycle 2's remediation adds `tests/test_hygiene.py`,
+  AGENTS.md (§ Testing, § Conventions), `issues/mutant-child-outlives-timeout.md` and `ROADMAP.md`.
 
 ---
 

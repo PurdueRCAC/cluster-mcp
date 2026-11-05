@@ -28,6 +28,8 @@ The cycle's PLAN (§6) set a trim threshold of +180 s per era. The cycle passed 
 | after P2 (`8ff5108`) | 739 s | 735 s | 765 s | 713 s |
 | after P3 (the sweep's unit rows added) | — | — | 790 s | 753 s |
 | `develop` (`13c0e83`), run back to back with the P3 row | — | — | 581 s | 521 s |
+| review cycle 2's remediation (`82b1f0e`), run back to back | — | — | 740 s | 730 s |
+| after it (this tree's last phase), run back to back | — | — | 768 s | 776 s |
 
 - CI's era jobs took about 12 and 13.8 minutes on `8ff5108`, of the 20-minute timeout.
 - Back to back on this Mac, at P3, the cycle's tree took 209 s (handshake) and 232 s (modern) more
@@ -41,6 +43,13 @@ The cycle's PLAN (§6) set a trim threshold of +180 s per era. The cycle passed 
   - the idle, quiet and silent-spell rows, about 7 s each;
   - the nine `test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made` shapes, 5.0–5.3 s each;
   - the gone-host rows, 4.1–4.25 s each.
+
+- 2026-11-05: review cycle 2's remediation adds 4 real-time rows to the default suite (two late
+  reconnects onto a link that goes silent again, under a 3 s connect bound, about 9 s each; two onto
+  a live link, about 4 s each) and 19 fast ones. Back to back on this Mac, base first, load about 2:
+  +28 s handshake (740 s to 768 s, 3.7%) and +46 s modern (730 s to 776 s, 6.3%). A first handshake
+  pair, its base run begun at load 5.7, read 769 s and 770 s and was re-run once. At CI's rate the
+  era jobs would go from about 12.5 to about 13–13.3 of their 20 minutes.
 
 A further cycle of the same size would bring an era job near its timeout.
 

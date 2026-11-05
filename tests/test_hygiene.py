@@ -611,13 +611,16 @@ def test_harness_builds_servers_inside_the_running_loop(tmp_path: Path, monkeypa
         probe.reset(token)
 
 
-# A feature-scoped spec id (`R#`, `P#`, `Q#`) in a comment, docstring or message of the package or the
-# suite: those restart per feature and live in `spec/`, never in the code (AGENTS.md § Conventions).
-SPEC_ID = re.compile(r'\b[RPQ][0-9]{1,2}\b')
+# A feature-scoped spec id (`R#`, `P#`, `Q#`) or a review-finding id (an `F` with a number, or with a
+# hyphen and a capital) in a comment, docstring or message of the package or the suite: those restart
+# per feature, or per review cycle, and live in `spec/`, never in the code (AGENTS.md § Conventions).
+# A finding's number joined to a name by a hyphen is a file's name (a checker's), and three digits
+# are a linter's code: neither is an id.
+SPEC_ID = re.compile(r'\b(?:[RPQ][0-9]{1,2}|F[0-9]{1,2}(?!-)|F-[A-Z])\b')
 
 
 def spec_id_violations(name: str, text: str) -> list[str]:
-    """Every line of `text` that names a feature-scoped spec id."""
+    """Every line of `text` that names a feature-scoped spec id or a review-finding id."""
     return [f'{name}:{n}: {line.strip()[:120]}' for n, line in enumerate(text.splitlines(), 1) if SPEC_ID.search(line)]
 
 
@@ -653,6 +656,10 @@ def test_no_spec_ids_in_the_package_or_the_suite() -> None:
     pytest.param('# Added in ' + 'P' + '3.', True, id='phase'),
     pytest.param('# As ruled (GOAL ' + 'Q' + '3).', True, id='clarification'),
     pytest.param('x = "R2D2 P100 RP1 HTTP2 Q100 QUIT SIGQUIT IQ3 Q3PO"', False, id='not-ids'),
+    pytest.param('# As review cycle 1\'s ' + 'F' + '1 found.', True, id='review-finding'),
+    pytest.param('# ' + 'F' + '-A: a late open.', True, id='review-finding-letter'),
+    pytest.param('# noqa: E402, F401; 0xF1 F100 F-Droid (`F1-contribution-refusal.sh`)', False,
+                 id='not-finding-ids'),
 ])
 def test_spec_id_check_catches_planted_ids(text: str, found: bool) -> None:
     assert bool(spec_id_violations('planted', text)) == found

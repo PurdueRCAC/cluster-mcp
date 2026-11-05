@@ -504,6 +504,17 @@ nothing, so no release waits on it.
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
 **Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
 
+## A mutant's child run outlives its timeout
+
+`tests/mutants.py` runs each case's targets through `subprocess.run(timeout=300)`, which kills the
+sandbox wrapper and not the pytest below it: a case whose target hangs leaves that pytest running,
+reparented to init, and the runner raises out of the sweep instead of reporting the case. Seen on
+2026-11-05. Pre-existing; it gates nothing. The fix starts the child in a session of its own and
+kills its process group.
+
+*Horizon: later · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
+**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
+
 ## A local command in flight can outlive the server that launched it
 
 In `local` mode each command runs in a process group of its own, which only its call ever signals. A

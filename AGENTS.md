@@ -944,7 +944,8 @@ import has no effect.
     check's docstring lists what else it cannot see); self-tests prove the guard, the PATH shim
     (also inside a program the launcher runs under the login bash,
     `test_path_shim_survives_a_login_bash`), the harness fence and the build-inside-the-loop rule
-    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`) appears in the package or the suite
+    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`), nor a review-finding id (`F#`, or
+    `F-` and a letter), appears in the package or the suite
     (`test_no_spec_ids_in_the_package_or_the_suite`, which reads every portion of the imported
     `cluster_mcp` namespace, so a planted id in a mutated copy fails it; `test_spec_id_scan_covers_every_member`
     asserts the three portions, so a member cannot drop out of the scan). A row that needs a login shell calls `conftest.need_shell`: off
@@ -3062,10 +3063,10 @@ What each mode means:
   error message and exit status are the intended ones, the file landed where you expected).
 - **Comments (and docstrings) are declarative statements of the invariant or the *why*** —
   capitalized sentences (`# Non-interactive: there is no TTY to prompt on.`), not lowercase
-  fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`): those restart per feature, live in
-  `spec/{slug}/`, and collide across branches (`tests/test_hygiene.py` keeps them out of the
-  package and the suite). Requirement provenance lives in the commit, the PR,
-  and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
+  fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`) or a review-finding id (`F#`,
+  or `F-` and a letter): those restart per feature or per review cycle, live in `spec/{slug}/`, and
+  collide across branches (`tests/test_hygiene.py` keeps them out of the package and the suite).
+  Requirement provenance lives in the commit, the PR, and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
   an `/etc/agents.d` path) is fine.
 - **No `Co-Authored-By` trailer** on any commit (repo convention). PR *bodies* end with the Claude
   Code generation line.
