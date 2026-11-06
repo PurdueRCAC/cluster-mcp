@@ -7,7 +7,7 @@ status: in_review
 branch: fix/ssh-half-open-link
 base: develop
 current_phase: done
-last_updated: '2026-11-05'
+last_updated: '2026-11-06'
 phases:
 - id: P1
   name: 'Commands: the liveness monitor, the open-retry, the stall proxy and the documents'
@@ -60,10 +60,10 @@ phases:
   attempts: 3
   verify: uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py && uv run python -I spec/ssh-half-open-link/remediation/F9-glued-id-hygiene.py
 review:
-  last_reviewed_commit: e2ad380c06d19aa91d93bdffc1296c7fea1257d8
-  verdict: changes-requested
-  blocked_reason: 'review cycle 3: N1 rule text broader than the code, N2 SFTP-step cap pinned only opt-in, N3 finding id in an identifier; escalated'
-  cycle: 3
+  last_reviewed_commit: 4b4ad2879c871d621ae6ed955c97a26da1e621fa
+  verdict: approved
+  blocked_reason: ''
+  cycle: 4
 ---
 
 # TECH.md — A dead SSH link that still reads as connected is noticed within a bound

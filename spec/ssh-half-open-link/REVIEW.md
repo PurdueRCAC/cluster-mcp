@@ -295,3 +295,40 @@ in `issues/suite-ci-time-budget.md`. Neither is a defect.
 ### Escalation
 
 This is cycle 3, the loop's last, without convergence. Per code-review Step 6, it goes to Geoffrey.
+
+## Remediation 3 — approved by foreman verification (2026-11-06)
+
+- **Verified commit:** 4b4ad2879c871d621ae6ed955c97a26da1e621fa · **Mode:** as Geoffrey chose at cycle 3's
+  escalation, no fourth blind pass: the foreman, as judge, read the remediation diff (`f1fa641..4b4ad28`,
+  spec excluded) and re-ran its checks.
+- **CI** run on the verified commit: both eras 4996 passed, `gate` green, on attempt 1 (782/810 s of pytest).
+
+### Verification run (the foreman's own)
+
+- `F9-glued-id-hygiene.py`: green. The widened check, run over `f1fa641`'s tree, names exactly the seven glued
+  lines (`tests/test_literal_args.py:264, 736`; `tests/test_timeout_stop.py:471, 493, 524, 789, 830`).
+- `F7-open-rule-statement.py both`: green. Callers of `_run`: `run` and the write's own `MAKE_PARENT`, `VERIFY`
+  and `PROBE`; of `_sftp`: `write`, `put`, `get`. A cap on every `_run` open is killed by the new
+  `…_is_a_lost_transfer[mkdir|place]` rows in both eras.
+- `F8-session-steps-cap.py both`: green. The channel-only cap survives the ten default rows of the `_sftp` family
+  without the pin and is killed by the opt-in step rows; both `shol-session-` cases are killed by the default
+  pin.
+- `tests/test_hygiene.py -k 'spec_id or id_rule'`: 16 passed; the N2 pin: 3 passed in each era.
+- The builder's full gate on the identical tree, from its logs: every step green. One union-step red on
+  `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`, the class `issues/stalled-reconnect-test-timing.md`
+  names, went through code-build's flake route (three passes alone, a green re-run) and has a dated line in that seed.
+
+### Status of cycle 3's findings
+
+| Finding | Status | Evidence |
+|---|---|---|
+| N1 | ✅ fixed | `OPEN_TEXT`, the footgun and § Testing now state the cap for opens before a call's work starts, and a `write`'s own commands as they run; F7 holds every caller path to the text |
+| N2 | ✅ fixed | a default-suite unit pin (about 0.7 s per era) kills the review's plant; two mutation cases |
+| N3 | ✅ fixed | `F3_SETTINGS` and `r1_violations` renamed; the check catches glued ids; § Testing and § Conventions state it word for word, pinned |
+
+No new defect found in the remediation diff. The diff changes no behaviour: `ssh.py` changes only the docstring
+and one comment.
+
+### Verdict
+
+Approved at `4b4ad28`. Next: publish.
