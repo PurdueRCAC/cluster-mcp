@@ -447,7 +447,8 @@ import has no effect.
     The lookup itself runs through the login bash (`executes`, beside each member set) with stubs a
     login profile puts first on PATH, an exported function and an exported `type` function, and
     over the loopback SSH server, present, absent and with the connection lost.
-  - `tests/test_probe_startup.py` (`unit`, `integration`): the probe at startup (§4). In process,
+  - `tests/test_probe_startup.py` (`unit`, `integration`): `surface_violations`, what a client
+    lists against every installed member not withheld. The probe at startup (§4). In process,
     `MCPServerApp.main` runs with a `harness.ProbeExecutor` as the shared executor, the site read
     stubbed and every step of the start recorded in order (`ORDER`), beside each member set with two
     capabilities made in the test (one declaring a command, one declaring none): `local` and `ssh`
@@ -469,7 +470,8 @@ import has no effect.
     line on stderr at its level, a login that ends at once serves every capability, and both hold with stdin
     closed and over HTTP; each drive starts one login. The suite never waits out the real 10 s
     bound.
-  - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`. The site
+  - `tests/test_site.py` (`unit`, `integration`): `read_violations`, `compose_violations`,
+    `budget_violations`, `line_violations`, `alike_violations`. The site
     read on a planted directory: every regular `*.md` file directly in it but `AGENTS.md` (dotfiles,
     `.md`, a space, `-n.md` and `end 0.md` included; `Upper.MD`, a `.txt`, a whitespace-only file, a
     symlink, a directory and a FIFO named `*.md` left out), in the byte order of the names (`Z.md` and
@@ -537,7 +539,8 @@ import has no effect.
     (`test_warning_names_replacement_and_window[<name>-honoured|ignored]`); an empty value counts as unset; a whitespace-only value is
     returned unstripped; each legacy name warns once per process; and no warning reaches stdout. A
     fixture resets the warn-once set before each test.
-  - `tests/test_deprecation_window.py` (`unit`): `upgrading_violations`. `deprecation.WINDOW` is
+  - `tests/test_deprecation_window.py` (`unit`): `upgrading_violations`,
+    `table_line_violations`, `version_violations`. `deprecation.WINDOW` is
     the window written out (`harness.DEPRECATION_WINDOW`: deprecated in 0.2.0, removed no earlier
     than 0.4.0), compared as a literal, never read back from the module
     (`test_window_is_the_published_one`). § Upgrading from rcac-mcp is read from the README's
@@ -581,7 +584,8 @@ import has no effect.
     directory or a directory above it (directly or through a symlink) that not every account can
     read, group class included, serves its one line and no site text, while `local` mode's read of
     the same directory serves the files (`test_delegate_serves_only_what_every_account_can_read`).
-  - `tests/test_cli.py`: `flag_violations`, `legacy_violations`, `stdio_violations`. The
+  - `tests/test_cli.py` (`unit`, `integration`): `flag_violations`, `legacy_violations`,
+    `stdio_violations`, `window_violations`, `naming_violations`. The
     `integration` cases drive the installed CLI with flags it no longer accepts and assert a clean
     `exit_status.bad_argument` rejection before the server starts. The deprecated `rcac-mcp`
     command, run beside `cluster-mcp` with no arguments, `--help`, `--version` and `--bogus`, exits
@@ -626,7 +630,8 @@ import has no effect.
     It needs the uv cache the development sync filled (offline), and `PYTHONPATH` passes through, so
     a mutated copy of the core is the core it drives.
   - `tests/test_startup.py` (`unit`, `integration`): `startup_refusal_violations`,
-    `raw_wire_violations`, `refused_violations`, `startup_failure_violations`, `bound_violations`. A
+    `raw_wire_violations`, `refused_violations`, `startup_failure_violations`, `bound_violations`,
+    `refused_start_violations` (a start a capability refuses, below). A
     failed SSH connect at startup is reported as `cannot connect to <host>: <cause>` once on stderr,
     as a −32603 error answering every stdio request until EOF, and as exit
     `exit_status.runtime_error` (§4). The responder over in-memory streams answers each request with
@@ -676,12 +681,14 @@ import has no effect.
     executor middleware until both are in flight, so a module global crosses them every time.
     Sequential calls on one server, shared and delegate, show that each executor middleware sets
     the executor on every call, not only the first (§1).
-  - `tests/test_no_executor.py` (`unit`): `refusal_violations`. A call with no executor for its
+  - `tests/test_no_executor.py` (`unit`): `refusal_violations`, `other_request_violations` (the
+    request that does set one runs once, as its owner). A call with no executor for its
     request (a bare server, every tool but `EXECUTORLESS`; a tokenless delegate call), including right after and while
     another request did set one, fails where the client sees it with `No executor configured`, and
     nothing runs. Any error is not enough: the stated reason is required (§1).
   - `tests/test_storage_resource.py` (`unit`): `read_violations`, `tool_path_violations`,
-    `storage_isolation_violations`. Every read of the storage resource runs once per URI it is
+    `storage_isolation_violations`, `tool_refusal_violations`, `shape_violations`,
+    `not_found_violations`. Every read of the storage resource runs once per URI it is
     served under (`harness.STORAGE_URIS`, row ids `cluster` and `rcac`). Reading `cluster://storage`,
     or its alias `rcac://storage`, runs on the executor its request's
     middleware installed, in both eras: over a `SharedExecutorMiddleware` server the text is exactly
@@ -782,7 +789,8 @@ import has no effect.
     exports functions over `cat`, `mkdir` and `chmod` and exports `noclobber` and `pipefail` in
     `SHELLOPTS` changes no write, `create_dirs` or job script (`test_a_profile_cannot_change_a_fixed_script`;
     bash 3.2 refuses an exported `SHELLOPTS`, so locally only the functions half can fail).
-  - `tests/test_sbatch.py` (`unit`, `integration`): `sbatch_violations`. `sbatch`'s argv ends
+  - `tests/test_sbatch.py` (`unit`, `integration`): `sbatch_violations`, `shared_violations`
+    (no two calls share a script path, below). `sbatch`'s argv ends
     `<extra_args…> -- <script path> <args…>`, each element one argument, after the tool's own
     options; the script operand never starts with `-` (a relative path gains `./`), also when an
     extra option that takes a value (`-J`) consumes the `--`; an `extra_args` element `--` is
@@ -810,7 +818,8 @@ import has no effect.
     `local` mode; an element `--` is refused; a string is refused by schema validation naming
     `extra_args` and the list type, each tool and era on its own row.
   - `tests/test_literal_args.py` (`integration`, with `unit` coverage rows): `call_violations`,
-    `argv_violations`, `coverage_violations`. The literal-argument matrix: a row per (mode, tool,
+    `argv_violations`, `coverage_violations`, `refusal_violations`, `content_violations`,
+    `error_violations`. The literal-argument matrix: a row per (mode, tool,
     parameter), `test_literal_argument[<mode>-<tool>-<param>]`, for every parameter whose served
     schema admits a string or a string array, but `run_command`'s `command`, in `local`, `delegate`
     (through `executes`, the `local` launch starting in the server's home) and `ssh` (the loopback
@@ -840,7 +849,8 @@ import has no effect.
     map's path from `CLUSTER_MCP_USER_MAP` or its legacy name, the replacement winning
     (`test_user_map_is_read_from_either_name`), and refuses to start with neither.
   - `tests/test_executors.py` (`unit`, `integration`): `launch_argv_violations`,
-    `timeout_violations`. The `unit` rows record the launch at `Popen`: the exact `sudo -n -H -u
+    `timeout_violations`, `held_violations`, `writer_violations` (a background job, below). The
+    `unit` rows record the launch at `Popen`: the exact `sudo -n -H -u
     <user>` prefix, then the launcher's stage (`/bin/bash --norc --posix -c <stage> cluster-mcp`) and one
     program that starts in `$HOME` (delegate), changes to the `cwd` as one quoted word and runs the
     script as one word (read with `test_launch.launch_violations`); the interpreter is `/bin/bash`
@@ -860,7 +870,8 @@ import has no effect.
     resolve in the mapped home, never the server's `HOME`, and a transfer returns the path it wrote,
     read exactly.
   - `tests/test_timeout_stop.py` (`integration`): `stop_violations`, `survival_violations`,
-    `completion_violations`. A timed-out command is stopped with what it started (§3), in `local`,
+    `completion_violations`, `return_violations` (when `run` returns), `gone_violations` (when
+    every pid is gone). A timed-out command is stopped with what it started (§3), in `local`,
     `delegate-root` (under `ROOT_RELAY`), `delegate` (under `RELAY`), through `executes`, and
     `ssh-bash`, against a loopback server connected before the row's clock starts: each shape
     (`tree`, a child and a grandchild; `ignores-holding`, the same ignoring every catchable
@@ -934,7 +945,8 @@ import has no effect.
     resolves to `Final` of a mapping from `str` to `Callable[[], AuthProvider | None]`; a `slice`,
     `Callable[..., X]` and a factory taking an argument are rejected. A live OIDC flow is untested.
   - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
-    `stack_import_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
+    `stack_import_violations`, `spec_id_violations`, `skip_violations`,
+    `sandbox_unset_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
     through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
     checked statically); no module but `tests/harness.py` imports the stack, by any of its import
     names `fastmcp`, `mcp`, `mcp_types`, `httpx2`, `httpcore2` (and the old `httpx`)
@@ -1092,14 +1104,16 @@ import has no effect.
     `builtin` or `set`, builtins a profile disables (`enable -n`), and an exported function named
     `[` (which a POSIX-mode bash reports, on stderr, that it cannot import) are a recorded limit, not
     a supported configuration.
-  - `tests/test_ssh_smoke.py` (`integration`): `smoke_violations`. `SSHExecutor` runs a command
+  - `tests/test_ssh_smoke.py` (`integration`, with `unit` controls): `smoke_violations`, its
+    controls fed planted results it must reject. `SSHExecutor` runs a command
     over the locked Fabric and Paramiko against an in-process Paramiko server on `127.0.0.1` with
     generated keys, which decodes the launcher's bootstrap and answers as the program would, its
     sentinel first and its end record last: stdout, exit status and hostname come back, and the decoded program runs the exact command. No
     process is launched and no real host is reached: `HOME` is under `tmp_path`, the agent socket is
     unset, no key files or agent are consulted, and Fabric gets an empty SSH config. The process's
     own stdin stays pytest's, which refuses reads, so a forwarded stdin fails the test.
-  - `tests/test_ssh_exec.py` (`integration`, with `unit` rows): the `ssh` backend against
+  - `tests/test_ssh_exec.py` (`integration`, with `unit` rows): `not_run_violations` (a
+    reconnect that gave up), `lost_write_violations` (a write that did); the `ssh` backend against
     `tests/ssh_server.py` (a helper, not collected), an in-process server that executes each exec
     string as `<login shell> -c <string>` inside `bin/sandbox.sh`, from the home, under an sshd-like
     `env -i`, serves SFTP over the same files (refusing any path outside the test's tree), and kills
@@ -1380,7 +1394,8 @@ import has no effect.
     server that never listens fails as `<transport>: the server did not start listening`.
   - `tests/test_audit.py` (`unit`, `integration`): `audit_violations`, `offline_requested`,
     `command` and `child_env` (all in `bin/audit_lock.py`, loaded from its file),
-    `offline_violations`, `unreachable_violations`. Planted `uv audit` outputs (one finding or two,
+    `offline_violations`, `unreachable_violations`, `refusal_violations` (the exit and the line
+    both share). Planted `uv audit` outputs (one finding or two,
     under exit 1 or exit 0; an unparsed report under exit 1; each unreachable marker; an audit that
     cannot run or was killed; a short or long count; an empty or different lock; no summary, or one
     not on a line of its own) are each red with exactly their own reasons and documented exit
@@ -1428,6 +1443,18 @@ import has no effect.
     duplicates) are judged as before. The furniture cases run over a tuple written in the test,
     never the script's own `FURNITURE`, and `test_furniture_matches_the_recorded_set` pins the two
     together, so dropping an entry is red.
+  - `tests/test_suite_parts.py` (`unit`): `suite_part_violations`, `list_violations`, and the
+    readers `verify_commands`, `gate_commands` and `workflow_commands`. The suite's commands
+    partition it, so every test runs exactly once per protocol era (§ Conventions, "CI mirrors the
+    gate", states the layout and every shape the part check refuses): the profile's `verify`, read
+    from this file, partitions the `tests/test_*.py` that exist
+    (`test_the_suite_commands_partition_the_suite`), and the profile's `verify`, the release
+    recipe's `gate` and `.github/workflows/ci.yml` run the same suite commands in the same order
+    (`test_the_three_lists_run_the_same_suite_commands`). Its controls plant each refused shape on
+    a row of its own, beside layouts the part check must accept (a `-k` pair either way round, a
+    compound expression and its parenthesised negation, no pair at all), and a list reordered,
+    short a command or differing in one, which the list check must refuse; the readers are fed
+    each list's own form (`test_the_list_readers_read_each_list`).
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
   - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point

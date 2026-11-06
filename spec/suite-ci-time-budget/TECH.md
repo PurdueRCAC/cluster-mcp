@@ -3,7 +3,7 @@ slug: suite-ci-time-budget
 title: Each CI era job keeps a margin under its timeout, and every row keeps its proof
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/suite-ci-time-budget
 base: develop
 current_phase: done
@@ -20,7 +20,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py controls && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py mirror && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py untouched && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition modern && UV_PYTHON=3.14 uv run pytest -q tests/test_suite_parts.py tests/test_hygiene.py
+  attempts: 1
+  verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/remediation/untouched-testing-list.py controls && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py mirror && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/remediation/untouched-testing-list.py && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition modern && UV_PYTHON=3.14 uv run pytest -q tests/test_suite_parts.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern UV_PYTHON=3.14 uv run pytest -q tests/test_suite_parts.py tests/test_hygiene.py && UV_PYTHON=3.14 uv run -q python -I spec/suite-ci-time-budget/remediation/F1-testing-list.py --controls && UV_PYTHON=3.14 uv run -q python -I spec/suite-ci-time-budget/remediation/F1-testing-list.py
 - id: P2
   name: Every process-wide fixture in force under each command, and each command green alone
   status: done
@@ -134,6 +135,53 @@ the same order; the documents describe the nine jobs; a new suite row pins the c
 - **Verify:** the frontmatter `verify:` (`controls`, `mirror`, `untouched`, `partition` in each era,
   then the two modules). `partition` took 14 s per era on the prototype (PLAN § 6.3).
 - **Touches:** `.github/workflows/ci.yml`, `AGENTS.md`, `tests/test_suite_parts.py`.
+
+**Amendment, review cycle 1 remediation (2026-11-06).** The review's one finding (MEDIUM): § Testing's
+per-module list, whose check names and test ids it calls a contract, has no bullet for
+`tests/test_suite_parts.py`. P1 wrote that module, so P1 is reopened; routed as its class, the list
+names every test module, each with its markers and every public `*_violations` it defines, and no
+name in it has gone stale. The review's ruling widens P1's "leave every other line of `AGENTS.md`
+alone" by exactly that list. Documentation only: no test row, test file, conftest, workflow or suite
+command changes, so each CI job runs the suite measured on `ef301e6` (GOAL Q5).
+
+- [x] `AGENTS.md` § Testing: a bullet for `tests/test_suite_parts.py` (`unit`), last, after the
+      other repository-tooling modules, naming `suite_part_violations`, `list_violations` and the
+      three list readers, and pointing at § Conventions for the shapes the part check refuses rather
+      than restating them.
+- [x] The sweep (`remediation/F1-testing-list.py`, the class predicate over the staged text) found
+      the base's list short of 30 more items, now named in their bullets: three markers, those of
+      `tests/test_cli.py` (`unit`, `integration`) and the `unit` controls of `tests/test_ssh_smoke.py`;
+      and 27 public checks (`test_audit` `refusal_violations`; `test_cli` `window_violations`,
+      `naming_violations`; `test_deprecation_window` `table_line_violations`, `version_violations`;
+      `test_executors` `held_violations`, `writer_violations`; `test_hygiene` `spec_id_violations`,
+      `skip_violations`, `sandbox_unset_violations`; `test_literal_args` `refusal_violations`,
+      `content_violations`, `error_violations`; `test_no_executor` `other_request_violations`;
+      `test_probe_startup` `surface_violations`; `test_sbatch` `shared_violations`; `test_site`
+      `budget_violations`, `line_violations`, `alike_violations`; `test_ssh_exec`
+      `not_run_violations`, `lost_write_violations`; `test_startup` `refused_start_violations`;
+      `test_storage_resource` `tool_refusal_violations`, `shape_violations`, `not_found_violations`;
+      `test_timeout_stop` `return_violations`, `gone_violations`). Underscore-prefixed helpers are
+      private to their module and stay unnamed. No stale name: every backticked `*_violations` a
+      bullet names is defined where it says, and every other backticked identifier occurs in tracked
+      code. The checker was red on `f44b482` (31 lines) and is green on the fix; its controls plant
+      each refusal.
+- [x] `verify:` retuned with `set_phase.py --verify-file`: `controls` and `untouched` under
+      `remediation/untouched-testing-list.py`, `mirror`, `partition` in each era, the two modules in
+      each era, then the class checker's controls and the checker. The frozen `untouched` mode is
+      red on this fix by construction ("AGENTS.md changes outside the profile, the recipe, the CI
+      bullet and the era bullet"), and was run and seen red on the staged fix first; so is the
+      frozen `controls` mode's "untouched sound" case, which feeds the staged AGENTS.md to the same
+      check. The first retuned gate ran `controls` unwrapped, went red on that case alone (every
+      other control `ok`), and is the one attempt recorded; the gate was retuned to wrap it and
+      every step re-run. The wrapper loads `verify/suite-gate.py` unedited and adds the per-module
+      list as a fifth region, bounded from the list's first sub-bullet to the next top-level bullet
+      and required once in the base's text and the staged one; a line planted above the list and
+      one in the next bullet each turn its `untouched` red.
+- Not in this gate, by the foreman's brief: `ci --check-baseline`, which is defined over `T1` to
+  `T2` and would read this commit as outside that set, and `head`, which needs this head's push run.
+  P2's `fixtures` and `shard` modes are not re-run: they read the suite commands, conftest and test
+  modules, none of which this commit changes.
+- **Verify:** the frontmatter `verify:`, as retuned.
 
 ## Phase P2 — Every process-wide fixture in force under each command, and each command green alone
 **Satisfies:** R4, R2 · **Depends on:** P1
