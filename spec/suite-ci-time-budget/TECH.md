@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/suite-ci-time-budget
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-06'
 phases:
 - id: P1
   name: Each era's suite as four commands, one CI job each, mirrored in verify and the release gate
-  status: pending
+  status: done
   satisfies:
   - R2
   - R3
@@ -101,20 +101,20 @@ and makes one atomic code+state commit.
 and the profile's `verify` and the release recipe's `gate` run the same eight commands verbatim, in
 the same order; the documents describe the nine jobs; a new suite row pins the commands' shape.
 
-- [ ] `.github/workflows/ci.yml`: replace `suite-legacy` and `suite-modern` with `suite-legacy-1` …
+- [x] `.github/workflows/ci.yml`: replace `suite-legacy` and `suite-modern` with `suite-legacy-1` …
       `suite-legacy-4` and `suite-modern-1` … `suite-modern-4`, each the old suite job (same
       `runs-on`, `timeout-minutes: 20`, checkout, setup-uv, provisioning step and `uv sync --locked`)
       with its one pytest step replaced by one command of PLAN § 2.1, the handshake era's four first;
       names `suite (handshake era, N of 4)` and `suite (modern era, N of 4)`; `gate` needs all eight,
       in that order, and is otherwise unchanged. No matrix, no `${{ }}`, no `env:`. Rewrite the
       header comment to describe the nine jobs.
-- [ ] `AGENTS.md` § Factory: the `verify` cell's two suite commands become the eight, in order,
+- [x] `AGENTS.md` § Factory: the `verify` cell's two suite commands become the eight, in order,
       verbatim, and its prose says each era runs as four commands that together run every test
       once; the release recipe's `gate` list the same; the `ci` row describes the nine jobs (the
       word "nine", every suite job id or the `suite-legacy-1` to `suite-legacy-4` range form, and
       `gate`, which needs all eight); a new `ci budget` row, after `ci`, states R1's budget and
       measure as PLAN § 2.4 words it, with `Baseline …: pending` (P3 fills it).
-- [ ] `AGENTS.md` § Conventions, "CI mirrors the gate": replace the two-job sentence with the four
+- [x] `AGENTS.md` § Conventions, "CI mirrors the gate": replace the two-job sentence with the four
       commands per era, how they partition the suite (the `-k` pair, the named modules, the
       `--ignore` complement, a new module runs in the last), the eight jobs, the `ci budget` row, and
       `tests/test_suite_parts.py`. Keep "one step per command, verbatim" and the rest of the bullet.
@@ -123,14 +123,14 @@ the same order; the documents describe the nine jobs; a new suite row pins the c
       rule; the `untouched` mode compares everything outside the four regions, and every profile
       row but `verify`, `ci` and `ci budget`, the `ci` row's landing rule, and the recipe but its
       `gate`). Wrap prose at the file's width; the prototype left two long lines.
-- [ ] `tests/test_suite_parts.py` (new, `unit`): the pure check `suite_part_violations` (PLAN § 2.3)
+- [x] `tests/test_suite_parts.py` (new, `unit`): the pure check `suite_part_violations` (PLAN § 2.3)
       over the `verify` cell's suite commands, a test that the gate list and the workflow run the
       same commands in order, and planted controls for each refusal (PLAN § 2.3: the `-k` pair must
       be `E` and `not (E)`, or `E` and `not E` for a single word; no `-k` on the last command). It
       imports only `re`, `shlex`, `pathlib`, `pytest` and `__future__`, and binds names at import
       and nothing else (the `untouched` mode checks both: a module that patched a helper at import
       would touch every row of part 4). No spec id in it.
-- [ ] Run the new module and `tests/test_hygiene.py` (its static checks read every test module).
+- [x] Run the new module and `tests/test_hygiene.py` (its static checks read every test module).
 - **Verify:** the frontmatter `verify:` (`controls`, `mirror`, `untouched`, `partition` in each era,
   then the two modules). `partition` took 14 s per era on the prototype (PLAN § 6.3).
 - **Touches:** `.github/workflows/ci.yml`, `AGENTS.md`, `tests/test_suite_parts.py`.

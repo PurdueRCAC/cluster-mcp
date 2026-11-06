@@ -3,9 +3,13 @@
 #
 # The gate, on GitHub. Each run step is a command from the factory profile's `setup` and `verify`
 # or the release recipe's `gate` (AGENTS.md § Factory); § Conventions binds the three lists. The
-# suite runs once per protocol era, each era in a job of its own and the two in parallel, so that
-# neither job nears its timeout; every other command runs in `gate`, in list order, once both eras
-# have passed. A run is green only when all three jobs are; publish reads the run.
+# suite runs as four commands per protocol era, each command in a job of its own and all eight in
+# parallel, so that no job nears its timeout (the `ci budget` row holds each to 10 minutes). The
+# four partition the suite: `tests/test_ssh_exec.py` split by `-k silent` and `-k 'not silent'`,
+# then `test_timeout_stop.py`, `test_startup.py` and `test_launch.py` together, then every other
+# module, with those four `--ignore`d, so every test runs exactly once per era and a new module
+# runs in the last. Every other command runs in `gate`, in list order, once all eight suite jobs
+# have passed. A run is green only when all nine jobs are; publish reads the run.
 #
 # Least privilege: a read-only token, no secrets, no caches, no uploads, and every action pinned
 # to a full commit SHA (the trailing comment carries the readable version).
@@ -25,8 +29,8 @@ defaults:
     shell: bash
 
 jobs:
-  suite-legacy:
-    name: suite (handshake era)
+  suite-legacy-1:
+    name: suite (handshake era, 1 of 4)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -40,10 +44,10 @@ jobs:
           enable-cache: false
       - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
       - run: uv sync --locked
-      - run: uv run pytest -q
+      - run: uv run pytest -q tests/test_ssh_exec.py -k silent
 
-  suite-modern:
-    name: suite (modern era)
+  suite-legacy-2:
+    name: suite (handshake era, 2 of 4)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -57,11 +61,113 @@ jobs:
           enable-cache: false
       - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
       - run: uv sync --locked
-      - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q
+      - run: uv run pytest -q tests/test_ssh_exec.py -k 'not silent'
+
+  suite-legacy-3:
+    name: suite (handshake era, 3 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py
+
+  suite-legacy-4:
+    name: suite (handshake era, 4 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py
+
+  suite-modern-1:
+    name: suite (modern era, 1 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent
+
+  suite-modern-2:
+    name: suite (modern era, 2 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent'
+
+  suite-modern-3:
+    name: suite (modern era, 3 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py
+
+  suite-modern-4:
+    name: suite (modern era, 4 of 4)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      - run: CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py
 
   gate:
     name: gate
-    needs: [suite-legacy, suite-modern]
+    needs: [suite-legacy-1, suite-legacy-2, suite-legacy-3, suite-legacy-4, suite-modern-1, suite-modern-2, suite-modern-3, suite-modern-4]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

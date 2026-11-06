@@ -1511,9 +1511,10 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   `era=… version=… first=…` (the first request the server's `MethodLog` saw on that connection),
   which a gate reads to prove a pass ran in its era; a connect in an era chosen with `era=` is not
   logged, since it does not exercise the selector. The profile's `verify`, the release recipe's
-  `gate` and CI, which mirrors both, run the suite in both eras (`uv run pytest -q`, then
-  `CLUSTER_MCP_TEST_ERA=modern uv run pytest -q`), so neither era's contracts go unchecked between
-  cycles; the mutation runner's children inherit both variables.
+  `gate` and CI, which mirrors both, run the suite in both eras, each era as four commands that
+  together run every test once (§ Conventions, "CI mirrors the gate"): the handshake era's four,
+  then the same four under `CLUSTER_MCP_TEST_ERA=modern`, so neither era's contracts go unchecked
+  between cycles; the mutation runner's children inherit both variables.
 - The harness keeps two rules:
   - **Build inside the loop.** Every server and middleware is constructed inside the coroutine
     handed to `drive`; the builders raise otherwise. Anything a construction sets in the context
@@ -1711,9 +1712,10 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | commit categories | `[feature]` `[fix]` `[docs]` `[refactor]` `[test]` `[ci]` `[release]` `[harness]`: lowercase, an open set (coin one when it fits). Branch commits take the GOAL's `kind` verbatim; landing subjects use these categories |
 | branch commits | `[{kind}] Build {slug} P<n>`; no `Co-Authored-By:` trailer (existing repo convention) |
 | landing | `squash-local`: squash onto `origin/develop` in the cycle worktree as one `[category] What changed` commit, then push `develop` |
-| ci | `.github/workflows/ci.yml`: the one check publish reads, a run of three jobs (`suite-legacy` and `suite-modern`, one protocol era each, then `gate`, which needs both). Before a `squash-local` landing, list the push runs of the cycle branch's head commit with `gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" -e push --json databaseId,attempt,status,conclusion`: at least one run must be listed, and every listed run, in its latest attempt, must be `completed` with conclusion `success`. A red, cancelled, missing or unfinished run is not green. Pull-request runs and `.github/workflows/mutants.yml` are never read |
+| ci | `.github/workflows/ci.yml`: the one check publish reads, a run of nine jobs (`suite-legacy-1` to `suite-legacy-4` and `suite-modern-1` to `suite-modern-4`, one suite command each, four per protocol era, then `gate`, which needs all eight). Before a `squash-local` landing, list the push runs of the cycle branch's head commit with `gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" -e push --json databaseId,attempt,status,conclusion`: at least one run must be listed, and every listed run, in its latest attempt, must be `completed` with conclusion `success`. A red, cancelled, missing or unfinished run is not green. Pull-request runs and `.github/workflows/mutants.yml` are never read |
+| ci budget | Every job that runs a suite command finishes within 10 minutes of wall time, start to completion as `gh run view --json jobs` reports it, on the hosted `ubuntu-24.04` runner, with `timeout-minutes` at 20. Baseline (worst of each job over the runs counted at landing): pending |
 | setup | `uv sync --locked`: dependency refresh, run before any verify |
-| verify | `uv lock --check && uv run pytest -q && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q && bin/sandbox.sh uv run cluster-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in both protocol eras: the handshake era first, then revision 2026-07-28 (§ Testing) |
+| verify | `uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in both protocol eras: the handshake era first, then revision 2026-07-28 (§ Testing), each era as four commands that together run every test once (§ Conventions, "CI mirrors the gate") |
 | throwaway environment | `bin/sandbox.sh <cmd…>` (contract below) |
 | coupled core | `packages/cluster-mcp/src/cluster_mcp/core/context.py`, `middleware.py`, `auth.py`, `token.py`, `executor/*`, `server.py` |
 | same-commit rules | see § Conventions |
@@ -1751,8 +1753,14 @@ release:
   gate:
     - uv lock --check
     - uv run python bin/audit_lock.py
-    - uv run pytest -q
-    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q
+    - uv run pytest -q tests/test_ssh_exec.py -k silent
+    - uv run pytest -q tests/test_ssh_exec.py -k 'not silent'
+    - uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py
+    - uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py
+    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent
+    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent'
+    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py
+    - CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py
     - uv build --all-packages --no-sources -o dist/
     - uvx twine check --strict dist/*
     # Sdist hygiene: fails on any repository furniture in a built sdist, or when there is no sdist.
@@ -3056,11 +3064,22 @@ What each mode means:
   commit, and a CLI flag name or default moves `compose.yml` with it: § Packaging.
 - **CI mirrors the gate.** `.github/workflows/ci.yml` runs the profile's `setup`, then each command
   of its `verify`, then each release-recipe `gate` step that `verify` lacks: one step per command,
-  verbatim. The two suite commands (one per protocol era) each run in a job of their own,
-  `suite-legacy` and `suite-modern`, in parallel and each after `setup`, so that neither job nears
-  its 20-minute timeout; the `gate` job needs both and runs `setup`, then every other command in
-  list order. A change to any of the three lists changes the workflow in the same commit, and the
-  reverse. Before `setup` in each suite job, one provisioning step installs the login shells the suite
+  verbatim. Each protocol era's suite runs as four commands, and each command runs in a job of its
+  own, `suite-legacy-1` to `suite-legacy-4` and `suite-modern-1` to `suite-modern-4`, all eight in
+  parallel and each after `setup`, so that no job nears its 20-minute timeout (the § Factory
+  `ci budget` row holds each to 10 minutes and records each job's time at landing). The four
+  commands partition the suite: `tests/test_ssh_exec.py` split by `-k silent` and its exact
+  negation `-k 'not silent'`, then `tests/test_timeout_stop.py`, `tests/test_startup.py` and
+  `tests/test_launch.py` together, then every other module, run from the root with exactly those
+  four `--ignore`d, so every test runs once per era and a new module runs in the last command with
+  no edit. No other option appears in them (a `-m`, `--deselect`, `-x` or `--lf` could drop a test
+  unseen). `tests/test_suite_parts.py` refuses any other shape (another option, a module named
+  twice, a `-k` pair other than an expression and its negation, a `-k` on the last command, an
+  `--ignore` set other than the named modules, eras that differ) and holds the three lists to the
+  same commands in the same order. A part rebalances by moving a module name between the third
+  command and the `--ignore` list, or by changing the `-k` word, in all three lists at once. The
+  `gate` job needs all eight suite jobs and runs `setup`, then every other command in list order.
+  A change to any of the three lists changes the workflow in the same commit, and the reverse. Before `setup` in each suite job, one provisioning step installs the login shells the suite
   drives (`zsh`, `tcsh`, `ksh`, `csh`) and nothing else: the runner lacks them, and without them
   those tests would fail there (`conftest.need_shell` fails a missing-shell row on CI rather than
   skip it). It has no local counterpart, since macOS ships them. The sdist furniture set lives only in `bin/sdist_hygiene.py`,
