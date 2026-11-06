@@ -612,11 +612,24 @@ def test_harness_builds_servers_inside_the_running_loop(tmp_path: Path, monkeypa
 
 
 # A feature-scoped spec id (`R#`, `P#`, `Q#`) or a review-finding id (an `F` with a number, or with a
-# hyphen and a capital) in a comment, docstring or message of the package or the suite: those restart
-# per feature, or per review cycle, and live in `spec/`, never in the code (AGENTS.md § Conventions).
-# A finding's number joined to a name by a hyphen is a file's name (a checker's), and three digits
-# are a linter's code: neither is an id.
-SPEC_ID = re.compile(r'\b(?:[RPQ][0-9]{1,2}|F[0-9]{1,2}(?!-)|F-[A-Z])\b')
+# hyphen and a capital) anywhere in the package or the suite, code and strings as well as comments:
+# those restart per feature, or per review cycle, and live in `spec/`, never in the code (AGENTS.md
+# § Conventions). An underscore is no shield, so an id glued into a name is one, in capitals, and in
+# lower case where an underscore joins it to the name. A letter or a digit beside it makes it part of
+# a word or a number; a finding's number followed by a hyphen is a file's name (a checker's), and
+# three digits are a linter's code: none of those is an id.
+SPEC_ID = re.compile(r'(?<![A-Za-z0-9])(?:[RPQ][0-9]{1,2}|F[0-9]{1,2}(?!-)|F-[A-Z])(?![A-Za-z0-9])'
+                     r'|(?<![A-Za-z0-9])[rpqf][0-9]{1,2}(?=_)|(?<=_)[rpqf][0-9]{1,2}(?![A-Za-z0-9])')
+
+# What the check enforces, as AGENTS.md § Testing and § Conventions both state it.
+SPEC_ID_RULE = (
+    '`test_no_spec_ids_in_the_package_or_the_suite` reads every line of every `.py` file in each portion of the '
+    '`cluster_mcp` namespace and directly in `tests/` (not its subdirectories), code and strings as well as '
+    'comments. It fails on an `R`, `P`, `Q` or `F` with one or two digits, or `F-` and a capital, that no letter '
+    'or digit touches; an underscore is no shield, so an id glued into a name is found, in capitals, and in lower '
+    'case where an underscore joins it to the name. Not ids: three or more digits (`F401`), a letter or digit '
+    'beside it (`0xF1`, `R2D2`, `F-Droid`), and an `F` and its number followed by a hyphen (a checker\'s file '
+    'name, `F1-contribution-refusal.sh`).')
 
 
 def spec_id_violations(name: str, text: str) -> list[str]:
@@ -660,9 +673,27 @@ def test_no_spec_ids_in_the_package_or_the_suite() -> None:
     pytest.param('# ' + 'F' + '-A: a late open.', True, id='review-finding-letter'),
     pytest.param('# noqa: E402, F401; 0xF1 F100 F-Droid (`F1-contribution-refusal.sh`)', False,
                  id='not-finding-ids'),
+    pytest.param('F' + '3_SETTINGS = []', True, id='finding-glued-before-a-name'),
+    pytest.param('ROWS_' + 'R' + '3 = []', True, id='requirement-glued-after-a-name'),
+    pytest.param('KEY_' + 'F' + '-A_CASES = ()', True, id='finding-letter-glued'),
+    pytest.param('def ' + 'r' + '1_violations(): ...', True, id='lower-case-glued-before-a-name'),
+    pytest.param('rows_' + 'p' + '2 = []', True, id='lower-case-glued-after-a-name'),
+    pytest.param('f1 = open(name); p2 = q3; HTTP_2 SHA_P100 0xF1_MASK R2D2_X x_F401 IQ3_Y f1x_', False,
+                 id='not-glued-ids'),
 ])
 def test_spec_id_check_catches_planted_ids(text: str, found: bool) -> None:
     assert bool(spec_id_violations('planted', text)) == found
+
+
+@pytest.mark.unit
+def test_the_id_rule_is_stated_as_the_check_enforces_it() -> None:
+    agents = (Path(__file__).resolve().parent.parent / 'AGENTS.md').read_text()
+    testing = agents[agents.index('\n## Testing'):agents.index('\n## Packaging')]
+    conventions = agents[agents.index('\n### Conventions (same-commit rules)'):]
+    conventions = conventions[:conventions.find('\n## ') if '\n## ' in conventions else len(conventions)]
+    unstated = [where for where, text in (('§ Testing', testing), ('§ Conventions', conventions))
+                if SPEC_ID_RULE not in ' '.join(text.split())]
+    assert unstated == [], f'AGENTS.md does not state the id rule as the check enforces it in {unstated}'
 
 
 # A row that needs a login shell, or a git that runs, runs it or, off CI, skips: `conftest.need_shell`

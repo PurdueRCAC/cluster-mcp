@@ -809,7 +809,7 @@ import has no effect.
     own options (before `scancel`'s `-- <job ids>`), received exactly by an argv-echo stand-in in
     `local` mode; an element `--` is refused; a string is refused by schema validation naming
     `extra_args` and the list type, each tool and era on its own row.
-  - `tests/test_literal_args.py` (`integration`, with `unit` coverage rows): `r1_violations`,
+  - `tests/test_literal_args.py` (`integration`, with `unit` coverage rows): `call_violations`,
     `argv_violations`, `coverage_violations`. The literal-argument matrix: a row per (mode, tool,
     parameter), `test_literal_argument[<mode>-<tool>-<param>]`, for every parameter whose served
     schema admits a string or a string array, but `run_command`'s `command`, in `local`, `delegate`
@@ -944,11 +944,19 @@ import has no effect.
     check's docstring lists what else it cannot see); self-tests prove the guard, the PATH shim
     (also inside a program the launcher runs under the login bash,
     `test_path_shim_survives_a_login_bash`), the harness fence and the build-inside-the-loop rule
-    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`), nor a review-finding id (`F#`, or
-    `F-` and a letter), appears in the package or the suite
-    (`test_no_spec_ids_in_the_package_or_the_suite`, which reads every portion of the imported
-    `cluster_mcp` namespace, so a planted id in a mutated copy fails it; `test_spec_id_scan_covers_every_member`
-    asserts the three portions, so a member cannot drop out of the scan). A row that needs a login shell calls `conftest.need_shell`: off
+    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`), nor a review-finding id (`F#`, or `F-`
+    and a capital), appears in the package or the suite.
+    `test_no_spec_ids_in_the_package_or_the_suite` reads every line of every `.py` file in each
+    portion of the `cluster_mcp` namespace and directly in `tests/` (not its subdirectories), code
+    and strings as well as comments. It fails on an `R`, `P`, `Q` or `F` with one or two digits, or
+    `F-` and a capital, that no letter or digit touches; an underscore is no shield, so an id glued
+    into a name is found, in capitals, and in lower case where an underscore joins it to the name.
+    Not ids: three or more digits (`F401`), a letter or digit beside it (`0xF1`, `R2D2`, `F-Droid`),
+    and an `F` and its number followed by a hyphen (a checker's file name,
+    `F1-contribution-refusal.sh`). The scan reads the imported namespace, so a planted id in a
+    mutated copy fails it; `test_spec_id_scan_covers_every_member` asserts the three portions, so a
+    member cannot drop out of the scan; and `test_the_id_rule_is_stated_as_the_check_enforces_it`
+    holds this statement and § Conventions' to the check, word for word. A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
@@ -3083,8 +3091,15 @@ What each mode means:
 - **Comments (and docstrings) are declarative statements of the invariant or the *why*** —
   capitalized sentences (`# Non-interactive: there is no TTY to prompt on.`), not lowercase
   fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`) or a review-finding id (`F#`,
-  or `F-` and a letter): those restart per feature or per review cycle, live in `spec/{slug}/`, and
-  collide across branches (`tests/test_hygiene.py` keeps them out of the package and the suite).
+  or `F-` and a capital), in a comment or anywhere else in the package or the suite: those restart
+  per feature or per review cycle, live in `spec/{slug}/`, and collide across branches.
+  `test_no_spec_ids_in_the_package_or_the_suite` reads every line of every `.py` file in each
+  portion of the `cluster_mcp` namespace and directly in `tests/` (not its subdirectories), code and
+  strings as well as comments. It fails on an `R`, `P`, `Q` or `F` with one or two digits, or `F-`
+  and a capital, that no letter or digit touches; an underscore is no shield, so an id glued into a
+  name is found, in capitals, and in lower case where an underscore joins it to the name. Not ids:
+  three or more digits (`F401`), a letter or digit beside it (`0xF1`, `R2D2`, `F-Droid`), and an `F`
+  and its number followed by a hyphen (a checker's file name, `F1-contribution-refusal.sh`).
   Requirement provenance lives in the commit, the PR, and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
   an `/etc/agents.d` path) is fine.
 - **No `Co-Authored-By` trailer** on any commit (repo convention). PR *bodies* end with the Claude

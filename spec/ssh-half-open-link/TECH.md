@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -44,7 +44,7 @@ phases:
   verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F7-open-rule-statement.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-cap.py both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -58,7 +58,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 3
-  verify: uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py && uv run python -I spec/ssh-half-open-link/remediation/F6-finding-id-hygiene.py
+  verify: uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py legacy 1 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py legacy 2 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py modern 1 && uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-sweep.py modern 2 && CLUSTER_MCP_TEST_EVERY_KIND=1 UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py all both && uv run python -I spec/ssh-half-open-link/remediation/ledger-plan-commits.py && uv run python -I spec/ssh-half-open-link/remediation/F3-floor-statement.py && uv run python -I spec/ssh-half-open-link/remediation/F9-glued-id-hygiene.py
 review:
   last_reviewed_commit: e2ad380c06d19aa91d93bdffc1296c7fea1257d8
   verdict: changes-requested
@@ -923,6 +923,65 @@ develop. Every recorded item has its seed.
     (the skips are `conftest.py`'s bash 4.1 rows, which CI's runner has). A first handshake pair,
     its base run begun at load 5.7, read 769 s and 770 s and was re-run once. Recorded in
     `issues/suite-ci-time-budget.md`, a dated note.
+- **Amended in review cycle 3's remediation (2026-11-05): N2's cases and N3.**
+  - **N2's cases**, in `tests/mutants.py`: `shol-session-channel-only-on-the-worker` (the review's
+    plant: the channel on the worker, the `sftp` subsystem and the version exchange on the call's
+    thread, with the steps' own loss handling) and `shol-session-version-on-the-call` (the version
+    exchange alone on the call's thread). Each is killed by the pin's three rows (P1's amendment) in
+    both eras. A first form of the first plant, without the loss handling, was killed by the default
+    suite (`test_an_sftp_open_cut_by_a_silent_link_reconnects[subsystem|version]`, a loss left
+    unhandled), so it was not the review's plant; it was replaced before any gate ran, and
+    `F8-session-steps-cap.py` shows the replacement survives the default family and fails the
+    opt-in step rows, as the review saw.
+  - **The sweep runs under a recorded wrapper,** `remediation/F8-session-steps-sweep.py`, in place
+    of `remediation/F5-late-reconnect-sweep.py`, which it runs unchanged with the two cases' rows
+    appended to the frozen gate's `SWEEP`. Why: the frozen gate checks its table against
+    `tests/mutants.py` both ways, so the new cases would read as cases the sweep does not name. The
+    case ids keep clear of the prefixes `F5-late-reconnect-cap.py` counts (`shol-cap-`,
+    `shol-sftp-cap-`, `shol-within-`), so its count of fourteen holds.
+  - **The suite's cost** of N2's pin: three `unit` rows, about 0.7 s per era (CI time is tracked in
+    `issues/suite-ci-time-budget.md`). The drive rows of P1's amendment are opt-in and cost CI
+    nothing.
+  - **N3, the class: every id of the kinds the rule names glued into a name**, where `\b` cannot see
+    it (no boundary falls between a digit and `_`). Swept: every `.py` file the check reads, and
+    every file git tracks outside `spec/`, with the widened pattern. Two names, both renamed:
+    `tests/test_timeout_stop.py`'s `F3_SETTINGS` (the review's instance, five lines) to
+    `ONE_SHELL_SETTINGS`, and `tests/test_literal_args.py`'s `r1_violations` (two lines; a
+    requirement id in lower case, glued) to `call_violations`, with its AGENTS.md § Testing entry.
+    Row ids are unchanged. `spec/**` keeps its ids (records).
+  - **The check, widened** (`tests/test_hygiene.py`, `SPEC_ID`): an id is one no letter or digit
+    touches, an underscore no longer shielding it, in capitals, and in lower case where an
+    underscore joins it to a name; the exclusions stand (three or more digits, a letter or digit
+    beside it, a finding's number followed by a hyphen). Planted cases each way: a finding id and a
+    requirement id glued before and after a name, a lettered finding id glued, lower-case ids glued
+    before and after; and as not ids `f1 = open(name)`, `p2 = q3`, `HTTP_2`, `SHA_P100`, `0xF1_MASK`,
+    `R2D2_X`, `x_F401`, `IQ3_Y`, `f1x_`, beside the earlier `F401`, `0xF1`, `F100`, `F-Droid` and the
+    `F1-…sh` file name. No false positive on the tree. Red first: the branch's
+    `test_no_spec_ids_in_the_package_or_the_suite`, run on `f1fa641`'s tree, fails naming exactly the
+    seven lines.
+  - **The rule, stated as enforced**: AGENTS.md § Testing and § Conventions now both carry the
+    check's scope (every line of every `.py` file in the namespace's portions and directly in
+    `tests/`, code and strings as well as comments), the glued forms and the exclusions, word for
+    word, held by a new row, `test_the_id_rule_is_stated_as_the_check_enforces_it` (`SPEC_ID_RULE`).
+    Seen red before AGENTS.md changed (both sections), and on a planted gap (§ Conventions saying "a
+    shield": the row and `F9-glued-id-hygiene.py` red), restored and compared.
+  - **Checker:** `remediation/F9-glued-id-hygiene.py` (review cycle 3, N3), superseding
+    `remediation/F6-finding-id-hygiene.py`, which stays as the record: F6's second check requires the
+    widened pattern to find exactly one line on `82b1f0e`, and the pattern now also finds that tree's
+    glued ids. F9: the suite's check, its planted cases and the rule row pass; on `f1fa641` the
+    suite's pattern finds exactly the seven glued lines, and the pattern as reviewed none; no false
+    positive on legitimate text or the tree; both statements carry the scope, the glued forms and the
+    exclusions. On `f1fa641` itself: 28 problems.
+  - **Verify retuned**: `F8-session-steps-sweep.py`'s four halves for `F5-late-reconnect-sweep.py`'s,
+    and `F9-glued-id-hygiene.py` for `F6-finding-id-hygiene.py`.
+  - **The gate**, on the combined tree P1's amendment describes: each sweep half 34 cases killed (68
+    per era), half 2 showing 7 of 7 equivalents, both `shol-session-` cases among the kills (legacy
+    191 s and 337 s, modern 182 s and 320 s); the every-tool run (947 s); the ledger wrapper; F3's
+    checker; `F9-glued-id-hygiene.py`. Then the profile's full gate: `uv lock --check`, the suite in
+    each era (4979 passed, 14 skipped, the skips `conftest.py`'s bash 4.1 rows, which CI's runner
+    has; 784 s handshake, 768 s modern), `bin/sandbox.sh uv run cluster-mcp --help`. The ledger and
+    F3's checker, the two steps that read this file and the seeds, ran again after these notes and
+    the commits.
 - **Verify:** the frontmatter's (≈ 10 min, run in the background).
 - **Touches:** `tests/mutants.py`, `spec/ssh-half-open-link/verify/`, and nothing else but a seed or
   entry the ledger finds missing. Review cycle 2's remediation adds `tests/test_hygiene.py`,

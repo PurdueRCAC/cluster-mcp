@@ -468,7 +468,8 @@ def test_a_hanging_login_is_stopped_over_ssh(executes: Any, hosts: Hosts, pids: 
 # path, answering the epoch.
 LATE = "trap '' TERM\n/bin/date() {{ echo 0; }}\ndate() {{ echo 0; }}\necho $$ > {pids}/login\n/bin/sleep 1.5\n"
 TOP = 'echo $$ > {pids}/top; exec /bin/sleep 30'
-F3_SETTINGS = ['local', 'delegate-root', 'delegate', 'ssh-bash']
+# Every setting with one login shell over `ssh`, bash, whatever EVERY_KIND adds.
+ONE_SHELL_SETTINGS = ['local', 'delegate-root', 'delegate', 'ssh-bash']
 
 
 def gone_violations(label: str, pids: Path, needed: tuple[str, ...], since: float) -> list[str]:
@@ -490,7 +491,7 @@ def gone_violations(label: str, pids: Path, needed: tuple[str, ...], since: floa
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize('setting', F3_SETTINGS)
+@pytest.mark.parametrize('setting', ONE_SHELL_SETTINGS)
 def test_a_command_past_its_deadline_is_stopped(setting: str, executes: Any, hosts: Hosts, pids: Path) -> None:
     executor = _executor(executes, hosts, setting)
     d = shlex.quote(str(pids))
@@ -521,7 +522,7 @@ def test_a_command_past_its_deadline_is_stopped(setting: str, executes: Any, hos
 # of the call); nothing runs past the bound, and `run` returns within it.
 WINDOWS = ('program', 'watchdog')
 WINDOW_ROWS = [pytest.param(setting, window, id=f'{setting}-{window}') for window in WINDOWS
-               for setting in F3_SETTINGS]
+               for setting in ONE_SHELL_SETTINGS]
 
 
 def _fork_end(text: str) -> int:
@@ -786,7 +787,7 @@ def test_a_slow_connect_leaves_an_ssh_command_its_whole_timeout(executes: Any, h
 # name in the program's text exported beforehand) with those it sees under none, with a timeout, so
 # the program reads its deadline too.
 @pytest.mark.integration
-@pytest.mark.parametrize('setting', F3_SETTINGS)
+@pytest.mark.parametrize('setting', ONE_SHELL_SETTINGS)
 def test_no_variable_of_the_program_reaches_the_command(setting: str, executes: Any, hosts: Hosts) -> None:
     executor = _executor(executes, hosts, setting)
     profile = _home(executes, hosts, setting) / '.bash_profile'
@@ -827,7 +828,7 @@ OPTIONS_SHOWN = 'shopt -p inherit_errexit expand_aliases shift_verbose; :'
 OPTIONS_LEFT = 'shopt -u inherit_errexit\nshopt -s expand_aliases\nshopt -s shift_verbose\n'
 if _bash_version() >= (4, 4):
     @pytest.mark.integration
-    @pytest.mark.parametrize('setting', F3_SETTINGS)
+    @pytest.mark.parametrize('setting', ONE_SHELL_SETTINGS)
     def test_a_command_sees_the_shell_options_its_profile_left(setting: str, executes: Any, hosts: Hosts) -> None:
         executor = _executor(executes, hosts, setting)
         (_home(executes, hosts, setting) / '.bash_profile').write_text(OPTIONS_PROFILE)

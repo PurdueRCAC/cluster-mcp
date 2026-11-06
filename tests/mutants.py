@@ -5314,6 +5314,8 @@ LATE_RUN, LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_link_that_goe
 LIVE_LATE_RUN, LIVE_LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_live_link_runs_the_call[{tool}]'
                                   for tool in ('run', 'write_file'))
 SLOW_WRITE = f'{SSH_EXEC}::test_a_slow_transfer_is_not_taken_for_a_silent_link[write]'
+SESSION_STEPS = tuple(f'{LIVENESS}::test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[{step}]'
+                      for step in ('channel', 'subsystem', 'version'))
 CASES += (
     # A link that dies silently (`ssh._Liveness`): every decision of the monitor and of the call
     # paths that read its verdict, planted at each alternative it can take. `spec/ssh-half-open-link/
@@ -5515,6 +5517,43 @@ CASES += (
     Case('shol-within-started-past-the-deadline', SSH,
          (('        if time.monotonic() >= until:\n            return None\n        try:\n', '        try:\n'),),
          (f'{LIVENESS}::test_an_open_that_ends_in_time_is_the_calls',), 'started past'),
+    # An SFTP session opened after a reconnect makes all three of its steps on the worker: the `sftp`
+    # subsystem and the version exchange, not the channel alone, are held to the call's deadline.
+    # Each plant keeps the steps' own handling: a loss there still gives `_OpenLost`, and the call
+    # reconnects.
+    Case('shol-session-channel-only-on-the-worker', SSH,
+         (('            session = _within(until, functools.partial(_session, transport))\n',
+           '            session = _within(until, functools.partial(_channel, transport))\n'
+           '            if session is not None and not isinstance(session, _OpenLost):\n'
+           '                chan = session\n'
+           '                try:\n'
+           '                    with _opening(transport):\n'
+           "                        chan.invoke_subsystem('sftp')\n"
+           '                        session = SFTPClient(chan)\n'
+           '                except (SSHException, EOFError, OSError) as exc:\n'
+           '                    with contextlib.suppress(Exception):\n'
+           '                        chan.close()\n'
+           '                    if not _gone(transport):\n'
+           '                        raise\n'
+           '                    session = _OpenLost(exc)\n'),),
+         SESSION_STEPS, "not all on the open's worker"),
+    Case('shol-session-version-on-the-call', SSH,
+         (("            chan.invoke_subsystem('sftp')\n            return SFTPClient(chan)\n",
+           "            chan.invoke_subsystem('sftp')\n            return chan\n"),
+          ('            session = _within(until, functools.partial(_session, transport))\n',
+           '            session = _within(until, functools.partial(_session, transport))\n'
+           '            if session is not None and not isinstance(session, _OpenLost):\n'
+           '                chan = session\n'
+           '                try:\n'
+           '                    with _opening(transport):\n'
+           '                        session = SFTPClient(chan)\n'
+           '                except (SSHException, EOFError, OSError) as exc:\n'
+           '                    with contextlib.suppress(Exception):\n'
+           '                        chan.close()\n'
+           '                    if not _gone(transport):\n'
+           '                        raise\n'
+           '                    session = _OpenLost(exc)\n')),
+         SESSION_STEPS, "not all on the open's worker"),
     # A transfer cut short: decided by state, raised naming the host, the write's own commands' losses
     # raised the same way.
     Case('shol-lost-transfer-unnamed', SSH,

@@ -261,7 +261,7 @@ def label(tool: str, param: str, value: str) -> str:
     return f'{tool}.{param}={name}'
 
 
-def r1_violations(tool: str, calls: Sequence[tuple[Any, ...]]) -> list[str]:
+def call_violations(tool: str, calls: Sequence[tuple[Any, ...]]) -> list[str]:
     """Every executor call that is not an argv, or a shell argv that runs an unregistered script."""
     found = []
     for kind, command, *_ in calls:
@@ -733,7 +733,7 @@ ROWS = [pytest.param(m, tool, param, id=f'{m}-{tool}-{param}') for (tool, param)
 @pytest.mark.parametrize(('mode', 'tool', 'param'), ROWS, indirect=['mode'])
 def test_literal_argument(mode: Mode, tool: str, param: str) -> None:
     violations = PARAMS[tool, param](mode, tool, param)
-    violations += r1_violations(tool, mode.executor.calls)
+    violations += call_violations(tool, mode.executor.calls)
     assert violations == [], '\n'.join(violations)
 
 
