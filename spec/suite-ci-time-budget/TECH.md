@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/suite-ci-time-budget
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py controls && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py mirror && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py untouched && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition modern && UV_PYTHON=3.14 uv run pytest -q tests/test_suite_parts.py tests/test_hygiene.py
 - id: P2
   name: Every process-wide fixture in force under each command, and each command green alone
-  status: pending
+  status: done
   satisfies:
   - R4
   - R2
@@ -142,14 +142,14 @@ fixture of `tests/conftest.py` and of its collection hook fails for the same rea
 base's one command per era (R4); and each command, run alone as its CI job runs it, is green (the
 runtime half of R2 locally: no row depends on a module another command now runs).
 
-- [ ] Run the frontmatter `verify:`. It changes nothing in the tree. On the prototype the `fixtures`
+- [x] Run the frontmatter `verify:`. It changes nothing in the tree. On the prototype the `fixtures`
       modes took about 35 s each, `fixtures-control` 45 s, and the `shard` modes 150–220 s each,
       about 25 minutes in all (PLAN § 6.3): run it through `run_in_background`.
-- [ ] If a `shard` mode is red on a row that passes in the whole-era run, the row depends on another
+- [x] If a `shard` mode is red on a row that passes in the whole-era run, the row depends on another
       module's import or state: stop and ask (the fix touches a row, which R3 governs).
-- [ ] If a `shard` mode is red on a row of the class `issues/stalled-reconnect-test-timing.md` names,
+- [x] If a `shard` mode is red on a row of the class `issues/stalled-reconnect-test-timing.md` names,
       re-run that mode once; a second red is a stop. Record the sighting in that seed either way.
-- [ ] Record each command's wall time and its first rows' times (the `shard` lines) in the commit
+- [x] Record each command's wall time and its first rows' times (the `shard` lines) in the commit
       body, naming this run.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/suite-ci-time-budget/TECH.md` (state), and `issues/stalled-reconnect-test-timing.md`
