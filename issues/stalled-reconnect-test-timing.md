@@ -76,6 +76,13 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   load. The branch adds nothing to that path: the call fails at `_ensure_connected` before any
   monitor exists for it, and the dropped connection's monitor threads end within a tick of
   `_wait_dropped`. Nothing on the path advances the fake clock.
+- 2026-11-05: `spec/ssh-half-open-link/`, review cycle 3's remediation:
+  `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake` failed once in the gate's union
+  run of eight files (macOS, handshake era, load about 3 at its start, another session's work
+  beside it) with "0 reconnect workers ran, not one", its third sighting with that text; 1684 others
+  passed. It passed three times run alone (3.12 s, 3.04 s, 3.11 s per call), and the same run on the
+  identical tree passed 1685. The remediation changes no code under the row: only docstrings, a
+  comment, tests and checkers.
 
 ## Why it was deferred
 

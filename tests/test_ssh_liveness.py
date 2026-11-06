@@ -11,7 +11,9 @@ to a probe handed over before it, and never moves the probe already out; the pri
 judged; and a probe handed over while the sender is stuck still counts. The activity hook stamps
 nothing on a read that raises; the bound is the connection's own; only a Paramiko transport is
 watched; a dead verdict closes the outermost gateway hop first; and a poke reaches the monitor of
-the transport it is given. The doc pin holds the texts that state the monitor's figures to the code.
+the transport it is given. An open on a worker (`ssh._Within`) gives its call nothing at the deadline
+and closes what it opens late, and an SFTP session opened after a reconnect makes all three of its
+steps there. The doc pin holds the texts that state the monitor's figures to the code.
 
 The `integration` rows use the loopback server (`tests/ssh_server.py`): the hook, on a real Paramiko
 client, stamps every message, `REQUEST_FAILURE` included, but the one read in progress as it went in;
@@ -376,6 +378,63 @@ def test_an_open_that_ends_in_time_is_the_calls() -> None:
     assert started == [], 'an open was started past its call\'s deadline'
 
 
+class SessionSteps:
+    """A transport whose SFTP session opens in its three steps, the channel, the `sftp` subsystem and
+    the version exchange (`ssh.SFTPClient`, patched to `version`), holding one until released, or for
+    `WORKER_END`; it records the thread each step ran on, and the session's close."""
+
+    def __init__(self, held: str) -> None:
+        self.held = held
+        self.release = threading.Event()
+        self.ran: dict[str, str] = {}
+        self.closed = threading.Event()
+
+    def _step(self, step: str) -> None:
+        self.ran[step] = threading.current_thread().name
+        if step == self.held:
+            self.release.wait(WORKER_END)
+
+    def open_session(self, timeout: float | None = None) -> SessionSteps:
+        self._step('channel')
+        return self
+
+    def invoke_subsystem(self, name: str) -> None:
+        self._step('subsystem')
+
+    def version(self, chan: SessionSteps) -> SessionSteps:
+        self._step('version')
+        return self
+
+    def close(self) -> None:
+        self.closed.set()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('held', ['channel', 'subsystem', 'version'])
+def test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker(held: str,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    # The call found no live connection, so the session it opens is after a reconnect: whichever of
+    # its three steps waits, the call gives up at its deadline, and the session is closed when it ends.
+    transport = SessionSteps(held)
+    monkeypatch.setattr(SSHExecutor, 'open', lambda self: None)
+    monkeypatch.setattr(ssh, 'SFTPClient', transport.version)
+    executor = SSHExecutor('login.example')
+    monkeypatch.setattr(executor, '_ensure_connected', lambda deadline: transport)
+    began = time.monotonic()
+    got = executor._sftp(began + 0.2)
+    took = time.monotonic() - began
+    transport.release.set()
+    violations = []
+    if got != executor._timed_out() or not 0.2 <= took < 0.2 + 0.5:
+        violations.append(f'held at its {held} step, the call gave {got!r} after {took:.2f} s, not '
+                          f'{executor._timed_out()!r} at its 0.2 s deadline')
+    if not transport.closed.wait(WORKER_END):
+        violations.append(f'the session held at its {held} step was left open')
+    if transport.ran != dict.fromkeys(('channel', 'subsystem', 'version'), 'cluster-mcp-open'):
+        violations.append(f'the steps ran on {transport.ran}, not all on the open\'s worker')
+    assert violations == [], '\n'.join(violations)
+
+
 
 # What a transfer cut short says it may leave, by what was cut.
 TRANSFER_TEXTS = {
@@ -565,14 +624,21 @@ LIVENESS_TEXT = (
     'survives the peer answering nothing for 29 s after a probe, and a transfer while some reply arrives at least '
     'every 44 s.')
 
-# Where a call's open waits once it has reconnected, as the SSHExecutor docstring and the AGENTS.md
-# footgun state it.
+# Where a call's opens wait, before its work starts and in a write's own commands, as the SSHExecutor
+# docstring and the AGENTS.md footgun state it.
 OPEN_TEXT = (
-    "A call's first open, on the connection it found live, waits for its own verdict, B after it begins. Every "
-    'later open, after a reconnect or a loss, runs on a worker thread (`cluster-mcp-open`) that the call waits for '
+    "A call's first open, on the connection it found live as it began, waits for its own verdict, B after it "
+    "begins. Every later open before the call's work starts (a command's exec request, a transfer's first file "
+    'operation), after a reconnect or a loss, runs on a worker thread (`cluster-mcp-open`) that the call waits for '
     'no later than its deadline, its sends on the write path included, so neither a link that goes silent again '
-    'after a late reconnect nor a write path another call holds there keeps the call past the 3B bound: an open '
-    'not made by then gives `cannot connect to <host>: timed out`, and nothing was sent.')
+    'after a late reconnect nor a write path another call holds there keeps the call from its work past the 3B '
+    'bound: an open not made by then gives `cannot connect to <host>: timed out`, and nothing was sent. Once its '
+    "work has started, a call's end is bounded from the silence instead, a command's as above and a transfer's as "
+    "below. A `write`'s own later commands (its parent's `mkdir`, its place step, and the probe that asks why a "
+    'transfer fell short) run inside its transfer, each on the connection it finds live as it begins, the one the '
+    "write's session opened on: each one's first open waits for its own verdict, after a late reconnect too and "
+    "past the write's deadline, and a later one is held to the write's deadline. A silence at the `mkdir` or the "
+    'place step raises `TransferLost` within the bound after it, and a probe that cannot run gives no reason.')
 
 # A transfer the silent link cuts, as the SSHExecutor docstring and the AGENTS.md footgun state it.
 TRANSFER_TEXT = (
@@ -613,7 +679,7 @@ def test_liveness_texts_state_the_monitor() -> None:
     missing = [name for name, text in texts.items() if LIVENESS_TEXT not in ' '.join(text.split())]
     assert missing == [], f'a text does not state the silent link as the monitor does: {missing}'
     missing = [name for name, text in texts.items() if OPEN_TEXT not in ' '.join(text.split())]
-    assert missing == [], f'a text does not state where an open after a reconnect waits: {missing}'
+    assert missing == [], f"a text does not state where a call's opens wait, and a write's own commands': {missing}"
     missing = [name for name, text in texts.items() if TRANSFER_TEXT not in ' '.join(text.split())]
     assert missing == [], f'a text does not state what a transfer cut short raises and leaves: {missing}'
     section = ' '.join(_section(agents, '### 2. Executor Protocol', '### 3.').split())

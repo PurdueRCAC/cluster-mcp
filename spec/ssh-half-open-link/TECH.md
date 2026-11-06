@@ -3,10 +3,10 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/ssh-half-open-link
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-05'
 phases:
 - id: P1
@@ -23,8 +23,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 3
-  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_timeout_stop.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path.py both && uv run python -I spec/ssh-half-open-link/remediation/F4-starting-call-verdict.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both
+  attempts: 4
+  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_executors.py tests/test_timeout_stop.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/open-timeout-gate.py commands both && uv run python -I spec/ssh-half-open-link/remediation/F1-send-path.py both && uv run python -I spec/ssh-half-open-link/remediation/F4-starting-call-verdict.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F7-open-rule-statement.py both
 - id: P2
   name: 'Transfers: the bounded SFTP open, TransferLost, the write path, and the documents'
   status: done
@@ -40,11 +40,11 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 2
-  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both
+  attempts: 3
+  verify: uv run pytest -q tests/test_ssh_liveness.py tests/test_ssh_exec.py tests/test_writes.py tests/test_sbatch.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/verify/silent-gate.py transfers both && uv run python -I spec/ssh-half-open-link/remediation/F2-transfer-contract.py && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F5-late-reconnect-cap.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F7-open-rule-statement.py both && UV_PYTHON=3.14 uv run python -I spec/ssh-half-open-link/remediation/F8-session-steps-cap.py both
 - id: P3
   name: The mutation sweep, every tool in both eras, and the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -423,6 +423,11 @@ develop.
       transfer's first file operation and everything after it (R2); `_ensure_connected`'s own waits
       (already bounded by the deadline: the reconnect loop); a `write`'s later commands (`_run` with
       the write's deadline: the rule applies to them as to any call, below).
+      - 2026-11-05 (review cycle 3, N1): a `write`'s later commands are not capped as any call is.
+        Each `_run` notes as found live the connection the write is on, so its first open waits for
+        its own verdict even after the write reconnected late; only a later open of that command is
+        held to the write's deadline. The transfer is in flight there (R2, and R3 once a command's
+        exec request has gone). The texts now say so: review cycle 3's remediation, below.
   - **The rule.** `_run` and `_sftp` note the connection they find live as they begin (`found`). The
     open on it, the call's first, waits for its own verdict, B after it begins, as before: it starts
     as the call does, inside its window, and a `write`'s later command, whose deadline its transfer
@@ -431,6 +436,9 @@ develop.
     deadline. An open not made by then returns `cannot connect to <host>: timed out`, nothing sent;
     the worker's late open is closed when it ends, and none is started once the deadline has passed.
     A process out of threads opens on the call's own thread, as `_Sends` sends.
+    - 2026-11-05 (review cycle 3, N1): "every later open" holds before a call's work starts. The
+      footgun and the docstring said it of every open after a reconnect or a loss, which a `write`'s
+      own commands contradict (above); review cycle 3's remediation narrows them, below.
   - **What a cut call reports** (from the existing contract): `run` gives `NOT_STARTED_EXIT_CODE`
     with `cannot connect to <host>: timed out; the command was not run` (AGENTS.md §3: a command
     never started is `-1002`); `write` the same result; `put` and `get` raise
@@ -508,6 +516,98 @@ develop.
     `F5-late-reconnect-cap.py both` (752 s): all 14 rows pass here in each era; on `82b1f0e` the 11
     late kinds fail past the 9 s bound in each era (10.12–10.54 s) and the 3 live and early rows
     pass; the 14 cases killed in each era.
+- **Amended in review cycle 3's remediation (2026-11-05): N1, and N2's pin, with P2 (bundled).**
+  - **The decision** (the project lead's): the remediation fixes N1, N2 and N3 with no behaviour
+    change; the foreman verifies the diff directly, with no fourth blind review. The foreman ruled
+    that attempts carried over from earlier review cycles do not count toward the breaker here.
+  - **Bundled with P2**, as in review cycle 2: the rule is one text over `_run` and `_sftp`, stated in
+    the footgun and the `SSHExecutor` docstring and held word for word by the doc pin (`OPEN_TEXT`),
+    and the copies of a rule change in one commit (AGENTS.md § Conventions).
+  - **N1, the class: every statement of where a call's opens wait, on every caller path into `_run`
+    and `_sftp`.** The instance: the text said every open after a reconnect or a loss is held to
+    the call's deadline, but a `write`'s own commands take the write's connection as found live, so
+    their first open waits for its own verdict, past the write's deadline after a late reconnect.
+    Swept, the statements:
+    - the `SSHExecutor` docstring and the footgun: narrowed to what is built, word for word, and
+      `OPEN_TEXT` re-pinned (below);
+    - `_run`'s comment: "the connection the call found live" now reads the connection found live
+      as `_run` began, the write's for a write's own command, and a later open ends at `deadline`;
+    - AGENTS.md § Testing: the late rows' sentence says the open they cut is made before the call's
+      work starts; the new rows; the doc pin's entry ("where a call's opens wait, before its work
+      starts and in a `write`'s own commands");
+    - right as written: `_sftp`'s docstring (it is called only as a transfer begins), `_exec`'s and
+      `_Within`'s (they speak of the `until` they are given), the module docstring (reconnect
+      attempts), the `tests/mutants.py` comment on the cap's cases (it already says a write's later
+      command past its deadline still opens); README.md, ROADMAP.md and `issues/` state no such
+      rule;
+    - records, unchanged: PLAN.md, REVIEW.md, and P1's cycle-2 amendment, which carries two dated
+      corrections above instead.
+  - **N1, the caller paths**, each evaluated against the new text: `_run` from `run` (every command
+    tool) and from the write's own three commands (`MAKE_PARENT` and `VERIFY` in `_write`, `PROBE` in
+    `_reason`); `_sftp` from `write`, `put` and `get` (every transfer tool). Every tool reaches the
+    executor through `run`, `write`, `put` or `get` only, each one call with its own deadline taken at
+    its start; `sbatch`'s `script_content` is a `write` and then a `run`, two calls. Nothing outside
+    `ssh.py` reaches `_run` on an SSH executor or `_sftp`.
+  - **The text, as built**: a call's first open, on the connection it found live as it began, waits
+    for its own verdict; every later open before the call's work starts (a command's exec request,
+    a transfer's first file operation), after a reconnect or a loss, is held to its deadline; once
+    the work has started the bound runs from the silence (a command's, a transfer's); a `write`'s
+    own later commands (its parent's `mkdir`, its place step, the probe of a short transfer) run
+    inside its transfer, each first open waiting for its own verdict, after a late reconnect too and
+    past the write's deadline, a later one held to the write's deadline; a silence at the `mkdir` or
+    the place step raises `TransferLost` within the bound after it, and a probe that cannot run gives
+    no reason.
+  - **N1, driven** (no behaviour change; the rows pin the text):
+    `test_a_write_cut_at_its_own_command_after_a_late_reconnect_is_a_lost_transfer[mkdir|place]`,
+    defined only with `CLUSTER_MCP_TEST_EVERY_KIND=1`, so the default suite neither runs nor skips it.
+    The review's scenario at B = 3 (a 9 s window): the write's session opens on the late reconnect,
+    and the new link goes silent at the second channel the server sees on it, the command's. Each
+    requires `TransferLost` saying the target is unchanged, the target unchanged, one late reconnect,
+    nothing run, and an end no sooner than B less `RECONNECT_SLACK` and within 3B and the slack after
+    the silence. Here 10.10–10.21 s per row from the call's start, past the 9 s window, as the text
+    says. With `shol-cap-always`'s edit planted (the cap on every `_run` open, the first included),
+    both rows fail: the write gives `-1002` there, not a lost transfer.
+  - **N2's pin** (P2's, in this commit with the transfer half's units):
+    `test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[channel|subsystem|version]`
+    in `tests/test_ssh_liveness.py`, `unit`, in the default suite: `_sftp` with no connection found
+    live, its transport a stand-in whose session holds at one step; the call must give
+    `cannot connect to login.example: timed out` at its 0.2 s deadline, every step must run on
+    `cluster-mcp-open`, and the late session must be closed. About 0.7 s per era. Its cases are P3's.
+  - **Checkers** (red first on `f1fa641`, each copied into a throwaway worktree of it):
+    - `remediation/F7-open-rule-statement.py` (review cycle 3, N1): the narrowed text in both places
+      and the doc pin; the retired phrases nowhere live; the caller paths, by the AST of `ssh.py`
+      and every package module; the drive rows passing, and failing under the cap on every `_run`
+      open; each era. On `f1fa641`: 27 problems (each stated phrase missing from both texts, the
+      retired phrases in AGENTS.md, `ssh.py` and `tests/test_ssh_liveness.py`, the drive rows not
+      collected).
+    - `remediation/F8-session-steps-cap.py` (review cycle 3, N2): the pin's rows pass; the
+      channel-only cap survives the default suite's ten rows of the `_sftp` family (the gap); the
+      same edit fails both opt-in step rows past their bound (the review's plant); both cases killed
+      by the pin; each era. On `f1fa641`: 3 problems (the pin's rows not collected, both cases
+      missing).
+  - **Verify retuned**: P1 adds `F7-open-rule-statement.py both`; P2 adds it and
+    `F8-session-steps-cap.py both`.
+  - **The gate**, P1, P2 and P3 run once on the final tree, each distinct step once (all three
+    phases' `verify:` lines, with `UV_PYTHON=3.14`), then committed apart: P2's retuned gate needs
+    P3's cases (`F8-session-steps-cap.py`), so the phases gate on the combined tree. One pytest run
+    of the union of P1's and P2's files (handshake era) stood in for each phase's own; one run each
+    of `F5-late-reconnect-cap.py both` and `F7-open-rule-statement.py both` for both phases. Green,
+    every step: the union 1685 passed, none skipped (681 s); the modern liveness rows;
+    `open-timeout-gate.py commands both` (404 s); `silent-gate.py transfers both` (492 s);
+    `F1-send-path.py both` (420 s); `F4-starting-call-verdict.py both`; `F2-transfer-contract.py`;
+    `F5-late-reconnect-cap.py both` (762 s); `F7-open-rule-statement.py both` (88 s: the callers as
+    listed above, the drive rows 10.08–10.19 s per call, the cap on every `_run` open killed in each
+    era); `F8-session-steps-cap.py both` (138 s: both cases killed, the channel-only cap passing all
+    ten default rows of the family and failing both opt-in step rows, each era).
+  - **Attempt 4 (P1; attempt 3 on P2): a known flake.** The gate's first run was red at the union
+    step on one row only, `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`, "0
+    reconnect workers ran, not one" (1 failed, 1684 passed), the row and the text
+    `issues/stalled-reconnect-test-timing.md` names as load-sensitive. The remediation changes no code
+    under it. It passed three times alone (3.04–3.12 s per call), and the union run on the identical
+    tree passed 1685 (code-build Step 4's known-flake route; it does not count toward the breaker; a
+    dated line is added to that seed). The second run was then stopped by hand, before any red, as
+    another session drove the host to load 58, and resumed from the next step on the identical tree
+    once the load was under 8.
 - **Verify:** the frontmatter's. `silent-gate.py commands both` requires every P1 row to pass here
   in both eras, and on develop's `packages/` every "fails" row to fail with `still waiting` and
   every "passes" row to pass.
@@ -641,6 +741,10 @@ hold a concurrent call.
 - **Amended in review cycle 2's remediation (2026-11-05): F-A, bundled with P1.** `_sftp`'s
   session open takes the same cap as `_exec`'s channel open, its three steps on one worker
   (`_session`); P1's amendment records the class, the rows, the cases, the documents and the gate.
+- **Amended in review cycle 3's remediation (2026-11-05): N1 and N2's pin, bundled with P1.** The
+  transfer half of the narrowed rule (a transfer's opens before its first file operation; a
+  `write`'s own commands) and N2's pin, the unit rows for the session's three steps on the worker.
+  P1's amendment records the class, the rows, the checkers and the gate; P3's records N2's cases.
 - **Verify:** the frontmatter's.
 - **Touches:** `core/executor/ssh.py`, `tests/ssh_server.py` (the place-step hook),
   `tests/test_ssh_exec.py`, `tests/test_ssh_liveness.py`, `tests/mutants.py`, `AGENTS.md`,

@@ -1275,13 +1275,18 @@ import has no effect.
     and so does one whose reconnect goes silent once made, early in its window
     (`test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`) or at its last start, the
     host back 0.2 s before it, under a 3 s connect bound (a 9 s reconnect bound), where an open left
-    to its own verdict would end a second past the bound: the open is cut at the call's deadline,
-    and the call ends within the bound and `RECONNECT_SLACK` of its start, its watchdog only
-    stopping a hang
+    to its own verdict would end a second past the bound: the open, made before the call's work
+    starts, is cut at the call's deadline, and the call ends within the bound and `RECONNECT_SLACK`
+    of its start, its watchdog only stopping a hang
     (`test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time[run|write_file]`, every
     tool, and a write going silent at its SFTP subsystem or version step, with
     `CLUSTER_MCP_TEST_EVERY_KIND=1`); a late reconnect onto a live link still runs the call
-    (`test_a_late_reconnect_onto_a_live_link_runs_the_call[run|write_file]`). A command running as the
+    (`test_a_late_reconnect_onto_a_live_link_runs_the_call[run|write_file]`). A write whose new link
+    goes silent later, at its own command's open (its parent's `mkdir`, its place step), is inside
+    its transfer: that open waits for its own verdict, and the write raises `TransferLost`, the target
+    unchanged, no sooner than B and within the bound after the silence
+    (`test_a_write_cut_at_its_own_command_after_a_late_reconnect_is_a_lost_transfer[mkdir|place]`,
+    with `CLUSTER_MCP_TEST_EVERY_KIND=1`). A command running as the
     link goes silent gives `-1003` with its note within the bound, with no timeout or a later one
     (`test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout|later-timeout]`), and `-1001` when
     its timeout comes first (`test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`); with
@@ -1345,9 +1350,15 @@ import has no effect.
     included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
     it wakes starts no reconnect. An open on a worker (`_Within`) that has not ended by its call's
     deadline gives the call nothing, at that deadline, and is closed when it ends; one that ends in
-    time is the call's, its failure raised there, and none starts past the deadline. The doc pin holds the `SSHExecutor` docstring, this file's
-    `executor/ssh.py` footgun and the README to the monitor's figures, the first two to where an open
-    after a reconnect waits, and them, §2 and the
+    time is the call's, its failure raised there, and none starts past the deadline. An SFTP
+    session opened after a reconnect makes all three of its steps on that worker: one held at its
+    channel, its `sftp` subsystem or its version step gives the call `cannot connect to <host>:
+    timed out` at its deadline, the step running on `cluster-mcp-open`, and the session is closed
+    when the step ends
+    (`test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[channel|subsystem|version]`).
+    The doc pin holds the `SSHExecutor` docstring, this file's
+    `executor/ssh.py` footgun and the README to the monitor's figures, the first two to where a
+    call's opens wait, before its work starts and in a `write`'s own commands, and them, §2 and the
     `Executor` Protocol's `write`, `put` and `get` (their Raises name `ssh.TransferLost` and a
     transfer that may be partly made) to what a transfer cut short raises and leaves.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
@@ -2054,12 +2065,20 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing merely quiet is cut, since any message proves the link live, while the peer
   answers within the background verdict: at the default bound, a quiet command survives the peer
   answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
-  44 s. A call's first open, on the connection it found live, waits for its own verdict, B after it
-  begins. Every later open, after a reconnect or a loss, runs on a worker thread
+  44 s. A call's first open, on the connection it found live as it began, waits for its own
+  verdict, B after it begins. Every later open before the call's work starts (a command's exec
+  request, a transfer's first file operation), after a reconnect or a loss, runs on a worker thread
   (`cluster-mcp-open`) that the call waits for no later than its deadline, its sends on the write
   path included, so neither a link that goes silent again after a late reconnect nor a write path
-  another call holds there keeps the call past the 3B bound: an open not made by then gives
-  `cannot connect to <host>: timed out`, and nothing was sent. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
+  another call holds there keeps the call from its work past the 3B bound: an open not made by
+  then gives `cannot connect to <host>: timed out`, and nothing was sent. Once its work has
+  started, a call's end is bounded from the silence instead, a command's as above and a
+  transfer's as below. A `write`'s own later commands (its parent's `mkdir`, its place step, and
+  the probe that asks why a transfer fell short) run inside its transfer, each on the connection
+  it finds live as it begins, the one the write's session opened on: each one's first open waits
+  for its own verdict, after a late reconnect too and past the write's deadline, and a later one
+  is held to the write's deadline. A silence at the `mkdir` or the place step raises
+  `TransferLost` within the bound after it, and a probe that cannot run gives no reason. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
   subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
   judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
   `ConnectionError` naming the host that says the transfer may be partly made and what may remain:

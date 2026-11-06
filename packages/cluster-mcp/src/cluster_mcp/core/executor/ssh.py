@@ -1271,12 +1271,20 @@ class SSHExecutor:
     answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
     44 s.
 
-    A call's first open, on the connection it found live, waits for its own verdict, B after it
-    begins. Every later open, after a reconnect or a loss, runs on a worker thread
+    A call's first open, on the connection it found live as it began, waits for its own verdict, B
+    after it begins. Every later open before the call's work starts (a command's exec request, a
+    transfer's first file operation), after a reconnect or a loss, runs on a worker thread
     (`cluster-mcp-open`) that the call waits for no later than its deadline, its sends on the write
     path included, so neither a link that goes silent again after a late reconnect nor a write path
-    another call holds there keeps the call past the 3B bound: an open not made by then gives
-    `cannot connect to <host>: timed out`, and nothing was sent.
+    another call holds there keeps the call from its work past the 3B bound: an open not made by
+    then gives `cannot connect to <host>: timed out`, and nothing was sent. Once its work has
+    started, a call's end is bounded from the silence instead, a command's as above and a
+    transfer's as below. A `write`'s own later commands (its parent's `mkdir`, its place step, and
+    the probe that asks why a transfer fell short) run inside its transfer, each on the connection
+    it finds live as it begins, the one the write's session opened on: each one's first open waits
+    for its own verdict, after a late reconnect too and past the write's deadline, and a later one
+    is held to the write's deadline. A silence at the `mkdir` or the place step raises
+    `TransferLost` within the bound after it, and a probe that cannot run gives no reason.
 
     A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
     subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
@@ -1618,8 +1626,9 @@ class SSHExecutor:
         prog, marks = launch.program(command, cwd, start='home')
         wire = launch.ssh_command(prog)
         # A channel that could not open on a lost connection sent nothing, so the call goes back to
-        # reconnecting, within the same deadline. Only the open on the connection the call found live
-        # waits for its own verdict; every later one, after a reconnect or a loss, ends at the deadline.
+        # reconnecting, within the same deadline. Only the open on the connection found live as this
+        # began waits for its own verdict (for a `write`'s own command, the write's connection, past
+        # its deadline too); every later one, after a reconnect or a loss, ends at `deadline`.
         found = _live(self._conn)
         ran = None
         while ran is None:

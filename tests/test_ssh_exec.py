@@ -2967,6 +2967,64 @@ def test_a_late_reconnect_onto_a_live_link_runs_the_call(tool: str, silenced: Ca
     assert violations == [], f'{tool} (ended {took:.2f} s after it began):\n' + '\n'.join(violations)
 
 
+# A write's own command after a late reconnect: the write's session opens on the new link, which goes
+# silent at the channel open of the write's parent's `mkdir` or of its place step, the second channel
+# the server sees on it. That command takes the write's connection as found live, so its open waits
+# for its own verdict, B after it began, past the write's deadline; the write is a lost transfer,
+# the target unchanged, within the bound after the silence. Only with `CLUSTER_MCP_TEST_EVERY_KIND=1`.
+if EVERY_KIND:
+    @pytest.mark.integration
+    @pytest.mark.parametrize('command', ['mkdir', 'place'])
+    def test_a_write_cut_at_its_own_command_after_a_late_reconnect_is_a_lost_transfer(
+            command: str, silenced: Callable[..., Silenced], executes: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(ssh, 'CONNECT_TIMEOUT', LATE_BOUND)
+        rig = silenced()
+        target = rig.home / ('new/x.txt' if command == 'mkdir' else 'x.txt')
+        if command == 'place':
+            target.write_text(BEFORE)
+        earlier = list(rig.server._transports)
+        hook = rig.server.on_step
+        channels: list[str] = []
+
+        def at_step(step: str, detail: str, transport: Any) -> None:
+            if step == 'channel' and transport not in earlier:
+                channels.append(detail)
+                if len(channels) == 2:
+                    rig.link.step = command
+                    rig.link.go_silent()
+                    return
+            if hook is not None:
+                hook(step, detail, transport)
+
+        rig.server.on_step = at_step
+        parent = '~/new' if command == 'mkdir' else None
+
+        def calling() -> list[Any]:
+            # The raise a lost transfer gives is its outcome, so it comes back as a value.
+            try:
+                return [rig.executor.write('~/new/x.txt' if parent else '~/x.txt', SILENT_DATA.encode(), parent=parent)]
+            except OSError as exc:
+                return [exc]
+
+        watched, began = _late(rig, LATE_WINDOW, calling)
+        since = _silent_at(rig.link, command)
+        (outcome,), took = watched.result(rig.link, 3 * LATE_BOUND, since)
+        text = str(outcome)
+        violations = _late_violations(rig, began, LATE_WINDOW)
+        if not (isinstance(outcome, ConnectionError) and LOST_DURING in text and PARTLY in text
+                and 'is unchanged' in text):
+            violations.append(f'gave {outcome!r:.400}, not a lost transfer saying the target is unchanged')
+        if (target.read_text() != BEFORE) if command == 'place' else target.exists():
+            violations.append('the target changed')
+        if not LATE_BOUND - RECONNECT_SLACK <= took <= 3 * LATE_BOUND + RECONNECT_SLACK:
+            violations.append(f'ended {took:.2f} s after the silence, not once its open\'s own verdict came '
+                              f'({LATE_BOUND} s) and within the bound after it ({3 * LATE_BOUND} s)')
+        if rig.server.received:
+            violations.append(f'the server received {rig.server.received!r:.300}, so something ran')
+        assert violations == [], (f'{command} (ended {took:.2f} s after the silence, '
+                                  f'{since + took - began:.2f} s after the write began):\n' + '\n'.join(violations))
+
+
 def _running(server: LoopbackSSH, count: int = 1) -> None:
     """Wait until `count` exec requests have reached `server`, and then `RUNNING` more."""
     limit = _REAL_MONOTONIC() + DROP_SEEN
