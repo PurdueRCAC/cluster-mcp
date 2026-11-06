@@ -35,7 +35,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures modern && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures-control legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 1 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 2 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 3 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 4 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 1 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 2 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 3 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 4
 - id: P3
   name: Three measured CI runs, the budget's baseline row, and the ledger (Run A, then Run B)
-  status: pending
+  status: in_progress
   satisfies:
   - R1
   - R5
@@ -162,15 +162,16 @@ suite job within 10 minutes, every job green; the `ci budget` row carries the ba
 waits on CI, so it is dispatched as two runs (the foreman's "external waits split the run").
 
 **Run A (ends ready to push; the builder never pushes):**
-- [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies and the branch's commit bodies for the
+- [x] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies and the branch's commit bodies for the
       phrases the `prepush` mode lists; each such item names an `issues/` seed with a `ROADMAP.md`
       entry (the `prepush` mode checks it). This plan files no new seed.
-- [ ] Run the frontmatter `verify:` up to, not including, the `ci` mode: `prepush` (no working-copy
+- [x] Run the frontmatter `verify:` up to, not including, the `ci` mode: `prepush` (no working-copy
       change outside the index, no site-private text in the cycle's added lines, the ledger over
       TECH, PLAN and commit bodies), `mirror`, `untouched` and `partition` in each era, so the
       measured commit is the tree P1 and P2 proved.
-- [ ] Commit the TECH state (P3 `in_progress`, a note "Run A done: ready to push") and stop. Hand
+- [x] Commit the TECH state (P3 `in_progress`, a note "Run A done: ready to push") and stop. Hand
       back the head commit: it is the measured commit `T1`.
+- Run A done: ready to push. Its head is the measured commit `T1`.
 - The foreman pushes `T1`, waits for its push run, then triggers full re-runs (`gh run rerun <id>`,
   never `--failed`: a partial re-run copies the jobs it skips and is refused) until at least three
   attempts have completed, and hands back the run id and every attempt. Every attempt of every push
