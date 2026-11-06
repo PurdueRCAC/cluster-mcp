@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:suite-ci-time-budget
 kind: test
 appetite: small
 lane: public

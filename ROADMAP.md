@@ -222,7 +222,7 @@ pytest on CI went from 555 s and 524 s to 739 s and 735 s, about 12 and 13.8 min
 split into two jobs, shorter built-in waits. It must land before more cycles add tests.
 
 *Horizon: next, the cycle after `ssh-half-open-link` (set 2026-11-05) · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
-**Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: unshaped*
+**Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: adopted:suite-ci-time-budget*
 
 ## Bespoke tools first, the shell last
 

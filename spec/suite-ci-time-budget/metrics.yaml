@@ -1,0 +1,25 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: suite-ci-time-budget
+escaped_from: null
+planned: {date: '2026-11-06', phases: 3}
+landed: {date: '2026-11-06', phases: 3, failed_verifies: 1}
+open: null
+runs:
+- {step: shape, start: '2026-11-06T06:29:33-05:00', stop: '2026-11-06T06:35:09-05:00', seconds: 336, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-06T06:35:16-05:00', stop: '2026-11-06T08:16:43-05:00', seconds: 6087, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-06T08:17:53-05:00', stop: '2026-11-06T09:38:19-05:00', seconds: 4826, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-06T09:38:33-05:00', stop: '2026-11-06T09:46:56-05:00', seconds: 503, end: gate, agent: claude-opus-5-5}
+- {step: build, start: '2026-11-06T09:46:56-05:00', stop: '2026-11-06T12:06:47-05:00', seconds: 8391, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-06T12:06:47-05:00', stop: '2026-11-06T12:09:29-05:00', seconds: 162, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-06T12:09:46-05:00', stop: '2026-11-06T12:09:52-05:00', seconds: 6, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-06'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 1, low: 0}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-06'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

@@ -93,6 +93,13 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   passed. It passed three times run alone (3.12 s, 3.04 s, 3.11 s per call), and the same run on the
   identical tree passed 1685. The remediation changes no code under the row: only docstrings, a
   comment, tests and checkers.
+- 2026-11-06: the probes row's `interrupt-both` parameter again, its second sighting:
+  `tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability[interrupt-both]`
+  failed on CI (run 42229254457, attempt 3, handshake era, job `suite (handshake era, 4 of 4)`,
+  `test/suite-ci-time-budget` at `ef301e6`, which changes only the workflow, AGENTS.md and one new
+  test module): a raised ending must be decided in under 0.15 s and took 0.18 s. 4323 others passed
+  in that job and the other seven suite jobs passed; attempts 1, 2 and 4 of the same run, each a
+  full re-run, passed. That cycle counted the attempt as its one replaced run.
 
 ## Why it was deferred
 
