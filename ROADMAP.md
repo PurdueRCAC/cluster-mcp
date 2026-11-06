@@ -236,7 +236,7 @@ pytest on CI went from 555 s and 524 s to 739 s and 735 s, about 12 and 13.8 min
 20-minute timeout, past PLAN's +180 s threshold. Directions to weigh: a parallel runner, each era
 split into two jobs, shorter built-in waits. It must land before more cycles add tests.
 
-*Horizon: near-term · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
+*Horizon: next, the cycle after `ssh-half-open-link` (set 2026-11-05) · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
 **Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last

@@ -57,6 +57,11 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   before it landed), at load about 4.5 with another session's gates running; the assertion text was
   not kept. It passed five times alone, the modern era passed whole on the identical tree, and CI
   passed it in both eras. First sighting of that row; the branch does not touch it.
+- 2026-11-05: the probes row again, a third parameter:
+  `tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability[interrupt-rcac]`
+  failed on CI (run 41985012712, modern era, `fix/ssh-half-open-link` at `b09a991`): a raised
+  ending must be decided in under 0.15 s and took 0.25 s. 4945 others passed, the handshake era
+  passed, and the re-run of the failed job passed. That branch does not touch the probes.
 - 2026-11-05: the startup-probe bound again, on a new row:
   `tests/test_probe_startup.py::test_every_ending_without_an_answer_serves_every_capability[hang-ssh-sse-core-only]`
   failed on CI (run 41977646670, handshake era, `fix/ssh-half-open-link` at `7bf9666`, a plan-only
