@@ -64,11 +64,12 @@ A row the change **touches** is a default-suite test id whose test code, paramet
 or the helpers and constants it reads (a bound, a wait, a loopback server, a hop) change, or that
 runs in a different CI job or process than before.
 
-- **R1 — Margin.** Each CI job that runs an era's suite SHALL complete within
-  [NEEDS CLARIFICATION: Q1 — the budget and its measure; recommended: 10 minutes of wall time, job
-  start to completion as `gh run view --json jobs` reports it, on GitHub's hosted `ubuntu-24.04`
-  runner, in the slowest of at least three push runs of the cycle branch's final tree, with each
-  job's `timeout-minutes` unchanged at 20].
+- **R1 — Margin.** Every CI job that runs an era's suite SHALL complete within 10 minutes of
+  wall time, job start to completion as `gh run view --json jobs` reports it, on GitHub's hosted
+  `ubuntu-24.04` runner, in the worst of at least three runs of the cycle branch's final tree, with
+  each job's `timeout-minutes` unchanged at 20. Where an era is split across several jobs, each of
+  them SHALL fit the budget on its own. Each attempt of a run (the first, and each full re-run the
+  foreman triggers with `gh run rerun <id>`) counts as one measured run.
 - **R2 — Every row still runs on CI.** For each era, every test id that CI collects and runs on the
   cycle's base (`origin/develop` at `5f6e984`) SHALL be collected and run by CI's job or jobs for
   that era on this tree, at least once: none dropped, newly skipped or deselected, and none moved
@@ -91,17 +92,19 @@ runs in a different CI job or process than before.
   planted violation where it has none, failing under CI's new arrangement as it fails under the
   old.
 - **R5 — The measured runs are green.** Each run counted for R1 SHALL be green in every job of the
-  workflow. [NEEDS CLARIFICATION: Q3 — how a failure of a row that
-  `issues/stalled-reconnect-test-timing.md` lists, in a counted run, is treated.]
+  workflow, with one exception. IF a counted run fails on a row of the load-sensitive class that
+  `issues/stalled-reconnect-test-timing.md` names (the seed's class, not only the ids it lists),
+  THEN that failure SHALL be added to the seed as a dated sighting naming the run, the era and the
+  row, and the run SHALL be replaced by a fresh one, at most once per cycle. Any other failure, or
+  a second such one, is red.
 - **R6 — CI mirrors the gate.** The profile's `verify`, the release recipe's `gate` and
   `.github/workflows/ci.yml` SHALL stay in step as `AGENTS.md` § Conventions binds them, changed
   in the same commit, and for each era the profile's `verify` SHALL run the same set of test ids as
   CI's job or jobs for that era. § Conventions, the § Factory `ci` row and the workflow's header
   comment SHALL describe the jobs as they then are.
-- **R7 — The budget is a profile baseline.** [NEEDS CLARIFICATION: Q2 — whether this cycle adds
-  it; recommended: yes.] The `AGENTS.md` § Factory profile SHALL carry a row stating R1's per-job
-  budget and its measure, and the baseline measured at landing: each era job's slowest wall time
-  over R1's runs, with the commit.
+- **R7 — The budget is a profile baseline.** The `AGENTS.md` § Factory profile SHALL carry a row
+  stating R1's per-job budget and its measure, and the baseline measured at landing: each era
+  job's worst wall time over R1's runs, with the commit.
 
 ## Non-goals (no-gos)
 
@@ -129,12 +132,24 @@ runs in a different CI job or process than before.
 - **Q:** Slug, kind and appetite? — **A:** `suite-ci-time-budget`, `test`, `small`, settled by the
   foreman; the cycle runs next, right after `ssh-half-open-link`, so that later cycles adding tests
   don't push an era job past its 20-minute timeout (resolved 2026-11-06).
-- [NEEDS CLARIFICATION: Q1 — R1's budget and measure: the figure, wall time or pytest time, how
-  many runs and which statistic (slowest, median), and whether `timeout-minutes` stays 20.]
-- [NEEDS CLARIFICATION: Q2 — whether this cycle adds the profile row R7 describes, or seeds it for
-  a later one.]
-- [NEEDS CLARIFICATION: Q3 — R5's treatment of a failure, in a counted run, of a row that
-  `issues/stalled-reconnect-test-timing.md` lists.]
+- **Q1:** R1's budget and measure? — **A:** 10 minutes of job wall time for every job that runs
+  an era's suite, start to completion as `gh run view --json jobs` reports it, on hosted
+  `ubuntu-24.04`, the worst of at least three runs of the final tree, `timeout-minutes` staying at
+  20. If an era is split into several jobs, each must fit. The effort's standing approval covers
+  re-runs of CI on cycle branches: the foreman triggers them (`gh run rerun <id>`, a full re-run),
+  and each attempt counts as one measured run (foreman ruling, resolved 2026-11-06).
+- **Q2:** Does this cycle add the profile row for the budget, or seed it for later? — **A:** This
+  cycle adds it (R7): the § Factory profile row states the budget, the measure and the landing
+  baseline (foreman ruling, resolved 2026-11-06).
+- **Q3:** How is a failure in a counted run treated, on a row that
+  `issues/stalled-reconnect-test-timing.md` covers? — **A:** Record and replace once. A failure on
+  a row of that seed's load-sensitive class (the class, not only its listed ids, as `code-build`'s
+  known-flake route reads it) is added to the seed as a dated sighting (run, era, row), and the run
+  is replaced by a fresh one, at most once per cycle. Any other failure, or a second such one, is
+  red (foreman ruling, resolved 2026-11-06).
+- **Q:** Do the non-goals stand? — **A:** Yes, as written, including the three shaping calls: the
+  stalled-reconnect seed out of scope, no product code, no row behind an opt-in (foreman ruling,
+  resolved 2026-11-06).
 
 ## Related materials
 
