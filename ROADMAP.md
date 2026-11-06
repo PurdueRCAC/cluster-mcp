@@ -75,10 +75,10 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Ten cycles, after the rename, the capability extras, the capability probe, the timeout stop and the
-silent-link check, that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC
-clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename to
-`cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
+Eleven cycles, after the rename, the capability extras, the capability probe, the timeout stop, the
+silent-link check and the CI time budget, that take this from *the Purdue RCAC MCP server* to *an
+MCP server for HPC clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The
+rename to `cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
 ([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
@@ -95,10 +95,13 @@ watchdog that sends KILL after the grace, with the remaining limits recorded in
 ([`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)): over `ssh`, a link that goes silent
 without a reset is noticed within the reconnect bound and treated as a lost connection, and a call
 in flight on it ends within that bound, with the floor below which a live link reads as dead
-recorded in `issues/ssh-liveness-message-gap.md`. What remains builds the bespoke tools, makes the
-shell a capability a deployment chooses, then builds each capability on the extras mechanism —
-Slurm first, then LMOD and xdu as the new capabilities that prove it generalizes — and finally the
-site extra that bundles them. Ahead of the tool families sit the CI time budget, taken next, and the
+recorded in `issues/ssh-liveness-message-gap.md`. The CI time budget landed the same day
+([`spec/suite-ci-time-budget/`](spec/suite-ci-time-budget/)): each era's suite runs as four CI
+jobs, every row still runs in one of them, and each job finishes within 10 minutes of its 20-minute
+timeout, a budget `AGENTS.md` § Factory holds with its landing baseline. What remains builds the
+bespoke tools, makes the shell a capability a deployment chooses, then builds each capability on
+the extras mechanism — Slurm first, then LMOD and xdu as the new capabilities that prove it
+generalizes — and finally the site extra that bundles them. Ahead of the tool families sit the
 executor fixes: the three that `ssh-reconnect-loop` deferred on the SSH connection, the liveness
 floor, and a reconnect test whose wall-clock bound measures load as well as behaviour.
 
@@ -213,16 +216,6 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 
 *Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
-
-## Each CI era job spends more than PLAN's growth threshold on real-time loopback rows
-
-`ssh-half-open-link` added 41 real-time loopback rows at a 2 s connect bound. Each era's
-pytest on CI went from 555 s and 524 s to 739 s and 735 s, about 12 and 13.8 minutes of each job's
-20-minute timeout, past PLAN's +180 s threshold. Directions to weigh: a parallel runner, each era
-split into two jobs, shorter built-in waits. It must land before more cycles add tests.
-
-*Horizon: next, the cycle after `ssh-half-open-link` (set 2026-11-05) · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
-**Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: adopted:suite-ci-time-budget*
 
 ## Bespoke tools first, the shell last
 
