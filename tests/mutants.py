@@ -875,7 +875,7 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_bash_runs_whatever_the_login_shell[zsh]',),
          'pinned interpreter'),
     Case('ssh-stdin-not-closed', 'core/executor/ssh.py',
-         (('                chan.shutdown_write()\n', '                pass\n'),),
+         (('            sends.eof()\n', '            pass\n'),),
          ('test_ssh_exec.py::test_stdin_is_empty_and_ends_at_once[bash]',),
          'EOF'),
     Case('ssh-drain-spins', 'core/executor/ssh.py',
@@ -895,9 +895,9 @@ CASES: tuple[Case, ...] = (
           'test_ssh_exec.py::test_a_startup_cd_does_not_move_the_start[zshenv]'),
          'a startup cd moved'),
     Case('content-on-stdin-over-ssh', 'core/executor/ssh.py',
-         (("                chan.shutdown_write()\n",
-           "                chan.sendall(SSHExecutor.content)\n                SSHExecutor.content = b''\n"
-           "                chan.shutdown_write()\n"),
+         (("            sends.eof()\n",
+           "            chan.sendall(SSHExecutor.content)\n            SSHExecutor.content = b''\n"
+           "            sends.eof()\n"),
           ("        if not path:\n            # As a shell's `>` with an empty name.\n",
            "        SSHExecutor.content = data\n"
            "        return self.run(launch.write_argv(path, append, parent, executable))\n"
@@ -907,14 +907,14 @@ CASES: tuple[Case, ...] = (
           'test_ssh_exec.py::test_a_remote_rc_never_reads_a_writes_content[bashrc]'),
          "content rode a command's stdin"),
     Case('ssh-timeout-no-drain', 'core/executor/ssh.py',
-         (('            _stopped(chan, out, err)\n', ''),),
+         (('            _stopped(chan, out, err, sends)\n', ''),),
          ('test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term',),
          'lost what followed the TERM'),
     # Over ssh the exit status comes ahead of output still queued on a slow link: the read goes on to
     # both end records however slowly they come, and a timeout before them names the status.
     Case('ssh-returns-at-exit-status', 'core/executor/ssh.py',
-         (('        _drain(chan, out, err)\n        if end is not None:\n',
-           '        _drain(chan, out, err)\n'
+         (('        _drain(chan, out, err, sends)\n        if end is not None:\n',
+           '        _drain(chan, out, err, sends)\n'
            "        if chan.exit_status_ready():\n"
            "            return bytes(out), bytes(err), chan.recv_exit_status(), b''\n"
            '        if end is not None:\n'),),
@@ -994,8 +994,8 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_an_ssh_write_follows_a_link',),
          'replaced the link'),
     Case('ssh-append-overwrites', 'core/executor/ssh.py',
-         (('                if append:\n                    script = PLACE_APPEND\n',
-           '                if False:\n                    script = PLACE_APPEND\n'),),
+         (('            if append:\n                script = PLACE_APPEND\n',
+           '            if False:\n                script = PLACE_APPEND\n'),),
          ('test_writes.py::test_writes_are_byte_exact[ssh-append]',),
          'differs from the bytes sent'),
     # A transfer that fails is never a write: every write's reply and the close are checked, then the
@@ -1013,17 +1013,17 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short]',),
          'was not refused for its staged file'),
     Case('staged-checksum-unchecked', 'core/executor/ssh.py',
-         (('                return self._run(launch.fixed_argv(VERIFY + script,', '                return self._run(launch.fixed_argv(script,'),),
+         (('            placed = self._run(launch.fixed_argv(VERIFY + script,', '            placed = self._run(launch.fixed_argv(script,'),),
          ('test_ssh_exec.py::test_a_staged_file_that_is_not_what_was_sent_is_never_placed[changed]',),
          'was not refused for its staged file'),
     Case('transfer-cause-unnamed', 'core/executor/ssh.py',
-         (("                                f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None\n",
-           "                                f'{exc}; the file is unchanged') from None\n"),),
+         (("                            f'{self._reason(staged, deadline) or exc}; the file is unchanged') from None\n",
+           "                            f'{exc}; the file is unchanged') from None\n"),),
          ('test_ssh_exec.py::test_a_write_that_runs_out_of_room_keeps_the_file[8k-free]',),
          'does not name its cause'),
     # Over ssh a write refuses what `cat >` refuses and leaves what it leaves.
     Case('unwritable-target-replaced', 'core/executor/ssh.py',
-         (('                    script = WRITABLE + PLACE\n', '                    script = PLACE\n'),),
+         (('                script = WRITABLE + PLACE\n', '                script = PLACE\n'),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh]',
           'test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]'),
          'read-only target was not refused'),
@@ -1033,7 +1033,7 @@ CASES: tuple[Case, ...] = (
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]',),
          'did not stay a link'),
     Case('link-loop-named-missing', 'core/executor/ssh.py',
-         (('                if _loops(sftp, remote):\n', '                if False:\n'),),
+         (('            if _loops(sftp, remote):\n', '            if False:\n'),),
          ('test_writes.py::test_a_write_refuses_what_cat_refuses[ssh]',
           'test_writes.py::test_a_write_refuses_what_cat_refuses[ssh-openssh]'),
          'loop of links'),
@@ -1096,8 +1096,8 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_reconnect_refused_authentication_fails_at_once',),
          'was retried'),
     Case('ssh-reconnect-late-success-leaks', 'core/executor/ssh.py',
-         (('                pending.transport, dropped = self._publish(conn)\n',
-           '                pending.transport, dropped = self._publish(conn) if pending.waiters else (None, None)\n'),),
+         (('                pending.transport, dropped, watch = self._publish(conn)\n',
+           '                pending.transport, dropped, watch = self._publish(conn) if pending.waiters else (None, None, None)\n'),),
          ('test_ssh_exec.py::test_a_reconnect_attempt_that_hangs_is_abandoned_at_the_bound',),
          'leaked'),
     Case('ssh-reconnect-attempt-per-call', 'core/executor/ssh.py',
@@ -1141,7 +1141,7 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_call_at_its_deadline_takes_an_outcome_that_has_come',),
          'reported a failure'),
     Case('ssh-reconnect-publish-replaces-live', 'core/executor/ssh.py',
-         (('        if current is not None:\n            return current, conn\n', ''),),
+         (('        if current is not None:\n            return current, conn, None\n', ''),),
          ('test_ssh_exec.py::test_a_reconnect_keeps_a_connection_published_meanwhile',),
          'closed or replaced'),
     Case('ssh-reconnect-bound-unfloored', 'core/executor/ssh.py',
@@ -1185,13 +1185,13 @@ CASES: tuple[Case, ...] = (
          ('test_ssh_exec.py::test_a_failed_attempt_releases_its_connection',),
          'left its connection open'),
     Case('ssh-write-parent-own-deadline', 'core/executor/ssh.py',
-         (("UserPath(parent)),\n                                 deadline=deadline)",
-           "UserPath(parent)),\n                                 deadline=time.monotonic() + self._window)"),),
+         (("UserPath(parent)),\n                             deadline=deadline)",
+           "UserPath(parent)),\n                             deadline=time.monotonic() + self._window)"),),
          ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[parent]',),
          'took a deadline of its own'),
     Case('ssh-write-place-own-deadline', 'core/executor/ssh.py',
-         (("UserPath(expected)),\n                                 deadline=deadline)",
-           "UserPath(expected)),\n                                 deadline=time.monotonic() + self._window)"),),
+         (("UserPath(expected)),\n                               deadline=deadline)",
+           "UserPath(expected)),\n                               deadline=time.monotonic() + self._window)"),),
          ('test_ssh_exec.py::test_a_write_spends_one_reconnect_window[place]',),
          'took a deadline of its own'),
     Case('ssh-write-probe-own-deadline', 'core/executor/ssh.py',
@@ -1203,15 +1203,15 @@ CASES: tuple[Case, ...] = (
     # again. A reconnect that gives up reads as nothing run at every tool: sbatch says nothing was
     # submitted, sacct stops at its failed whoami, and the cluster context is never cached from it.
     Case('ssh-reconnect-gives-up-for-good', 'core/executor/ssh.py',
-         (('        transport = self._ensure_connected(deadline)\n'
-           '        if isinstance(transport, str):\n'
-           '            return self._not_run(transport)\n'
-           '        out, err, code, note',
-           "        transport = getattr(self, '_gave_up', None) or self._ensure_connected(deadline)\n"
-           '        if isinstance(transport, str):\n'
-           '            self._gave_up = transport\n'
-           '            return self._not_run(transport)\n'
-           '        out, err, code, note'),),
+         (('            transport = self._ensure_connected(deadline)\n'
+           '            if isinstance(transport, str):\n'
+           '                return self._not_run(transport)\n'
+           '            ran = self._exec',
+           "            transport = getattr(self, '_gave_up', None) or self._ensure_connected(deadline)\n"
+           '            if isinstance(transport, str):\n'
+           '                self._gave_up = transport\n'
+           '                return self._not_run(transport)\n'
+           '            ran = self._exec'),),
          ('test_ssh_exec.py::test_a_failed_reconnect_leaves_the_server_serving',),
          'after the host returned'),
     Case('sbatch-not-started-reads-as-failed', 'slurm/tools.py',
@@ -1261,8 +1261,8 @@ CASES: tuple[Case, ...] = (
          ('test_executors.py::test_backend_satisfies_executor_protocol[delegate]',),
          'does not satisfy Executor'),
     Case('ssh-close-renamed', 'core/executor/ssh.py',
-         (('    def close(self) -> None:\n        """Close the SSH connection."""',
-           '    def disconnect(self) -> None:\n        """Close the SSH connection."""'),),
+         (('    def close(self) -> None:\n        """Close the SSH connection, and stop its liveness monitor.',
+           '    def disconnect(self) -> None:\n        """Close the SSH connection, and stop its liveness monitor.'),),
          ('test_executors.py::test_backend_satisfies_executor_protocol[ssh]',),
          'does not satisfy Executor'),
     Case('ssh-write-renamed', 'core/executor/ssh.py',
@@ -4690,7 +4690,7 @@ CASES += (
 # and delay changed, its `sleep` resolved through a profile, its descriptor renumbered, each stream
 # it must not hold kept; the prologue's posix mode, its turning builtins back on and the functions it
 # unsets dropped; the deadline's clock, comparison, value and refusal changed; the KILL request's
-# guard, the open-channel check under the channel's lock and the wait for a key exchange changed.
+# guard, the open-channel check under the connection's write path and the wait for a key exchange changed.
 # Each is killed by the rows that pin what the decision is for: the stop rows (`still running`), the
 # survival rows (a completed call's job stopped), the profile rows (a call that outlives `TMOUT`, or
 # a profile's shadows, cut short), the grace rows (the output printed while stopping lost, or a
@@ -4770,6 +4770,10 @@ KILL_ORDER = 'test_ssh_exec.py::test_a_timeout_asks_for_kill_after_its_grace'
 KILL_DRAINS = 'test_ssh_exec.py::test_a_timeout_drains_what_follows_the_term'
 CLOSED_ASKED = 'test_ssh_exec.py::test_no_signal_is_asked_for_on_a_closed_channel'
 LOCK_HELD = 'test_ssh_exec.py::test_a_signal_request_goes_while_the_channel_is_held_open'
+CLOSED_AS_IT_WAITS = 'test_ssh_exec.py::test_a_signal_request_never_follows_a_close_made_as_it_waits'
+WRITE_PATH_HELD = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held]'
+WRITE_PATH_FREE = 'test_ssh_exec.py::test_a_timed_call_never_waits_on_a_write_path_another_call_holds[free]'
+STALLED_TIMEOUT = 'test_ssh_exec.py::test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout'
 KEY_EXCHANGE = 'test_ssh_exec.py::test_a_signal_request_waits_out_a_key_exchange'
 EXCHANGE_STARTS = 'test_ssh_exec.py::test_a_signal_request_never_goes_as_a_key_exchange_starts'
 GIVES_UP = tuple(f'test_ssh_exec.py::test_a_signal_request_gives_up_on_a_key_exchange[{kind}]'
@@ -4930,25 +4934,42 @@ SSH_PROGRAM = "        prog, marks = launch.program(command, cwd, start='home')\
 # Over `ssh`, the read after the TERM, bounded by GRACE.
 GRACE_READ = '    end = time.monotonic() + launch.GRACE\n'
 DEADLINE = '    deadline = None if timeout is None else time.time_ns() + math.ceil(timeout * 1e9)\n'
-# The KILL request at a timeout, between the TERM request and the return, unless the channel has ended.
-KILL_REQUEST = ("            _signal(chan, 'TERM')\n"
-                "            _stopped(chan, out, err)\n"
-                "            if not _ended(chan):\n"
-                "                _signal(chan, 'KILL')\n")
-TERM_LINE, GRACE_LINE, GUARD_LINE, GUARDED_KILL = KILL_REQUEST.splitlines(keepends=True)
-KILL_LINE = GUARD_LINE + GUARDED_KILL
-BARE_KILL = "            _signal(chan, 'KILL')\n"
-# `_signal`'s loop: the wait for a key exchange made without the channel's lock, then the
-# open-channel check and the send, holding it, only once the exchange has ended.
+# The stop at a timeout, as `_collect` hands it to the call's sender: the TERM, the GRACE read, then
+# the KILL, which the sender sends `GRACE` after the TERM went, unless the channel has ended by then.
+KILL_REQUEST = ("            sends.term()\n"
+                "            _stopped(chan, out, err, sends)\n"
+                "            sends.kill()\n")
+TERM_LINE, GRACE_LINE, KILL_LINE = KILL_REQUEST.splitlines(keepends=True)
+KILL_SENT = ("        if not _ended(self.chan):\n"
+             "            _signal(self.chan, 'KILL')\n")
+GUARD_LINE, GUARDED_KILL = KILL_SENT.splitlines(keepends=True)
+BARE_KILL = "        _signal(self.chan, 'KILL')\n"
+KILL_HELD = ("        if self._termed is not None:\n"
+             "            end = self._termed + launch.GRACE\n"
+             "            while not _ended(self.chan) and (left := end - time.monotonic()) > 0:\n"
+             "                time.sleep(min(SELECT_WAIT, left))\n")
+# `_signal`'s loop: the wait for a key exchange made holding no lock, then, holding the connection's
+# write path (`clear_to_send_lock`) and never the channel's lock, the open-channel check and the send,
+# only once the exchange has ended.
 SIGNAL_LOOP = ("        while transport.is_active() and time.monotonic() < give_up:\n"
                "            transport.clear_to_send.wait(SELECT_WAIT)\n")
-CHECKED = ("            with chan.lock:\n"
+CHECKED = ("            if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):\n"
+           "                continue\n"
+           "            try:\n"
            "                if chan.closed:\n"
            "                    return\n"
-           "                with transport.clear_to_send_lock:\n"
-           "                    if transport.clear_to_send.is_set():\n"
-           "                        transport._send_message(message)\n"
-           "                        return\n")
+           "                if transport.clear_to_send.is_set():\n"
+           "                    transport._send_message(message)\n"
+           "                    return\n"
+           "            finally:\n"
+           "                transport.clear_to_send_lock.release()\n")
+UNLOCKED = (CHECKED.replace("            if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):\n"
+                            "                continue\n", '')
+            .replace("                transport.clear_to_send_lock.release()\n", "                pass\n"))
+
+
+def kill_sent(*lines: str) -> tuple[tuple[str, str], ...]:
+    return ((KILL_SENT, ''.join(lines)),)
 
 
 def kill_request(*lines: str) -> tuple[tuple[str, str], ...]:
@@ -5161,82 +5182,81 @@ CASES += (
          (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
     Case('tpc-ssh-kill-dropped-unit', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE),
          (KILL_ORDER,), "['TERM']"),
-    Case('tpc-ssh-kill-before-term', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+    Case('tpc-ssh-kill-before-term', 'core/executor/ssh.py', kill_request(KILL_LINE, TERM_LINE, GRACE_LINE),
          (KILL_DRAINS, KILL_ORDER), "['KILL', 'TERM']"),
-    Case('tpc-ssh-kill-before-term-output', 'core/executor/ssh.py', kill_request(BARE_KILL, TERM_LINE, GRACE_LINE),
+    Case('tpc-ssh-kill-before-term-output', 'core/executor/ssh.py', kill_request(KILL_LINE, TERM_LINE, GRACE_LINE),
          GRACE_KEPT[2:], OUTPUT_LOST),
+    # Handed over before the GRACE read, the KILL still goes GRACE after the TERM (the sender's wait),
+    # but that wait holds back the window adjusts the read owes, so a command that prints past the
+    # window as it stops is cut short. The grace rows print too little to tell, so both cases are
+    # killed by the row whose command does.
     Case('tpc-ssh-kill-before-grace', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
-         (KILL_ORDER,), 'before the GRACE read was over'),
+         (WRITE_PATH_FREE,), 'not all it printed'),
     Case('tpc-ssh-kill-before-grace-output', 'core/executor/ssh.py', kill_request(TERM_LINE, KILL_LINE, GRACE_LINE),
-         GRACE_KEPT[2:], OUTPUT_LOST),
+         (WRITE_PATH_FREE,), 'not all it printed'),
     *(Case(f'tpc-ssh-kill-{name.lower()}', 'core/executor/ssh.py',
-           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")),
+           kill_sent(GUARD_LINE, GUARDED_KILL.replace("'KILL'", f"'{name}'")),
            (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING) for name in SSH_NAMES),
     *(Case(f'tpc-ssh-kill-{name.lower()}-unit', 'core/executor/ssh.py',
-           kill_request(TERM_LINE, GRACE_LINE, KILL_LINE.replace("'KILL'", f"'{name}'")), (KILL_ORDER,),
+           kill_sent(GUARD_LINE, GUARDED_KILL.replace("'KILL'", f"'{name}'")), (KILL_ORDER,),
            f"['TERM', '{name}']") for name in SSH_NAMES),
-    # Its guard: no KILL once the channel has ended (a command that died during the read), and one
-    # while the launch may be alive.
-    Case('tpc-ssh-kill-unguarded', 'core/executor/ssh.py', kill_request(TERM_LINE, GRACE_LINE, BARE_KILL),
+    # Its guard, at the send: no KILL once the channel has ended (a command that died during its
+    # grace), and one while the launch may be alive.
+    Case('tpc-ssh-kill-unguarded', 'core/executor/ssh.py', kill_sent(BARE_KILL),
          (KILL_DRAINS,), "['TERM', 'KILL']"),
     Case('tpc-ssh-kill-guard-inverted', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL), (KILL_ORDER,), "['TERM']"),
+         kill_sent('        if _ended(self.chan):\n', GUARDED_KILL), (KILL_ORDER,), "['TERM']"),
     Case('tpc-ssh-kill-guard-inverted-behaviour', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if _ended(chan):\n', GUARDED_KILL),
+         kill_sent('        if _ended(self.chan):\n', GUARDED_KILL),
          (BASHRC_UNDONE, HANGING_LOGIN), STILL_RUNNING),
     Case('tpc-ssh-kill-guard-status', 'core/executor/ssh.py',
-         kill_request(TERM_LINE, GRACE_LINE, '            if not chan.exit_status_ready():\n', GUARDED_KILL),
+         kill_sent('        if not self.chan.exit_status_ready():\n', GUARDED_KILL),
          (KILL_DRAINS,), "['TERM', 'KILL']"),
-    # `_signal` sends nothing on a closed channel, and checks and sends holding the channel's lock.
+    # `_signal` sends nothing on a closed channel, and checks and sends holding the connection's write
+    # path, never the channel's lock.
     Case('tpc-ssh-signal-unchecked', 'core/executor/ssh.py',
          ((CHECKED, CHECKED.replace('                if chan.closed:\n                    return\n', '')),),
          (CLOSED_ASKED,), CONNECTION_LOST),
     Case('tpc-ssh-signal-active-checked', 'core/executor/ssh.py',
          ((CHECKED, CHECKED.replace('if chan.closed:', 'if not chan.active:')),), (CLOSED_ASKED,), CONNECTION_LOST),
     Case('tpc-ssh-signal-unlocked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('with chan.lock:', 'if True:')),), (LOCK_HELD,), "holding the channel's lock"),
+         ((CHECKED, CHECKED.replace('if not transport.clear_to_send_lock.acquire(timeout=SELECT_WAIT):',
+                                    'if not chan.lock.acquire(timeout=SELECT_WAIT):')
+                    .replace('transport.clear_to_send_lock.release()', 'chan.lock.release()')),),
+         (LOCK_HELD,), 'holding the write path alone'),
     Case('tpc-ssh-signal-checked-then-sent', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '            with transport.clear_to_send_lock:\n'
-                                    '                if transport.clear_to_send.is_set():\n'
-                                    '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
-         (LOCK_HELD,), "holding the channel's lock"),
+         ((SIGNAL_LOOP + CHECKED, SIGNAL_LOOP.replace('        while transport.is_active()',
+                                                      '        while not chan.closed and transport.is_active()')
+           + CHECKED.replace('                if chan.closed:\n                    return\n', '')),),
+         (CLOSED_AS_IT_WAITS,), 'went after a close'),
     # ... and only once a key exchange has ended (RFC 4253 §7.1), waiting for it without the channel's
     # lock, for no longer than Paramiko's own bound, and not at all on a transport that has gone.
     Case('tpc-ssh-signal-no-key-exchange-wait', 'core/executor/ssh.py',
          ((SIGNAL_LOOP + CHECKED, SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
-           + CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                             '                    if transport.clear_to_send.is_set():\n'
-                             '                        transport._send_message(message)\n'
-                             '                        return\n',
+           + CHECKED.replace('                if transport.clear_to_send.is_set():\n'
+                             '                    transport._send_message(message)\n'
+                             '                    return\n',
                              '                transport._send_message(message)\n'
                              '                return\n')),),
          (KEY_EXCHANGE,), 'sent during the key exchange'),
     Case('tpc-ssh-signal-key-exchange-unchecked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
+         ((CHECKED, CHECKED.replace('                if transport.clear_to_send.is_set():\n'
                                     '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
+                                    '                    return\n',
+                                    '                transport._send_message(message)\n'
+                                    '                return\n')),),
          (KEY_EXCHANGE,), 'sent during the key exchange'),
     Case('tpc-ssh-signal-wait-locked', 'core/executor/ssh.py',
-         ((SIGNAL_LOOP + CHECKED,
-           SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n', '')
-           + CHECKED.replace('            with chan.lock:\n', '            with chan.lock:\n'
-                                                              '                transport.clear_to_send.wait(SELECT_WAIT)\n')),),
+         ((SIGNAL_LOOP, SIGNAL_LOOP.replace('            transport.clear_to_send.wait(SELECT_WAIT)\n',
+                                            '            with chan.lock:\n'
+                                            '                transport.clear_to_send.wait(SELECT_WAIT)\n')),),
          (KEY_EXCHANGE,), "held the channel's lock"),
     Case('tpc-ssh-signal-user-message', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '                transport._send_user_message(message)\n'
-                                    '                return\n')),),
-         (KEY_EXCHANGE,), "held the channel's lock"),
+         ((CHECKED, '            if chan.closed:\n'
+                    '                return\n'
+                    '            transport._send_user_message(message)\n'
+                    '            return\n'),),
+         (CLOSED_AS_IT_WAITS,), 'went after a close'),
     Case('tpc-ssh-signal-unbounded', 'core/executor/ssh.py',
          ((SIGNAL_LOOP, SIGNAL_LOOP.replace(' and time.monotonic() < give_up', '')),), GIVES_UP[:1], 'held its caller'),
     Case('tpc-ssh-signal-transport-unchecked', 'core/executor/ssh.py',
@@ -5276,17 +5296,327 @@ CASES += (
          NOT_RUN),
     # `_signal` checks that no key exchange runs and sends in one step under `clear_to_send_lock`, as
     # the transport thread starts one: without it, an exchange can start between the check and the send.
-    Case('tpc-ssh-signal-exchange-unlocked', 'core/executor/ssh.py',
-         ((CHECKED, CHECKED.replace('                with transport.clear_to_send_lock:\n'
-                                    '                    if transport.clear_to_send.is_set():\n'
-                                    '                        transport._send_message(message)\n'
-                                    '                        return\n',
-                                    '                if transport.clear_to_send.is_set():\n'
-                                    '                    transport._send_message(message)\n'
-                                    '                    return\n')),),
+    Case('tpc-ssh-signal-exchange-unlocked', 'core/executor/ssh.py', ((CHECKED, UNLOCKED),),
          (EXCHANGE_STARTS,), 'sent as the key exchange started'),
 )
 
+
+# The silent-link sweep's files and targets.
+SSH = 'core/executor/ssh.py'
+SSH_EXEC = 'test_ssh_exec.py'
+LIVENESS = 'test_ssh_liveness.py'
+# Where `_run` and `_sftp` give an open its deadline, and the rows that tell where it ends.
+OPEN_UNTIL = 'None if transport is found else deadline'
+RUN_OPEN = f'            ran = self._exec(transport, wire, timeout, marks.end, {OPEN_UNTIL})\n'
+SFTP_OPEN = f'            until = {OPEN_UNTIL}\n'
+LATE_RUN, LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time[{tool}]'
+                        for tool in ('run', 'write_file'))
+LIVE_LATE_RUN, LIVE_LATE_WRITE = (f'{SSH_EXEC}::test_a_late_reconnect_onto_a_live_link_runs_the_call[{tool}]'
+                                  for tool in ('run', 'write_file'))
+SLOW_WRITE = f'{SSH_EXEC}::test_a_slow_transfer_is_not_taken_for_a_silent_link[write]'
+SESSION_STEPS = tuple(f'{LIVENESS}::test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[{step}]'
+                      for step in ('channel', 'subsystem', 'version'))
+CASES += (
+    # A link that dies silently (`ssh._Liveness`): every decision of the monitor and of the call
+    # paths that read its verdict, planted at each alternative it can take. `spec/ssh-half-open-link/
+    # verify/silent-sweep.py` names every case and runs it in both protocol eras.
+    #
+    # The activity hook stamps every message read, nothing on a read that raises, and goes in at the
+    # monitor's start; the first probe primes it and is never judged.
+    Case('shol-hook-removed', SSH, (('        _hook(self.transport.packetizer, self)\n', ''),),
+         (f'{SSH_EXEC}::test_an_idle_connection_is_not_taken_for_a_silent_link',), 'taken for dead'),
+    Case('shol-hook-replies-only', SSH,
+         (('        message = read()\n        monitor.heard = _liveness_clock()\n',
+           '        message = read()\n        if message[0] in (81, 82):\n'
+           '            monitor.heard = _liveness_clock()\n'),),
+         (f'{SSH_EXEC}::test_a_quiet_command_is_not_taken_for_a_silent_link[slow-link]',), 'taken for dead'),
+    Case('shol-hook-stamps-a-raise', SSH,
+         (('        message = read()\n        monitor.heard = _liveness_clock()\n        return message\n',
+           '        try:\n            return read()\n        finally:\n'
+           '            monitor.heard = _liveness_clock()\n'),),
+         (f'{LIVENESS}::test_the_hook_stamps_nothing_on_a_read_that_raises',), 'stamped as heard'),
+    Case('shol-priming-dropped', SSH, (('        primed = False\n', '        primed = True\n'),),
+         (f'{SSH_EXEC}::test_an_idle_connection_is_not_taken_for_a_silent_link',), 'taken for dead'),
+    # The verdict (`_verdict`): the quiet period, a poke's verdict, a background probe's verdict, the
+    # margin, which of the two comes first, and what counts as an answer.
+    Case('shol-quiet-zero', SSH, (('or now - heard >= bound:', 'or now - heard >= 0:'),),
+         (f'{LIVENESS}::test_a_probe_is_due_after_a_bound_of_quiet_and_at_once_for_a_poke',),
+         'a probe went before a bound of quiet'),
+    Case('shol-quiet-3b', SSH, (('or now - heard >= bound:', 'or now - heard >= 3 * bound:'),),
+         (f'{LIVENESS}::test_a_probe_is_due_after_a_bound_of_quiet_and_at_once_for_a_poke',),
+         'no probe went after a bound of quiet'),
+    Case('shol-poke-verdict-zero', SSH, (('max(out, poked) + bound)', 'max(out, poked))'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'judged dead before the poke was a bound old'),
+    Case('shol-poke-verdict-background', SSH,
+         (('max(out, poked) + bound)', 'max(out, poked) + 2 * bound - VERDICT_MARGIN)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-poke-verdict-3b', SSH, (('max(out, poked) + bound)', 'max(out, poked) + 3 * bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-poke-term-alone', SSH, (('max(out, poked) + bound)', 'poked + bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'judged dead before the probe was a bound old'),
+    Case('shol-background-b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'judged dead before its verdict'),
+    Case('shol-background-2b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + 2 * bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'a background probe outlived its verdict'),
+    Case('shol-background-3b', SSH, (('        due = out + 2 * bound - VERDICT_MARGIN\n', '        due = out + 3 * bound\n'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'a background probe outlived its verdict'),
+    Case('shol-margin-zero', SSH, (('VERDICT_MARGIN: Final = 1.0', 'VERDICT_MARGIN: Final = 0.0'),),
+         (f'{LIVENESS}::test_a_background_probe_is_dead_at_twice_the_bound_less_the_margin',),
+         'the stated background verdict is 29 s'),
+    Case('shol-min-as-max', SSH, (('due = min(due, max(out, poked) + bound)', 'due = max(due, max(out, poked) + bound)'),),
+         (f'{LIVENESS}::test_a_waiting_call_has_its_verdict_one_bound_after_its_poke',),
+         'a waiting call outlived its verdict'),
+    Case('shol-answer-not-before', SSH, (('    if out is not None and heard < out:\n', '    if out is not None and heard <= out:\n'),),
+         (f'{LIVENESS}::test_anything_heard_since_the_probe_went_is_an_answer',), 'still judged dead'),
+    # The bound handed to the verdict: the connection's own (`_bound`), never `CONNECT_TIMEOUT`.
+    Case('shol-bound-connect-timeout', SSH, (('        self.bound = _bound(conn)\n', '        self.bound = CONNECT_TIMEOUT\n'),),
+         (f'{LIVENESS}::test_the_monitor_takes_the_connections_own_bound',), 'gave the monitor a'),
+    Case('shol-bound-doubled', SSH,
+         (('_verdict(self.heard, self.out, self.poked, now, self.bound)',
+           '_verdict(self.heard, self.out, self.poked, now, 2 * self.bound)'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    # The poke: made by every open (`opening`), latched while the open waits and then until a probe
+    # handed over at or after it is answered, and never moving the probe out.
+    Case('shol-poke-removed', SSH,
+         (('            self.waiting += 1\n        self.poke()\n', '            self.waiting += 1\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_reconnects[run]',), 'still waiting'),
+    Case('shol-latch-cleared-on-answer', SSH,
+         (('if self.poked is not None and self.out >= self.poked and not self.waiting:', 'if not self.waiting:'),),
+         (f'{LIVENESS}::test_a_poke_stays_latched_past_an_answer_to_an_earlier_probe',), 'consumed the poke'),
+    Case('shol-hold-not-kept', SSH,
+         (('if self.poked is not None and self.out >= self.poked and not self.waiting:',
+           'if self.poked is not None and self.out >= self.poked:'),),
+         (f'{LIVENESS}::test_a_call_waiting_on_an_open_keeps_its_poke',), 'cleared the waiting poke'),
+    Case('shol-poke-moves-out', SSH,
+         (('            if self.poked is None:\n                self.poked = _liveness_clock()\n',
+           '            if self.poked is None:\n                self.poked = _liveness_clock()\n'
+           '            if self.out is not None:\n                self.out = _liveness_clock()\n'),),
+         (f'{LIVENESS}::test_a_poke_never_moves_the_probe_out',), 'moved the probe already out'),
+    # The close: every transport, the outermost hop first.
+    Case('shol-close-dropped', SSH,
+         (('        for transport in reversed(_transports(self.conn)):\n', '        for transport in ():\n'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    Case('shol-close-innermost-first', SSH,
+         (('        for transport in reversed(_transports(self.conn)):\n', '        for transport in _transports(self.conn):\n'),),
+         (f'{LIVENESS}::test_a_dead_verdict_closes_the_outermost_hop_first',), 'not the outermost first'),
+    # Two threads: the judge never sends, a probe counts from its hand-over, and a hand-over counts
+    # while the sender is still busy.
+    Case('shol-judge-sends', SSH,
+         (('        if action == \'probe\':\n            self._send.set()\n        return action\n',
+           '        if action == \'probe\':\n            message = Message()\n'
+           '            message.add_byte(cMSG_GLOBAL_REQUEST)\n            message.add_string(PROBE_REQUEST)\n'
+           '            message.add_boolean(True)\n            self.transport._send_user_message(message)\n'
+           '        return action\n'),),
+         (f'{SSH_EXEC}::test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time',), 'still waiting'),
+    Case('shol-out-after-send', SSH,
+         (("            if action == 'probe':\n                self.out = now\n",
+           "            if action == 'probe':\n                pass\n"),
+          ('                self.transport._send_user_message(message)\n            except Exception:\n',
+           '                self.transport._send_user_message(message)\n'
+           '                with self._lock:\n                    self.out = _liveness_clock()\n'
+           '            except Exception:\n')),
+         (f'{LIVENESS}::test_a_probe_handed_over_while_the_sender_is_stuck_counts',), 'did not count'),
+    Case('shol-handover-refused-busy', SSH,
+         (("            if action == 'probe':\n                self.out = now\n",
+           "            if action == 'probe' and getattr(self, 'busy', False):\n                action = None\n"
+           "            elif action == 'probe':\n                self.out = now\n"),
+          ('                self.transport._send_user_message(message)\n            except Exception:\n                pass\n',
+           '                self.busy = True\n                self.transport._send_user_message(message)\n'
+           '            except Exception:\n                pass\n            self.busy = False\n')),
+         (f'{LIVENESS}::test_a_probe_handed_over_while_the_sender_is_stuck_counts',), 'did not count'),
+    # The tick, and the monitor's own clock.
+    Case('shol-tick-long', SSH, (('LIVENESS_TICK: Final = 0.1', 'LIVENESS_TICK: Final = 5.0'),),
+         (f'{SSH_EXEC}::test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout]',), 'still waiting'),
+    # The open: it waits past the call's verdict; a failure that is a loss goes back to reconnecting
+    # within the same deadline, never once the executor is closed, and never once the request went.
+    Case('shol-open-timeout-alone', SSH,
+         (('    return max(OPEN_TIMEOUT, (CONNECT_TIMEOUT if monitor is None else monitor.bound) + OPEN_MARGIN)\n',
+           '    return OPEN_TIMEOUT\n'),),
+         tuple(f'{SSH_EXEC}::test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[{opens}]'
+               for opens in ('run', 'sftp')), 'Timeout opening channel'),
+    Case('shol-retry-removed', SSH,
+         (('            if self._closed:\n                raise chan.cause\n            return None\n',
+           '            raise chan.cause\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run_command]',), 'it must say'),
+    Case('shol-retry-past-exec', SSH,
+         (("                return b'', b'', CONNECTION_LOST_EXIT_CODE, launch.LOST_NOTE\n",
+           '                return None\n'),),
+         (f'{SSH_EXEC}::test_a_command_cut_by_a_silent_link_is_never_run_twice[run]',), 'not once'),
+    Case('shol-retry-fresh-deadline', SSH,
+         (('            ran = self._exec(transport, wire, timeout, marks.end, None if transport is found else deadline)\n',
+           '            ran = self._exec(transport, wire, timeout, marks.end, None if transport is found else deadline)\n'
+           '            deadline = time.monotonic() + self._window\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run]',), 'past its'),
+    Case('shol-closed-ignored', SSH,
+         (('            if self._closed:\n                raise chan.cause\n            return None\n',
+           '            return None\n'),),
+         (f'{LIVENESS}::test_close_leaves_no_monitor_and_starts_no_reconnect',), 'close() woke'),
+    Case('shol-sftp-retry-removed', SSH,
+         (('                if self._closed:\n                    raise session.cause\n                continue\n',
+           '                raise session.cause\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'it must say'),
+    Case('shol-sftp-retry-channel-only', SSH,
+         (('            chan.invoke_subsystem(\'sftp\')\n'
+           '            return SFTPClient(chan)\n'
+           '    except (SSHException, EOFError, OSError) as exc:\n'
+           '        if chan is not None:\n',
+           '            try:\n'
+           '                chan.invoke_subsystem(\'sftp\')\n'
+           '                return SFTPClient(chan)\n'
+           '            except (SSHException, EOFError, OSError) as exc:\n'
+           '                raise RuntimeError(f\'not retried: {exc!r}\') from exc\n'
+           '    except (SSHException, EOFError, OSError) as exc:\n'
+           '        if chan is not None:\n'),),
+         (f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[subsystem]',
+          f'{SSH_EXEC}::test_an_sftp_open_cut_by_a_silent_link_reconnects[version]'), 'not retried'),
+    Case('shol-sftp-fresh-deadline', SSH,
+         (('                    raise session.cause\n                continue\n',
+           '                    raise session.cause\n'
+           '                deadline = time.monotonic() + self._window\n                continue\n'),),
+         (f'{SSH_EXEC}::test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[write_file]',), 'past its'),
+    # The open after a reconnect or a loss: on a worker the call waits for no later than its deadline
+    # (`_within`), the call's own, never one taken as the open starts; the first open, on the
+    # connection the call found live, waits for its own verdict, so a write's later command past its
+    # deadline still opens; and one cut by the deadline gives up rather than reconnect again.
+    *(Case(f'shol-cap-{name}', SSH, ((RUN_OPEN, RUN_OPEN.replace(OPEN_UNTIL, until)),), (target,), why)
+      for name, until, target, why in (
+          ('removed', 'None', LATE_RUN, 'past its'),
+          ('first-only', 'deadline if transport is found else None', LATE_RUN, 'past its'),
+          ('from-the-open', 'None if transport is found else time.monotonic() + self._window', LATE_RUN, 'past its'),
+          ('at-the-last-start', 'None if transport is found else deadline - FINAL_ATTEMPT_LEAD', LIVE_LATE_RUN,
+           'not its call run to its end'),
+          ('always', 'deadline', SLOW_WRITE, 'not the whole transfer'))),
+    Case('shol-cap-cut-retried', SSH,
+         (('        if chan is None:\n            return self._timed_out()\n', '        if chan is None:\n            return None\n'),),
+         (LATE_RUN,), 'past its'),
+    *(Case(f'shol-sftp-cap-{name}', SSH, ((SFTP_OPEN, SFTP_OPEN.replace(OPEN_UNTIL, until)),), (target,), why)
+      for name, until, target, why in (
+          ('removed', 'None', LATE_WRITE, 'past its'),
+          ('first-only', 'deadline if transport is found else None', LATE_WRITE, 'past its'),
+          ('from-the-open', 'None if transport is found else time.monotonic() + self._window', LATE_WRITE,
+           'past its'),
+          ('at-the-last-start', 'None if transport is found else deadline - FINAL_ATTEMPT_LEAD', LIVE_LATE_WRITE,
+           'not its call run to its end'))),
+    Case('shol-sftp-cap-cut-retried', SSH,
+         (('            if session is None:\n                return self._timed_out()\n',
+           '            if session is None:\n                continue\n'),),
+         (LATE_WRITE,), 'past its'),
+    Case('shol-within-waits-past-the-deadline', SSH,
+         (('        if not self._done.wait(max(0.0, until - time.monotonic())):\n',
+           '        if not self._done.wait(None):\n'),),
+         (f'{LIVENESS}::test_an_open_that_ends_after_its_call_gave_up_is_closed',), 'never released'),
+    Case('shol-within-late-open-kept', SSH, (('        if ok:\n            _close_quietly(value)\n', ''),),
+         (f'{LIVENESS}::test_an_open_that_ends_after_its_call_gave_up_is_closed',), 'was left open'),
+    Case('shol-within-started-past-the-deadline', SSH,
+         (('        if time.monotonic() >= until:\n            return None\n        try:\n', '        try:\n'),),
+         (f'{LIVENESS}::test_an_open_that_ends_in_time_is_the_calls',), 'started past'),
+    # An SFTP session opened after a reconnect makes all three of its steps on the worker: the `sftp`
+    # subsystem and the version exchange, not the channel alone, are held to the call's deadline.
+    # Each plant keeps the steps' own handling: a loss there still gives `_OpenLost`, and the call
+    # reconnects.
+    Case('shol-session-channel-only-on-the-worker', SSH,
+         (('            session = _within(until, functools.partial(_session, transport))\n',
+           '            session = _within(until, functools.partial(_channel, transport))\n'
+           '            if session is not None and not isinstance(session, _OpenLost):\n'
+           '                chan = session\n'
+           '                try:\n'
+           '                    with _opening(transport):\n'
+           "                        chan.invoke_subsystem('sftp')\n"
+           '                        session = SFTPClient(chan)\n'
+           '                except (SSHException, EOFError, OSError) as exc:\n'
+           '                    with contextlib.suppress(Exception):\n'
+           '                        chan.close()\n'
+           '                    if not _gone(transport):\n'
+           '                        raise\n'
+           '                    session = _OpenLost(exc)\n'),),
+         SESSION_STEPS, "not all on the open's worker"),
+    Case('shol-session-version-on-the-call', SSH,
+         (("            chan.invoke_subsystem('sftp')\n            return SFTPClient(chan)\n",
+           "            chan.invoke_subsystem('sftp')\n            return chan\n"),
+          ('            session = _within(until, functools.partial(_session, transport))\n',
+           '            session = _within(until, functools.partial(_session, transport))\n'
+           '            if session is not None and not isinstance(session, _OpenLost):\n'
+           '                chan = session\n'
+           '                try:\n'
+           '                    with _opening(transport):\n'
+           '                        session = SFTPClient(chan)\n'
+           '                except (SSHException, EOFError, OSError) as exc:\n'
+           '                    with contextlib.suppress(Exception):\n'
+           '                        chan.close()\n'
+           '                    if not _gone(transport):\n'
+           '                        raise\n'
+           '                    session = _OpenLost(exc)\n')),
+         SESSION_STEPS, "not all on the open's worker"),
+    # A transfer cut short: decided by state, raised naming the host, the write's own commands' losses
+    # raised the same way.
+    Case('shol-lost-transfer-unnamed', SSH,
+         (("super().__init__(f'the connection to {host} was lost during", "super().__init__(f'the connection was lost during"),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put]',), 'not a lost transfer'),
+    Case('shol-lost-transfer-by-type', SSH,
+         (("                sftp.get(remote, local)\n            except (OSError, EOFError, SSHException) as exc:\n",
+           "                sftp.get(remote, local)\n            except OSError as exc:\n"),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[get]',),
+         'Server connection dropped'),
+    Case('shol-reason-on-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        raise Short(',
+           '    except OSError as exc:\n        raise Short('),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[upload]',),
+         "read a lost session as the server's answer"),
+    Case('shol-is-dir-swallows-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        return False\n\n\ndef _loops',
+           '    except OSError as exc:\n        return False\n\n\ndef _loops'),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[is-dir]',),
+         "read a lost session as the server's answer"),
+    Case('shol-loops-swallows-a-loss', SSH,
+         (('    except OSError as exc:\n        if _cut(sftp, exc):\n            raise\n        return False\n    return False\n',
+           '    except OSError as exc:\n        return False\n    return False\n'),),
+         (f'{LIVENESS}::test_a_lost_session_is_never_read_as_the_servers_answer[loops]',),
+         "read a lost session as the server's answer"),
+    Case('shol-staging-loss-unnamed', SSH,
+         (('            if _cut(sftp, exc):\n                exc.left = _remains(unchanged, directory)  # type: ignore[union-attr]\n'
+           '                raise\n            if not isinstance(exc, OSError):\n',
+           '            if not isinstance(exc, OSError):\n'),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[write-stage]',),
+         'was not named'),
+    Case('shol-mkdir-loss-returned', SSH, (('            if _lost_to(made, transport):\n', '            if False:\n'),),
+         (f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[write-mkdir]',),
+         'not a lost transfer'),
+    Case('shol-place-loss-returned', SSH, (('            if _lost_to(placed, transport):\n', '            if False:\n'),),
+         tuple(f'{SSH_EXEC}::test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[{shape}]'
+               for shape in ('write-place', 'write-place-gone')), 'not a lost transfer'),
+    Case('shol-live-not-started-lost', SSH,
+         (('    return result.exit_code == CONNECTION_LOST_EXIT_CODE or (result.exit_code == NOT_STARTED_EXIT_CODE\n'
+           '                                                            and _down(transport))\n',
+           '    return result.exit_code in (CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE)\n'),),
+         (f'{SSH_EXEC}::test_a_failed_ssh_write_leaves_nothing_behind',), 'TransferLost'),
+    # Everything a call sends once its exec request is answered goes through its sender (`_Sends`),
+    # and the call waits for it only until its timeout and GRACE. Each made on the call's own thread
+    # instead holds the call while another sender holds the write path.
+    Case('shol-term-on-the-call', SSH, (('            sends.term()\n', "            _signal(chan, 'TERM')\n"),),
+         (WRITE_PATH_HELD, STALLED_TIMEOUT), 'still waiting'),
+    Case('shol-kill-on-the-call', SSH,
+         (('            sends.kill()\n', "            if not _ended(chan):\n                _signal(chan, 'KILL')\n"),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-eof-on-the-call', SSH, (('            sends.eof()\n', '            chan.shutdown_write()\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-close-on-the-call', SSH,
+         (('            sends.close()\n            sends.wait(until)\n',
+           '            sends.wait(until)\n            chan.close()\n'),), (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-adjust-on-the-call', SSH, (('    if not isinstance(chan, Channel):\n', '    if True:\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    Case('shol-wait-past-the-deadline', SSH, (('            sends.wait(until)\n', '            sends.wait(None)\n'),),
+         (WRITE_PATH_HELD,), 'still waiting'),
+    # The KILL's grace counts from when the TERM went: counted from the call's read, a TERM that waited
+    # on the write path is followed at once by the KILL.
+    Case('shol-kill-grace-from-the-read', SSH, ((KILL_HELD, ''),), (WRITE_PATH_HELD,), 'inside its'),
+)
 
 # `>|`, not `>`: a profile's `set -C` refuses `>` onto the path bash 3.2 names a process substitution
 # by; a newer bash names it by a pipe, which noclobber allows, so only macOS tells the two apart.

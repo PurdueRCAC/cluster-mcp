@@ -152,7 +152,21 @@ It sits with the timeout entry above because both are about a call that a client
 dead or stuck remote end.
 
 *Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
-**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: unshaped*
+**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: adopted:ssh-half-open-link*
+
+## A live link that answers nothing for longer than its liveness verdict reads as dead
+
+The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe goes unanswered,
+with nothing at all heard since, past its verdict: a background probe two connect bounds less
+`VERDICT_MARGIN` after it went (29 s at the default bound), and, while a call starts, one bound after
+that call's start (15 s). A live link on which nothing arrives for that long, such as a quiet command
+whose peer answers nothing for 29 s (an outage of about 25 s), or an SFTP upload slower than about
+0.75 KB/s, is cut and reported as lost. While another call starts on the connection, the floor is
+that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
+a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
+
+*Horizon: later · Depends on: ssh-half-open-link · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*
+**Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
 
 ## A write whose host is lost after staging leaves its staging directory behind
 
@@ -162,6 +176,8 @@ directory stays, holding the user's own content: the write returns `-1002` with 
 untouched, or, if the host is back at once, succeeds and leaves the checksum file. Pre-existing;
 found by `ssh-reconnect-loop`'s review, 2026-10-26, which corrected the texts and deferred the
 cleanup.
+
+- 2026-11-05: `spec/ssh-half-open-link/` P2: such a write now raises `TransferLost` naming the staging directory left; the cleanup is still this seed's.
 
 *Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md) · *status: unshaped*
@@ -188,6 +204,8 @@ never builds a chain: its fake connection has no gateway, so a change that stops
 passes. The bound still holds; a hop could be left running unnoticed. Found by
 `ssh-reconnect-loop`'s final review, 2026-10-27, as a missing pin.
 
+- 2026-11-05: `spec/ssh-half-open-link/`'s liveness close goes outermost hop first, pinned on a fake chain only; the seed records it.
+
 *Horizon: later · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
 **Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
 
@@ -202,9 +220,24 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 - 2026-11-02: a third, `test_timeout_stop.py`'s signal-death survival row over an `sh` login shell
   (every-login-shell runs only), failed once locally under load and passed on re-runs; the seed
   records it.
+- 2026-11-05: the reconnect row failed once more with "0 reconnect workers ran" in a local full run
+  during `spec/ssh-half-open-link/` P2, and passed three times alone; the seed records it.
+- 2026-11-05: `test_a_reconnect_worker_that_cannot_start_frees_the_attempt` failed on CI a second time
+  (0.3 s against a 0.1 s bound); under the same load it fails as often on `develop` as on
+  `spec/ssh-half-open-link/`'s branch; the seed records both rates.
 
 *Horizon: later · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
+
+## Each CI era job spends more than PLAN's growth threshold on real-time loopback rows
+
+`ssh-half-open-link` added 41 real-time loopback rows at a 2 s connect bound. Each era's
+pytest on CI went from 555 s and 524 s to 739 s and 735 s, about 12 and 13.8 minutes of each job's
+20-minute timeout, past PLAN's +180 s threshold. Directions to weigh: a parallel runner, each era
+split into two jobs, shorter built-in waits. It must land before more cycles add tests.
+
+*Horizon: near-term · Depends on: — · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §6, TECH P3; `.github/workflows/ci.yml`*
+**Seed:** [`issues/suite-ci-time-budget.md`](issues/suite-ci-time-budget.md) · *status: unshaped*
 
 ## Bespoke tools first, the shell last
 
@@ -471,6 +504,17 @@ nothing, so no release waits on it.
 *Horizon: later · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
 **Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
 
+## A mutant's child run outlives its timeout
+
+`tests/mutants.py` runs each case's targets through `subprocess.run(timeout=300)`, which kills the
+sandbox wrapper and not the pytest below it: a case whose target hangs leaves that pytest running,
+reparented to init, and the runner raises out of the sweep instead of reporting the case. Seen on
+2026-11-05. Pre-existing; it gates nothing. The fix starts the child in a session of its own and
+kills its process group.
+
+*Horizon: later · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
+**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
+
 ## A local command in flight can outlive the server that launched it
 
 In `local` mode each command runs in a process group of its own, which only its call ever signals. A
@@ -493,6 +537,8 @@ In `ssh` mode a call opens its channel before the guard that turns a lost connec
 so a link that resets just then raises Paramiko's `ConnectionResetError` out of `SSHExecutor.run`
 instead of reporting that the command was not run. Seen once against a test server that dropped the
 connection, 2026-11-02. Pre-existing; the SFTP paths were not checked.
+
+- 2026-11-05: `spec/ssh-half-open-link/` now reconnects a channel or SFTP-session open that a lost connection cut short; a reset at that instant is still unpinned; the seed records it.
 
 *Horizon: later · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
 **Seed:** [`issues/ssh-open-session-reset-raises.md`](issues/ssh-open-session-reset-raises.md) · *status: unshaped*

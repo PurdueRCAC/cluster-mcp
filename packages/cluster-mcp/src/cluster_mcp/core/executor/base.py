@@ -150,7 +150,8 @@ class Executor(Protocol):
         checksum against the bytes sent and moves it into place, so the target is replaced whole
         and keeps its permission bits but setuid and setgid, as `cat >` leaves them (`ssh.write`
         states the cases written through instead). A failed or short transfer, or a mismatch,
-        leaves the target untouched. Over `ssh`, too, a write refuses what `cat >` refuses: an
+        leaves the target untouched; a lost connection is the one exception, over `ssh`, once the
+        transfer has begun (see Raises). Over `ssh`, too, a write refuses what `cat >` refuses: an
         existing target the user may not write, and a symbolic link whose target's directory does
         not exist (the link stays). A symbolic link is followed to the file it names. The temporary
         file and its directory are removed afterwards, except when the host is lost after the
@@ -174,7 +175,13 @@ class Executor(Protocol):
                 symbolic link whose target's directory does not exist, a path through a loop of
                 links (`ELOOP`), or its directory is missing or closed to the user, or the transfer
                 failed or fell short, with the reason, such as `No space left on device`); nothing
-                was written.
+                was written. The one `OSError` that promises nothing of the kind is the lost
+                transfer below.
+            ConnectionError: Over `ssh`, the connection was lost once the write's SFTP session had
+                opened (`ssh.TransferLost`, an `OSError` too): the error names the host, says the
+                transfer may be partly made, and says what may remain: while the content is staged,
+                the target unchanged and its staging directory; once the file is being put in place,
+                the old file or the new one, or part of an append or a write-through.
         """
         ...
 
@@ -198,7 +205,9 @@ class Executor(Protocol):
         Raises:
             ConnectionError: Over `ssh`, a lost connection could not be re-established within the
                 bound `SSHExecutor` states (`cannot connect to <host>: <cause>; nothing was
-                transferred`).
+                transferred`); or the connection was lost once the transfer had begun
+                (`ssh.TransferLost`): that error names the host, says the transfer may be partly
+                made, and says the destination may be truncated or hold part of the file.
         """
         ...
 
@@ -219,7 +228,9 @@ class Executor(Protocol):
         Raises:
             ConnectionError: Over `ssh`, a lost connection could not be re-established within the
                 bound `SSHExecutor` states (`cannot connect to <host>: <cause>; nothing was
-                transferred`).
+                transferred`); or the connection was lost once the transfer had begun
+                (`ssh.TransferLost`): that error names the host, says the transfer may be partly
+                made, and says the local file may be truncated or hold part of the file.
         """
         ...
 

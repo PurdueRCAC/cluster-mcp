@@ -53,11 +53,30 @@ request was answered or before.
 
 Any of them can go down and come back, as a host that reboots does: `refuse()` stops accepting, so a
 new connection is refused, and cuts every connection it holds as a lost link does; `serve_again()`
-listens on the same port once more.
+listens on the same port once more. A server calls its `on_step` hook, when one is set, with the
+step and its detail as a request arrives, before it is answered: `'channel'` with the kind of a
+channel to open, `'subsystem'` with its name, `'version'` as an SFTP client's version request
+arrives, `'exec'` with the program an exec string carries (decoded), `'probe'` with the name of a
+global request (which it refuses, as sshd refuses one it does not know), and for SFTP requests
+`'lookup'` (a stat), `'stage'` (a mkdir), `'upload'` (a write) and `'download'` (a read), each with
+its path.
+
+`SilentLink` is a hop in front of any of them on which the link can die silently, as a NAT entry that
+expires or a host powered off does: `go_silent()` stops forwarding both ways, and holds new
+connections the same way, closing no socket, so the client's sends fill its buffers and nothing it
+waits for comes. `come_back()` forwards new connections again (the old ones stay silent),
+`resume()` lets the held connections forward again, after a silent spell of a set length; `rate`
+limits forwarding at the TCP level, so a reply queues behind the data ahead of it, as behind sshd;
+`silent_at` goes silent at a server step, and `silent_after_handshake` once a new connection is
+made (at its first probe or channel open). The receive buffer of each accepted connection is 16 KiB,
+set on the listener, and `narrow_sends` fixes a client socket's send buffer at 16 KiB, so an upload
+holds the client's write path long before the channel's window, on any platform.
 """
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import os
 import select
 import signal
@@ -67,7 +86,7 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import paramiko
 from fabric import Config
@@ -120,7 +139,15 @@ class _Handle(paramiko.SFTPHandle):
         except OSError as exc:
             return paramiko.SFTPServer.convert_errno(exc.errno)
 
+    # The server this file is served by, which a step's hook reaches through it.
+    owner: Any = None
+
+    def read(self, offset: int, length: int) -> Any:
+        self.owner.step('download', self.filename)
+        return super().read(offset, length)
+
     def write(self, offset: int, data: bytes) -> int:
+        self.owner.step('upload', self.filename)
         if self.flip and offset == 0 and data and os.path.basename(self.filename) == 'content':
             data = bytes([data[0] ^ 1]) + data[1:]
         # As a filesystem that runs out: the bytes that fit land, and the write fails (or, with no
@@ -169,9 +196,11 @@ class _SFTP(paramiko.SFTPServerInterface):
             return paramiko.SFTPServer.convert_errno(exc.errno)
 
     def stat(self, path: str) -> Any:
+        self.owner.step('lookup', path)
         return self._stat(path, os.stat)
 
     def lstat(self, path: str) -> Any:
+        self.owner.step('lookup', path)
         return self._stat(path, os.lstat)
 
     def open(self, path: str, flags: int, attr: Any) -> Any:
@@ -189,6 +218,7 @@ class _SFTP(paramiko.SFTPServerInterface):
         else:
             mode = 'rb'
         handle = _Handle(flags)
+        handle.owner = self.owner
         handle.limit, handle.flip = self.owner.write_limit, self.owner.write_flip
         handle.filename = real
         handle.readfile = handle.writefile = os.fdopen(fd, mode)
@@ -210,6 +240,7 @@ class _SFTP(paramiko.SFTPServerInterface):
         return self._do(path, lambda real: os.chmod(real, attr.st_mode & 0o7777))
 
     def mkdir(self, path: str, attr: Any) -> int:
+        self.owner.step('stage', path)
         return self._do(path, lambda real: os.mkdir(real, _mode(attr, 0o777)))
 
     def rmdir(self, path: str) -> int:
@@ -233,6 +264,22 @@ class _Subsystem(paramiko.SFTPServer):
     file is answered with a failure once the file is closed, as a filesystem that defers its writes
     (NFS, a quota checked at close) reports one that did not land."""
 
+    def _send_server_version(self) -> int:
+        # The step is taken once the client's version request has been read: the client is then
+        # past the subsystem's reply, waiting on the session's last step before it opens.
+        read = self._read_packet
+
+        def version_read() -> Any:
+            got = read()
+            self.server.owner.step('version', '')
+            return got
+
+        self._read_packet = version_read  # type: ignore[method-assign]
+        try:
+            return super()._send_server_version()
+        finally:
+            del self._read_packet
+
     def _process(self, t: int, request_number: int, msg: paramiko.Message) -> None:
         if t == paramiko.sftp.CMD_CLOSE and self.server.owner.close_failure:
             at = msg.packet.tell()
@@ -254,8 +301,9 @@ def _mode(attr: Any, default: int) -> int:
 
 
 class _Server(paramiko.ServerInterface):
-    def __init__(self, owner: LoopbackSSH) -> None:
+    def __init__(self, owner: LoopbackSSH, transport: paramiko.Transport | None = None) -> None:
         self.owner = owner
+        self.transport = transport
 
     def get_allowed_auths(self, username: str) -> str:
         return 'publickey'
@@ -265,14 +313,33 @@ class _Server(paramiko.ServerInterface):
         return paramiko.AUTH_SUCCESSFUL if same else paramiko.AUTH_FAILED
 
     def check_channel_request(self, kind: str, chanid: int) -> int:
+        self.owner.step('channel', kind, self.transport)
         return paramiko.OPEN_SUCCEEDED if kind == 'session' else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
+    def check_global_request(self, kind: str, msg: paramiko.Message) -> bool:
+        # A request sshd does not know is refused (`REQUEST_FAILURE` when it wants a reply).
+        self.owner.step('probe', kind, self.transport)
+        return False
+
+    def check_channel_subsystem_request(self, channel: paramiko.Channel, name: str) -> bool:
+        self.owner.step('subsystem', name, self.transport)
+        return super().check_channel_subsystem_request(channel, name)
+
     def check_channel_exec_request(self, channel: paramiko.Channel, command: bytes) -> bool:
+        self.owner.step('exec', _program(command.decode()), self.transport)
         self.owner.received.append(command.decode())
         if self.owner.before_the_reply(channel, command.decode()):
             return True
         threading.Thread(target=self.owner.execute, args=(channel, command.decode()), daemon=True).start()
         return True
+
+
+def _program(wire: str) -> str:
+    """The program an exec string carries (its last word, base64), or the string itself."""
+    try:
+        return base64.b64decode(wire.rsplit(None, 1)[-1], validate=True).decode('utf-8')
+    except (ValueError, IndexError):
+        return wire
 
 
 # How long the feeder waits, after the client's end of stdin, to tell a closed channel from an EOF.
@@ -400,6 +467,7 @@ class LoopbackSSH:
         self.processes: list[subprocess.Popen[bytes]] = []
         self._execs: dict[paramiko.Channel, subprocess.Popen[bytes]] = {}
         self._transports: list[paramiko.Transport] = []
+        self.on_step: Callable[[str, str, paramiko.Transport | None], None] | None = None
         self.port = 0
         self._listen()
         self.port = self._listener.getsockname()[1]
@@ -450,7 +518,7 @@ class LoopbackSSH:
                 transport.set_subsystem_handler('sftp', _Subsystem, _SFTP, self.home, self.jail, self)
             else:
                 transport.set_subsystem_handler('sftp', _RealSFTP, self)
-            transport.start_server(server=_Server(self))
+            transport.start_server(server=_Server(self, transport))
 
     def _request(self, channel: paramiko.Channel, m: paramiko.Message) -> None:
         # A `signal` request is delivered here; any other is read again by Paramiko's own handler.
@@ -482,6 +550,13 @@ class LoopbackSSH:
         except OSError:
             return False
         return True
+
+    def step(self, name: str, detail: str, transport: paramiko.Transport | None = None) -> None:
+        """A request at step `name` has arrived (on `transport`, when known): call the `on_step`
+        hook, if set."""
+        hook = self.on_step
+        if hook is not None:
+            hook(name, detail, transport)
 
     def environment(self) -> list[str]:
         shim = Path(os.environ['BASH_ENV']).parent
@@ -539,9 +614,10 @@ class LoopbackSSH:
             self._execs[channel] = proc
         return proc
 
-    def executor(self) -> SSHExecutor:
-        """An `SSHExecutor` for this server, isolated from the developer's SSH setup."""
-        return SSHExecutor(LOOPBACK, port=self.port, user=USER,
+    def executor(self, port: int | None = None) -> SSHExecutor:
+        """An `SSHExecutor` for this server (reached on `port`, a hop's, when given), isolated from the
+        developer's SSH setup."""
+        return SSHExecutor(LOOPBACK, port=self.port if port is None else port, user=USER,
                            config=Config(overrides={'load_ssh_configs': False}, ssh_config=paramiko.SSHConfig()),
                            connect_kwargs={'pkey': _key('client'), 'look_for_keys': False, 'allow_agent': False})
 
@@ -732,3 +808,229 @@ class DroppingSSH(LoopbackSSH):
         time.sleep(CONFIRM)
         self._run_unsent(wire)
         _drop(channel.get_transport())
+
+
+# The ports a test must never take: the developer's own servers listen there.
+RESERVED_PORTS = range(54001, 54006)
+
+# The receive buffer of each connection the silent link accepts, and the send buffer a row gives a
+# client's socket: small and fixed, so an upload fills the client's send path well below the
+# channel's 2 MiB window, as an un-ACKed path does, whatever the platform's autotuning (Linux grows
+# both to 4 MiB unless they are set; it doubles a value set, for its own bookkeeping). The receive
+# buffer is set on the listener, so an accepted connection's advertised window starts small too.
+RECEIVE_BUFFER = 16384
+SEND_BUFFER = 16384
+
+
+def narrow_sends(sock: socket.socket) -> None:
+    """Fix `sock`'s send buffer at `SEND_BUFFER`, so a stalled send fills it and blocks."""
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER)
+
+# How long a pump waits for its socket at a time, and how often a held one looks again.
+PUMP_WAIT = 0.05
+
+
+class _Pair:
+    """One connection through the silent link: the client's socket, the server's, and whether it is held."""
+
+    def __init__(self, client: socket.socket, upstream: socket.socket) -> None:
+        self.client, self.upstream = client, upstream
+        self.held = False
+        self.lock = threading.Lock()
+
+
+class SilentLink:
+    """A hop on 127.0.0.1 in front of `server`, on which the link can die silently: no byte is
+    forwarded and no socket closed, as when a NAT entry expires or a host is powered off.
+
+    Each connection it accepts gets a connection to the server and a pump per direction, which
+    forwards under the connection's lock (at `rate` bytes a second each way, when set). `go_silent()`
+    holds every connection, both ways, and every new one the same way (`held` counts those), so a
+    new connection reads `timed out` as one across a dead path does. `come_back()` forwards new
+    connections again, and `resume()` the held ones. `silent_at(step)` goes silent as the server
+    reaches that step (`LoopbackSSH.step`), recording it in `step`; `silent_after_handshake`, once
+    set, goes silent at the first probe or channel open the server sees on a connection it accepts
+    from then on: what a new connection sends first once it is made (its liveness monitor's
+    priming probe, or a call's channel). `forwarded` counts the bytes forwarded, `opened` the time
+    (`time.monotonic`) each connection was forwarded to the server, and `silenced` when the link
+    last went silent (`go_silent` returned). `close()` cuts everything.
+    """
+
+    def __init__(self, server: LoopbackSSH, rate: int | None = None) -> None:
+        self.server = server
+        self.rate = rate
+        self.silent = False
+        # The connections the server had accepted when `silent_after_handshake` was set, or None.
+        self._handshake_after: int | None = None
+        self.step: str | None = None
+        self.silenced: float | None = None
+        self.held = 0
+        self.forwarded = 0
+        self.opened: list[float] = []
+        self._pairs: list[_Pair] = []
+        self._held: list[socket.socket] = []
+        self._closed = False
+        self._steps: dict[str, tuple[str | None, str]] = {}
+        self._lock = threading.Lock()
+        self._listener = self._bind()
+        self.port = self._listener.getsockname()[1]
+        self._accepting = threading.Thread(target=self._accept, daemon=True)
+        self._accepting.start()
+        server.on_step = self._at_step
+
+    @staticmethod
+    def _bind() -> socket.socket:
+        while True:
+            listener = socket.socket()
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER)
+            listener.bind((LOOPBACK, 0))
+            if listener.getsockname()[1] not in RESERVED_PORTS:
+                listener.listen(8)
+                return listener
+            listener.close()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                client, _ = self._listener.accept()
+            except OSError:
+                return
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER)
+            upstream = None
+            with self._lock:
+                silent = self._closed or self.silent
+            if not silent:
+                try:
+                    upstream = socket.create_connection((LOOPBACK, self.server.port))
+                except OSError:
+                    client.close()
+                    continue
+            with self._lock:
+                if upstream is None or self._closed or self.silent:
+                    # Held: accepted, as a dead path's far end never answers, and never forwarded.
+                    self._held.append(client)
+                    self.held += 1
+                    if upstream is not None:
+                        upstream.close()
+                    continue
+                pair = _Pair(client, upstream)
+                self._pairs.append(pair)
+                self.opened.append(time.monotonic())
+            for end in (client, upstream):
+                end.settimeout(PUMP_WAIT)
+            for source, sink in ((client, upstream), (upstream, client)):
+                threading.Thread(target=self._pump, args=(pair, source, sink), daemon=True).start()
+
+    def _pump(self, pair: _Pair, source: socket.socket, sink: socket.socket) -> None:
+        # The lock is held for one read or one send at a time, each bounded by the sockets' timeout,
+        # so `go_silent` never waits on a send the other side is not reading; what was read and not
+        # yet sent stays here until the connection forwards again.
+        size = 65536 if self.rate is None else max(1, int(self.rate * PUMP_WAIT))
+        pending = b''
+        while not self._closed:
+            if pair.held:
+                time.sleep(PUMP_WAIT)
+                continue
+            if not pending:
+                try:
+                    if not select.select([source], [], [], PUMP_WAIT)[0]:
+                        continue
+                except (OSError, ValueError):
+                    return
+            sent = 0
+            with pair.lock:
+                if pair.held or self._closed:
+                    continue
+                try:
+                    if not pending:
+                        pending = source.recv(size)
+                        if not pending:
+                            raise EOFError
+                    sent = sink.send(pending)
+                except TimeoutError:
+                    pass
+                except (OSError, EOFError):
+                    # One side closed: so does the other, as a live path carries the close.
+                    for end in (pair.client, pair.upstream):
+                        with contextlib.suppress(OSError):
+                            end.shutdown(socket.SHUT_RDWR)
+                    return
+                pending = pending[sent:]
+                self.forwarded += sent
+            if self.rate is not None and sent:
+                time.sleep(sent / self.rate)
+
+    def go_silent(self) -> None:
+        """Stop forwarding, both ways, on every connection and every new one; close nothing."""
+        with self._lock:
+            self.silent = True
+            pairs = list(self._pairs)
+        for pair in pairs:
+            with pair.lock:
+                pair.held = True
+        self.silenced = time.monotonic()
+
+    def come_back(self) -> None:
+        """Forward new connections again, as a host reachable once more; the held ones stay silent."""
+        with self._lock:
+            self.silent = False
+
+    def resume(self) -> None:
+        """Let every held connection forward again, what was held first."""
+        with self._lock:
+            pairs = list(self._pairs)
+        for pair in pairs:
+            with pair.lock:
+                pair.held = False
+
+    @property
+    def silent_after_handshake(self) -> bool:
+        """Whether the link goes silent at the first probe or channel open on a connection the server
+        accepts from now on."""
+        return self._handshake_after is not None
+
+    @silent_after_handshake.setter
+    def silent_after_handshake(self, value: bool) -> None:
+        self._handshake_after = len(self.server._transports) if value else None
+
+    def silent_at(self, step: str, detail: str | None = None, named: str | None = None) -> None:
+        """Go silent as the server reaches `step` (with `detail` in its detail, when given), once,
+        recording the step as `named` (the step itself by default)."""
+        self._steps[step] = (detail, named or step)
+
+    def _at_step(self, step: str, detail: str, transport: paramiko.Transport | None) -> None:
+        after = self._handshake_after
+        if (step in ('probe', 'channel') and after is not None and transport in self.server._transports
+                and self.server._transports.index(transport) >= after):
+            self._handshake_after = None
+            self.step = 'handshake'
+            self.go_silent()
+            return
+        if step in self._steps and (self._steps[step][0] is None or self._steps[step][0] in detail):
+            self.step = self._steps.pop(step)[1]
+            self.go_silent()
+
+    def executor(self) -> SSHExecutor:
+        """The server's `SSHExecutor`, reaching it through this hop."""
+        return self.server.executor(port=self.port)
+
+    def close(self) -> None:
+        """Cut every connection and stop listening; a call held on the link then ends."""
+        with self._lock:
+            self._closed = True
+            pairs, held = list(self._pairs), list(self._held)
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
+        self._listener.close()
+        self._accepting.join(5)
+        for sock in [*held, *(end for pair in pairs for end in (pair.client, pair.upstream))]:
+            with contextlib.suppress(OSError):
+                sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+        self.server.on_step = None
+
+    def __enter__(self) -> SilentLink:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()

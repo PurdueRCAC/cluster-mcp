@@ -55,3 +55,4 @@ again, or names what it left so the user can remove it.
 - Related: `spec/ssh-reconnect-loop/` (REVIEW.md cycle 1, the write finding);
   `issues/ssh-half-open-link.md`; `AGENTS.md` § Invariants §2.
 - Found by: `ssh-reconnect-loop` review, cycle 1, 2026-10-26; filed by its remediation build.
+- 2026-11-05: `spec/ssh-half-open-link/` P2: a write whose connection is lost once its SFTP session has opened, the place step included, now raises `TransferLost` naming its staging directory (R2 above, for that case); the directory is still left behind, and a host lost at the place step with no reconnect raises instead of returning `-1002`.

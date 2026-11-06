@@ -809,7 +809,7 @@ import has no effect.
     own options (before `scancel`'s `-- <job ids>`), received exactly by an argv-echo stand-in in
     `local` mode; an element `--` is refused; a string is refused by schema validation naming
     `extra_args` and the list type, each tool and era on its own row.
-  - `tests/test_literal_args.py` (`integration`, with `unit` coverage rows): `r1_violations`,
+  - `tests/test_literal_args.py` (`integration`, with `unit` coverage rows): `call_violations`,
     `argv_violations`, `coverage_violations`. The literal-argument matrix: a row per (mode, tool,
     parameter), `test_literal_argument[<mode>-<tool>-<param>]`, for every parameter whose served
     schema admits a string or a string array, but `run_command`'s `command`, in `local`, `delegate`
@@ -944,10 +944,19 @@ import has no effect.
     check's docstring lists what else it cannot see); self-tests prove the guard, the PATH shim
     (also inside a program the launcher runs under the login bash,
     `test_path_shim_survives_a_login_bash`), the harness fence and the build-inside-the-loop rule
-    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`) appears in the package or the suite
-    (`test_no_spec_ids_in_the_package_or_the_suite`, which reads every portion of the imported
-    `cluster_mcp` namespace, so a planted id in a mutated copy fails it; `test_spec_id_scan_covers_every_member`
-    asserts the three portions, so a member cannot drop out of the scan). A row that needs a login shell calls `conftest.need_shell`: off
+    are active. No feature-scoped spec id (`R#`, `P#`, `Q#`), nor a review-finding id (`F#`, or `F-`
+    and a capital), appears in the package or the suite.
+    `test_no_spec_ids_in_the_package_or_the_suite` reads every line of every `.py` file in each
+    portion of the `cluster_mcp` namespace and directly in `tests/` (not its subdirectories), code
+    and strings as well as comments. It fails on an `R`, `P`, `Q` or `F` with one or two digits, or
+    `F-` and a capital, that no letter or digit touches; an underscore is no shield, so an id glued
+    into a name is found, in capitals, and in lower case where an underscore joins it to the name.
+    Not ids: three or more digits (`F401`), a letter or digit beside it (`0xF1`, `R2D2`, `F-Droid`),
+    and an `F` and its number followed by a hyphen (a checker's file name,
+    `F1-contribution-refusal.sh`). The scan reads the imported namespace, so a planted id in a
+    mutated copy fails it; `test_spec_id_scan_covers_every_member` asserts the three portions, so a
+    member cannot drop out of the scan; and `test_the_id_rule_is_stated_as_the_check_enforces_it`
+    holds this statement and § Conventions' to the check, word for word. A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
@@ -1160,9 +1169,16 @@ import has no effect.
     a command whose records have not come by the deadline is a timeout naming its status, a lost
     status stays `-1`, what the command prints after the TERM at a deadline is read, and KILL is
     asked for after the TERM, only once `GRACE` has been read and only on a channel that has not
-    ended (one that closed during the read gets TERM alone); against the loopback server, a `signal` request on
+    ended (one that closed during the read gets TERM alone); a `signal` request waits out a key
+    exchange holding no lock, gives up at Paramiko's bound, and never follows a close marked while it
+    waited for the write path; against the loopback server, a `signal` request on
     a channel both sides have closed is never sent, so the connection serves the next call, and one
-    on an open channel is written holding the channel's lock; an oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
+    on an open channel is written holding the connection's write path and not the channel's lock;
+    a timed call whose write path another sender takes as its exec request is answered returns at its
+    timeout and `GRACE` with all it read, owing its EOF, window adjust, TERM, KILL and close, and once
+    the path is free the TERM reaches the command and the KILL comes `GRACE` after it; with the path
+    free, all a command prints past the channel's window as it stops is read, and it ends before any
+    KILL (`test_a_timed_call_never_waits_on_a_write_path_another_call_holds[held|free]`); an oversize program is refused, naming the limit, before connecting. The `reconnect` rows start from
     a published connection that has gone dead, with Fabric's `Connection` scripted or built for
     real with its `open()` stubbed, under a fake clock (`ssh.time`, and `ssh._await` for the wait
     on an attempt) that only a calling thread moves and that raises `Runaway` past twice the bound,
@@ -1231,7 +1247,7 @@ import has no effect.
     (`test_a_write_spends_one_reconnect_window[parent|place|probe]`, which
     `ssh-write-parent-own-deadline`, `-place-own-deadline` and `-probe-own-deadline` each turn red);
     one whose placing program meets it 44 s into the write, past its last start, starts no attempt
-    and gives `-1002` naming `timed out` at once (`test_a_write_command_past_its_last_start_starts_no_attempt`,
+    and gives up naming `timed out` at once, raised as the lost transfer since its session had opened (`test_a_write_command_past_its_last_start_starts_no_attempt`,
     which `ssh-reconnect-starts-past-last-start` also turns red). An attempt whose authentication
     outlasts a 1 s auth timeout, the server holding it, leaves no transport active once it has
     failed, and the next attempt runs the command (`test_a_failed_attempt_releases_its_connection`,
@@ -1247,6 +1263,112 @@ import has no effect.
     (`test_a_reconnect_failure_never_changes_the_cluster_context`). The mutation cases
     `ssh-reconnect-gives-up-for-good`, `sbatch-not-started-reads-as-failed`, `sacct-whoami-unchecked`
     and `context-served-from-a-failed-read` each turn one of these rows red.
+    The silent-link rows (`silent` in every name) put `tests/ssh_server.py`'s `SilentLink` in front
+    of the loopback server: a hop that can stop forwarding both ways and hold new connections the
+    same way, closing no socket (`go_silent()`), forward new connections again (`come_back()`) or the
+    held ones (`resume()`), limit its rate (`rate=`), go silent as the server reaches a step
+    (`silent_at`: a channel, subsystem or exec request, a probe, the SFTP version exchange, or an SFTP
+    lookup, mkdir, write or read; an exec by the program it carries) or once a new connection is made
+    (`silent_after_handshake`), with a 16 KiB receive buffer on what it accepts and a port never in
+    54001–54005. Each runs under a 2 s connect bound (a 6 s reconnect bound), its call on a thread
+    under a watchdog of its figure plus 1 s from the moment the link went silent, which fails with
+    `still waiting <t> s after the link went silent` and then cuts the link; a liveness thread's
+    exception fails the row. A call that starts on a silent link reconnects, over one new connection
+    made within 3 s (`test_a_call_on_a_silent_link_reconnects[run|run_command]`, every command tool
+    with `CLUSTER_MCP_TEST_EVERY_KIND=1`), also when the open's own timeout is shorter than the
+    verdict (`test_a_channel_open_outlasting_its_own_timeout_on_a_silent_link_reconnects[run]`);
+    with the host gone it reads as nothing run, naming `cannot connect to 127.0.0.1: timed out`,
+    within the bound, nothing reaching the server and an attempt held by the hop
+    (`test_a_call_on_a_silent_link_to_a_gone_host_is_not_run[run|run_command|sbatch-path|read_file|list_directory]`),
+    and so does one whose reconnect goes silent once made, early in its window
+    (`test_a_reconnect_onto_a_link_that_goes_silent_still_ends_in_time`) or at its last start, the
+    host back 0.2 s before it, under a 3 s connect bound (a 9 s reconnect bound), where an open left
+    to its own verdict would end a second past the bound: the open, made before the call's work
+    starts, is cut at the call's deadline, and the call ends within the bound and `RECONNECT_SLACK`
+    of its start, its watchdog only stopping a hang
+    (`test_a_late_reconnect_onto_a_link_that_goes_silent_again_ends_in_time[run|write_file]`, every
+    tool, and a write going silent at its SFTP subsystem or version step, with
+    `CLUSTER_MCP_TEST_EVERY_KIND=1`); a late reconnect onto a live link still runs the call
+    (`test_a_late_reconnect_onto_a_live_link_runs_the_call[run|write_file]`). A write whose new link
+    goes silent later, at its own command's open (its parent's `mkdir`, its place step), is inside
+    its transfer: that open waits for its own verdict, and the write raises `TransferLost`, the target
+    unchanged, no sooner than B and within the bound after the silence
+    (`test_a_write_cut_at_its_own_command_after_a_late_reconnect_is_a_lost_transfer[mkdir|place]`,
+    with `CLUSTER_MCP_TEST_EVERY_KIND=1`). A command running as the
+    link goes silent gives `-1003` with its note within the bound, with no timeout or a later one
+    (`test_a_command_on_a_link_that_goes_silent_is_lost[no-timeout|later-timeout]`), and `-1001` when
+    its timeout comes first (`test_a_command_on_a_link_that_goes_silent_ends_at_its_timeout`); with
+    the host back before the verdict it is lost and never sent again
+    (`test_a_command_cut_by_a_silent_link_is_never_run_twice[run|sbatch-path]`). A call beside a
+    stalled command ends within 3 s of its start, the stalled one with it
+    (`test_a_call_beside_a_command_on_a_silent_link_ends_in_time`). A call that starts while the
+    link is silent judges it at its own verdict, B after its start, and that verdict covers the work
+    already in flight: with the link answering again 1 s into the call (B/2), a quiet command and a
+    4 MiB upload stalled at its first write each finish whole beside it on one connection; answering
+    2.8 s in, past the call's verdict but inside the 3 s a background probe would wait, the command
+    is lost and the upload cut within 3 s of the silence, and the call completes on a new connection
+    (`test_a_quiet_command_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`,
+    `test_a_slow_transfer_beside_a_starting_call_has_that_calls_verdict[answered|unanswered]`).
+    A command whose own timeout comes while an upload stalled on the silent link holds the write
+    path, under a 3 s connect bound so the verdict comes well after, returns `-1001` at its timeout
+    and `GRACE` (`test_a_timed_command_beside_a_transfer_stalled_on_a_silent_link_ends_at_its_timeout`).
+    Nothing quiet is cut: a
+    connection idle past the bound serves the next call
+    (`test_an_idle_connection_is_not_taken_for_a_silent_link`), a command silent past it, or
+    trickling its output through a 32 KiB/s hop for longer, gives its whole result on the same
+    connection (`test_a_quiet_command_is_not_taken_for_a_silent_link[quiet|slow-link]`), and so does
+    one through a silent spell that begins as a background probe arrives and ends 2.5 s later
+    (`test_a_quiet_command_rides_out_a_silent_spell_shorter_than_its_verdict`). The transfer rows go
+    silent at a server step of an SFTP request or an exec (`lookup`, `stage`, `upload`, `download`,
+    and the write's `mkdir` and place programs), each named in the watchdog's message. A write
+    whose SFTP session open meets the silence, at its channel, subsystem or version step, reconnects
+    and lands whole (`test_an_sftp_open_cut_by_a_silent_link_reconnects[channel|subsystem|version]`,
+    and `[sftp]` of the open-timeout row); `write_file` reconnects too
+    (`test_a_call_on_a_silent_link_reconnects[write_file]`, every transfer tool with
+    `CLUSTER_MCP_TEST_EVERY_KIND=1`), and with the host gone every transfer tool reads as nothing
+    run (`…to_a_gone_host_is_not_run[write_file|upload_file|download_file|sbatch-content]`). A transfer
+    in flight as the link goes silent raises the lost transfer within the bound, naming the host,
+    saying it may be partly made, and stating what may remain as it is found: `put`'s target
+    truncated, `get`'s local file, a write's target unchanged and its staging directory named, or
+    at the place step the old file or the new one; `sbatch` says the script failed and submits
+    nothing (`test_a_transfer_on_a_link_that_goes_silent_may_be_partly_made[put|get|write-lookup|write-stage|write-upload|write-mkdir|write-place|write-place-gone|sbatch]`).
+    A slow transfer through a 32 KiB/s hop, longer than the bound, lands whole on one connection
+    (`test_a_slow_transfer_is_not_taken_for_a_silent_link[put|get|write]`), and a call beside a 4 MiB
+    upload stalled on the silent link, the row first showing the write path held (the hop's receive
+    buffer and the client's send buffer fixed at 16 KiB, never autotuned, and a send on the path
+    still blocked 0.5 s later within 3 s of the silence, a failure otherwise), ends within 3 s, the
+    upload with it
+    (`test_a_call_beside_a_transfer_stalled_on_a_silent_link_ends_in_time`). A write whose parent's
+    `mkdir` or place step cannot reconnect raises the lost transfer naming the cause, the target
+    untouched (`test_a_write_spends_one_reconnect_window[parent|place]`,
+    `test_a_write_command_past_its_last_start_starts_no_attempt`).
+  - `tests/test_ssh_liveness.py` (`unit`, with `integration` rows on the loopback server): the
+    liveness monitor. On a fake clock, `_verdict` gives a probe after a bound of quiet and at once
+    for a poke, and with nothing heard since the probe went, dead at 2B − `VERDICT_MARGIN` for a
+    background probe or one bound after a waiting poke, whichever is first, never before; any
+    message heard clears the probe, a poke stays latched past an answer to a probe handed over
+    before it and never moves the probe out, the priming probe is never judged, a hand-over
+    counts while the sender is stuck, and while a call waits on an open no answer clears its poke,
+    each probe then judged a bound after it went. A lost transfer names the host, says it may be
+    partly made, and says what may remain; a lost session (a send on its closed channel) is never
+    read as the server's answer by `_upload`, `_is_dir` or `_loops`. The hook stamps nothing on a read that raises; the bound is
+    the connection's own (`_bound`); a fake connection gets no monitor; the close goes outermost hop
+    first on a fake gateway chain; an open pokes the monitor of the transport it opens on. On a real
+    Paramiko client and the loopback server the hook stamps every message, `REQUEST_FAILURE`
+    included, but the read in progress as it went in; `close()` leaves no monitor thread and a call
+    it wakes starts no reconnect. An open on a worker (`_Within`) that has not ended by its call's
+    deadline gives the call nothing, at that deadline, and is closed when it ends; one that ends in
+    time is the call's, its failure raised there, and none starts past the deadline. An SFTP
+    session opened after a reconnect makes all three of its steps on that worker: one held at its
+    channel, its `sftp` subsystem or its version step gives the call `cannot connect to <host>:
+    timed out` at its deadline, the step running on `cluster-mcp-open`, and the session is closed
+    when the step ends
+    (`test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[channel|subsystem|version]`).
+    The doc pin holds the `SSHExecutor` docstring, this file's
+    `executor/ssh.py` footgun and the README to the monitor's figures, the first two to where a
+    call's opens wait, before its work starts and in a `write`'s own commands, and them, §2 and the
+    `Executor` Protocol's `write`, `put` and `get` (their Raises name `ssh.TransferLost` and a
+    transfer that may be partly made) to what a transfer cut short raises and leaves.
   - `tests/test_transports.py` (`integration`, with `unit` controls): `transport_violations`. The
     installed `cluster-mcp -e local` starts under `bin/sandbox.sh` on each transport and a client lists
     exactly `EXPECTED_TOOLS` in the era it asked for: `stdio` and `http` in both eras, `sse` in the
@@ -1932,21 +2054,90 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   and an `AuthFailure` is one only when every source it tried was refused. Paramiko before 3.2
   raises the refusal's text for a closed link, so `pyproject.toml` declares `paramiko>=3.2`
   (`PARAMIKO_FLOOR`; `test_the_declared_paramiko_floor_matches_the_classifier` keeps the two
-  equal). The connect bound (`_bounded`: the TCP connect,
+  equal). The silent link (`_Liveness`). A link that dies with no reset still reads as connected,
+  so a liveness monitor watches each published connection. It stamps every message the peer sends, and sends a probe
+  (`PROBE_REQUEST`, a global request that wants a reply) once nothing has been heard for the
+  connect bound B, and at once when a call starts using the connection; the first probe is never
+  judged. A probe with nothing at all heard since it went is judged dead B after the poke of a
+  call that started while it was out, so a call that starts on a silent link notices it at most B
+  after its start, and a background probe after 2B − `VERDICT_MARGIN` (29 s with the default
+  bound), so a call in flight ends at most 3B − 0.55 s after the last message heard, inside the 3B
+  bound. A call that starts during a stall ends the stalled call too, at its own verdict. On a dead
+  verdict the monitor closes the connection's transports, the outermost gateway hop first, and
+  every wait on it ends: a channel open that fails on a lost connection has sent nothing, so the
+  call reconnects within its deadline; from the exec request on nothing is retried, and a command
+  cut short returns `CONNECTION_LOST_EXIT_CODE`, with or without a timeout, unless its own timeout
+  came first. That timeout holds whatever another call holds on the connection: nothing a call sends
+  once its exec request is answered (the end of stdin, the window adjusts its reads owe, the TERM
+  and KILL at a deadline, the close) waits on the call's own thread for the connection's write
+  path, which an upload stalled on the silent link holds until the verdict (`_Sends`). Nothing merely quiet is cut, since any message proves the link live, while the peer
+  answers within the background verdict: at the default bound, a quiet command survives the peer
+  answering nothing for 29 s after a probe, and a transfer while some reply arrives at least every
+  44 s. A call's first open, on the connection it found live as it began, waits for its own
+  verdict, B after it begins. Every later open before the call's work starts (a command's exec
+  request, a transfer's first file operation), after a reconnect or a loss, runs on a worker thread
+  (`cluster-mcp-open`) that the call waits for no later than its deadline, its sends on the write
+  path included, so neither a link that goes silent again after a late reconnect nor a write path
+  another call holds there keeps the call from its work past the 3B bound: an open not made by
+  then gives `cannot connect to <host>: timed out`, and nothing was sent. Once its work has
+  started, a call's end is bounded from the silence instead, a command's as above and a
+  transfer's as below. A `write`'s own later commands (its parent's `mkdir`, its place step, and
+  the probe that asks why a transfer fell short) run inside its transfer, each on the connection
+  it finds live as it begins, the one the write's session opened on: each one's first open waits
+  for its own verdict, after a late reconnect too and past the write's deadline, and a later one
+  is held to the write's deadline. A silence at the `mkdir` or the place step raises
+  `TransferLost` within the bound after it, and a probe that cannot run gives no reason. A transfer's SFTP session opens with the same retry, its three steps (the channel, the `sftp`
+  subsystem and the version exchange) holding the call's poke, so each probe sent while it waits is
+  judged B after it went. Once the session has opened, a loss raises `TransferLost`, a
+  `ConnectionError` naming the host that says the transfer may be partly made and what may remain:
+  for `put`, the remote target, truncated or holding part of the file; for `get`, the local file,
+  likewise; for `write`, the target unchanged and the staging directory that may remain, or, when
+  its parent's `mkdir` or its place step meets the loss, what that step can leave (an overwrite is
+  the old file or the new one, an append or a write-through may be partial). The loss is decided by
+  state before any handler that would read it as the server's answer, and a lost write leaves its
+  staging directory (`issues/ssh-write-staging-leftover.md`). A link quieter than that is taken for dead, the recorded floor
+  (`issues/ssh-liveness-message-gap.md`). What it rests on: the activity hook is an instance
+  wrapper on the transport's `packetizer.read_message` (the one call site where `Transport.run`
+  reads every message after the handshake, in 3.2 and 5.0), which stamps a read that returns and
+  nothing on one that raises, and misses the read in progress as it goes in, hence the unjudged
+  priming probe; the decision is the pure `_verdict`; a call pokes as its channel or session opens
+  (`opening`, the one poke, made by every open that follows `_ensure_connected`), its poke latched
+  until the open ends and then until a probe handed over at or after it is answered, and a poke
+  never moves the probe already out; the judge thread
+  (`cluster-mcp-liveness`) takes no transport lock and hands each probe to the sender thread
+  (`cluster-mcp-probe`), which sends it through `_send_user_message` as `_signal` sends, swallows
+  every error and has at most one send in flight, the probe counting from its hand-over so a send
+  stuck behind a full buffer still meets its verdict; the monitor reads its own clock
+  (`_liveness_clock`), never `time` or `_await`, which the fake-clock reconnect rows replace; it is
+  made with the connection it watches under the lock, started once the lock is let go, stopped
+  with it, and only a Paramiko `Transport` is watched. A channel open waits `_open_timeout`,
+  `max(OPEN_TIMEOUT, B + OPEN_MARGIN)`, so the monitor's close comes first on a dead link; its
+  failure is a loss by state (`_gone`: the monitor's verdict, or the transport inactive `SETTLE`
+  after it, decided inside the open, so on a worker it is the worker's wait), never by exception
+  type; an open on a worker (`_Within`) that ends after its call stopped waiting is closed; and a call that `close()` woke (`_closed`) raises as it
+  would have and starts no reconnect. The connect bound (`_bounded`: the TCP connect,
   banner and auth timeouts default to `CONNECT_TIMEOUT` through Fabric's config, so an ssh_config
   `ConnectTimeout` still wins, and a startup against an unreachable host is answered within it); the channel loop (`_collect`), which must
   send no stdin and its EOF at once; wait without spinning; read to both end records, never stopping
   at the exit status (sshd sends it ahead of output still queued on the link); and at the deadline
   return the timeout marker rather than raise, naming an exit status that had arrived
-  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM and then asking for KILL unless
-  the channel has ended (sshd acts on it only while the launch lives: a TERM ignored from the
-  launch's entry; never before the read, which would cut short what a stopping command prints),
+  (`launch.LATE_NOTE`) or reading for `launch.GRACE` after the TERM and then handing over the KILL,
+  which goes `GRACE` after the TERM went unless the channel has ended by then (sshd acts on it only
+  while the launch lives: a TERM ignored from the launch's entry; never handed over before the read,
+  whose window adjusts its wait would hold back, cutting short what a stopping command prints),
   never sending a `signal` request on a channel the client has closed or begun to close (sshd drops
-  the connection for one on a channel it has freed; `_signal` checks and sends holding the channel's
-  lock, and waits for a key exchange without it, as Paramiko does, for no longer than Paramiko's own
-  bound), and report a channel that closed
+  the connection for one on a channel it has freed; `_signal` checks and sends holding the
+  connection's write path, `clear_to_send_lock`, through which Paramiko sends every close, never the
+  channel's lock, which the call's reads and the transport thread take; it waits for a key exchange
+  and for the path a step at a time, as Paramiko does, for no longer than Paramiko's own bound), and
+  report a channel that closed
   without its end of output as a lost connection (`CONNECTION_LOST_EXIT_CODE`), never as a command
-  that did not start; `write`, which stages content by SFTP as a 0600 file in a fresh 0700
+  that did not start; the call's sender (`_Sends`, a `cluster-mcp-send` thread per call, started
+  with its first send and ended with its last), which makes every send of a call once its exec
+  request is answered (the EOF, the window adjusts its reads owe, read from Paramiko's buffers by
+  `_take` since `recv` would send them on the caller's thread, the TERM, the KILL and the close), in
+  order, so another call holding the write path never holds this one past its timeout and `GRACE`
+  (with no timeout, the call waits for its sends: on a dead link, until the verdict); `write`, which stages content by SFTP as a 0600 file in a fresh 0700
   directory beside the target, with no pipelined writes and a checked close (`_upload`, `_close`:
   Paramiko 5 drops both reports otherwise), checks its size and `cksum`, has a fixed program
   refuse an unwritable target and move the file into place (keeping the target's mode but setuid
@@ -2082,7 +2273,15 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   closed to new entries, is written through instead, staged in the login home; the staging
   directory is removed afterwards, except when the host is lost after the content is staged:
   removing it needs the connection, so it can then remain (mode 0700, the user's own) beside the
-  target or in the login home, a known limitation (`issues/ssh-write-staging-leftover.md`). A
+  target or in the login home, a known limitation (`issues/ssh-write-staging-leftover.md`). Over
+  `ssh` a connection lost once the write's SFTP session has opened, a silent link included, raises
+  `ssh.TransferLost`, a `ConnectionError` (so an `OSError`, which the tools report as a failed
+  write) naming the host and saying the transfer may be partly made, with what may remain: while
+  the content is staged, the target unchanged and the staging directory named; at the parent's
+  `mkdir` or the place step (whose `-1003`, or `-1002` on the lost connection, is raised this
+  way), what that step can leave, an overwrite being the old file or the new one and an append or a
+  write-through possibly partial. `sbatch`'s job script is written this way, and no job is
+  submitted after it. A
   write refuses what `cat >` refuses: an existing target the
   user may not write (`[ -w ]`: a read-only file, another user's file in a group-writable
   directory) fails with `Permission denied`, a symbolic link whose target's directory does not
@@ -2153,7 +2352,10 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   resolves through symlinks (`/bin/ls` comes back `/usr/bin/ls`). A directory destination receives
   the file under its own name. A leading `~`/`~/` is the home of whoever touches that file: on the
   command side the user commands run as; on the server's side the server process's user (`ssh`,
-  `local`), except in `delegate`, where both sides are the mapped user on one host.
+  `local`), except in `delegate`, where both sides are the mapped user on one host. Over `ssh` a
+  connection lost once the SFTP session has opened raises `ssh.TransferLost` naming the host and
+  saying the transfer may be partly made: `put`'s remote target, or `get`'s local file, may be
+  truncated or hold part of the file (the tools report the error).
 - **Three implementations move together:** `SSHExecutor`, `LocalShellExecutor`, `DelegatingExecutor`.
   Adding or changing a Protocol member means editing all three in the same commit — there is no base
   class to inherit a default from, and `runtime_checkable` `isinstance` checks **method presence
@@ -2197,7 +2399,12 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   - **`CONNECTION_LOST_EXIT_CODE = -1003`** (`ssh` only): the connection was lost before both end
     records arrived, so the command may have run, and may have finished: the channel closed without
     its end of output (as the transport closes it when the link goes), or the link went once the
-    exec request was sent. stdout and stderr keep whatever arrived, and stderr ends with
+    exec request was sent. A link that went silent, with no reset, is one: the liveness monitor
+    closes the connection at its verdict (the `executor/ssh.py` footgun), and a command running
+    then, with or without a timeout, returns this code within the reconnect bound after the last
+    message heard, unless its own timeout came first (then it is `TIMEOUT_EXIT_CODE`, the timeout
+    contract below). A channel open that the loss cut short sent nothing: that call reconnects
+    instead, and gives `NOT_STARTED_EXIT_CODE` only when it cannot. stdout and stderr keep whatever arrived, and stderr ends with
     `cluster-mcp: the connection was lost; the command may have run` (`launch.LOST_NOTE`). It is
     never `-1002`: a command whose start sentinel had not arrived when the link went may still have
     run. `sbatch` reports it as a submission that may have happened, never as a failure, so an
@@ -2302,13 +2509,17 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   no startup file's `TMOUT` (readonly or not), disabled `read`, or function named like a builtin or a
   path the launch runs that the prologue undoes makes it signal a command that has not reached its
   deadline, or has no timeout. Over `ssh` the client asks for
-  TERM, reads for `GRACE`, then, unless the channel has ended meanwhile (closed, or its output and
-  exit status both in), asks for KILL, and closes the channel (`_collect`); the KILL adds no wait. No `signal` request goes on a channel the client
+  TERM, reads for `GRACE`, then hands over the KILL, which goes `GRACE` after the TERM went unless
+  the channel has ended by then (closed, or its output and exit status both in), and closes the
+  channel (`_collect`); the KILL adds no wait. These requests, like everything a call sends once its
+  exec request is answered, go through the call's sender (`ssh._Sends`), never on its own thread, so
+  the call returns at its timeout and `GRACE` whatever another call holds on the connection's write
+  path; a TERM that waited on that path still gets its whole `GRACE` before the KILL. No `signal` request goes on a channel the client
   has closed or begun to close: sshd answers a request on a channel it has freed by dropping the
   connection, which every call and transfer shares, so `_signal` checks and sends holding the
-  channel's lock, under which Paramiko marks a channel closed before it sends its own close; and none
-  goes during a key exchange (RFC 4253 §7.1): `_signal` waits for it to end without that lock, for
-  no longer than Paramiko's own bound. sshd
+  connection's write path (`clear_to_send_lock`), through which Paramiko sends a channel's close
+  after it marks the channel closed; and none goes during a key exchange (RFC 4253 §7.1): `_signal`
+  waits for it to end holding no lock, for no longer than Paramiko's own bound. sshd
   acts on the KILL only while the launch lives, which after the read means the program ignored TERM
   from its entry (the remote login shell's own rc file, `.bashrc` for a bash login shell or
   `.zshenv`, ignored it before the bootstrap ran, and bash cannot undo an ignore it started with),
@@ -2879,10 +3090,17 @@ What each mode means:
   error message and exit status are the intended ones, the file landed where you expected).
 - **Comments (and docstrings) are declarative statements of the invariant or the *why*** —
   capitalized sentences (`# Non-interactive: there is no TTY to prompt on.`), not lowercase
-  fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`): those restart per feature, live in
-  `spec/{slug}/`, and collide across branches (`tests/test_hygiene.py` keeps them out of the
-  package and the suite). Requirement provenance lives in the commit, the PR,
-  and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
+  fragments, and **never** a feature-scoped spec id (`R#`, `P#`, `Q#`) or a review-finding id (`F#`,
+  or `F-` and a capital), in a comment or anywhere else in the package or the suite: those restart
+  per feature or per review cycle, live in `spec/{slug}/`, and collide across branches.
+  `test_no_spec_ids_in_the_package_or_the_suite` reads every line of every `.py` file in each
+  portion of the `cluster_mcp` namespace and directly in `tests/` (not its subdirectories), code and
+  strings as well as comments. It fails on an `R`, `P`, `Q` or `F` with one or two digits, or `F-`
+  and a capital, that no letter or digit touches; an underscore is no shield, so an id glued into a
+  name is found, in capitals, and in lower case where an underscore joins it to the name. Not ids:
+  three or more digits (`F401`), a letter or digit beside it (`0xF1`, `R2D2`, `F-Droid`), and an `F`
+  and its number followed by a hyphen (a checker's file name, `F1-contribution-refusal.sh`).
+  Requirement provenance lives in the commit, the PR, and the retained `spec/{slug}/`. Referencing stable things (a real symbol, a documented invariant,
   an `/etc/agents.d` path) is fine.
 - **No `Co-Authored-By` trailer** on any commit (repo convention). PR *bodies* end with the Claude
   Code generation line.

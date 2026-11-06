@@ -62,6 +62,32 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   failed on CI (run 41977646670, handshake era, `fix/ssh-half-open-link` at `7bf9666`, a plan-only
   commit that changes no code). The start must finish in under 0.8 s and took 0.85 s. 4835 others
   passed; the modern era passed, and the re-run of the failed job passed.
+- 2026-11-05: `spec/ssh-half-open-link/` P2: `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`
+  failed once in a local full-suite run (macOS, handshake era, load about 2.3 with another session's
+  suites running) with "0 reconnect workers ran, not one", as on 2026-10-30; 4880 others passed. It
+  passed three times run alone (7.1 s, 10.3 s, 3.1 s). The branch adds a liveness monitor to every
+  published connection (threads `cluster-mcp-liveness` and `cluster-mcp-probe`, never counted as
+  reconnect workers); the row's own window is unchanged.
+- 2026-11-05: `test_a_reconnect_worker_that_cannot_start_frees_the_attempt` failed on CI (handshake
+  era, `fix/ssh-half-open-link` at `8ff5108`) with "the call whose worker could not start took 0.3 s,
+  not giving up at once"; 4897 others passed. It is the row's second sighting. Measured during
+  `spec/ssh-half-open-link/` P3 on macOS:
+  - alone, 20 runs each: that branch 20 of 20 passed, `develop` (`13c0e83`) 19 of 20, its one
+    failure the same text at 0.3 s;
+  - alternated run by run under the same load (four CPU spinners beside another session's suites,
+    load 22–26): 12 of 20 passed on each.
+
+  Its bound is 0.1 s of real time (`ATTEMPT_POLL`) across an in-memory tool call, so it measures
+  load. The branch adds nothing to that path: the call fails at `_ensure_connected` before any
+  monitor exists for it, and the dropped connection's monitor threads end within a tick of
+  `_wait_dropped`. Nothing on the path advances the fake clock.
+- 2026-11-05: `spec/ssh-half-open-link/`, review cycle 3's remediation:
+  `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake` failed once in the gate's union
+  run of eight files (macOS, handshake era, load about 3 at its start, another session's work
+  beside it) with "0 reconnect workers ran, not one", its third sighting with that text; 1684 others
+  passed. It passed three times run alone (3.12 s, 3.04 s, 3.11 s per call), and the same run on the
+  identical tree passed 1685. The remediation changes no code under the row: only docstrings, a
+  comment, tests and checkers.
 
 ## Why it was deferred
 

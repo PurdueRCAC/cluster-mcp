@@ -57,3 +57,4 @@ call's bound runs it after all. Which of the two, and where the guard sits, is l
   times out after 30 s with Paramiko's error rather than the host's name),
   [`ssh-reconnect-stuck-step.md`](ssh-reconnect-stuck-step.md).
 - Found by: `timeout-process-cleanup` review-cycle-1 remediation, 2026-11-02.
+- 2026-11-05: `spec/ssh-half-open-link/` retries a channel or SFTP-session open that fails on a lost connection (`_gone`: the liveness monitor's verdict, or the transport inactive `SETTLE` after the failure), back into the reconnect within the call's deadline, so a reset while a channel opens now reconnects or reports the command not run; no row drops the link at that instant, so R2 above is still unpinned.
