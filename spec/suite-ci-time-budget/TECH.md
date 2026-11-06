@@ -3,7 +3,7 @@ slug: suite-ci-time-budget
 title: Each CI era job keeps a margin under its timeout, and every row keeps its proof
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/suite-ci-time-budget
 base: develop
 current_phase: done
@@ -48,10 +48,10 @@ phases:
   hill: uphill
   verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py prepush && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py mirror && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py untouched && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py partition modern && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py ci --runs-file spec/suite-ci-time-budget/ci-runs.txt --check-baseline
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 567ce36d5ad0c2026d1b5566318265ddf0994b09
+  verdict: changes-requested
+  blocked_reason: 'F-A: § Testing omits test_suite_parts.py and its checks'
+  cycle: 1
 ---
 
 # TECH.md — Each CI era job keeps a margin under its timeout, and every row keeps its proof
