@@ -3,7 +3,7 @@ slug: ssh-half-open-link
 title: A dead SSH link that still reads as connected is noticed within a bound
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/ssh-half-open-link
 base: develop
 current_phase: done
