@@ -3,7 +3,7 @@ slug: suite-ci-time-budget
 title: Each CI era job keeps a margin under its timeout, and every row keeps its proof
 kind: test
 appetite: small
-status: in_review
+status: done
 branch: test/suite-ci-time-budget
 base: develop
 current_phase: done
