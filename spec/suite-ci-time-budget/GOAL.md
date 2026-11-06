@@ -151,6 +151,20 @@ runs in a different CI job or process than before.
   stalled-reconnect seed out of scope, no product code, no row behind an opt-in (foreman ruling,
   resolved 2026-11-06).
 
+- **Q4:** Does R2's "deselected" bar a `-k` pair that splits one module across two jobs of an
+  era? — **A:** No. "Deselected" is read per era: an id is deselected when none of that era's jobs
+  runs it. A pair of commands whose selections are an expression and its exact negation over one
+  module deselects nothing from the era, and the plan's `partition` gate and
+  `tests/test_suite_parts.py` prove every id runs exactly once per era (foreman ruling at the
+  PLAN/TECH sign-off, resolved 2026-11-06).
+- **Q5:** Which commit do R1's runs measure, when R7 writes their baseline into the tree? —
+  **A:** R1's three or more runs are of `T1`, the branch's final suite, workflow, tests and
+  conftest. `T2` adds only the baseline row, the run ledger, TECH state and any seed sighting, and
+  the plan's `--check-baseline` proves it changes nothing a suite job runs. Before landing, every
+  push run of `T2` must be green with each suite job within 600 s, and `origin/develop` must not
+  have moved past the base. No further re-runs of `T2` are owed (foreman ruling at the PLAN/TECH
+  sign-off, resolved 2026-11-06).
+
 ## Related materials
 
 - Seed: [`issues/suite-ci-time-budget.md`](../../issues/suite-ci-time-budget.md)
