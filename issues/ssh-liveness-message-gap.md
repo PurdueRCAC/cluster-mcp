@@ -59,5 +59,5 @@ noticed within the bound.
 - Candidate directions: smaller SFTP write requests in `write`'s staging (more replies per byte);
   reading the socket's unacknowledged bytes where the platform reports them (`TCP_INFO`, Linux
   only); a longer verdict only while an upload is in flight.
-- Related: `spec/ssh-half-open-link/`, `issues/ssh-half-open-link.md`.
+- Related: `spec/ssh-half-open-link/` (landed 2026-11-06).
 - Found by: `ssh-half-open-link` planning research, 2026-11-05.

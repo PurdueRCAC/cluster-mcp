@@ -75,10 +75,10 @@ the release lands.
 
 # Part I — Becoming cluster-mcp
 
-Eleven cycles, after the rename, the capability extras, the capability probe and the timeout stop,
-that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC clusters, with Purdue as
-one supported site*, ending in **release 0.2.0**. The rename to `cluster-mcp` and the uv-workspace
-restructure landed on `develop` on 2026-10-30
+Ten cycles, after the rename, the capability extras, the capability probe, the timeout stop and the
+silent-link check, that take this from *the Purdue RCAC MCP server* to *an MCP server for HPC
+clusters, with Purdue as one supported site*, ending in **release 0.2.0**. The rename to
+`cluster-mcp` and the uv-workspace restructure landed on `develop` on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
 ([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
@@ -91,12 +91,16 @@ timeout stop landed on 2026-11-04
 ([`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/)): a timed-out command and
 everything in its process group have exited within 2 × `GRACE` of the deadline in every mode, by a
 watchdog that sends KILL after the grace, with the remaining limits recorded in
-`issues/timeout-stop-limits.md`. What remains builds the bespoke tools, makes the shell a capability
-a deployment chooses, then builds each capability on the extras mechanism — Slurm first, then LMOD
-and xdu as the new capabilities that prove it generalizes — and finally the site extra that bundles
-them. Ahead of the tool families sit the executor fixes: the four that `ssh-reconnect-loop` deferred
-on the SSH connection, and a reconnect test whose wall-clock bound measures load as well as
-behaviour.
+`issues/timeout-stop-limits.md`. The silent-link check landed on 2026-11-06
+([`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)): over `ssh`, a link that goes silent
+without a reset is noticed within the reconnect bound and treated as a lost connection, and a call
+in flight on it ends within that bound, with the floor below which a live link reads as dead
+recorded in `issues/ssh-liveness-message-gap.md`. What remains builds the bespoke tools, makes the
+shell a capability a deployment chooses, then builds each capability on the extras mechanism —
+Slurm first, then LMOD and xdu as the new capabilities that prove it generalizes — and finally the
+site extra that bundles them. Ahead of the tool families sit the CI time budget, taken next, and the
+executor fixes: the three that `ssh-reconnect-loop` deferred on the SSH connection, the liveness
+floor, and a reconnect test whose wall-clock bound measures load as well as behaviour.
 
 ## The rename left three identity strings behind
 
@@ -135,28 +139,9 @@ planning research, 2026-11-01, and its reviews, 2026-11-02 and 2026-11-04.
 *Horizon: later · Depends on: timeout-process-cleanup (cleared: landed on `develop` 2026-11-04) · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5*
 **Seed:** [`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md) · *status: unshaped*
 
-## A dead SSH link that still reads as connected holds file transfers without limit
-
-When the link to the cluster goes silent without a reset, nothing marks it dead: keepalive is off
-and the transport stays active. No reconnect starts, so the bounded reconnect from
-`ssh-reconnect-loop` never runs. The cost depends on the tool:
-
-- the SFTP tools wait up to an hour to open a channel, and then without limit;
-- each command waits 30 s and fails with Paramiko's error rather than the host's name;
-- a command whose channel was already open waits without limit when it has no timeout.
-
-Pre-existing. Found by `ssh-reconnect-loop`'s planning research, 2026-10-23, and ruled out of
-that cycle's scope.
-
-It sits with the timeout entry above because both are about a call that a client sees hang on a
-dead or stuck remote end.
-
-*Horizon: near-term after `ssh-reconnect-loop` · Depends on: ssh-reconnect-loop (its published-connection lifecycle; cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) research 03 §B*
-**Seed:** [`issues/ssh-half-open-link.md`](issues/ssh-half-open-link.md) · *status: adopted:ssh-half-open-link*
-
 ## A live link that answers nothing for longer than its liveness verdict reads as dead
 
-The silent-link detection `ssh-half-open-link` adds calls a link dead when a probe goes unanswered,
+The silent-link detection `ssh-half-open-link` added calls a link dead when a probe goes unanswered,
 with nothing at all heard since, past its verdict: a background probe two connect bounds less
 `VERDICT_MARGIN` after it went (29 s at the default bound), and, while a call starts, one bound after
 that call's start (15 s). A live link on which nothing arrives for that long, such as a quiet command
@@ -165,7 +150,7 @@ whose peer answers nothing for 29 s (an outage of about 25 s), or an SFTP upload
 that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
 a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 
-*Horizon: later · Depends on: ssh-half-open-link · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*
+*Horizon: later · Depends on: ssh-half-open-link (cleared: landed on `develop` 2026-11-06) · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5*
 **Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
 
 ## A write whose host is lost after staging leaves its staging directory behind

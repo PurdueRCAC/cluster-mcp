@@ -46,5 +46,6 @@ host is reachable again, and never leaves more than a bounded number of stuck wo
 
 ## Notes
 
-- Related: `spec/ssh-reconnect-loop/` (PLAN §5 risk 3, R7); `issues/ssh-half-open-link.md`.
+- Related: `spec/ssh-reconnect-loop/` (PLAN §5 risk 3, R7); `spec/ssh-half-open-link/` (landed
+  2026-11-06).
 - Found by: `ssh-reconnect-loop` plan, 2026-10-23; filed at its P3 ledger, 2026-10-26.
