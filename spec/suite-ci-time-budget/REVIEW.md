@@ -47,3 +47,23 @@ Unmapped changes: the `ROADMAP.md` and `issues/suite-ci-time-budget.md` status f
 ## Human-gate triggers
 
 - None. The finding is in `AGENTS.md`, not on § Invariants' high-blast-radius list, and touches no `[human gate]` section.
+
+## Review cycle 2 — approved (2026-11-06)
+
+- **Reviewed commit:** dd4c5f2b909f2511642cef33b8a0f3be3625c2a5  ·  **Mode:** scoped to F-A's remediation (one fresh blind reviewer; the remediation is documentation only, outside every high-blast-radius path).
+
+### Verification run
+
+- A mechanical class check, written by the reviewer, parsed § Testing's bullets. It checked them against `tests/test_*.py` on disk, against the markers from `pytest --collect-only -m unit` / `-m integration`, and against each module's top-level definitions (via `ast`). Result: 40 modules, 40 bullets; no module without a bullet, no bullet without a module. Every stated marker set equals the collected set. Every public `*_violations` function is named in its module's bullet. Every backticked `*_violations` and `test_*` name exists. Two names are attributed to `bin/audit_lock.py` and `bin/sdist_hygiene.py`, which is where they are defined.
+- Negative control: the same check on `567ce36`'s `AGENTS.md` reports 16 problems (the new module unlisted, two marker statements wrong, 15 modules with unlisted checks).
+- Each newly described check was read against its source; every description matches.
+- `git diff 567ce36 dd4c5f2 --stat -- . ':(exclude)spec/'`: `AGENTS.md` only, all hunks inside § Testing. § Factory, § Conventions and § Packaging are byte-identical (`cmp`).
+- `uv run pytest -q tests/test_hygiene.py tests/test_suite_parts.py`: 121 passed in each era.
+
+### Findings
+
+- None. F-A's class is closed.
+
+### Human-gate triggers
+
+- None, in either cycle.
