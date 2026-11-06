@@ -3,10 +3,10 @@ slug: suite-ci-time-budget
 title: Each CI era job keeps a margin under its timeout, and every row keeps its proof
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/suite-ci-time-budget
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-06'
 phases:
 - id: P1
@@ -35,7 +35,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures modern && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py fixtures-control legacy && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 1 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 2 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 3 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard legacy 4 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 1 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 2 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 3 && UV_PYTHON=3.14 uv run -q --with pyyaml python -I spec/suite-ci-time-budget/verify/suite-gate.py shard modern 4
 - id: P3
   name: Three measured CI runs, the budget's baseline row, and the ledger (Run A, then Run B)
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R5
@@ -180,14 +180,14 @@ waits on CI, so it is dispatched as two runs (the foreman's "external waits spli
   (record, replace once); whether the row is of that class is the foreman's call, by the seed.
 
 **Run B:**
-- [ ] Write `spec/suite-ci-time-budget/ci-runs.txt`: `sha <T1 full>`, one `run <id>:<attempt>` per
+- [x] Write `spec/suite-ci-time-budget/ci-runs.txt`: `sha <T1 full>`, one `run <id>:<attempt>` per
       counted attempt, and `replaced <id>:<attempt>` for a replaced one (at most one), whose dated
       sighting goes into `issues/stalled-reconnect-test-timing.md` in this commit, naming the run id,
       the era (`handshake` or `modern`) and the row's test name.
-- [ ] Run `suite-gate.py ci --runs-file spec/suite-ci-time-budget/ci-runs.txt` without
+- [x] Run `suite-gate.py ci --runs-file spec/suite-ci-time-budget/ci-runs.txt` without
       `--check-baseline` first; it prints the baseline sentence. Put it in the `ci budget` row in
       place of `Baseline …: pending`, changing nothing else in `AGENTS.md`.
-- [ ] Stage, run the frontmatter `verify:`, mark P3 done and commit. The new head `T2` differs from
+- [x] Stage, run the frontmatter `verify:`, mark P3 done and commit. The new head `T2` differs from
       `T1` only in that row, `ci-runs.txt`, TECH state and a seed sighting (PLAN § 3, deviation 2).
 - Before landing (publish, after the foreman pushes `T2` and its push run ends): run
   `suite-gate.py head`. It reads every push run of `T2` (green, every suite job within 600 s) and

@@ -1,0 +1,6 @@
+# The measured commit and every attempt of its push runs, read by `suite-gate.py ci --runs-file`.
+sha ef301e6bf6d76aeb6848233ae936e785685f96fb
+run 42229254457:1
+run 42229254457:2
+replaced 42229254457:3  # one probes row on the handshake era's fourth job; its sighting is in the seed
+run 42229254457:4
