@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:skip-check-fence-gaps
 kind: test
 appetite: small
 lane: public
