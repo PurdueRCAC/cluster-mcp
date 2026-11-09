@@ -93,6 +93,17 @@ within its limit is reported exactly as it is today.
   reported as not killed (R3). That is the runner's documented rule, that a case is caught only when
   every target fails with its `why`, and the conservative reading for a gate (foreman ruling at the
   GOAL gate, resolved 2026-11-09).
+- **Q:** Which processes does "every process that run started" (R1, and R2's "no process of that
+  run") cover? — **A:** Every process reachable from the run's wrapper at the stop, through a chain of
+  live parents or through membership in a process group of such a process. A process that cut both
+  links before the stop (left every group of the run and lost its parent) is out of portable reach,
+  and is not covered; in the suite only the rows that make such an escape on purpose do that
+  (2026-11-09, foreman ruling at the PLAN/TECH gate).
+- **Q:** How is R4 ("no case's verdict … changes") shown, without a sweep of every case? — **A:** By
+  the 22-case sample run in two passes against develop's recorded output (planted: each case still
+  killed with its `why`; unmutated: each target still passes), the three `--self-check` controls, and
+  the gate that holds every other statement of the runner byte-identical to develop's (2026-11-09,
+  foreman ruling at the PLAN/TECH gate).
 
 ## Related materials
 
