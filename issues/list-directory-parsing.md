@@ -41,5 +41,6 @@ name holds and whatever kind of file it is, and one odd entry never fails the li
 ## Notes
 
 - Related: `spec/safe-execution/` (research 04 §4, PLAN risk 7). `ROADMAP.md` places it under
-  `issues/tool-surface.md`, whose `file_*` family rewrites `list_directory`.
+  `issues/files-extra.md`, whose file family rewrites `list_directory` (moved there from
+  `issues/tool-surface.md`, 2026-11-09).
 - Found by: `safe-execution` planning research, filed at P4 (2026-10-17).

@@ -12,10 +12,10 @@ lane: public
 Every `cluster-mcp` server serves `run_command`, whatever else is installed. It is the one tool
 that does anything the account can do, and the one no client can reason about from its name. Today
 a deployment cannot leave it out short of patching the server. Someone running a hosted server for
-other users, in `delegate` mode, under the token mode of Part II, can't offer "the cluster's files,
+other users, in `delegate` mode or under the hosted token mode, can't offer "the cluster's files,
 jobs and storage, through named tools" without also offering "and any command line".
 
-`tool-surface` puts the bespoke tools first and the shell last, and keeps the shell, because on a
+The roadmap puts the bespoke tools first and the shell last, and keeps the shell, because on a
 cluster running code is the product. That is the right default for a user running the server for
 themselves. It leaves no choice for an administrator who wants the named tools only.
 
@@ -28,8 +28,14 @@ This is the same mechanism that serves `[slurm]` and `[rcac]` (`capability-extra
 server offers a shell is then decided where every other capability is: at installation, by the
 operator.
 
-- **The executor stays in the core.** Every tool is built on `Executor.run`; only the MCP tool,
-  its instructions and `tool-surface`'s steering rules move. A server without the extra still runs
+*Re-scoped 2026-11-09.* The member is a remote shell and nothing about HPC: `run_command` over the
+executor (the SSH bridge in the default mode), with instructions that name no scheduler, module
+system or filesystem. `cluster-mcp[shell]` alone is a remote shell, useful on any host the bridge
+reaches. Lexing and steering on `run_command` are not part of this cycle; they are
+`issues/shell-rails.md`'s, in 0.4.0.
+
+- **The executor stays in the core** (`issues/core-extraction.md`). Every tool is built on
+  `Executor.run`; only the MCP tool and its instructions move. A server without the extra still runs
   commands, but only the ones its named tools compose.
 - **The instructions follow what is loaded.** Without the member, no served text names
   `run_command`. The core's text says what to do when no tool fits: tell the user the server has no
@@ -45,17 +51,19 @@ operator.
   What leaving it out does give: every action is a named tool with honest annotations, which a
   client can allow-list tool by tool and an audit log reads as intent; and the easiest path to an
   arbitrary command is gone. The combination that does confine is the shell left out *and*
-  `tool-surface`'s `--profile read-only`. The docs name that combination and say plainly that the
-  shell's absence alone is a choice of scope, not a security boundary (the boundary remains the
-  Unix account).
+  `--profile read-only` (`issues/tool-surface.md`). The docs name that combination and say plainly
+  that the shell's absence alone is a choice of scope, not a security boundary (the boundary remains
+  the Unix account).
 - **Installation widens, a profile narrows.** A runtime profile may serve less than is installed;
   it may never serve a tool that isn't installed. So no flag adds a shell to a server installed
   without one.
 
-**Sequencing.** It lands after `tool-surface`, whose `file_*` family makes a server without a shell
-useful, and before release 0.2.0. Under the `cluster-mcp` name, what a bare install serves is set
-once: 0.2.0 is the first release under that name, so changing the default then breaks no one, and
-changing it later would.
+**Sequencing.** It lands in 0.3.0, with or right after `issues/core-extraction.md`, beside
+`issues/files-extra.md`, whose file family makes a server without a shell useful. *Corrected
+2026-11-09:* this seed first argued for 0.2.0, the first release under the `cluster-mcp` name,
+since changing the bare default then would break no one. Release 0.2.0 now carries no capability
+reshaping, so its bare install still serves the shell, and 0.3.0 narrows it; the release notes of
+both say so.
 
 Open questions for shaping:
 
@@ -74,8 +82,8 @@ Open questions for shaping:
 
 ## Sketch of the acceptance criteria
 
-- **R1** — `run_command` and its steering rules SHALL be registered only by the `[shell]` member;
-  no other distribution SHALL serve a tool that takes a free-form command line.
+- **R1** — `run_command` SHALL be registered only by the `[shell]` member; no other distribution
+  SHALL serve a tool that takes a free-form command line.
 - **R2** — WHERE the shell member is not installed, no served instruction, resource or tool
   description SHALL name `run_command`, and the core's instructions SHALL say that the server has
   no shell.
@@ -90,9 +98,11 @@ Open questions for shaping:
 
 ## Notes
 
-- Related: [`tool-surface.md`](tool-surface.md) (the `file_*` family, steering, `--profile
-  read-only`), [`site-extras.md`](site-extras.md) (which extras a site bundles),
+- Related: [`core-extraction.md`](core-extraction.md) (what stays in the core),
+  [`tool-surface.md`](tool-surface.md) (names, annotations, `--profile read-only`),
+  [`files-extra.md`](files-extra.md) (the file family), [`shell-rails.md`](shell-rails.md) (lexing and
+  steering, 0.4.0), [`site-extras.md`](site-extras.md) (`[rcac]` pulls `[shell]`),
   [`slurm-capability.md`](slurm-capability.md) (job scripts run anything),
-  `spec/capability-extras/` (the member mechanism; Q1 and Q3 rulings), ROADMAP Part II (hosted
-  `delegate` mode, where an operator chooses for other users).
+  `spec/capability-extras/` (the member mechanism; Q1 and Q3 rulings),
+  [`https-token-mode.md`](https-token-mode.md) (hosted, where an operator chooses for other users).
 - Found by: Geoffrey, 2026-11-04 (roadmap review, out of cycle).

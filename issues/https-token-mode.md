@@ -26,7 +26,9 @@ and a forwarded port is reachable from the user's own browser, which makes DNS r
 
 ## Why it was deferred
 
-Not deferred — the Part II cycle, after release 0.2.0. It is built on the upgraded HTTP transport
+Not deferred — after release 0.3.0, not yet ordered (*re-placed 2026-11-09*; it was the cycle after
+0.2.0). 0.4.0's records design (`issues/observability-audit.md`) must cover this mode whenever it
+lands. It is built on the upgraded HTTP transport
 ([`spec/stack-upgrade/`](../spec/stack-upgrade/)) and the safe executor
 ([`spec/safe-execution/`](../spec/safe-execution/)), and it names its command and paths `cluster-mcp`
 ([`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/), landed 2026-10-30).
@@ -99,5 +101,6 @@ node needs a real certificate and a site's network approval.
 - Related: [`spec/stack-upgrade/`](../spec/stack-upgrade/),
   [`spec/safe-execution/`](../spec/safe-execution/),
   [`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/),
-  [`xdu-storage.md`](xdu-storage.md) (index queries benefit most from running next to the data).
+  [`xdu-storage.md`](xdu-storage.md) (index queries benefit most from running next to the data),
+  [`observability-audit.md`](observability-audit.md) (its records follow the `local` rule).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).

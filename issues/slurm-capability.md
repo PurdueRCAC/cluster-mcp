@@ -5,9 +5,13 @@ appetite: big
 lane: public
 ---
 
-# A job_* family that accepts what a model naturally sends
+# `[slurm]`: the first implementation of the `job_*` interface, accepting what a model naturally sends
 
 ## Problem
+
+*Re-scoped 2026-11-09.* The `job_*` family is now an abstract interface
+(`issues/jobs-interface.md`); this seed is `[slurm]`, its first implementation, and keeps the
+findings below, which bind the interface as much as the implementation.
 
 The Slurm tools mirror the command-line programs one to one, and they reject reasonable input in
 ways that cost a job submission. Found while submitting and watching test jobs through the server:
@@ -33,16 +37,18 @@ in a loop, one tool call per poll.
 
 ## Why it was deferred
 
-Not deferred — a roadmap cycle in Part I. It rebuilds the Slurm capability distribution, which
-[`spec/capability-extras/`](../spec/capability-extras/) made an optional extra, it follows the
-naming, annotation and budget rules from [`tool-surface.md`](tool-surface.md), and it rides the
-argv executor from [`spec/safe-execution/`](../spec/safe-execution/).
+Not deferred — a roadmap cycle in Part II (0.3.0). It rebuilds the Slurm capability distribution,
+which [`spec/capability-extras/`](../spec/capability-extras/) made an optional extra, as the first
+implementation of [`jobs-interface.md`](jobs-interface.md); it follows the naming, annotation and
+budget rules from [`tool-surface.md`](tool-surface.md), and it rides the argv executor from
+[`spec/safe-execution/`](../spec/safe-execution/).
 
 **Pre-existing:** every problem above is on `main` today.
 
 ## Outcome / vision
 
-`cluster-mcp[slurm]` installs a `job_*` family:
+`cluster-mcp[slurm]` implements the `job_*` interface over Slurm. As first sketched (the interface
+cycle settles the names and shapes):
 
 - `job_submit(script_path | script_content, args, modules, …resources)` — resources typed to accept
   an int or a string where Slurm does (`gpus=1` and `gpus="a100:1"`); `modules=[…]` loads modules in
@@ -67,9 +73,9 @@ Every validation error names the accepted forms with an example. The remaining s
 
 ## Sketch of the acceptance criteria
 
-- **R1** — WHERE the `slurm` capability is installed and detected, the server SHALL register the
-  `job_*` family; `jobinfo`, `jobcmd`, `jobenv`, `jobscript` and `scontrol_show_job` SHALL be
-  replaced per the aliases decision in `tool-surface`.
+- **R1** — WHERE the `slurm` capability is installed and detected, the server SHALL serve the
+  `job_*` interface through it; `jobinfo`, `jobcmd`, `jobenv`, `jobscript` and `scontrol_show_job`
+  SHALL be replaced per the aliases decision in `tool-surface`.
 - **R2** — `job_submit` SHALL accept `gpus`, `nodes`, `ntasks` and `cpus_per_task` as an integer or a
   string, and SHALL return the job id on success.
 - **R3** — `job_submit` SHALL accept `args: list[str]` and `modules: list[str]`, and SHALL write
@@ -88,11 +94,14 @@ Every validation error names the accepted forms with an example. The remaining s
 - The Purdue wrappers (`jobinfo` and friends) are site commands; the generic `job_info` must not
   depend on them. [`site-extras.md`](site-extras.md) decides whether the site extra enriches
   `job_info` or registers its own view.
+- Indexing a large tree for [`files-xdu-extra.md`](files-xdu-extra.md) goes through the interface,
+  not through Slurm directly.
 - Related: [`spec/safe-execution/`](../spec/safe-execution/) (`args`, the executor),
   [`tool-surface.md`](tool-surface.md) (names, annotations, budgets, aliases),
   [`spec/capability-extras/`](../spec/capability-extras/) (the distribution),
   [`spec/capability-probe/`](../spec/capability-probe/) (its probe: the commands the member
   declares),
-  [`lmod-tool-group.md`](lmod-tool-group.md) (`modules=[…]`), [`xdu-storage.md`](xdu-storage.md)
+  [`jobs-interface.md`](jobs-interface.md) (the interface this implements),
+  [`modules-interface.md`](modules-interface.md) (`modules=[…]`), [`xdu-storage.md`](xdu-storage.md)
   (indexes large trees through `job_submit`).
 - Found by: roadmap revision, 2026-10-16 (out of cycle).

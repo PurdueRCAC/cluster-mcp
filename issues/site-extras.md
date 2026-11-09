@@ -5,9 +5,15 @@ appetite: big
 lane: public
 ---
 
-# Introduce site extras, starting with cluster-mcp[rcac]
+# `cluster-mcp[rcac]`: the first site extra, and the pattern other centers copy
 
 ## Problem
+
+*Re-scoped 2026-11-09.* `[rcac]` is `cluster-mcp[slurm,lmod,files-xdu,shell]` plus RCAC's
+implementations of the site interfaces (`issues/site-interfaces.md`: storage quota over `myquota`,
+allocation balance over `mybalance`), and Purdue's member routes and favicon, moved here from
+`issues/rename-leftover-identity-strings.md`. Storage discovery is now absorbed by the site
+interfaces, not here.
 
 A user at Purdue should be able to install one thing — `cluster-mcp[rcac]` — and get the right
 capability extras plus Purdue's own tools and context, without first knowing that Gautschi runs Slurm
@@ -32,7 +38,8 @@ group, so the core no longer imports it. What is left is the contract: the bundl
 
 ## Why it was deferred
 
-Not deferred — sequenced after `capability-extras`
+Not deferred — the last cycle of Part II (0.3.0), after the capability families it bundles and
+the site interfaces it implements, and after `capability-extras`
 ([`spec/capability-extras/`](../spec/capability-extras/), landed 2026-11-01), whose mechanism it
 consumes. Filed separately because the interesting work here is the **contribution boundary**, not the
 Purdue code: what exactly does a new center have to write, and where does it put it?
@@ -65,17 +72,24 @@ plan should say plainly how they compose, because a contributor will ask.
   contributor adding one touches no core module.
 - **R6** — The composition of packaged site context with runtime `/etc/agents.d/*.md` context SHALL be
   documented and SHALL be deterministic.
+- **R7** — `cluster-mcp[rcac]` SHALL install `[slurm]`, `[lmod]`, `[files-xdu]` and `[shell]`, and its
+  member SHALL implement the site interfaces over `myquota` and `mybalance`.
+- **R8** — A member SHALL be able to register its own routes and icons; the core SHALL serve no
+  Purdue-branded asset, and the RCAC member SHALL serve the favicon.
 
 ## Notes
 
 - Naming: an extra called `rcac` inside a distribution called `cluster-mcp` is the intended shape.
   Whether the *module* keeps `rcac` or becomes `sites/rcac.py` is a plan-level call.
 - Related: [`spec/capability-extras/`](../spec/capability-extras/) (strict prerequisite, landed),
-  [`lmod-tool-group.md`](lmod-tool-group.md) (pulled in by the site extra),
-  [`generalize-storage-discovery.md`](generalize-storage-discovery.md) (the site hook this establishes
-  is where a discovery implementation lands).
+  [`site-interfaces.md`](site-interfaces.md) (what this implements),
+  [`lmod-tool-group.md`](lmod-tool-group.md), [`files-xdu-extra.md`](files-xdu-extra.md),
+  [`shell-extra.md`](shell-extra.md) and [`slurm-capability.md`](slurm-capability.md) (pulled in),
+  [`rename-leftover-identity-strings.md`](rename-leftover-identity-strings.md) (where the favicon
+  was first filed).
 - Found by: the harness port, 2026-08-26 (out of cycle).
-- 2026-10-16: absorbs [`generalize-storage-discovery.md`](generalize-storage-discovery.md). With
+- 2026-10-16: absorbs [`generalize-storage-discovery.md`](generalize-storage-discovery.md).
+  *Superseded 2026-11-09:* the site interfaces absorb it instead. With
   capabilities as separate distributions ([`spec/capability-extras/`](../spec/capability-extras/),
   GOAL Clarifications), the `rcac` alias lists distribution names (`cluster-mcp-slurm`, …) rather
   than the self-referencing extras sketched in the Problem above.

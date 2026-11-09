@@ -35,9 +35,10 @@ though they were facts about clusters.
 
 ## Why it was deferred
 
-Not deferred — sequenced last in Part I, because it needs the site hook that
-[`site-extras.md`](site-extras.md) establishes. A discovery protocol with no place to put a site's
-implementation is just an abstraction with one caller.
+Not deferred — a 0.3.0 cycle, absorbed by [`site-interfaces.md`](site-interfaces.md), whose
+storage-quota interface is this protocol, with `[rcac]` ([`site-extras.md`](site-extras.md)) as its
+first implementation. A discovery protocol with no place to put a site's implementation is just an
+abstraction with one caller.
 
 **Pre-existing:** yes — every one of these assumptions is on `main` today.
 
@@ -79,12 +80,14 @@ Two design questions worth naming now:
   fixed the `rcac://storage` resource, which had called the `@mcp_tool`-decorated `storage_paths`,
   and factored its logic into the undecorated `resolve_storage_paths()` that the tool and the
   resource both call.
-- Related: [`site-extras.md`](site-extras.md) (strict prerequisite),
+- Related: [`site-interfaces.md`](site-interfaces.md) (absorbs this seed),
+  [`site-extras.md`](site-extras.md) (the first implementation),
   [`spec/rename-to-cluster-mcp/`](../spec/rename-to-cluster-mcp/) (split the instructions into core,
   Slurm and RCAC parts).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: planned to be absorbed by [`site-extras.md`](site-extras.md), the cycle that
-  establishes the site hook this one needs.
+  establishes the site hook this one needs. *Superseded 2026-11-09:* absorbed by
+  [`site-interfaces.md`](site-interfaces.md).
 - 2026-10-30: the rename split the instructions. `CORE_INSTRUCTIONS` names no Purdue figure, so R5
   holds for the core already; the numbers above now live in `RCAC_INSTRUCTIONS`, which the server
   still serves to every user.

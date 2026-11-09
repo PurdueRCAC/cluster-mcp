@@ -5,9 +5,13 @@ appetite: big
 lane: public
 ---
 
-# Add an LMOD module-system tool group
+# `[lmod]`: the first implementation of the `module_*` interface
 
 ## Problem
+
+*Re-scoped 2026-11-09.* The module tools are now an abstract interface
+(`issues/modules-interface.md`); this seed is `[lmod]`, its first implementation, and keeps the
+evidence and the LMOD findings below.
 
 Every tool in this server is about *jobs*. None is about *software*. On an LMOD cluster an agent
 cannot discover what is installed, what versions exist, what a name resolves to, or what
@@ -32,7 +36,8 @@ The four commands that carry nearly all the value:
 
 ## Why it was deferred
 
-Not deferred — sequenced after `capability-extras`
+Not deferred — a roadmap cycle in Part II (0.3.0), with or right after
+[`modules-interface.md`](modules-interface.md), sequenced after `capability-extras`
 ([`spec/capability-extras/`](../spec/capability-extras/), landed 2026-11-01), and deliberately so:
 it is the **first** capability written for the extras mechanism rather than moved onto it, which is
 what proves that mechanism generalizes rather than having been shaped around the Slurm and RCAC
@@ -42,8 +47,8 @@ members alone. Doing LMOD first would produce two ad-hoc conditionals instead of
 
 ## Outcome / vision
 
-`cluster-mcp[lmod]` adds a module tool group. An agent can check `module spider python` before writing
-a job script, and `INSTRUCTIONS.md` loses its hardcoded compiler-version claim because the tools
+`cluster-mcp[lmod]` implements the `module_*` interface over LMOD. An agent can check what
+`module spider python` answers before writing a job script, and `INSTRUCTIONS.md` loses its hardcoded compiler-version claim because the tools
 answer that question live.
 
 Two things the plan has to get right:
@@ -58,8 +63,8 @@ Two things the plan has to get right:
 
 ## Sketch of the acceptance criteria
 
-- **R1** — WHERE the `lmod` capability is enabled, the server SHALL register tools covering
-  `module avail`, `module spider`, `module list`, and `module show`.
+- **R1** — WHERE the `lmod` capability is enabled, the server SHALL serve the `module_*`
+  interface through it, covering `module avail`, `module spider`, `module list`, and `module show`.
 - **R2** — The module tools SHALL work in a non-interactive shell, where `module` is not defined as a
   shell function.
 - **R3** — WHEN LMOD writes to stderr on success, the tool SHALL return that content as its result
@@ -74,10 +79,12 @@ Two things the plan has to get right:
 ## Notes
 
 - The direction is explicitly "may not be LMOD" (`AGENTS.md` § *Direction*) — Tcl Environment Modules,
-  Spack, and EasyBuild-generated hierarchies all exist. This cycle should not over-abstract for them,
-  but its tool names should not be so LMOD-specific that a sibling `[tmod]` extra cannot reuse them.
+  Spack, and EasyBuild-generated hierarchies all exist. This cycle should not over-abstract for them;
+  the interface ([`modules-interface.md`](modules-interface.md)) carries the names, so a sibling
+  extra for Environment Modules implements the same tools.
 - Related: [`spec/capability-extras/`](../spec/capability-extras/) (strict prerequisite, landed),
-  [`site-extras.md`](site-extras.md) (a site extra pulls this one in).
+  [`modules-interface.md`](modules-interface.md) (the interface this implements),
+  [`site-extras.md`](site-extras.md) (`[rcac]` pulls this one in).
 - Found by: the harness port, 2026-08-26 (out of cycle).
 - 2026-10-16: module state does not persist between calls — each call is a fresh shell — so a
   `module load` in one `run_command` is gone by the next. Consider a `modules=[…]` parameter on
