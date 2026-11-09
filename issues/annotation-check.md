@@ -22,6 +22,9 @@ It was fixed only because the `stack-upgrade` cycle happened to rewrite `auth.py
 pins one annotation in one module. Nothing in the suite or the release recipe's `gate` checks
 annotations anywhere else in `src/`, so the next one of the same kind would ship the same way.
 
+The annotations meant here are Python type annotations, not the MCP tool annotations
+(`readOnlyHint` and its kin) that [`tool-surface.md`](tool-surface.md) sets.
+
 ## Why it was deferred
 
 The defect's own seed asked whether to add the general check alongside its one-character fix, and

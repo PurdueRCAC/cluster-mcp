@@ -42,17 +42,18 @@ workspace member's `src/` and rejects any that resolves to something other than 
 where it is. It finds its modules from the workspace itself, so every member and family added later
 is covered on arrival. It changes no code under `src/`: it is a gate, not a cleanup. Which tool or
 mechanism (a `get_type_hints` sweep, an AST pass, a type checker in a narrow configuration) is the
-plan's call, within what Clarification 1 settles.
+plan's call, within what Q1 settles.
 
 ## Acceptance criteria (the contract)
 
-- **R1** — WHEN an annotation the check covers, in any module under any workspace member's `src/`,
-  resolves to an object that is not a valid type expression (a `slice` inside a subscript, as
-  `AUTH_MODES` carried before `stack-upgrade`, or any other non-type value), the check SHALL fail.
-  [NEEDS CLARIFICATION: which annotations the check covers — see Clarifications, Q1.]
-- **R2** — IF an annotation the check covers cannot be resolved at all (it names something that
-  does not exist where it is evaluated), THEN the check SHALL
-  [NEEDS CLARIFICATION: fail, or not — see Clarifications, Q2].
+- **R1** — WHEN an annotation Python keeps at run time (a module variable's, a class attribute's,
+  or a function's or method's parameter or return annotation), in any module under any workspace
+  member's `src/`, resolves to an object that is not a valid type expression (a `slice` inside a
+  subscript, as `AUTH_MODES` carried before `stack-upgrade`, or any other non-type value), the
+  check SHALL fail.
+- **R2** — IF such an annotation cannot be resolved at all (it names something that does not exist
+  where it is evaluated, such as a name imported only under `TYPE_CHECKING`), THEN the check SHALL
+  fail as it does for a non-type.
 - **R3** — WHEN the check fails, its output SHALL name, for each annotation it rejects, the module,
   the annotated name (qualified by its class or function), and the annotation as written or as it
   resolved.
@@ -80,8 +81,8 @@ plan's call, within what Clarification 1 settles.
 - Changing any served annotation, schema, docstring or instruction, and how the served-surface
   fixture follows a deliberate change
   ([`issues/surface-fixture-after-a-surface-change.md`](../../issues/surface-fixture-after-a-surface-change.md)).
-- Making `src/` clean under a general type checker, or fixing type errors other than an annotation
-  that resolves to a non-type (unless Q1 settles on option C).
+- Making `src/` clean under a general type checker, fixing type errors other than an annotation
+  that resolves to a non-type or not at all, and function-local annotations (Q1).
 - Annotations under `tests/`, `bin/` or `spec/`.
 - Replacing `AUTH_MODES`'s exact-shape pin in `tests/test_auth_modes.py`: it asserts more about that
   one annotation than a general check can, and it stays.
@@ -89,18 +90,14 @@ plan's call, within what Clarification 1 settles.
 
 ## Clarifications
 
-- **Q1:** Which annotations does the check cover? [NEEDS CLARIFICATION: (A) the annotations Python
-  keeps at run time: module variables, class attributes, and function and method signatures;
-  function-local annotations, which are never evaluated, are out. (B) Every annotation in the
-  source, function-local ones included, which needs static analysis (an AST pass, or a type checker
-  limited to annotation validity). (C) A full static type check of every member's `src/`, with every
-  pre-existing finding fixed in this cycle; a likely `big` appetite that would touch high-blast-radius
-  and served code.]
-- **Q2:** An annotation the check cannot resolve (an undefined name, or one imported only under
-  `TYPE_CHECKING`): [NEEDS CLARIFICATION: (A) it fails the check like a non-type, which forbids
-  annotations that need a `TYPE_CHECKING`-only import (none exist in `src/` today); (B) it is
-  reported but passes; (C) it fails unless an in-repo list exempts it by name.] Moot if Q1 is B or C
-  and a static tool resolves such names.
+- **Q1:** Which annotations does the check cover? — **A:** the annotations Python keeps at run
+  time: module variables, class attributes, and function and method signatures. Function-local
+  annotations, which are never evaluated, are out, and so is a full static type check of `src/`;
+  neither is seeded (resolved 2026-11-09, foreman ruling at the GOAL gate).
+- **Q2:** What does the check do with an annotation it cannot resolve (an undefined name, or one
+  imported only under `TYPE_CHECKING`)? — **A:** it fails like a non-type, with no exemption list.
+  This forbids annotations that need a `TYPE_CHECKING`-only import; none exist in `src/` today
+  (resolved 2026-11-09, foreman ruling at the GOAL gate).
 
 ## Related materials
 

@@ -164,7 +164,8 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 `auth.py`'s `AUTH_MODES` carried a slice inside its annotation's subscript for months:
 `typing.get_type_hints` and eager evaluation both accepted it, in a high-blast-radius module, and it
 was fixed only because `stack-upgrade` happened to rewrite the file (R7). Nothing in the suite or
-the gate checks any other annotation. A gate step or standing test that type-checks every member's
+the gate checks any other type annotation (Python's, not the MCP tool hints of Part II).
+A gate step or standing test that type-checks every member's
 `src/`, or at least rejects an annotation under `cluster_mcp` that resolves to a non-type, closes
 it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement,
 2026-10-17.
