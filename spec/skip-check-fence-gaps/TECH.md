@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/skip-check-fence-gaps
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: A skip is allowed only in the single top-level helper of the suite's conftest
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -115,16 +115,16 @@ checklists below are the work. `code-build` executes the next actionable phase, 
 `need_shell` / `need_git` in the suite's `conftest.py`, when that binding is a top-level `def`; the
 twelve scope rows prove each shape was a gap and is now reported (or, for the closure, still admitted).
 
-- [ ] In `tests/test_hygiene.py`, add `CONFTESTS` and `SCOPES`, `_module_bindings` and `_allowed`
+- [x] In `tests/test_hygiene.py`, add `CONFTESTS` and `SCOPES`, `_module_bindings` and `_allowed`
       as PLAN § 2 "Which module is conftest" and "Where a skip is allowed" describe (steps 1–5),
       and switch `skip_violations` from the line-number set to the node-identity set `_allowed`
       returns; the `defined again` reports join `found`. Keep the `.Exception` exemption exactly as
       it is in this phase (P2 narrows it).
-- [ ] Append PLAN § 2's twelve P1 rows after `outcome-type`, ids and `found` values exactly as tabled;
+- [x] Append PLAN § 2's twelve P1 rows after `outcome-type`, ids and `found` values exactly as tabled;
       leave every existing row byte-for-byte.
-- [ ] Keep the comment above `SKIPPERS` true: it now says the helpers are the single top-level
+- [x] Keep the comment above `SKIPPERS` true: it now says the helpers are the single top-level
       definitions in `tests/conftest.py`.
-- [ ] Stage, then run the `verify:`. If `test_only_need_shell_skips` reports anything in the suite
+- [x] Stage, then run the `verify:`. If `test_only_need_shell_skips` reports anything in the suite
       as it stands, stop and report the line: it is a finding for the foreman, never an exemption.
 - **Verify:** the frontmatter's (gate `controls scope` 13 s and `scope` ≈ 1 s, then
   `tests/test_hygiene.py` in each era, 2 s and 5 s; measured on the prototype, mac-m2). A refusal
@@ -149,21 +149,36 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
       instead, this item becomes: read `ast.alias` names against `SKIPPERS` and add a row
       `skip-renamed-on-import`, and/or report a skipper's `.Exception` among a class's bases and add
       a row `outcome-type-subclassed` (`found` yes each; the gate's `SPELLING_ROWS` gains them in
-      the same commit). Q2 (deselection) files nothing.
+      the same commit). Ruled 2026-11-09: the default stands (the seed; see Amendments).
+- [ ] **Q2, per the sign-off's ruling on PLAN § 5** (2026-11-09; see Amendments): file a seed for
+      conftest-level deselection (`collect_ignore`, `pytest_collection_modifyitems`, `pytest.exit`
+      making rows vanish from a CI run) from the KB's `ISSUE.md` template, `status: unshaped`, and
+      its `ROADMAP.md` entry in Part I's gates group, placed after this cycle's entry.
 - [ ] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and the branch's
       commit bodies for "do not fix here", "known limitation", "left as a follow-up", "deferred",
       "limit" and "not covered"; each must have an `issues/` seed and a `ROADMAP.md` entry. Expected:
-      Q1's seed (unless folded). The outcome type raised through a name is a GOAL non-goal, Q2 is
-      outside the GOAL, and PLAN § 5's unpinned binding forms are a review risk; none is a
-      deferral. An unrecorded deferral fails the phase.
+      Q1's seed and Q2's seed. The outcome type raised through a name is a GOAL non-goal, and
+      PLAN § 5's unpinned binding forms are a review risk; neither is a deferral. An unrecorded
+      deferral fails the phase.
 - [ ] Standing last-phase items: the previous cycle's last phase carried no project-level obligation
       beyond the ledger (no `## Times` quote in this repo).
 - [ ] Stage, then run the `verify:`.
 - **Verify:** the frontmatter's: gate `controls all` and `all`, then the profile's full `verify`,
   both eras (≈ 26 min, 1,571 s, measured once on the prototype; PLAN § 6). The whole command runs past the 10-minute cap of one foreground
   shell call: run it in the background and wait for its exit.
-- **Touches:** `tests/test_hygiene.py`; `issues/skip-check-import-aliases.md` and `ROADMAP.md`
-  (the Q1 default).
+- **Touches:** `tests/test_hygiene.py`; `issues/skip-check-import-aliases.md`, Q2's deselection
+  seed under `issues/`, and `ROADMAP.md`.
+
+## Amendments
+
+- **2026-11-09, sign-off rulings on PLAN § 5, for P2** (recorded during P1's build; P1 is
+  unaffected). **Q1:** the default stands. P2's ledger files `issues/skip-check-import-aliases.md`
+  (`status: unshaped`: a skipper renamed on import; the outcome type subclassed, then raised) and
+  its `ROADMAP.md` entry beside this cycle's; R4 is not widened and no row is added for either
+  shape. **Q2:** P2's ledger also files a seed for conftest-level deselection (`collect_ignore`,
+  `pytest_collection_modifyitems`, `pytest.exit` making rows vanish), `status: unshaped`, with its
+  `ROADMAP.md` entry in Part I's gates group, placed after this cycle's entry. Both seeds follow
+  the KB's `ISSUE.md` template. The gate's fence already admits `issues/*.md` and `ROADMAP.md`.
 
 ---
 

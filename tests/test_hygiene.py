@@ -696,27 +696,90 @@ def test_the_id_rule_is_stated_as_the_check_enforces_it() -> None:
     assert unstated == [], f'AGENTS.md does not state the id rule as the check enforces it in {unstated}'
 
 
-# A row that needs a login shell, or a git that runs, runs it or, off CI, skips: `conftest.need_shell`
-# and `conftest.need_git` are the only places that decide, and on CI (where the workflow installs
-# every shell and the runner image carries git) they fail the row instead. Any other skip in the
-# suite would let a row vanish from CI without failing.
+# A row that needs a login shell, or a git that runs, runs it or, off CI, skips: the single top-level
+# definitions of `need_shell` and `need_git` in `tests/conftest.py` are the only places that decide,
+# and on CI (where the workflow installs every shell and the runner image carries git) they fail the
+# row instead. Any other skip in the suite would let a row vanish from CI without failing.
 SKIPPERS = {'skip', 'skipif', 'importorskip', 'xfail'}
 SKIP_HELPERS = {'need_shell', 'need_git'}
+# The suite's conftest by path, never by suffix: `tests/test_conftest.py` is another module. The scan
+# passes absolute paths; the bare name is the same file as the planted rows spell it.
+CONFTESTS = {Path('conftest.py'), TESTS / 'conftest.py'}
+# Definitions whose bodies are a scope of their own: a name bound in one is not a module binding.
+SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+
+
+def _module_bindings(tree: ast.Module, helper: str) -> list[ast.AST]:
+    """Every node that binds `helper` at module scope, and every `global` naming it, in line order.
+
+    A binding is a definition, a store or delete, an import, an `except ... as` or a `match` capture.
+    A `global` rebinds the module name from inside a function, so it counts wherever it sits.
+    """
+    bindings: list[ast.AST] = []
+    pending: list[ast.AST] = list(tree.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, SCOPES):
+            if getattr(node, 'name', None) == helper:
+                bindings.append(node)
+            # Decorators, defaults and bases run at module scope; the body does not.
+            body = node.body if isinstance(node.body, list) else [node.body]
+            pending += [c for c in ast.iter_child_nodes(node) if not any(c is b for b in body)]
+            continue
+        if isinstance(node, ast.Name):
+            bound = node.id if not isinstance(node.ctx, ast.Load) else None
+        elif isinstance(node, ast.alias):
+            bound = node.asname or node.name.split('.')[0]
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+            bound = node.name
+        elif isinstance(node, ast.MatchMapping):
+            bound = node.rest
+        else:
+            bound = None
+        if bound == helper:
+            bindings.append(node)
+        pending += ast.iter_child_nodes(node)
+    bindings += [n for n in ast.walk(tree) if isinstance(n, ast.Global) and helper in n.names]
+    return sorted(bindings, key=lambda n: (n.lineno, n.col_offset))
+
+
+def _allowed(name: str, tree: ast.Module, found: list[str]) -> set[int]:
+    """The ids of the nodes a skip may sit in; a helper bound more than once is reported into `found`.
+
+    Only in the suite's conftest, and only the body of a helper's single module-scope binding when
+    that binding is a top-level `def`: a second binding shadows the first, so neither allows anything.
+    """
+    if Path(name) not in CONFTESTS:
+        return set()
+    allowed: set[int] = set()
+    for helper in sorted(SKIP_HELPERS):
+        bindings = _module_bindings(tree, helper)
+        found.extend(f'{name}:{n.lineno}: {helper} defined again' for n in bindings[1:])
+        single = bindings[0] if len(bindings) == 1 else None
+        if isinstance(single, ast.FunctionDef) and any(single is n for n in tree.body):
+            allowed |= {id(n) for statement in single.body for n in ast.walk(statement)}
+    # A helper's name defined below the top level is never the helper, even inside the real one.
+    for node in ast.walk(tree):
+        if (isinstance(node, SCOPES) and getattr(node, 'name', None) in SKIP_HELPERS
+                and not any(node is n for n in tree.body)):
+            allowed -= {id(n) for n in ast.walk(node)}
+    return allowed
 
 
 def skip_violations(name: str, text: str) -> list[str]:
-    """Every skip, conditional skip or expected failure in `text` outside the `SKIP_HELPERS`."""
-    found = []
+    """Every skip, conditional skip or expected failure in `text` outside the `SKIP_HELPERS`.
+
+    A helper is the body of the single top-level `def` of its name in the suite's conftest; a second
+    binding of a helper's name there is reported as well.
+    """
+    found: list[str] = []
     tree = ast.parse(text, name)
-    allowed: set[int] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name in SKIP_HELPERS and name.endswith('conftest.py'):
-            allowed |= {n.lineno for n in ast.walk(node) if hasattr(n, 'lineno')}
+    allowed = _allowed(name, tree, found)
     # `pytest.skip.Exception` names the outcome without skipping anything.
     named = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
     for node in ast.walk(tree):
         word = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else None
-        if word in SKIPPERS and node.lineno not in allowed and id(node) not in named:
+        if word in SKIPPERS and id(node) not in allowed and id(node) not in named:
             found.append(f'{name}:{node.lineno}: {word}')
     return found
 
@@ -741,6 +804,30 @@ def test_only_need_shell_skips() -> None:
     pytest.param('conftest.py', 'def need_git():\n    pytest.skip("git")\n', False, id='need-git'),
     pytest.param('conftest.py', 'def need_other():\n    pytest.skip("x")\n', True, id='other-helper'),
     pytest.param('t.py', 'import pytest\nraised = pytest.skip.Exception\n', False, id='outcome-type'),
+    pytest.param('conftest.py', 'import pytest\n@pytest.fixture\ndef shell():\n    def need_shell(s):\n'
+                 '        pytest.skip(s)\n    return need_shell\n', True, id='helper-nested-in-a-fixture'),
+    pytest.param('conftest.py', 'import pytest\nclass Tools:\n    def need_git(self):\n        pytest.skip("git")\n',
+                 True, id='helper-as-a-method'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    def need_shell(t):\n        pytest.skip(t)\n'
+                 '    need_shell(s)\n', True, id='helper-nested-in-the-helper'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    def missing():\n        pytest.skip(s)\n'
+                 '    missing()\n', False, id='closure-inside-the-helper'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\n'
+                 'def need_shell(s):\n    pytest.skip(s)\n', True, id='helper-defined-twice'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\ndef need_git():\n    pass\n',
+                 True, id='helper-redefined-without-a-skip'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nneed_git = print\n', True,
+                 id='helper-rebound'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'def swap():\n    global need_git\n    need_git = print\n', True, id='helper-rebound-by-global'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\n'
+                 'from os import getcwd as need_shell\n', True, id='helper-rebound-by-import'),
+    pytest.param('conftest.py', 'import pytest\nif True:\n    def need_git():\n        pytest.skip("git")\n', True,
+                 id='helper-below-the-top-level'),
+    pytest.param('tests/test_conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\n', True,
+                 id='look-alike-conftest'),
+    pytest.param('elsewhere/conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\n', True,
+                 id='another-conftest'),
 ])
 def test_skip_check_catches_planted_skips(name: str, text: str, found: bool) -> None:
     assert bool(skip_violations(name, text)) == found
