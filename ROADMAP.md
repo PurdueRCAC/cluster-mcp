@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 28 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Twenty-eight entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -75,8 +75,8 @@ What remains comes in five groups, in this order:
   timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
   wording, the image's init, and the surface fixture, which must land before the first cycle that
   changes the served surface.
-- **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
-  left on the SSH connection and the `local` launch.
+- **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
+  left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
   floors a git install resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
@@ -155,6 +155,8 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
 - 2026-11-05: `test_a_reconnect_worker_that_cannot_start_frees_the_attempt` failed on CI a second time
   (0.3 s against a 0.1 s bound); under the same load it fails as often on `develop` as on
   `spec/ssh-half-open-link/`'s branch; the seed records both rates.
+- 2026-11-09: shaping split the loopback SSH breaks (the `EOFError` and socket-error rows) into
+  their own seed, under the executor group below.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
 **Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: adopted:stalled-reconnect-test-timing*
@@ -279,6 +281,18 @@ connection, 2026-11-02. Pre-existing; the SFTP paths were not checked.
 
 *Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
 **Seed:** [`issues/ssh-open-session-reset-raises.md`](issues/ssh-open-session-reset-raises.md) · *status: unshaped*
+
+## Loopback SSH rows break under load, with no time bound missed
+
+Three loopback SSH rows (`test_startup_output_is_separated[tcsh]` and `[bash]`, and
+`test_timeout_stop.py`'s signal-death row over an `sh` login shell) have failed on a busy host with
+Paramiko's `EOFError` or a socket error, then passed alone and on re-run: twice on CI, twice
+locally, 2026-10-29 to 2026-11-02. None checks a time bound; the link itself broke, by a mechanism
+nobody has found, in the test server, Paramiko or the executor. Pre-existing; split out of
+`stalled-reconnect-test-timing` at its GOAL gate, 2026-11-09.
+
+*Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `issues/ssh-open-session-reset-raises.md`; `tests/ssh_server.py`*
+**Seed:** [`issues/loopback-ssh-breaks-under-load.md`](issues/loopback-ssh-breaks-under-load.md) · *status: unshaped*
 
 ## A local command in flight can outlive the server that launched it
 

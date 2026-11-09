@@ -22,8 +22,7 @@ the rows, their bounds and their sightings, confirmed against `develop` at `0bfa
    `STALL_WINDOW` (3 s) plus `STALL_LATE` (0.5 s) of the call's start, and the abandoned worker must
    end within `STALL_WORKER` (1 s) after (`tests/test_ssh_exec.py:2120–2165`). Six local
    full-suite or union-run failures (2026-10-28, text not kept; 2026-10-30 ×3; 2026-11-05 ×2), never
-   on CI. Every
-   failure whose text was kept said **"0 reconnect workers ran, not one"**, which is not a missed
+   on CI. Every failure whose text was kept said **"0 reconnect workers ran, not one"**, which is not a missed
    time bound: the row counts reconnect workers by listing live threads once `executor.run` has
    returned (`:2148`), after the call has given up. Alone, the row's call took 3.04–3.12 s.
 2. **The worker that cannot start** (`tests/test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt`).
@@ -33,18 +32,18 @@ the rows, their bounds and their sightings, confirmed against `develop` at `0bfa
    suites (load 22–26), 12 of 20, the same on a branch that changes nothing on the path.
 3. **The probe's raised endings** (`tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability`,
    rows in `RAISED`). A raised ending must be decided in under `BOUND / 2` (0.15 s, `BOUND` 0.3 s;
-   `:291`), the row's proof that it was decided when it happened and not at the deadline. Three CI
+   `:291`), the row's proof that it was decided when it happened and not at the deadline. Four CI
    failures: 0.20 s (2026-11-01, `interrupt-both`), 0.25 s (2026-11-05, `interrupt-rcac`), 0.18 s
-   (2026-11-06, `interrupt-both`).
+   (2026-11-06, `interrupt-both`), and 0.23 s on a fourth parameter, `exit-0-slurm` (run
+   42678748547, job `suite (modern era, 4 of 4)`, "decided only at the deadline (0.23 s)").
 4. **The bounded start** (`tests/test_probe_startup.py::test_every_ending_without_an_answer_serves_every_capability`).
    A start must finish in under the probe bound plus 0.5 s (0.8 s for `hang` and `timeout-code`,
    0.5 s otherwise; `:470`). One CI failure: 0.85 s (2026-11-05, `hang-ssh-sse-core-only`).
-5. **Loopback SSH rows that break, not time out.** `test_ssh_exec.py::test_startup_output_is_separated`
-   failed with paramiko's `EOFError` on CI twice (`[tcsh]`, 2026-10-29 and 2026-11-01, the server
-   logging `Connection reset by peer`) and locally once (`[bash]`, 2026-11-01);
-   `test_timeout_stop.py`'s `test_a_command_that_dies_of_a_signal_leaves_its_jobs_running[ssh-sh]`
-   (every-login-shell runs only) failed locally once with `Bad file descriptor` (2026-11-02). None
-   checks a time bound; the loopback link itself broke under load, by a mechanism nobody has found.
+
+The seed also records loopback SSH rows that broke under load with Paramiko's `EOFError` or a
+socket error, missing no time bound. Their mechanism is unknown and may lie outside the tests; they
+are their own `fix` seed, [`issues/loopback-ssh-breaks-under-load.md`](../../issues/loopback-ssh-breaks-under-load.md)
+(Clarifications, 2026-11-09).
 
 Rows 1–4 are pre-existing (row 1 landed with `ssh-reconnect-loop`, 2026-10-27; rows 3–4 with
 `capability-probe`, 2026-11-01). Each property they guard is real and must stay guarded: the
@@ -61,8 +60,9 @@ profile's CI budget, and no row leaves the gate.
 
 ## Acceptance criteria (the contract)
 
-`[NEEDS CLARIFICATION: scope — which rows this cycle covers (M1)]`; R2–R4 are written for M1's
-recommended option and fall away with the rows they name.
+In scope: rows 1–4 of Problem (Clarifications, 2026-11-09). "The load protocol" is the one
+Clarifications records: 20 runs alone and 20 under four CPU spinners beside a full-suite run, on
+macOS.
 
 - **R1** — WHEN the stalled-reconnect row runs and one attempt reaches the silent host, the row
   SHALL count that attempt's reconnect worker, whether or not the worker has ended by the time the
@@ -70,16 +70,17 @@ recommended option and fall away with the rows they name.
   allowed lateness, when no attempt or more than one worker runs, and when the abandoned attempt is
   still running past its allowed time after the give-up.
 - **R2** — The worker-cannot-start row SHALL still fail when a call whose reconnect worker could not
-  start waits for an attempt before giving up, and SHALL NOT fail on a host under the load of M2's
+  start waits for an attempt before giving up, and SHALL NOT fail on a host under the load
   protocol when the call gives up at once.
 - **R3** — The probe's raised-ending rows SHALL still fail when a raised ending is decided only at
-  the probe's deadline, and SHALL NOT fail on a host under the load of M2's protocol when it is
+  the probe's deadline, and SHALL NOT fail on a host under the load protocol when it is
   decided as it happens.
 - **R4** — The bounded-start rows SHALL still fail when a start waits past the probe's bound, and
-  SHALL NOT fail on a host under the load of M2's protocol when the start is bounded.
-- **R5** — Each in-scope row SHALL pass every run of M2's protocol, alone and under load, on the
-  cycle's final tree, with the runs and their pass counts recorded under `spec/stalled-reconnect-test-timing/`.
-  `[NEEDS CLARIFICATION: the protocol and the pass threshold (M2)]`
+  SHALL NOT fail on a host under the load protocol when the start is bounded.
+- **R5** — Each in-scope row SHALL pass 20 of 20 runs alone and 20 of 20 runs under four CPU
+  spinners beside a full-suite run, on macOS, on the cycle's final tree, with the runs and their
+  pass counts recorded under `spec/stalled-reconnect-test-timing/`. No extra CI dispatch is part of
+  this criterion.
 - **R6** — For each property R1–R4 says a row SHALL still catch, a planted fault that breaks it
   SHALL turn the row red, shown on the cycle's final tree; an existing `mutants.CASES` entry that
   names a changed row (`ssh-reconnect-unstarted-worker-holds-slot` names row 2) SHALL still be killed.
@@ -88,6 +89,10 @@ recommended option and fall away with the rows they name.
 - **R8** — Every suite job SHALL stay within the profile's `ci budget` row (10 minutes each), the
   gate's commands and its partition SHALL be unchanged, and every in-scope row SHALL still run once
   per era in the gate.
+- **R9** — Every in-scope row's bound SHALL keep its value (row 1: 3.0 s + 0.5 s, then 1.0 s; row
+  2: 0.1 s; row 3: 0.15 s against a 0.3 s deadline; row 4: 0.8 s or 0.5 s); what changes is the
+  point it is measured from or against. A value MAY change only by the fallback the Clarifications
+  name for that row, and only after its before-and-after figures, CI time included, are signed off.
 
 ## Non-goals (no-gos)
 
@@ -102,9 +107,8 @@ recommended option and fall away with the rows they name.
 - **The CI budget and the gate's shape.** The `ci budget` row, the verify command, the job split and
   `timeout-minutes` are not changed here.
 - **A suite-wide sweep** of every wall-clock read (about 180 `monotonic()` reads across 13 test
-  modules), unless M1 chooses it.
-- **The loopback SSH breaks** (Problem, row 5), unless M1 chooses them: their mechanism is unknown
-  and may lie in the server code rather than the tests.
+  modules).
+- **The loopback SSH breaks**: [`issues/loopback-ssh-breaks-under-load.md`](../../issues/loopback-ssh-breaks-under-load.md).
 - **The mutation runner and the skip check.** `tests/mutants.py`'s runner and `tests/test_hygiene.py`'s
   skip check belong to sibling cycles (`mutants-workflow-timeout`, `mutant-child-outlives-timeout`,
   `skip-check-fence-gaps`); this cycle adds or retargets `mutants.CASES` entries only where R6 needs
@@ -112,47 +116,33 @@ recommended option and fall away with the rows they name.
 
 ## Clarifications
 
-Open, each blocking `code-plan`:
-
-- **M1 · Scope.** `[NEEDS CLARIFICATION: which rows does this cycle cover?]`
-  (a) rows 1–4, the four wall-clock rows the seed records, each held to R1–R7; row 5 goes to a new
-  seed. (b) row 1 alone, as the seed's title and Non-goals frame it; rows 2–5 to new seeds.
-  (c) rows 1–5. (d) every wall-clock bound in the suite, swept and held to R7 (appetite `big`).
-- **M2 · Load protocol and threshold.** `[NEEDS CLARIFICATION: under what load, how many runs, and
-  what pass count make R2–R5 hold?]` Before: row 2 passed 19 of 20 alone and 12 of 20 alternated
-  under four CPU spinners beside other suites (load 22–26, macOS); rows 1, 3 and 4 have no measured
-  rate, only sightings. (a) the seed's protocol: 20 runs alone and 20 under four CPU spinners beside
-  a full-suite run, 20 of 20 each, for every in-scope row, local macOS. (b) as (a) at 50 runs each.
-  (c) (a) plus a stated number of clean CI runs of the full gate (each about 8 minutes of eight
-  parallel jobs). (d) 20 of 20 alone only, the load runs recorded but not gating.
-- **M3 · Each row's bound.** `[NEEDS CLARIFICATION: may the plan change a row's bound, and to what?]`
-  Before → candidate after, per row:
-  - row 1: give up by 3.0 s + 0.5 s = 3.5 s from the call's start; abandoned worker gone 1.0 s later.
-    Its kept failures are the worker count, not the bound, so R1 may need no bound change.
-  - row 2: give up within 0.1 s of measured time; seen 0.3 s under load.
-  - row 3: a raised ending decided under 0.15 s (half of a 0.3 s deadline); seen 0.18–0.25 s.
-  - row 4: start under 0.8 s (`hang`, `timeout-code`) or 0.5 s; seen 0.85 s.
-
-  Options: (a) **keep every bound's value and move what it is measured from or against**: from the
-  moment the attempt reaches the host, or against the deadline the same run sets, or on a clock the
-  test controls where the property is an ordering, not a duration. (b) **widen the gap between
-  "decided as it happens" and "decided at the deadline"** by raising the deadline the row sets (for
-  row 3, a 3 s deadline with a 1.5 s cut instead of 0.3 s and 0.15 s), which keeps the property but
-  makes every deadline-reaching row of that test wait longer; the CI-time cost goes in the report.
-  (c) **widen only the scheduling slack** by a stated figure per row (row 1's 0.5 s to 1.0 s, row 4's
-  0.5 s to 1.0 s), never past the point where the broken behaviour would pass. (d) change no bound;
-  R7's messages only, to diagnose the next failure. Whatever is chosen, each changed figure and its
-  before value go in the plan for sign-off.
+- **Q:** Which rows does this cycle cover? — **A:** Rows 1–4, the four wall-clock rows, with the
+  `exit-0-slurm` sighting of row 3 added to Problem. The loopback SSH breaks become their own `fix`
+  seed, `issues/loopback-ssh-breaks-under-load.md`. A single row, all five groups and a suite-wide
+  sweep were declined (resolved 2026-11-09).
+- **Q:** Under what load, how many runs and what pass count make R2–R5 hold? — **A:** 20 of 20 run
+  alone and 20 of 20 under four CPU spinners beside a full-suite run, on macOS; no extra CI
+  dispatches. Before: row 2 passed 19 of 20 alone and 12 of 20 alternated under that kind of load
+  (load 22–26); rows 1, 3 and 4 have sightings only (resolved 2026-11-09).
+- **Q:** May the plan change a row's bound? — **A:** Row 1 needs no bound change: its kept failures
+  are the worker count (R1). Rows 2–4 keep every value and change the reference point: what the
+  interval is measured from (for instance the moment the attempt reaches the host) or against (the
+  deadline the same run sets), or a clock the test controls where the property is an ordering, not a
+  duration. Fallbacks, a constraint on the plan: rows 2 and 3 may instead raise the deadline the row
+  sets so that "decided as it happens" and "decided at the deadline" lie further apart (row 3: for
+  instance a 3 s deadline with a 1.5 s cut, before 0.3 s and 0.15 s); row 4 alone may widen its
+  scheduling slack (before 0.5 s, so 0.8 s or 0.5 s in all). A fallback comes back to the maintainer
+  with before-and-after figures, the CI job times against the `ci budget` row included, before it
+  lands (resolved 2026-11-09).
 
 ## Related materials
 
 - Seed: [`issues/stalled-reconnect-test-timing.md`](../../issues/stalled-reconnect-test-timing.md)
+- Split out: [`issues/loopback-ssh-breaks-under-load.md`](../../issues/loopback-ssh-breaks-under-load.md)
 - `tests/test_ssh_exec.py` (`STALL_WINDOW`, `STALL_LATE`, `STALL_WORKER`, `not_run_violations`,
-  `_fake_time`, `test_a_reconnect_worker_that_cannot_start_frees_the_attempt`,
-  `test_startup_output_is_separated`)
+  `_fake_time`, `test_a_reconnect_worker_that_cannot_start_frees_the_attempt`)
 - `tests/test_probes.py` (`BOUND`, `SLACK`, `RAISED`); `tests/test_probe_startup.py` (`ENDINGS`)
-- `tests/test_timeout_stop.py` (`test_a_command_that_dies_of_a_signal_leaves_its_jobs_running`)
-- `tests/mutants.py` (`ssh-reconnect-unstarted-worker-holds-slot`, `backend-separation-skipped`)
+- `tests/mutants.py` (`ssh-reconnect-unstarted-worker-holds-slot`)
 - `AGENTS.md` § Factory (`ci budget`, `verify`), § Conventions ("CI mirrors the gate")
 - Prior cycles: [`spec/ssh-reconnect-loop/`](../ssh-reconnect-loop/), [`spec/capability-probe/`](../capability-probe/),
   [`spec/ssh-half-open-link/`](../ssh-half-open-link/) (P3's alternated load measurement of row 2),
