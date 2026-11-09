@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: ci/annotation-check
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: The annotation check and its controls, seen red in each kind of position
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -82,6 +82,21 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
   fixture, no `bin/`, and neither `tests/mutants.py` nor `tests/test_hygiene.py` (sibling cycles).
   If the check flags an annotation on the tree, STOP and report it (R7): never change it here.
 
+## Amendments
+
+- **2026-11-09, rulings at the PLAN/TECH gate.** The foreman accepted deviation rows 1 to 5 of
+  PLAN § 3, among them row 4's reading of R2 (a `__main__` module that holds an annotation is
+  refused unimported, as one the check cannot evaluate without running the program) and row 5's
+  scope-dependence refusal. The maintainer approved the CI cost (2026-11-09): about 5 s per era in
+  `suite-legacy-4` and `suite-modern-4`, about 7:27 and 7:38 of the 10:00 budget. A hosted figure
+  above 15 s in either job goes back to the maintainer before landing; P1's report records the
+  module's local wall time per era as the reference.
+- **2026-11-09, P1 build.** The controls' `scratch` fixture forgets the modules loaded from the
+  scratch tree (by file, or by the per-case `scratch_` package prefix), not every module imported
+  during the case: forgetting a standard-library module a scratch import loaded first would leave a
+  second copy of it for later tests. The module holds 112 tests (PLAN § 4's prototype held 87): the
+  controls are parametrized per position kind and per evaluation mode.
+
 ---
 
 ## Phase P1 — The annotation check and its controls, seen red in each kind of position
@@ -90,7 +105,7 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
 across every workspace member, naming where; green on the tree, red on a slice planted in each kind
 of position in the core and in other members.
 
-- [ ] Write `tests/test_annotations.py` per PLAN § 2: `workspace_members`, `member_modules`,
+- [x] Write `tests/test_annotations.py` per PLAN § 2: `workspace_members`, `member_modules`,
       `annotation_positions`, `type_expression_violations`, the evaluation through
       `typing.get_type_hints` on a one-string holder, the import step (`__main__` refused unimported
       when annotated, `__file__` equality, the failed-import fallback), `workspace_violations`, and
@@ -102,17 +117,17 @@ of position in the core and in other members.
       bodies skipped, a member without `src/` refused, the class lookup checked by `__qualname__`
       and `__module__`, and the failed-import fallback's innermost statement, resolved paths and
       metaclass namespaces.
-- [ ] The tree test `test_every_kept_annotation_in_the_workspace_is_a_type` (`integration`) runs the
+- [x] The tree test `test_every_kept_annotation_in_the_workspace_is_a_type` (`integration`) runs the
       check in a child, `[str(SANDBOX), sys.executable, '-I', '-c', CHILD, str(ROOT)]`, and asserts
       no violation, a module from every member with a `src/`, and `AUTH_MODES` among the positions.
       The child starts in a session of its own, and a timeout kills its whole process group.
       `test_the_members_are_the_locked_workspace` (`unit`) holds the members to `uv.lock`'s manifest.
-- [ ] The `unit` controls, under exactly the names `gate.sh`'s `IDS` lists (PLAN § 2, Controls),
+- [x] The `unit` controls, under exactly the names `gate.sh`'s `IDS` lists (PLAN § 2, Controls),
       each against scratch workspaces under `tmp_path` with unique package names, forgetting what
       they imported.
-- [ ] The module carries no spec id, launches only through `bin/sandbox.sh`, never skips, and
+- [x] The module carries no spec id, launches only through `bin/sandbox.sh`, never skips, and
       imports no stack module (`test_hygiene.py`'s rails); comments are declarative sentences.
-- [ ] If the tree test is red on the current tree, STOP: report each flagged annotation (R7).
+- [x] If the tree test is red on the current tree, STOP: report each flagged annotation (R7).
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P1` (about 2 min, 113 s in the plan's dry
   run; it runs `verify/seen_red.sh`, R5's evidence, 35 plants, and prints the module's wall time,
   the figure PLAN § 5 quotes).
