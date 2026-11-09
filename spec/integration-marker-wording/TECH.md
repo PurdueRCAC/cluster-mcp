@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/integration-marker-wording
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -24,7 +24,7 @@ phases:
   verify: sh spec/integration-marker-wording/verify/gate.sh P1
 - id: P2
   name: The word-for-word check, its planted drift and the mutant sweep
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -168,7 +168,7 @@ the routes the probe found open.
 word, line wrapping the only freedom, ending where Markdown ends it; 51 planted drift rows, each the
 named killer of a mutant; 34 mutants, decisions and additive carve-outs, all killed.
 
-- [ ] `tests/test_hygiene.py`: `import tomllib`; insert after `test_unit_guard_redirects_home`,
+- [x] `tests/test_hygiene.py`: `import tomllib`; insert after `test_unit_guard_redirects_home`,
       before the `SANDBOX_UNSET` comment: `MARKERS_STATED`, `MARKER_ITEM`, `described_markers`,
       `LIST_ITEM`, `stated_markers`, `statement_end_problems`, `agents_section`,
       `marker_statement_violations`, `test_the_markers_are_stated_as_pyproject_describes_them`, the
@@ -176,14 +176,14 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       `test_marker_statement_check_catches_planted_drift` (the 51 rows of `verify/drift-ids.txt`).
       Reference text: `verify/draft/check_block.py`. The module only gains lines and binds no
       existing top-level name again.
-- [ ] `AGENTS.md` § Testing, `tests/test_hygiene.py` entry: `marker_statement_violations` in the list
+- [x] `AGENTS.md` § Testing, `tests/test_hygiene.py` entry: `marker_statement_violations` in the list
       of checks, and the sentence naming the live test and the drift test (reference:
       `apply_edits.py` `P2`).
-- [ ] Keep the check's text such that every substitution in `verify/marker_mutants.py` applies
+- [x] Keep the check's text such that every substitution in `verify/marker_mutants.py` applies
       exactly once. The gate's files are frozen at the plan commit (PLAN deviation row 8): a
       `STALE` line, or a check that cannot be written that way, stops the phase for the foreman;
       never re-key a mutant or drop a row.
-- [ ] Record the sweep's output in `verify/mutant-sweep.md` (one line a mutant, the run's date and
+- [x] Record the sweep's output in `verify/mutant-sweep.md` (one line a mutant, the run's date and
       commit).
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P2` — `wording`, `slice`, `ids`
   (junit in both eras: the live test, the 4 accept rows, exactly the 51 drift ids, and the kept rails

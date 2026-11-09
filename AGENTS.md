@@ -959,7 +959,7 @@ import has no effect.
     `Callable[..., X]` and a factory taking an argument are rejected. A live OIDC flow is untested.
   - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
     `stack_import_violations`, `spec_id_violations`, `skip_violations`,
-    `sandbox_unset_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
+    `sandbox_unset_violations`, `marker_statement_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
     through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
     which does not read a call through `conftest.REAL_POPEN`: `tests/test_ssh_exec.py`'s `_host`
     runs `hdiutil` through it, outside the sandbox, `issues/marker-rule-gaps.md`;
@@ -983,7 +983,12 @@ import has no effect.
     `F1-contribution-refusal.sh`). The scan reads the imported namespace, so a planted id in a
     mutated copy fails it; `test_spec_id_scan_covers_every_member` asserts the three portions, so a
     member cannot drop out of the scan; and `test_the_id_rule_is_stated_as_the_check_enforces_it`
-    holds this statement and § Conventions' to the check, word for word. A row that needs a login shell calls `conftest.need_shell`: off
+    holds this statement and § Conventions' to the check, word for word.
+    `test_the_markers_are_stated_as_pyproject_describes_them` holds § Testing's and § Conventions'
+    statement of the markers to the `markers` descriptions in `pyproject.toml` word for word
+    (`marker_statement_violations`): line wrapping is the only freedom, and case, punctuation,
+    markup, spacing, order, a missing or third marker and a clause added anywhere all count;
+    `test_marker_statement_check_catches_planted_drift` plants each. A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
