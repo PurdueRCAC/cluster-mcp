@@ -52,12 +52,14 @@ image.
 
 The fixture's **steps** are its three `hdiutil` invocations: `create`, `attach` and `detach`
 (`detach` also when it is run as cleanup by R3). A step **fails** when it exits non-zero, and
-**hangs** when it runs past its bound (`[NEEDS CLARIFICATION: T1]`).
+**hangs** when it runs past its bound: 120 s for each real step, as today (Clarification T1).
 
-- **R1** — WHEN a step hangs, the fixture SHALL stop that step's process and every process it
-  started that is still running, and wait for them to exit, before the test fails. IF a stopped
-  process has not exited within the stop's wait (`[NEEDS CLARIFICATION: T2]`), THEN the fixture SHALL
-  stop waiting, and the failure SHALL name each such process (its pid and command).
+- **R1** — WHEN a step hangs, the fixture SHALL force-stop (KILL) at once that step's process and
+  every process it started that is still running, as the server's own timeout stop does, and then
+  wait for them to exit, before the test fails. That wait is bounded by the figure the maintainer
+  sets at the PLAN/TECH sign-off (Clarification T2). IF a stopped process has not exited within that
+  wait, THEN the fixture SHALL stop waiting, and the failure SHALL name each such process (its pid
+  and command).
 - **R2** — WHEN a step fails or hangs, the test's failure SHALL name the step (`create`, `attach` or
   `detach`) and how it ended: that it ran past its bound, naming the bound, or the exit status it
   returned with the tail of its standard error.
@@ -66,9 +68,10 @@ The fixture's **steps** are its three `hdiutil` invocations: `create`, `attach` 
   either exists. A `create` or `attach` that made no device and no image SHALL still end in R2's
   failure for that step, not in an error from the cleanup. The cleanup's own `detach` is a step: R1
   and R2 hold for it.
-- **R4** — IF `detach` fails or hangs, THEN after R1's stop the fixture SHALL
-  `[NEEDS CLARIFICATION: D1 — what the fixture does about the volume a detach could not detach]`,
-  and the failure SHALL name the mount point and the image path left behind.
+- **R4** — IF `detach` fails or hangs, THEN after R1's stop the fixture SHALL make no further
+  attempt to detach: the volume stays attached and the image file is kept, so `hdiutil info` still
+  names it, and the failure SHALL name the mount point and the image path left behind
+  (Clarification D1).
 - **R5** — WHEN the test body fails (the fill, its assertion, or the test's own assertions inside
   the fixture's `with`) and the fixture's `detach` then also fails or hangs, the test's report SHALL
   carry both failures, the body's first.
@@ -78,8 +81,9 @@ The fixture's **steps** are its three `hdiutil` invocations: `create`, `attach` 
   their rows and their outcomes on macOS (a real volume) and on Linux (the in-process path).
 - **R7** — A test SHALL pin R1–R6 with a stand-in for `hdiutil`, with no real disk image, on every
   platform the suite runs on (Linux CI and macOS), and with no skip (`AGENTS.md` § Testing: the
-  suite's only skips are `need_shell` and `need_git`). A hanging step runs against a short bound
-  (`[NEEDS CLARIFICATION: T3]`), never the real one. One row for each of these cases:
+  suite's only skips are `need_shell` and `need_git`). A hanging step runs against a short bound,
+  never the real one: the figure the maintainer sets at the PLAN/TECH sign-off (Clarification T3).
+  One row for each of these cases:
   1. `create` hangs, having made no device; its stand-in has started a child that hangs too.
   2. `create` hangs after making a device from the image; its stand-in has started a child that
      hangs too (the case observed: `hdiutil` and its formatter).
@@ -120,29 +124,32 @@ The fixture's **steps** are its three `hdiutil` invocations: `create`, `attach` 
 
 ## Clarifications
 
-None resolved yet. Open, each blocking `code-plan`:
-
-- `[NEEDS CLARIFICATION: T1 — the bound on each real hdiutil step.]` Before: 120 s per step
-  (`communicate(timeout=120)`); a hang fails the test after 120 s and leaves the step running. After,
-  the worst case for a hung `create` or `attach` is the bound, plus R1's wait (T2), plus the R3
-  cleanup `detach` (up to one more bound and wait); for a hung `detach`, the bound plus the wait (plus
-  whatever D1 adds). Options: (a) keep 120 s for every step; (b) a shorter bound for every step
-  (e.g. 60 s); (c) a bound per step (e.g. `create` longer than `attach` and `detach`).
-- `[NEEDS CLARIFICATION: T2 — how R1 stops a hung step, and how long it waits for the stopped
-  processes to exit.]` Before: no stop and no wait. Options: (a) force-stop at once (KILL, as the
-  server's own timeout stop does), wait up to 5 s, then report survivors; (b) ask first (TERM), force
-  after a 2 s grace, then wait up to 5 s; (c) force-stop and wait without a bound (a process stuck in
-  the kernel would hang the test, the failure this cycle removes).
-- `[NEEDS CLARIFICATION: T3 — the short bound the R7 test runs a hanging stand-in against.]`
-  Before: no such test. After: R7 has six hanging rows (1, 2, 5, 6, 9, 12; row 12 hangs twice, so
-  seven waits), each costing about the bound plus T2's stop, in both protocol eras, on whichever CI
-  suite job the test lands in (budget 10 min per job; worst baseline 7:34, `suite-modern-3`).
-  Options: (a) 0.5 s (about 4–5 s per era); (b) 1 s (about 8 s per era); (c) 2 s (about 15 s per era).
-- `[NEEDS CLARIFICATION: D1 — R4: a detach that failed or hung.]` Options: (a) report only: the
-  volume stays attached, the image file is kept so `hdiutil info` still names it, and the failure
-  names both; (b) one more bounded `detach -force` after the stop, then (a) if it also fails, adding
-  up to one bound and wait (T1, T2) to that worst case; (c) as (b), then remove the image file even
-  when the volume is still attached.
+- **T1 — Q:** What bound does each real `hdiutil` step get? Before: 120 s per step
+  (`communicate(timeout=120)`); a hang fails the test after 120 s and leaves the step running. The
+  options were (a) keep 120 s for every step, (b) a shorter bound for every step (e.g. 60 s), and
+  (c) a bound per step. — **A:** (a): keep 120 s for each real step. No bound changes. The worst case
+  for a hung `create` or `attach` becomes 120 s, plus R1's wait (T2), plus the R3 cleanup `detach`
+  (up to one more 120 s and wait); for a hung `detach`, 120 s plus the wait (resolved 2026-11-09,
+  foreman ruling at the GOAL gate).
+- **T2 — Q:** How does R1 stop a hung step, and how long does it wait for the stopped processes to
+  exit? Before: no stop and no wait. The options were (a) KILL at once, as the server's own timeout
+  stop does, then a bounded wait, then report survivors; (b) TERM, KILL after a grace, then a bounded
+  wait; (c) KILL and wait without a bound. — **A:** (a)'s approach: KILL at once, a bounded wait,
+  then report survivors. The wait's figure is the maintainer's at the PLAN/TECH sign-off: the plan
+  proposes it (5 s is the starting proposal) with its before (no stop, no wait) and after (resolved
+  2026-11-09, foreman ruling at the GOAL gate).
+- **T3 — Q:** What short bound does R7 run a hanging stand-in against? Before: no such test. R7 has
+  six hanging rows (1, 2, 5, 6, 9, 12; row 12 hangs twice, so seven waits), each costing about the
+  bound plus T2's wait, in both protocol eras, on whichever CI suite job the test lands in (budget
+  10 min per job; worst baseline 7:34, `suite-modern-3`). — **A:** The figure is the maintainer's at
+  the PLAN/TECH sign-off: the plan proposes it (1 s is the starting proposal, about 8 s per era) with
+  the per-era CI cost before and after (resolved 2026-11-09, foreman ruling at the GOAL gate).
+- **D1 — Q:** R4: what does the fixture do about a volume a `detach` that failed or hung could not
+  detach? The options were (a) report only, (b) one more bounded `detach -force`, then (a) if it
+  also fails, and (c) as (b), then remove the image file even while the volume is attached. —
+  **A:** (a): report only. The volume stays attached, the image file is kept so `hdiutil info` still
+  names it, and the failure names both. No retry, consistent with the non-goals (resolved
+  2026-11-09, foreman ruling at the GOAL gate).
 
 ## Related materials
 
