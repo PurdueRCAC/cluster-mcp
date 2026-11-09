@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:full-volume-fixture-leaks-hdiutil
 kind: test
 appetite: small
 lane: public

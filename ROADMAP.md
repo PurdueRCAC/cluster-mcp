@@ -191,7 +191,7 @@ On macOS the full-filesystem write test builds a real 4 MB volume with `hdiutil`
 Mac. Pre-existing; macOS only, since the CI runner never calls `hdiutil`.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: `tests/test_ssh_exec.py` (`_host`, `full_volume`); [`spec/safe-execution/`](spec/safe-execution/)*
-**Seed:** [`issues/full-volume-fixture-leaks-hdiutil.md`](issues/full-volume-fixture-leaks-hdiutil.md) · *status: unshaped*
+**Seed:** [`issues/full-volume-fixture-leaks-hdiutil.md`](issues/full-volume-fixture-leaks-hdiutil.md) · *status: adopted:full-volume-fixture-leaks-hdiutil*
 
 ## The `integration` marker says it drives the CLI, and not every integration test does
 
