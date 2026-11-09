@@ -192,6 +192,44 @@ def _skipping_helper_in(pred):
     return shape
 
 
+def _twice_without_a_skip(name, tree):
+    return any(len(defs) > 1 and not any(_has_skip(d) for d in defs)
+               for defs in ([d for d in _top(name, tree) if d.name == h] for h in HELPERS))
+
+
+def _binds(node: ast.AST) -> str | None:
+    """The name `node` binds, as Python reads it (written apart from the check's own code)."""
+    if isinstance(node, ast.Name):
+        return node.id if not isinstance(node.ctx, ast.Load) else None
+    if isinstance(node, ast.alias):
+        return node.asname or node.name.split('.')[0]
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return node.name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest
+    return node.name if isinstance(node, ast.ClassDef) else None
+
+
+def _rebound_by(kind, where=lambda node, tree: True):
+    """A top-level helper, and a node of `kind` (meeting `where`) that binds a helper's name."""
+    def shape(name, tree):
+        return bool(_top(name, tree)) and any(
+            isinstance(n, kind) and _binds(n) in HELPERS and where(n, tree) for n in ast.walk(tree))
+    return shape
+
+
+def _rebound_in_a_default(name, tree):
+    return bool(_top(name, tree)) and any(
+        isinstance(f, ast.FunctionDef) and f.name not in HELPERS and any(
+            isinstance(e, ast.NamedExpr) and _binds(e.target) in HELPERS for d in f.args.defaults for e in ast.walk(d))
+        for f in tree.body)
+
+
+def _async_nested_in_helper(name, tree):
+    return any(isinstance(inner, ast.AsyncFunctionDef) and inner.name in HELPERS and _has_skip(inner)
+               for outer in _top(name, tree) for inner in ast.walk(outer))
+
+
 def _attribute(name, tree):
     return any(isinstance(n, ast.Attribute) and n.attr != 'Exception' and _skipper(n.value) for n in ast.walk(tree))
 
@@ -236,6 +274,18 @@ SCOPE_ROWS = {
                                                       and Path(n).name != 'conftest.py')),
     'another-conftest': (True, _skipping_helper_in(lambda n: Path(n).name == 'conftest.py' and n != 'conftest.py'
                                                    and not Path(n).is_absolute())),
+    # Review cycle 1: R2's own report on a skip-less double definition, and each binding form and
+    # scope kind the check reads, each a gap the base had (the mutant sweep, verify/mutant-sweep.md).
+    'helper-defined-twice-without-a-skip': (True, _twice_without_a_skip),
+    'helper-rebound-in-a-default': (True, _rebound_in_a_default),
+    'helper-deleted': (True, _rebound_by(ast.Name, lambda n, t: isinstance(n.ctx, ast.Del))),
+    'helper-rebound-by-a-dotted-import': (True, _rebound_by(ast.alias, lambda n, t: not n.asname and '.' in n.name)),
+    'helper-rebound-by-except': (True, _rebound_by(ast.ExceptHandler)),
+    'helper-rebound-by-a-match-capture': (True, _rebound_by(ast.MatchAs)),
+    'helper-rebound-by-a-match-star': (True, _rebound_by(ast.MatchStar)),
+    'helper-rebound-by-a-match-rest': (True, _rebound_by(ast.MatchMapping)),
+    'helper-rebound-by-a-class': (True, _rebound_by(ast.ClassDef, lambda n, t: any(n is s for s in t.body))),
+    'async-helper-nested-in-the-helper': (True, _async_nested_in_helper),
 }
 SPELLING_ROWS = {
     'skip-through-an-attribute': (True, _attribute),

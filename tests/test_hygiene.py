@@ -849,6 +849,39 @@ def test_only_need_shell_skips() -> None:
                  id='outcome-type-as-an-argument'),
     pytest.param('t.py', 'import pytest\nwith pytest.raises(pytest.xfail.Exception):\n    pass\n', False,
                  id='outcome-type-caught'),
+    pytest.param('conftest.py', 'def need_git():\n    pass\ndef need_git():\n    pass\n', True,
+                 id='helper-defined-twice-without-a-skip'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\ndef other():\n'
+                 '    need_shell = print\n', False, id='helper-name-local-to-another-function'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'def other(x=(need_git := print)):\n    pass\n', True, id='helper-rebound-in-a-default'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'other = lambda: (need_git := print)\n', False, id='helper-name-bound-inside-a-lambda'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\ndel need_git\n', True,
+                 id='helper-deleted'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nimport need_git.tools\n',
+                 True, id='helper-rebound-by-a-dotted-import'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'try:\n    pass\nexcept ValueError as need_git:\n    pass\n', True, id='helper-rebound-by-except'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'match 0:\n    case need_git:\n        pass\n', True, id='helper-rebound-by-a-match-capture'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'match []:\n    case [*need_git]:\n        pass\n', True, id='helper-rebound-by-a-match-star'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'match {}:\n    case {**need_git}:\n        pass\n', True, id='helper-rebound-by-a-match-rest'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nclass need_git:\n    pass\n',
+                 True, id='helper-rebound-by-a-class'),
+    pytest.param('conftest.py', 'import pytest\nclass need_git:\n    pytest.skip("git")\n', True,
+                 id='helper-as-a-class'),
+    pytest.param('conftest.py', 'import pytest\nasync def need_shell(s):\n    pytest.skip(s)\n', True,
+                 id='helper-as-an-async-def'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    async def need_shell(t):\n'
+                 '        pytest.skip(t)\n', True, id='async-helper-nested-in-the-helper'),
+    pytest.param('conftest.py', 'import pytest\n@pytest.mark.skipif(True, reason="x")\ndef need_git():\n    pass\n',
+                 True, id='skip-on-the-helpers-decorator'),
+    pytest.param('t.py', 'import pytest\nraise ValueError("x") from pytest.skip.Exception\n', False,
+                 id='outcome-type-as-a-cause'),
+    pytest.param('t.py', 'try:\n    pass\nexcept ValueError:\n    raise\n', False, id='bare-reraise'),
 ])
 def test_skip_check_catches_planted_skips(name: str, text: str, found: bool) -> None:
     assert bool(skip_violations(name, text)) == found

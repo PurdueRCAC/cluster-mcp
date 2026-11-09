@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I â€” 0.2.0: hardening, and the rename finished
 
-Twenty-six entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-eight entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, six cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -67,9 +67,9 @@ era's suite runs as four CI jobs, each within 10 minutes, a budget `AGENTS.md` Â
 What remains comes in five groups, in this order:
 
 - **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
-  its children, the skip check and the two gaps it still leaves, the timing-sensitive reconnect test, an annotation check, the test
-  harnesses' leftovers, the marker wording, the image's init, and the surface fixture, which must
-  land before the first cycle that changes the served surface.
+  its children, the skip check and the two gaps it still leaves, the timing-sensitive reconnect
+  test, an annotation check, the test harnesses' leftovers, the marker wording, the image's init,
+  and the surface fixture, which must land before the first cycle that changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the

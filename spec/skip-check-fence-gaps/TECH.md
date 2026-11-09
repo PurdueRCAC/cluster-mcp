@@ -3,7 +3,7 @@ slug: skip-check-fence-gaps
 title: The static skip check catches the skips it admits today
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/skip-check-fence-gaps
 base: develop
 current_phase: done
@@ -163,11 +163,28 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
 - [x] Standing last-phase items: the previous cycle's last phase carried no project-level obligation
       beyond the ledger (no `## Times` quote in this repo).
 - [x] Stage, then run the `verify:`.
+- **Remediation, review cycle 1** (`REVIEW.md` F1–F3, all LOW/CONFIRMED; P2 reopened, see Amendments):
+  - [x] **F1:** every count in `ROADMAP.md` agrees with its entries: `**Seed:**` lines counted per
+        Part (Part I 28, by group 12 / 6 / 5 / 3 / 2; Part II 14, eleven `##` cycles and three
+        absorbed; Part III 2; after 0.3.0, 3), against the preamble, every Part blurb and the
+        group list. Only Part I's blurb was stale ("Twenty-six"); the gates bullet is rewrapped.
+  - [x] **F2:** `issues/skip-check-import-aliases.md` names only the spellings that import from
+        `pytest` and skip or xfail when renamed (`skip`, `xfail`, `importorskip`, each run under
+        pytest), and says `skipif` cannot be imported from `pytest` (a mark; `ImportError`).
+  - [x] **F3:** a mutant sweep over every decision in `skip_violations`, `_module_bindings`,
+        `_allowed` and the `.Exception` / `raise` exemption, recorded in
+        [`verify/mutant-sweep.md`](verify/mutant-sweep.md). Seventeen rows appended after
+        `outcome-type-caught` (existing rows byte-identical), each killing a mutant the reviewed
+        rows let survive, the first `helper-defined-twice-without-a-skip` (M6). M3, M10, M26, M25
+        and M42 are equivalent, with the reason recorded; M1b dies only to
+        `test_only_need_shell_skips`. The ten of them that are R1/R2 gaps the base had join the
+        gate's `SCOPE_ROWS` with a shape each.
 - **Verify:** the frontmatter's: gate `controls all` and `all`, then the profile's full `verify`,
   both eras (≈ 26 min, 1,571 s, measured once on the prototype; PLAN § 6). The whole command runs past the 10-minute cap of one foreground
   shell call: run it in the background and wait for its exit.
 - **Touches:** `tests/test_hygiene.py`; `issues/skip-check-import-aliases.md`,
-  `issues/skip-check-deselection.md` and `ROADMAP.md`.
+  `issues/skip-check-deselection.md` and `ROADMAP.md`; in remediation, also
+  `verify/planted-rows.py` (the required-row table) and `verify/mutant-sweep.md`.
 
 ## Amendments
 
@@ -185,6 +202,23 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
   leaves out "a star import" from PLAN § 2's list, because the check does see one:
   `from pytest import *` then `skip("x")` reads the word `skip` and is reported. The rest of the
   list stands, with the renamed import added because Q1 is seeded.
+- **2026-11-09, review cycle 1 remediation (F1–F3).** P2 is reopened, not P1: F1 and F2 are P2's
+  ledger, and F3 fails R6 (a planted row for R2's own report), which P2 satisfies; R2's behaviour
+  was graded met, and the check's code is unchanged (rows only). P2's `verify:` is kept as written;
+  it runs `controls all` and `all`, so P1's `scope` rows are gated with it, and the full profile
+  `verify` runs `tests/test_hygiene.py` in both eras. The gate's required-row table changes:
+  `SCOPE_ROWS` gains ten rows, `helper-defined-twice-without-a-skip`, `helper-rebound-in-a-default`,
+  `helper-deleted`, `helper-rebound-by-a-dotted-import`, `helper-rebound-by-except`,
+  `helper-rebound-by-a-match-capture`, `-star`, `-rest`, `helper-rebound-by-a-class` and
+  `async-helper-nested-in-the-helper`, each with a shape (`_twice_without_a_skip`, `_rebound_by`,
+  `_rebound_in_a_default`, `_async_nested_in_helper`), so `rows`, `bite` and the per-row controls
+  cover them (`controls all` is now about 31 s). The other seven new rows are not required: three
+  pin a decision the base check already reported (`helper-as-a-class`, `helper-as-an-async-def`)
+  or that no R-ID names (`skip-on-the-helpers-decorator`), and four expect no report
+  (`helper-name-local-to-another-function`, `helper-name-bound-inside-a-lambda`,
+  `outcome-type-as-a-cause`, `bare-reraise`); `meet` holds them, and the sweep record names the
+  mutant each kills. PLAN § 5's "unpinned binding forms" risk is closed by the `except`/`match`
+  rows. The fence, `kept` and `bodies` checks are unchanged.
 
 ---
 
