@@ -139,7 +139,7 @@ it gates nothing yet, and every later mutation gate rests on it.
 - 2026-11-02: `timeout-process-cleanup` adds 101 more (1,032 in all), about 11 minutes per era.
 
 *Horizon: Part I, gates first; before core extraction's review · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
-**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
+**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: adopted:mutants-workflow-timeout*
 
 ## The mutation runner's stop path is pinned for its main layer, not its deeper ones
 
