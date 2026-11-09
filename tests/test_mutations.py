@@ -11,11 +11,22 @@ runner cannot count a child as a kill unless every target failed for the case's 
 
 from __future__ import annotations
 
+import ast
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from mutants import CASES, MEMBERS, REPO_FILES, SURVIVOR_CONTROL, Case, apply, apply_repo, mutation_violations
+import mutants
+from mutants import (CASES, CHILD, LIMIT, MEMBERS, REPO_FILES, SANDBOX, SURVIVOR_CONTROL, Case,
+                     ChildTimeout, RunnerSignal, apply, apply_repo, die_by, mutation_violations, run_child, run_members,
+                     stop_on_signals, stop_run, timeout_violations)
 
 TARGETS = ['test_isolation.py::test_a', 'test_isolation.py::test_b']
 WHY = 'ran as'
@@ -94,3 +105,456 @@ def test_mutation_check_accepts_a_clean_kill() -> None:
 def test_mutation_check_flags_survivors(returncode: int, report: str | None, fragment: str) -> None:
     violations = mutation_violations(returncode, report, TARGETS, WHY)
     assert any(fragment in v for v in violations), violations
+
+
+
+# --- A child run past its limit -----------------------------------------------------------------
+
+# A run as a process table sees it: the runner (10), the bin/sandbox.sh wrapper leading the run's
+# group (100), the child pytest (101), a grandchild in a group of its own (102), an orphan left in the
+# wrapper's group (103), a grandchild in a session of its own (104) and an orphan left in that
+# session's group (105), and an orphan of nothing in the run (200).
+RUN: dict[int, tuple[int, int, str]] = {
+    10: (1, 10, 'S'), 100: (10, 100, 'S'), 101: (100, 100, 'S'), 102: (101, 102, 'S'), 103: (1, 100, 'S'),
+    104: (101, 104, 'Ss'), 105: (1, 104, 'S'), 200: (1, 200, 'S')}
+OWN = (10, 10)
+
+
+def runner_group_table() -> tuple[dict[int, tuple[int, int, str]], set[int], set[int]]:
+    """The wrapper in the test's own process group, the test's pid placed as the child's child, and a sibling in that group."""
+    me, group = os.getpid(), os.getpgrp()
+    table = {me: (101, group, 'S'), 100: (me, group, 'S'), 101: (100, group, 'S'), 300: (1, group, 'S')}
+    return table, {100, 101}, {100}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('present', 'absent'), [
+    pytest.param({101}, set(), id='child'),
+    pytest.param({102}, set(), id='grandchild'),
+    pytest.param({103}, set(), id='orphan-in-the-group'),
+    pytest.param({104, 105}, set(), id='new-session-group'),
+    pytest.param(set(), {200, 10, 1}, id='unrelated-orphan'),
+    pytest.param(set(), set(), id='runner-group'),
+])
+def test_run_members_follow_parents_and_groups(present: set[int], absent: set[int], request: pytest.FixtureRequest) -> None:
+    if request.node.callspec.id == 'runner-group':
+        table, pids, groups = runner_group_table()
+        found, known = run_members(table, [100], [100])
+        assert (set(found), set(known)) == (pids, groups)
+        assert os.getpid() not in found and os.getpgrp() not in known
+        return
+    found, known = run_members(RUN, [100], [100], OWN)
+    assert present <= set(found) and not absent & set(found), found
+    assert set(found) == {100, 101, 102, 103, 104, 105} and set(known) == {100, 102, 104}, (found, known)
+
+
+class Fakes:
+    """Recorded stand-ins for every process call the stop makes; `tables` are what each `ps` look returns."""
+
+    def __init__(self, tables: list[Any], pid: int = 100) -> None:
+        self.tables = list(tables)
+        self.calls: list[tuple[Any, ...]] = []
+        self.now = 0.0
+        self.pid = pid
+        self.stdout, self.stderr = Pipe(self.calls, 'stdout'), Pipe(self.calls, 'stderr')
+
+    def processes(self) -> dict[int, tuple[int, int, str]]:
+        self.calls.append(('table',))
+        table = self.tables.pop(0) if len(self.tables) > 1 else self.tables[0]
+        if isinstance(table, BaseException):
+            raise table
+        return dict(table)
+
+    def kill(self, pid: int, signum: int) -> None:
+        self.calls.append(('kill', pid, signum))
+
+    def killpg(self, group: int, signum: int) -> None:
+        self.calls.append(('killpg', group, signum))
+        if group == self.pid and signum == signal.SIGSTOP and getattr(self, 'wrapper_gone', False):
+            raise ProcessLookupError(group)
+
+    def mask(self, how: int, signals: Any) -> None:
+        self.calls.append(('mask', how, frozenset(signals)))
+
+    def clock(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.calls.append(('sleep', seconds))
+        self.now += seconds
+
+    def wait(self) -> int:
+        self.calls.append(('wait',))
+        return -9
+
+    def gone(self, pids: list[int], groups: list[int]) -> list[int]:
+        return mutants._wait_gone(pids, groups, processes=self.processes, kill=self.kill, clock=self.clock,
+                                  sleep=self.sleep, own=OWN)
+
+    def stop(self) -> list[int]:
+        return stop_run(self, processes=self.processes, kill=self.kill, killpg=self.killpg,  # type: ignore[arg-type]
+                        mask=self.mask, clock=self.clock, sleep=self.sleep)
+
+
+class Pipe:
+    def __init__(self, calls: list[tuple[Any, ...]], name: str) -> None:
+        self.calls, self.name = calls, name
+
+    def close(self) -> None:
+        self.calls.append(('close', self.name))
+
+
+KILL, STOP = signal.SIGKILL, signal.SIGSTOP
+# The stop's figures as the maintainer approved them, stated here so a changed constant shows in the rows
+# that use them, not only in `test_the_stop_figures`.
+GONE_WITHIN, GONE_POLL = 10, 0.1
+HELD = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('tables', 'pids', 'groups', 'left', 'kills', 'sleeps'), [
+    pytest.param([{}], [101], [100], [], [], 0, id='gone-at-once'),
+    pytest.param([{101: (100, 100, 'Z+')}], [101], [100], [], [], 0, id='zombie-is-gone'),
+    pytest.param([{101: (100, 100, 'S')}, {101: (100, 100, 'R')}, {}], [101], [100], [], [101, 101], 2,
+                 id='gone-after-polls'),
+    pytest.param([{101: (1, 100, 'S')}, {101: (1, 100, 'Z'), 102: (1, 100, 'S'), 103: (101, 300, 'S')}, {}],
+                 [101], [100], [], [101, 102, 103], 2, id='new-member-in-a-group'),
+    pytest.param([{101: (1, 100, 'S'), 102: (1, 100, 'S')}, {101: (1, 100, 'S')}, {101: (1, 100, 'S'), 102: (1, 100, 'S')}],
+                 [101, 102], [100], [101], None, None, id='still-running'),
+])
+def test_gone_waits_until_every_process_ends(tables: list[Any], pids: list[int], groups: list[int], left: list[int],
+                                             kills: list[int] | None, sleeps: int | None) -> None:
+    fakes = Fakes(tables)
+    assert fakes.gone(pids, groups) == left
+    killed = [c[1] for c in fakes.calls if c[0] == 'kill']
+    assert all(c[2] == KILL for c in fakes.calls if c[0] == 'kill')
+    slept = [c[1] for c in fakes.calls if c[0] == 'sleep']
+    assert all(s == GONE_POLL for s in slept), slept
+    if kills is not None:
+        assert (killed, len(slept)) == (kills, sleeps), fakes.calls
+        return
+    # Still running: looked every GONE_POLL until GONE_WITHIN had passed, and 102, once absent, never
+    # signalled again although a later table shows that number in a group of the run.
+    assert GONE_WITHIN <= fakes.now < GONE_WITHIN + 2 * GONE_POLL, fakes.now
+    assert killed.count(102) == 1 and killed.count(101) == len(slept), killed
+
+
+@pytest.mark.unit
+def test_stop_run_freezes_then_kills_the_whole_run() -> None:
+    first = {100: (10, 100, 'S'), 101: (100, 100, 'T'), 104: (101, 104, 'Ts')}
+    second = {**first, 105: (1, 104, 'T')}
+    fakes = Fakes([first, second, second, {100: (10, 100, 'Z')}])
+    assert fakes.stop() == []
+    assert fakes.calls == [
+        ('mask', signal.SIG_BLOCK, HELD),
+        ('killpg', 100, STOP),
+        ('table',), ('kill', 101, STOP), ('killpg', 104, STOP), ('kill', 104, STOP),
+        ('table',), ('kill', 105, STOP),
+        ('table',),
+        ('kill', 105, KILL), ('kill', 104, KILL), ('killpg', 104, KILL), ('kill', 101, KILL), ('killpg', 100, KILL),
+        ('table',),
+        ('wait',),
+        ('mask', signal.SIG_UNBLOCK, HELD),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('cut', ['table-fails', 'wrapper-gone'])
+def test_stop_run_kills_what_it_found_when_it_is_cut_short(cut: str) -> None:
+    if cut == 'table-fails':
+        fakes = Fakes([{101: (100, 100, 'T')}, RuntimeError('ps failed')])
+        with pytest.raises(RuntimeError, match='ps failed'):
+            fakes.stop()
+        assert fakes.calls == [
+            ('mask', signal.SIG_BLOCK, HELD), ('killpg', 100, STOP),
+            ('table',), ('kill', 101, STOP), ('table',),
+            ('kill', 101, KILL), ('killpg', 100, KILL), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD)]
+        return
+    fakes = Fakes([{}])
+    fakes.wrapper_gone = True  # type: ignore[attr-defined]
+    assert fakes.stop() == []
+    assert fakes.calls == [
+        ('mask', signal.SIG_BLOCK, HELD), ('killpg', 100, STOP), ('table',), ('killpg', 100, KILL),
+        ('table',), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD)]
+
+
+@pytest.mark.unit
+def test_the_stop_figures() -> None:
+    assert (LIMIT, mutants.GONE_WITHIN, mutants.GONE_POLL) == (300, GONE_WITHIN, GONE_POLL)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('exc', 'violations'), [
+    pytest.param(ChildTimeout(8, []), ['timeout: the child ran past its 8 s limit and was stopped'], id='gone'),
+    pytest.param(ChildTimeout(300, [4242, 4343]), ['timeout: the child ran past its 300 s limit and was stopped',
+                                                   'still running 10 s after the stop: pids 4242, 4343'], id='left'),
+])
+def test_a_timeout_reason_names_the_limit(exc: ChildTimeout, violations: list[str]) -> None:
+    assert timeout_violations(exc) == violations
+
+
+class FakePopen:
+    """A stand-in for `subprocess.Popen` that records how the child was started; `first` is what communicate does once."""
+
+    made: list[FakePopen] = []
+    first: Any = None
+
+    def __init__(self, args: list[str], **kwargs: Any) -> None:
+        self.args, self.kwargs, self.pid, self.returncode = args, kwargs, 4100, None
+        self.calls: list[tuple[Any, ...]] = []
+        self.stdout, self.stderr = Pipe(self.calls, 'stdout'), Pipe(self.calls, 'stderr')
+        FakePopen.made.append(self)
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        self.calls.append(('communicate', timeout))
+        if FakePopen.first is not None:
+            raise FakePopen.first
+        self.returncode = 3
+        return 'out', 'err'
+
+
+@pytest.fixture
+def fake_popen(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    """Patch in `FakePopen`, `LIMIT` = 7, and a recording `stop_run` that reports pid 4242 still running."""
+    stops: list[tuple[Any, ...]] = []
+    FakePopen.made, FakePopen.first = [], None
+    monkeypatch.setattr(subprocess, 'Popen', FakePopen)
+    monkeypatch.setattr(mutants, 'LIMIT', 7)
+
+    def recorded(proc: FakePopen) -> list[int]:
+        stops.append(('stop_run', proc))
+        proc.calls.append(('stop_run',))
+        return [4242]
+    monkeypatch.setattr(mutants, 'stop_run', recorded)
+    return stops
+
+
+@pytest.mark.unit
+def test_run_child_returns_what_the_child_returned(fake_popen: list[tuple[Any, ...]], tmp_path: Path) -> None:
+    src, junit, repo = tmp_path / 'src', tmp_path / 'junit.xml', tmp_path / 'repo'
+    got = run_child(src, ['test_x.py::test_y'], junit, repo)
+    proc, = FakePopen.made
+    argv = [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src), str(junit), str(repo), 'tests/test_x.py::test_y']
+    assert proc.args == argv
+    env = proc.kwargs.pop('env')
+    assert (env['PYTHONPATH'], env['PYTHONDONTWRITEBYTECODE']) == (str(src), '1')
+    assert proc.kwargs == {'stdout': subprocess.PIPE, 'stderr': subprocess.PIPE, 'text': True, 'start_new_session': True}
+    assert proc.calls == [('communicate', 7)]
+    assert isinstance(got, subprocess.CompletedProcess)
+    assert (got.args, got.returncode, got.stdout, got.stderr) == (argv, 3, 'out', 'err')
+    assert fake_popen == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('exit_', ['timeout', 'interrupt', 'signal'])
+def test_run_child_stops_the_run_on_every_early_exit(exit_: str, fake_popen: list[tuple[Any, ...]], tmp_path: Path) -> None:
+    raised = {'timeout': subprocess.TimeoutExpired('sh', 7), 'interrupt': KeyboardInterrupt(),
+              'signal': RunnerSignal(signal.SIGTERM)}[exit_]
+    FakePopen.first = raised
+    expected: type[BaseException] = ChildTimeout if exit_ == 'timeout' else type(raised)
+    with pytest.raises(expected) as caught:
+        run_child(tmp_path / 'src', ['test_x.py::test_y'], tmp_path / 'junit.xml')
+    proc, = FakePopen.made
+    assert proc.calls == [('communicate', 7), ('stop_run',), ('close', 'stdout'), ('close', 'stderr')]
+    assert len(fake_popen) == 1
+    if exit_ == 'timeout':
+        assert (caught.value.limit, caught.value.left) == (7, [4242])  # type: ignore[attr-defined]
+    elif exit_ == 'signal':
+        assert caught.value.signum == signal.SIGTERM  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('signum', [signal.SIGTERM, signal.SIGHUP], ids=['term', 'hup'])
+def test_a_runner_signal_exits_through_the_stop(signum: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, ...]] = []
+    installed: dict[int, Any] = {}
+
+    def record_signal(sig: int, handler: Any) -> None:
+        calls.append(('signal', sig, handler))
+        installed[sig] = handler
+    monkeypatch.setattr(signal, 'signal', record_signal)
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: calls.append(('kill', pid, sig)))
+    stop_on_signals()
+    assert sorted(installed) == sorted([signal.SIGTERM, signal.SIGHUP])
+    with pytest.raises(RunnerSignal) as caught:
+        installed[signum](signum, None)
+    assert caught.value.signum == signum
+    calls.clear()
+    with pytest.raises(SystemExit):
+        die_by(signum)
+    assert calls == [('signal', signum, signal.SIG_DFL), ('kill', os.getpid(), signum)]
+
+
+@pytest.mark.unit
+def test_the_script_installs_the_signal_stop() -> None:
+    tree = ast.parse(Path(mutants.__file__).read_text())
+    block = tree.body[-1]
+    assert isinstance(block, ast.If) and ast.unparse(block.test) == "__name__ == '__main__'"
+    texts = [ast.unparse(statement) for statement in block.body]
+    assert texts[0] == 'stop_on_signals()', texts
+    tried, = [s for s in block.body if isinstance(s, ast.Try)]
+    assert block.body.index(tried) > 0 and [ast.unparse(s) for s in tried.body] == ['sys.exit(main())']
+    handler, = tried.handlers
+    assert ast.unparse(handler.type) == 'RunnerSignal'
+    assert any(isinstance(n, ast.Call) and ast.unparse(n.func) == 'die_by' for n in ast.walk(handler))
+
+
+# The child run the integration row hangs: the pytest starts a child in its own group, a child in a
+# session of its own, and an orphan left in its group (its spawner, which outlives the orphan's start,
+# gone) that then starts a child in a session of its own, reachable only through the orphan's group.
+# Each is a sleeper that writes `pid ppid pgrp sid spawner` once in place; then the pytest records
+# itself and its PYTHONPATH, writes a ready file, and sleeps past any limit the row sets.
+SLEEPER = """\
+import os, subprocess, sys, time
+spawner = int(sys.argv[3])
+end = time.monotonic() + 20
+while os.getppid() == spawner and time.monotonic() < end:
+    time.sleep(0.01)
+if len(sys.argv) > 4:
+    subprocess.Popen([sys.executable, '-c', sys.argv[5], sys.argv[4], sys.argv[2], '0'], start_new_session=True)
+with open(sys.argv[1] + '.part', 'w') as out:
+    out.write(f'{os.getpid()} {os.getppid()} {os.getpgrp()} {os.getsid(0)} {spawner}')
+os.replace(sys.argv[1] + '.part', sys.argv[1])
+time.sleep(60)
+"""
+SPAWNER = """\
+import os, subprocess, sys, time
+subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3], str(os.getpid()), sys.argv[4], sys.argv[1]])
+time.sleep(0.3)
+"""
+HANG_TEST = """\
+import os, subprocess, sys, time
+from pathlib import Path
+
+OUT = Path(@OUT@)
+SLEEPER = @SLEEPER@
+SPAWNER = @SPAWNER@
+
+
+def test_hang():
+    py = sys.executable
+    subprocess.Popen([py, '-c', SLEEPER, str(OUT / 'child'), 'mutant-hang-child', '0'])
+    subprocess.Popen([py, '-c', SLEEPER, str(OUT / 'session'), 'mutant-hang-session', '0'], start_new_session=True)
+    subprocess.Popen([py, '-c', SPAWNER, SLEEPER, str(OUT / 'orphan'), 'mutant-hang-orphan', str(OUT / 'orphan-session')]).wait()
+    end = time.monotonic() + 30
+    while not all((OUT / name).exists() for name in ('child', 'session', 'orphan', 'orphan-session')):
+        assert time.monotonic() < end, 'the sleepers never wrote'
+        time.sleep(0.01)
+    (OUT / 'pytest').write_text(f'{os.getpid()} {os.getppid()} {os.getpgrp()} {os.getsid(0)}')
+    (OUT / 'pythonpath').write_text(os.environ.get('PYTHONPATH', ''))
+    (OUT / 'ready').write_text('')
+    time.sleep(60)
+"""
+RECORDED = ('pytest', 'wrapper', 'child', 'session', 'orphan', 'orphan-session')
+
+
+def process_state(pid: int) -> str:
+    """'gone' for a process that has ended (absent, or a zombie), else its `ps` state letters."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return 'gone'
+    except PermissionError:
+        return 'not ours'
+    stat = subprocess.run([str(SANDBOX), 'ps', '-o', 'stat=', '-p', str(pid)], capture_output=True, text=True).stdout.strip()
+    return 'gone' if not stat or stat.startswith('Z') else stat
+
+
+def recorded_pids(out: Path) -> dict[str, int]:
+    """The run's processes the hang child wrote down, by role; the wrapper is the pytest's parent."""
+    pids: dict[str, int] = {}
+    for name in ('pytest', 'child', 'session', 'orphan', 'orphan-session', 'sentinel-group', 'sentinel-session'):
+        if (out / name).exists():
+            pids[name] = int((out / name).read_text().split()[0])
+    if (out / 'pytest').exists():
+        pids['wrapper'] = int((out / 'pytest').read_text().split()[1])
+    return pids
+
+
+@pytest.mark.integration
+def test_a_child_past_its_limit_is_stopped_whole_and_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                              capsys: pytest.CaptureFixture[str]) -> None:
+    repo, out, scratch, tmp = tmp_path / 'repo', tmp_path / 'out', tmp_path / 'scratch', tmp_path / 'tmp'
+    for directory in (repo / 'tests', out, scratch, tmp):
+        directory.mkdir(parents=True)
+    (repo / 'pytest.ini').write_text('[pytest]\n')
+    (repo / 'tests' / 'test_hang.py').write_text(
+        HANG_TEST.replace('@OUT@', repr(str(out))).replace('@SLEEPER@', repr(SLEEPER)).replace('@SPAWNER@', repr(SPAWNER)))
+    (repo / 'tests' / 'test_quick.py').write_text("def test_quick():\n    assert False, 'planted'\n")
+    # The sandbox homes the killed wrappers leave go with tmp_path, not into the host's temporary directory.
+    monkeypatch.setenv('TMPDIR', str(tmp))
+    monkeypatch.setattr(tempfile, 'tempdir', str(scratch))
+    monkeypatch.setattr(mutants, 'LIMIT', 8)
+    monkeypatch.setattr(mutants, 'TESTS', repo / 'tests')
+    control = SURVIVOR_CONTROL
+    monkeypatch.setattr(mutants, 'CASES', (
+        Case('hang', control.file, control.edits, ('test_hang.py::test_hang',), 'hung'),
+        Case('quick', control.file, control.edits, ('test_quick.py::test_quick',), 'planted')))
+    sentinels = [
+        subprocess.Popen([str(SANDBOX), sys.executable, '-c', SLEEPER, str(out / 'sentinel-group'), 'mutant-hang-sentinel', '0']),
+        subprocess.Popen([str(SANDBOX), sys.executable, '-c', SLEEPER, str(out / 'sentinel-session'), 'mutant-hang-sentinel', '0'],
+                         start_new_session=True)]
+    seen: dict[str, Any] = {}
+    real = mutants.run_case
+
+    def watched(case: Case, *args: Any, **kwargs: Any) -> list[str]:
+        start = time.monotonic()
+        result = real(case, *args, **kwargs)
+        if case.id == 'hang':
+            seen['took'] = time.monotonic() - start
+            seen['ready'] = (out / 'ready').exists()
+            pids = recorded_pids(out)
+            seen['run'] = {name: process_state(pids[name]) for name in RECORDED if name in pids}
+            seen['sentinels'] = [process_state(p.pid) for p in sentinels] + [
+                process_state(pids[name]) for name in ('sentinel-group', 'sentinel-session') if name in pids]
+            seen['scratch'] = sorted(p.name for p in scratch.iterdir())
+        return result
+    monkeypatch.setattr(mutants, 'run_case', watched)
+    try:
+        end = time.monotonic() + 30
+        while not ((out / 'sentinel-group').exists() and (out / 'sentinel-session').exists()):
+            assert time.monotonic() < end, 'the sentinels never started'
+            time.sleep(0.01)
+        code = mutants.main(['hang', 'quick'])
+        printed = capsys.readouterr().out
+        assert seen.get('ready'), f'the child never got ready: {seen}'
+        rec = {name: tuple(int(f) for f in (out / name).read_text().split()) for name in RECORDED if name != 'wrapper'}
+        pytest_pid, wrapper = rec['pytest'][:2]
+        layout = {'pytest in the wrapper group': rec['pytest'][2] == wrapper,
+                  'child in the wrapper group': rec['child'][2] == wrapper,
+                  'orphan parent neither the pytest nor its spawner': rec['orphan'][1] not in (pytest_pid, rec['orphan'][4]),
+                  'orphan in the wrapper group': rec['orphan'][2] == wrapper,
+                  'session child leads its own group and session': rec['session'][0] == rec['session'][2] == rec['session'][3],
+                  "orphan's child is its own and leads a session": (rec['orphan-session'][1] == rec['orphan'][0]
+                                                                    and rec['orphan-session'][0] == rec['orphan-session'][2]
+                                                                    == rec['orphan-session'][3])}
+        assert all(layout.values()), f'layout not as planned: {layout}'
+        pythonpath = os.path.realpath((out / 'pythonpath').read_text())
+        assert pythonpath.startswith(os.path.realpath(scratch) + os.sep), pythonpath
+        assert seen['run'] == {name: 'gone' for name in RECORDED}, seen
+        assert seen['scratch'] == [], seen
+        assert seen['took'] < mutants.LIMIT + 5, seen
+        assert len(seen['sentinels']) == 4 and all(s not in ('gone', 'not ours') and 'T' not in s for s in seen['sentinels']), seen
+        assert printed == ('FAILED  hang: timeout: the child ran past its 8 s limit and was stopped\n'
+                           "killed  quick: test_quick.py::test_quick failed with 'planted'\n"), printed
+        assert code == 1
+    finally:
+        pids = recorded_pids(out)
+        for pid in [*pids.values(), *(p.pid for p in sentinels)]:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        for sentinel in sentinels:
+            try:
+                sentinel.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        end = time.monotonic() + 2
+        for pid in pids.values():
+            while time.monotonic() < end:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.02)

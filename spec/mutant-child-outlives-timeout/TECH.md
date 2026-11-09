@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/mutant-child-outlives-timeout
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: A child run past its limit is stopped whole, reported, and the sweep goes on
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -81,8 +81,9 @@ and makes one atomic code+state commit.
   gate's data modes read the index, and `rows` and `within-limit` refuse a working copy that differs
   from it. A gate near or over the Bash tool's 10-minute cap (P2's full `verify`) runs through
   `run_in_background`; never a disowned launch.
-- Only `tests/mutants.py`, `tests/test_mutations.py`, `AGENTS.md` (the mutation-runner bullet) and
-  `issues/sandbox-dirs-left-on-kill.md` change, besides this cycle's `spec/` (the `untouched` mode).
+- Only `tests/mutants.py`, `tests/test_mutations.py` and `AGENTS.md` (the mutation-runner bullet)
+  change, besides this cycle's `spec/` (the `untouched` mode, which also allows
+  `issues/sandbox-dirs-left-on-kill.md`; this cycle no longer edits it, P1 amendment 2).
   In `tests/mutants.py`, `CASES`, `SURVIVOR_CONTROL`, `apply`, `apply_repo`, `mutation_violations`,
   `self_check` and `main` stay byte-identical, and new statements go between `apply_repo` and
   `run_child`; that keeps the sibling cycle `mutants-workflow-timeout` rebasing cleanly (PLAN § 2,
@@ -96,39 +97,62 @@ and makes one atomic code+state commit.
 reported `FAILED` with the timeout and its limit named, before the next case runs; a child that ends
 within its limit is read exactly as before.
 
-- [ ] In `tests/mutants.py`, between `apply_repo` and `run_child`: `LIMIT = 300`, `GONE_WITHIN = 10`,
-      `GONE_POLL = 0.1` (the figures stand as PLAN § 3 D3 and D5 propose until the maintainer rules on
-      them; a ruling changes the constant and `test_the_stop_figures` together), `ChildTimeout`,
+- [x] In `tests/mutants.py`, between `apply_repo` and `run_child`: `LIMIT = 300`, `GONE_WITHIN = 10`,
+      `GONE_POLL = 0.1` (approved, amendment 1; a later ruling changes the constant and
+      `test_the_stop_figures` together), `ChildTimeout`,
       `RunnerSignal`, `_processes`, `run_members`, `_wait_gone`, `stop_run`, `timeout_violations`,
       `stop_on_signals`, `die_by`, each as PLAN § 2 specifies (signatures; the stop's order: signals
       held, freeze, walk, SIGKILL in reverse discovery order inside `try`/`finally`, confirmation,
       then `wait`; exact violation strings).
-- [ ] `run_child`: `Popen(..., start_new_session=True)` with the same argv and environment as today,
+- [x] `run_child`: `Popen(..., start_new_session=True)` with the same argv and environment as today,
       `communicate(timeout=LIMIT)` read at call time, the two early-exit clauses (PLAN § 2), and a
       `CompletedProcess` built as `subprocess.run` builds it.
-- [ ] `run_case`: catch `ChildTimeout` inside the `TemporaryDirectory` block and return
+- [x] `run_case`: catch `ChildTimeout` inside the `TemporaryDirectory` block and return
       `timeout_violations(exc)`. `main` and `self_check` are not edited.
-- [ ] The `__main__` block calls `stop_on_signals()`, then `sys.exit(main())` with `RunnerSignal`
+- [x] The `__main__` block calls `stop_on_signals()`, then `sys.exit(main())` with `RunnerSignal`
       caught and handed to `die_by` (it stays the file's last statement).
-- [ ] Imports: `signal`, `time`. The module docstring gains one sentence on the limit and the stop.
-- [ ] `AGENTS.md` § Testing, the mutation-runner bullet: the `FAILED` sentence names the timeout
-      (PLAN § 2, Docs). `issues/sandbox-dirs-left-on-kill.md`: the sentence naming this runner's
-      timeout path states the new mechanism (the whole run SIGKILLed, `bin/sandbox.sh` included); its
-      home is still left, which is that seed's.
-- [ ] `tests/test_mutations.py`: every row PLAN § 6 lists, with exactly the names and parameter ids
+- [x] Imports: `signal`, `time`. The module docstring gains one sentence on the limit and the stop.
+- [x] `AGENTS.md` § Testing, the mutation-runner bullet: the `FAILED` sentence names the timeout
+      (PLAN § 2, Docs). `issues/sandbox-dirs-left-on-kill.md` is not edited (amendment 2).
+- [x] `tests/test_mutations.py`: every row PLAN § 6 lists, with exactly the names and parameter ids
       the gate's `ROWS` freezes, each tagged `unit` or `integration` as listed. The unit rows launch
       nothing (fakes injected into `stop_run`, a fake `Popen`, a recorded `signal.signal`). The
       integration row's processes carry `mutant-hang-` in their argv and its teardown kills each one.
-- [ ] Mutant pass (code-build Step 4): plant each mutant of PLAN § 6's decision list into a scratch
+- [x] Mutant pass (code-build Step 4): plant each mutant of PLAN § 6's decision list into a scratch
       copy of `tests/mutants.py` and run the rows it names; each must go red. Record the table (mutant,
       rows red, or survivor and why) in the commit body.
-- [ ] Measure the integration row's time in each era (`pytest --durations=0`) and put both figures
+- [x] Measure the integration row's time in each era (`pytest --durations=0`) and put both figures
       in the commit body; PLAN § 5's 10–11 s is a projection until then.
 - **Verify:** the frontmatter `verify:`: `controls`, `untouched`, `rows legacy`, `rows modern`,
   `tests/test_hygiene.py` with `tests/test_mutations.py` (the sandbox rail and the spec-id check over
   the new code), then `within-limit` (R4, both passes, about 200 s).
-- **Touches:** `tests/mutants.py`, `tests/test_mutations.py`, `AGENTS.md`,
-  `issues/sandbox-dirs-left-on-kill.md`.
+- **Touches:** `tests/mutants.py`, `tests/test_mutations.py`, `AGENTS.md`.
+- **Amendments (2026-11-09, P1 build):**
+  1. D3 and D5 approved by the maintainer at the PLAN/TECH gate, 2026-11-09: `GONE_POLL = 0.1`,
+     `GONE_WITHIN = 10`; one integration row at about 10–11 s per era in each era's fourth suite
+     command, and a measurement above 15 s per era goes back to the maintainer before P1 lands.
+  2. Foreman ruling: `issues/sandbox-dirs-left-on-kill.md` is not rewritten in this cycle. That seed
+     is owned by the `sandbox-dirs-left-on-kill` cycle since 2026-11-09, which keeps `bin/sandbox.sh`
+     as it is and has each harness that SIGKILLs a sandbox point its `TMPDIR` into a directory the
+     harness owns, plus a suite-session sweep. This cycle does not change how the runner sets
+     `TMPDIR` for its child (the PLAN never did); only the integration row points its own `TMPDIR`
+     under `tmp_path`, as PLAN § 6 planned.
+  3. Build detail beyond PLAN § 2's names, all inside the run-child block: `HELD` (the held signals),
+     `Table` (the table's type), `_send` (a signal send that ignores a vanished or foreign target) and
+     `_raise_runner_signal` (the handler). `run_members` returns its pids and groups as lists in
+     discovery order (the stop's kill order needs it) and never adds pid or group 0 or 1, so no
+     signal can go to `kill(0)`, `killpg(0)` or init. `_wait_gone` also drops a group once no live
+     member of the run carries it. `die_by` raises `SystemExit(128 + signum)` should the signal not
+     end the runner.
+  4. Three rows strengthened after the mutant pass's first run showed a named row green (each
+     mutant was still killed by another row). The integration row's orphan starts a child in a
+     session of its own, reachable only through the orphan's group, so "`run_members` ignores
+     pgid" turns the row red (killing the wrapper's group alone had reached the orphan); and its
+     spawner lingers 0.3 s, with the layout check requiring the orphan's parent to be neither the
+     pytest nor the spawner, so "the orphan's layout not waited for" is red every time, not by a
+     race. The `gone-*` rows compare against the approved figures stated in the test module, not
+     the imported constants, so "`GONE_WITHIN` 10 → 1" and "`GONE_POLL` 0.1 → 1" turn
+     `still-running` and `gone-after-polls` red as listed.
 
 ## Phase P2 — The ledger, and the full gate in both eras
 **Satisfies:** R1, R2, R3, R4 (the whole suite, both eras, on the final tree) · **Depends on:** P1
