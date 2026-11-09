@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/integration-marker-wording
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: The descriptions and AGENTS.md state the markers
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -135,22 +135,22 @@ proven against `tests/conftest.py`, and `AGENTS.md` states the markers word for 
 and § Conventions, points at them from the development commands, drops the exception note and names
 the routes the probe found open.
 
-- [ ] Replace the two `markers` entries in `pyproject.toml` with PLAN § 2's text, exactly (two
+- [x] Replace the two `markers` entries in `pyproject.toml` with PLAN § 2's text, exactly (two
       lines changed, nothing else in the file).
-- [ ] `AGENTS.md` § Testing, marker bullet: the not-`unit`-is-`integration` sentence, the statement
+- [x] `AGENTS.md` § Testing, marker bullet: the not-`unit`-is-`integration` sentence, the statement
       (`MARKERS_STATED` line plus the two items, wrapped with continuation lines two spaces deeper
       than the dash), a blank line (without it the next line renders inside the `integration`
       item), and the line naming `test_the_markers_are_stated_as_pyproject_describes_them`.
-- [ ] `AGENTS.md` § Conventions, marker bullet: the same statement, verbatim.
-- [ ] `AGENTS.md` development commands: the `-m unit` comment's pointer and the sandboxed-run
+- [x] `AGENTS.md` § Conventions, marker bullet: the same statement, verbatim.
+- [x] `AGENTS.md` development commands: the `-m unit` comment's pointer and the sandboxed-run
       comment's per-launch sentence (PLAN deviation row 1).
-- [ ] `AGENTS.md` § Testing, `tests/test_registry.py` entry: drop "although it drives no CLI".
-- [ ] `AGENTS.md` § Testing: the rails' unit-guard bullet names the open routes and
+- [x] `AGENTS.md` § Testing, `tests/test_registry.py` entry: drop "although it drives no CLI".
+- [x] `AGENTS.md` § Testing: the rails' unit-guard bullet names the open routes and
       `issues/marker-rule-gaps.md`; the `tests/test_hygiene.py` entry says `test_cli_drives_are_sandboxed`
       does not read a `conftest.REAL_POPEN` call (`_host`, `hdiutil`), naming the same seed.
       Do not fix those routes here: the seed `issues/marker-rule-gaps.md` and its ROADMAP entry were
       filed by the plan commit.
-- [ ] Reference text for all of the above: `verify/draft/apply_edits.py` (`P1`). Stage, then run
+- [x] Reference text for all of the above: `verify/draft/apply_edits.py` (`P1`). Stage, then run
       the gate.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P1` — `wording` (the probe of
   `tests/conftest.py`, the claimed phrases present and "fast", "CLI", "drives" absent, the drafted
@@ -210,6 +210,17 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
 - **Touches:** nothing new, unless the ledger records a new `issues/` file and its `ROADMAP.md` entry.
 
 ---
+
+## Amendments
+
+- **2026-11-09, the PLAN/TECH gate's rulings** (recorded at P1). PLAN § 3's deviation rows 1–9 are
+  accepted as written. Row 6's "3 rows" was a slip: the design has 4 accept rows (`as-planted`,
+  `rewrapped`, `unwrapped`, `paragraph-after-a-blank`, as P2 and `marker_gate.py` already say);
+  PLAN row 6 is corrected in place and says so. The gate freezes only `verify/`, so the correction
+  is allowed. Row 4's conflict with the sibling cycle is settled on the sibling's side: its stand-in
+  will launch through `bin/sandbox.sh`, and nothing changes in this cycle. Row 8 stands as the
+  oracle freeze: no file under `verify/` changes except `mutant-sweep.md`, and a check that cannot
+  take the sweep's substitutions stops the phase for the foreman rather than re-keying a mutant.
 
 ## How `code-build` drives this
 

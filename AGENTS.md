@@ -107,7 +107,8 @@ uv run pytest -v                         # full suite
 uv run pytest -v -k "pattern"            # by name
 uv run pytest -v -m unit                 # marker: unit | integration (--strict-markers)
                                          #   every test carries one; the conftest fails the
-                                         #   run on an unmarked test (§ Testing)
+                                         #   run on an unmarked test; each means what its
+                                         #   pyproject.toml description says (§ Testing)
 
 # Drive the CLI safely: throwaway HOME, blank auth env, unreachable cluster.
 bin/sandbox.sh uv run cluster-mcp --help
@@ -115,7 +116,9 @@ bin/sandbox.sh sh -c "uv run cluster-mcp -e local --generate-token"
 
 # A test drive must step back into the repo: the sandbox cd's out of it, and pytest would
 # otherwise set rootdir to the throwaway dir and never load pyproject.toml (losing
-# --strict-markers and every registered marker). HOME/auth/SSH isolation is unaffected.
+# --strict-markers and every registered marker). HOME/auth/SSH isolation is unaffected. Wrapping
+# the whole run is a choice for a manual run; the rule the suite enforces is per launch: every
+# process an integration test launches goes through bin/sandbox.sh (§ Testing).
 bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
 ```
 
@@ -304,7 +307,17 @@ import has no effect.
 - `uv run pytest`. Only **`@mark.unit`** and **`@mark.integration`** are real markers under
   `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
   hook that fails the run with a `pytest.UsageError` listing any collected test that carries
-  neither. So `-m unit` and `-m integration` each select a real subset.
+  neither. So `-m unit` and `-m integration` each select a real subset, and a test that is not `unit`
+  is `integration`: the unit guard (below) is inactive for it.
+  Each marker means what its description in `pyproject.toml` says, word for word:
+  - `unit`: starts no process, opens no network connection (a name lookup included) and sees no
+    real HOME; the unit guard holds it to that
+  - `integration`: needs what a unit test is refused (a process, a network connection or name
+    lookup, or the real HOME), itself or through a fixture or helper; every process it launches
+    goes through bin/sandbox.sh
+
+  `test_the_markers_are_stated_as_pyproject_describes_them` holds this statement and § Conventions'
+  to those descriptions (`tests/test_hygiene.py`, below).
 - The suite pins the coupled core's contracts (§ Invariants §1–§7) and the agent-facing surface
   (§9). Every module is built around **pure check functions** (`*_violations`) that its tests feed
   observed behaviour, and that gates may import directly (`sys.path.insert(0, 'tests')`). Their
@@ -339,7 +352,7 @@ import has no effect.
     module. That is the case without git on PATH, without `bin/sandbox.sh` (an sdist), outside a
     work tree (one above `GIT_CEILING_DIRECTORIES` included), in a `unit` test, which may start no
     process, when a call fails or lists a file in no class (a FIFO, socket or device aside) or in
-    two, and when a directory there cannot be read. So `test_docs_modules_absent` is `integration` although it drives no CLI, and
+    two, and when a directory there cannot be read. So `test_docs_modules_absent` is `integration`, and
     `-m unit` no longer runs it. It is the one test that asks the developer's own git, and only
     when it fails. Every other test that runs git, each git-backed control and
     `test_git_env_drops_what_points_git_elsewhere`, uses a scratch HOME and system config, so the
@@ -948,6 +961,8 @@ import has no effect.
     `stack_import_violations`, `spec_id_violations`, `skip_violations`,
     `sandbox_unset_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
     through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
+    which does not read a call through `conftest.REAL_POPEN`: `tests/test_ssh_exec.py`'s `_host`
+    runs `hdiutil` through it, outside the sandbox, `issues/marker-rule-gaps.md`;
     checked statically); no module but `tests/harness.py` imports the stack, by any of its import
     names `fastmcp`, `mcp`, `mcp_types`, `httpx2`, `httpcore2` (and the old `httpx`)
     (`test_only_the_harness_imports_the_stack`, also static: `import`, `from … import`, and
@@ -1462,7 +1477,12 @@ import has no effect.
     every process launch (`subprocess.Popen`, `os.system`/`popen`/`exec*`/`spawn*`/`fork`,
     `posix_spawn`, `pty`, `multiprocessing`) and network connect or lookup is refused and recorded.
     A refusal fails the test at teardown; contract tests also assert `guard.refused == []` in the
-    body, because a refusal inside a tool comes back as a tool error. **File I/O is not guarded:** a
+    body, because a refusal inside a tool comes back as a tool error. It replaces those names, so
+    what was bound before the test or sits below them is not refused: a `Popen` class bound earlier
+    (`conftest.REAL_POPEN`, a `from subprocess import Popen`) still launches; a `_socket` connect, a
+    UDP `sendto` and an early-bound `getaddrinfo` still reach the network; `socket.gethostbyname`
+    and its kin still look a name up; and a fixture of wider scope has launched before the guard is
+    active (`issues/marker-rule-gaps.md`). **File I/O is not guarded:** a
     tool that falls back to local file operations is caught by `refusal_violations`' stated reason
     and the `transfer-local-fallback` planted case, not by the guard.
   - **The PATH shim**, for every test: `sudo` and `ssh` stand-ins come first on `PATH`; each
@@ -3123,6 +3143,12 @@ What each mode means:
   every new test; `tests/conftest.py` fails the run on one that carries neither (§ Testing). Still,
   do not write a `verify:` gate whose only assertion is a marker selection: a selection can match
   nothing, or not the tests you meant, and pass green. Name the test ids the gate depends on.
+  Each marker means what its description in `pyproject.toml` says, word for word:
+  - `unit`: starts no process, opens no network connection (a name lookup included) and sees no
+    real HOME; the unit guard holds it to that
+  - `integration`: needs what a unit test is refused (a process, a network connection or name
+    lookup, or the real HOME), itself or through a fixture or helper; every process it launches
+    goes through bin/sandbox.sh
 - **A CLI drive — any verify or test drive — never touches the developer's real home, config, or a
   real cluster.** Wrap it in
   `bin/sandbox.sh`, which unsets the SSH host by both names (`CLUSTER_MCP_SSH_HOST` and the legacy
