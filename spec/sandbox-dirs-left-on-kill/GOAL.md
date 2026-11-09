@@ -54,11 +54,8 @@ sandbox changes, and the directories already on a host are the developer's to re
 
 - **R1** — WHEN `bin/sandbox.sh` is killed with SIGKILL, alone or with its process group, by any
   caller, the directory it made SHALL no longer exist once the wrapper and the command it started
-  have both ended, [NEEDS CLARIFICATION: by when? (a) before the killing caller's own wait on the
-  wrapper returns; (b) within a fixed time after both have ended, the figure set by the maintainer
-  at the plan gate (before: never; after: the plan proposes one with its measured cost); (c) by the
-  end of the drive, suite or sweep that started it; (d) at the latest when the next
-  `bin/sandbox.sh` starts on that host].
+  have both ended, within the bound the maintainer sets at the PLAN/TECH sign-off (Clarification
+  Q1).
 - **R2** — WHEN the profile's `verify` command, a single pytest run of any part of the suite, or
   `tests/mutants.py` over any cases (a case whose child run passes its time limit included) runs to
   its end, the `TMPDIR` it ran under SHALL hold no `cluster-mcp-sandbox.*` directory that the run
@@ -99,7 +96,24 @@ sandbox changes, and the directories already on a host are the developer's to re
 
 ## Clarifications
 
-None resolved yet; R1's bound is open (it also sets R2's).
+- **Q1:** By when must a SIGKILLed sandbox's directory be gone (R1, and through it R2)? Options
+  weighed: before the killing caller's own wait on the wrapper returns; within a fixed time after
+  the wrapper and its command have both ended; by the end of the drive, suite or sweep that started
+  it; at the latest when the next `bin/sandbox.sh` starts. — **A:** Within a fixed time after the
+  wrapper and the command it started have both ended, with the fix in or around `bin/sandbox.sh`
+  so every caller gets it. The figure is a timing bound and the maintainer's: the plan proposes it
+  with its before (never removed) and after (the figure and its measured cost), and the maintainer
+  sets it at the PLAN/TECH gate (2026-11-09, foreman ruling at the GOAL gate; the figure is the
+  maintainer's at the PLAN/TECH gate).
+- **Q:** Who reviews a finding in `bin/sandbox.sh`? — **A:** It is a high-blast-radius path
+  (`AGENTS.md` § Invariants, High-blast-radius paths), so a CONFIRMED review finding there needs
+  the maintainer's sign-off before the cycle lands, and the plan runs research (2026-11-09, foreman
+  ruling at the GOAL gate).
+- **Q:** Who owns the seed `issues/sandbox-dirs-left-on-kill.md` while both cycles are open? —
+  **A:** This cycle. Its sentence on the mutation runner's timeout path is carried verbatim from
+  `mutant-child-outlives-timeout`'s shape commit, whose build does not rewrite it; the "last three"
+  referent after that sentence is fixed by whichever cycle lands second, at its landing
+  (2026-11-09, foreman ruling at the GOAL gate).
 
 ## Related materials
 
@@ -114,3 +128,8 @@ None resolved yet; R1's bound is open (it also sets R2's).
 - Neighbouring cycles: `mutant-child-outlives-timeout` (whose GOAL leaves this home here) and
   `mutants-workflow-timeout`, both on their own branches
 - Related seed: [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md)
+- **Constraint for the plan** (not a requirement of its own): any process `bin/sandbox.sh` leaves
+  running to remove its directory after a SIGKILL must stay out of reach of a run-wide stop that
+  walks live parents and process groups, such as `mutant-child-outlives-timeout`'s SIGSTOP-then-
+  SIGKILL of every group of a run; a stop that reaches it kills it too and the directory stays.
+  R2's mutation-runner row is where that shows.
