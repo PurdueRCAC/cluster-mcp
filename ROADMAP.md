@@ -170,7 +170,7 @@ it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carr
 2026-10-17.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
-**Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*
+**Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: adopted:annotation-check*
 
 ## A sandbox killed with SIGKILL leaves its directory behind
 

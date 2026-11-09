@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:annotation-check
 kind: ci
 appetite: small
 lane: public
