@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: Row 1 counts each reconnect worker as it starts
-  status: pending
+  status: done
   satisfies:
   - R1
   - R7
@@ -150,6 +150,13 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
   D1. If (c) is signed instead, the plan is amended before P4 (the slack value, `KEPT[4]` and
   `BUILT[4]` in `timing-gate.py`, and the row-4 fault sizes) and re-signed.
 
+## Amendments
+
+- **2026-11-09, the PLAN/TECH gate's rulings.** GOAL (`abe12e3`) and PLAN/TECH (`758e7d1`) signed
+  for P1–P3. D2–D7 accepted. D1 (row 4: the collector paused for the timed start, or fallback (c))
+  is with the maintainer: P4 does not start until he rules, and if he picks (c), PLAN and TECH are
+  amended as Conventions says and re-signed before P4.
+
 ---
 
 ## Phase P1 — Row 1 counts each reconnect worker as it starts
@@ -157,18 +164,18 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
 **Goal:** the stalled-reconnect row counts the one reconnect worker whether or not it has ended by the
 time the call returns, and still fails on each fault in PLAN § 6's row-1 list.
 
-- [ ] In `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`, replace the `before`
+- [x] In `test_a_stalled_reconnect_is_abandoned_against_a_real_handshake`, replace the `before`
   snapshot and the `threading.enumerate()` listing with a `Thread.start` hook
   (`monkeypatch.setattr(threading.Thread, 'start', start)`) that records each thread named `WORKER`
   whose `_target` is `executor._settle`, once its real start returns; keep it on until the joins
   below are done, then restore the real `start` (and in the `finally`). Message: `'{n} reconnect
   workers started during the call, not one'`.
-- [ ] Join each recorded worker for `STALL_WORKER`; message `'the abandoned attempt was still running
+- [x] Join each recorded worker for `STALL_WORKER`; message `'the abandoned attempt was still running
   {STALL_WORKER} s after the call gave up, past its {STALL_WORKER} s bound'`.
-- [ ] `not_run_violations`: the time message becomes `'the call gave up {elapsed:.2f} s after it began,
+- [x] `not_run_violations`: the time message becomes `'the call gave up {elapsed:.2f} s after it began,
   past its {bound} s bound and {slack} s of slack'` (D4). Its check, and row 1's call of it with
   `slack=STALL_LATE`, unchanged.
-- [ ] Keep `STALL_WINDOW`, `STALL_LATE`, `STALL_WORKER`, the window check and `held` as they are.
+- [x] Keep `STALL_WINDOW`, `STALL_LATE`, `STALL_WORKER`, the window check and `held` as they are.
 - **Verify:** `timing-gate.py row 1`: values (R9, no skip/xfail/early return), scope, the row in both
   eras, faults 1/* (five, ~30 s), control 1 in each era (the tree passes; the base fails with
   `reconnect workers ran, not one`). Measured on the prototype: about 1 min.
