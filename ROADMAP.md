@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 28 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Twenty-eight entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, six cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -66,10 +66,11 @@ era's suite runs as four CI jobs, each within 10 minutes, a budget `AGENTS.md` �
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
-  its children, the skip check and the two gaps it still leaves, the timing-sensitive reconnect
-  test, an annotation check, the test harnesses' leftovers, the marker wording, the image's init,
-  and the surface fixture, which must land before the first cycle that changes the served surface.
+- **Gates first** (thirteen entries), because every later gate rests on them: the mutation run and
+  its children, the skip check, the two gaps it still leaves and the pins it still lacks, the
+  timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
+  wording, the image's init, and the surface fixture, which must land before the first cycle that
+  changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
@@ -132,6 +133,18 @@ does so today. Raised by the adversarial review of `skip-check-fence-gaps`'s pla
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §4a, §5, Q2); `tests/conftest.py`*
 **Seed:** [`issues/skip-check-deselection.md`](issues/skip-check-deselection.md) · *status: unshaped*
+
+## The static skip check's behaviour is pinned for some forms and positions, not all
+
+`skip-check-fence-gaps` leaves three pin gaps its third review found: the "defined again"
+report is pinned for some module-scope binding forms, a raised `or` for its last operand only, and
+some admitted values and non-bindings not at all. The check behaves correctly on each; a mutant can
+change it and pass every row. The fix is one planted row per binding form, raise operand position
+and admitted value position, and a mutant sweep with additive mutants. Seeded by the maintainer's
+landing ruling, 2026-11-09.
+
+*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
+**Seed:** [`issues/skip-check-pin-completeness.md`](issues/skip-check-pin-completeness.md) · *status: unshaped*
 
 ## A real-time reconnect test fails under full-suite load
 
