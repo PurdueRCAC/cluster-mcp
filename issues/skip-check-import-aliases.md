@@ -16,10 +16,11 @@ statically visible skips get past it:
 - **A skipper renamed on import.** `from pytest import skip as go`, then `go("x")`. The call's
   word is `go`; the import alias (`alias.name == 'skip'`) is never read. The same holds for
   `xfail` and `importorskip`: renamed on import, each still skips or xfails its row (run under
-  pytest, 2026-11-09). `skipif` cannot be imported from `pytest`: it is a mark, reached only as
-  `pytest.mark.skipif`, so `from pytest import skipif` fails with `ImportError` and breaks
-  collection loudly rather than skipping a row. Renaming the module is caught (`import pytest as
-  pt`, then `pt.skip(...)`): the attribute's word is still `skip`.
+  pytest, 2026-11-09). `skipif` cannot be imported from `pytest`: it is a mark, reached as an
+  attribute of `pytest.mark` (or of `mark` after `from pytest import mark`), so `from pytest import
+  skipif` fails with `ImportError` and breaks collection loudly rather than skipping a row; the
+  check reads the attribute's word `skipif` either way. Renaming the module is caught (`import
+  pytest as pt`, then `pt.skip(...)`): the attribute's word is still `skip`.
 - **The outcome type subclassed, then raised.** `class S(pytest.skip.Exception): pass`, then
   `raise S("x")`. `pytest.skip.Exception` among a class's bases is the outcome type read as a value,
   which the check admits by design (it is how `pytest.param(..., pytest.skip.Exception)` and

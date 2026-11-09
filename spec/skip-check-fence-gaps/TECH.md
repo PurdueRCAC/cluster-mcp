@@ -3,7 +3,7 @@ slug: skip-check-fence-gaps
 title: The static skip check catches the skips it admits today
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/skip-check-fence-gaps
 base: develop
 current_phase: done
@@ -179,6 +179,31 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
         and M42 are equivalent, with the reason recorded; M1b dies only to
         `test_only_need_shell_skips`. The ten of them that are R1/R2 gaps the base had join the
         gate's `SCOPE_ROWS` with a shape each.
+- **Remediation, review cycle 2** (`REVIEW.md` A–C, all LOW/CONFIRMED; P2 reopened, see Amendments):
+  - [x] **A + B, what the check reports (R4/R5):** a `raise` is reported when its exception is the
+        skip or xfail outcome (bare, called, with a cause), found by `_raised`, which follows only
+        what the raise hands on as its exception (a call's callee, a called method's value, either
+        branch of a conditional, a walrus's value, each `and`/`or` operand); the outcome type
+        anywhere else in a raise (an argument, a message, an f-string, a `repr`, a conditional's
+        test, an uncalled attribute of it) is a value and is admitted. Rows: five `raised-outcome-*`
+        (reported) and five `outcome-type*` (admitted).
+  - [x] **A + B, what counts as a second definition (R2/R5):** only a module-scope store rebinds a
+        helper (`_scope_bindings` per scope, `_module_bindings` over them). A load, an annotation
+        without a value, a comprehension's own variable, a `global` with no store in its scope, a
+        `global` at module scope and a `global` of another name bind nothing; an annotated
+        assignment with a value, a walrus in a comprehension and a `global` paired with a store in
+        any nested scope still do. Rows: six admitted (`helper-read-at-module-scope` kills V16) and
+        three reported.
+  - [x] **Mutant sweep:** extended in [`verify/mutant-sweep.md`](verify/mutant-sweep.md) § Review
+        cycle 2, every decision of `skip_violations`, `_allowed`, `_scope_bindings`,
+        `_module_bindings` and `_raised`, in process and planted under pytest in both eras. The
+        reviewer's surviving V40 and V54 get a row each (`helper-named-class-in-the-helper`,
+        `skip-in-a-one-line-helpers-default`). Survivors are the recorded equivalents only.
+  - [x] **C, seed prose:** every runtime claim in `issues/skip-check-deselection.md`,
+        `issues/skip-check-import-aliases.md` and their `ROADMAP.md` entries run under pytest in a
+        scratch directory; corrected: `pytest.exit` drops rows on a passing run only with
+        `returncode=0` (its default exits 2), and `pytest_deselected` alone removes nothing (the
+        row runs and fails, exit 1); `skipif` is reachable as `mark.skipif` too.
 - **Verify:** the frontmatter's: gate `controls all` and `all`, then the profile's full `verify`,
   both eras (≈ 26 min, 1,571 s, measured once on the prototype; PLAN § 6). The whole command runs past the 10-minute cap of one foreground
   shell call: run it in the background and wait for its exit.
@@ -219,6 +244,17 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
   `outcome-type-as-a-cause`, `bare-reraise`); `meet` holds them, and the sweep record names the
   mutant each kills. PLAN § 5's "unpinned binding forms" risk is closed by the `except`/`match`
   rows. The fence, `kept` and `bodies` checks are unchanged.
+- **2026-11-09, review cycle 2 remediation (A–C).** P2 is reopened again, not P1: A and B are R5
+  (with R4 and R2 on the other side of each property) and R6, which P2 satisfies, and C is P2's
+  ledger. The check's code changes this time, so PLAN § 2 gets a dated note where it described
+  the replaced rules: "the exception expression's subtree" becomes `_raised`'s hand-on chain, and
+  "every `global` naming the helper anywhere" becomes a `global` paired with a store in its own
+  scope. P2's `verify:` is kept as written. The gate's required-row table changes: `SCOPE_ROWS`
+  gains eleven rows and `SPELLING_ROWS` ten (51 required in all), each with a shape
+  (`_raised(word, cause)`, `_raised_in`, `_value_in_a_raise`, `_top_level`, `_comprehension_binds`,
+  `_class_in_helper`, `_skip_on_the_helpers_line`); every new reported row is a gap the base had
+  (`bite`), and every new admitted row is held by `meet` and its shape. The fence, `kept` and
+  `bodies` checks are unchanged; every existing row is byte-identical.
 
 ---
 

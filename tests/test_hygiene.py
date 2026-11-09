@@ -709,22 +709,30 @@ CONFTESTS = {Path('conftest.py'), TESTS / 'conftest.py'}
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
 
-def _module_bindings(tree: ast.Module, helper: str) -> list[ast.AST]:
-    """Every node that binds `helper` at module scope, and every `global` naming it, in line order.
+def _scope_bindings(body: list[ast.stmt], helper: str) -> tuple[list[ast.AST], list[ast.Global]]:
+    """The nodes that store `helper` in the scope whose statements are `body`, and its `global`s naming it.
 
-    A binding is a definition, a store or delete, an import, an `except ... as` or a `match` capture.
-    A `global` rebinds the module name from inside a function, so it counts wherever it sits.
+    A store is a definition, an assignment (an annotated one with a value), a delete, an import, an
+    `except ... as` or a `match` capture. A load binds nothing, nor does an annotation with no value,
+    nor a comprehension's own variable, which lives in the comprehension's scope.
     """
-    bindings: list[ast.AST] = []
-    pending: list[ast.AST] = list(tree.body)
+    stores: list[ast.AST] = []
+    declared: list[ast.Global] = []
+    pending: list[ast.AST] = list(body)
     while pending:
         node = pending.pop()
         if isinstance(node, SCOPES):
             if getattr(node, 'name', None) == helper:
-                bindings.append(node)
-            # Decorators, defaults and bases run at module scope; the body does not.
-            body = node.body if isinstance(node.body, list) else [node.body]
-            pending += [c for c in ast.iter_child_nodes(node) if not any(c is b for b in body)]
+                stores.append(node)
+            # Decorators, defaults and bases run in the enclosing scope; the body does not.
+            inner = node.body if isinstance(node.body, list) else [node.body]
+            pending += [c for c in ast.iter_child_nodes(node) if not any(c is b for b in inner)]
+            continue
+        if isinstance(node, ast.comprehension) or (isinstance(node, ast.AnnAssign) and node.value is None):
+            pending += [c for c in ast.iter_child_nodes(node) if c is not node.target]
+            continue
+        if isinstance(node, ast.Global):
+            declared += [node] if helper in node.names else []
             continue
         if isinstance(node, ast.Name):
             bound = node.id if not isinstance(node.ctx, ast.Load) else None
@@ -737,9 +745,23 @@ def _module_bindings(tree: ast.Module, helper: str) -> list[ast.AST]:
         else:
             bound = None
         if bound == helper:
-            bindings.append(node)
+            stores.append(node)
         pending += ast.iter_child_nodes(node)
-    bindings += [n for n in ast.walk(tree) if isinstance(n, ast.Global) and helper in n.names]
+    return stores, declared
+
+
+def _module_bindings(tree: ast.Module, helper: str) -> list[ast.AST]:
+    """Every node that rebinds `helper` at module scope, in line order.
+
+    That is a store at module scope, or a `global` naming it in a function or class that stores it
+    too: the store then rebinds the module name. A `global` with no store, or at module scope, binds
+    nothing.
+    """
+    bindings, _ = _scope_bindings(tree.body, helper)
+    for node in ast.walk(tree):
+        if isinstance(node, SCOPES) and isinstance(node.body, list):
+            stores, declared = _scope_bindings(node.body, helper)
+            bindings += declared if stores else []
     return sorted(bindings, key=lambda n: (n.lineno, n.col_offset))
 
 
@@ -766,12 +788,39 @@ def _allowed(name: str, tree: ast.Module, found: list[str]) -> set[int]:
     return allowed
 
 
+def _raised(tree: ast.Module) -> set[int]:
+    """The ids of the nodes a `raise` raises: its exception, and what that expression hands on as it.
+
+    A call hands on what it calls, and a method called on a value (`.with_traceback(...)`) that
+    value; a conditional either branch; a walrus its value; `and` / `or` each operand. An argument,
+    a message, a conditional's test and the `from` cause are values read on the way, not raised.
+    """
+    raised: set[int] = set()
+    pending = [r.exc for r in ast.walk(tree) if isinstance(r, ast.Raise) and r.exc is not None]
+    while pending:
+        node = pending.pop()
+        raised.add(id(node))
+        if isinstance(node, ast.Call):
+            pending.append(node.func)
+            if isinstance(node.func, ast.Attribute):
+                pending.append(node.func.value)
+        elif isinstance(node, ast.IfExp):
+            pending += [node.body, node.orelse]
+        elif isinstance(node, ast.NamedExpr):
+            pending.append(node.value)
+        elif isinstance(node, ast.BoolOp):
+            pending += node.values
+    return raised
+
+
 def skip_violations(name: str, text: str) -> list[str]:
     """Every skip, conditional skip or expected failure in `text` outside the `SKIP_HELPERS`.
 
     A helper is the body of the single top-level `def` of its name in the suite's conftest; a second
     binding of a helper's name there is reported as well. A skipper reached through any attribute
-    is a skip, and so is its outcome type raised directly; the outcome type read as a value is not.
+    is a skip, and so is a `raise` whose exception is its outcome type (bare, called, or with a
+    cause); the outcome type anywhere else is a value, an argument or message of a raised exception
+    included, and is not.
 
     What a static parse of names cannot see, and this check does not: a lookup by string
     (`getattr`, `vars`, `globals()`); a skipper or its outcome type carried through a name, a
@@ -783,7 +832,7 @@ def skip_violations(name: str, text: str) -> list[str]:
     tree = ast.parse(text, name)
     allowed = _allowed(name, tree, found)
     # `pytest.skip.Exception` names the outcome type without skipping anything; raised, it skips.
-    raised = {id(n) for r in ast.walk(tree) if isinstance(r, ast.Raise) and r.exc is not None for n in ast.walk(r.exc)}
+    raised = _raised(tree)
     named = {id(node.value) for node in ast.walk(tree)
              if isinstance(node, ast.Attribute) and node.attr == 'Exception' and id(node) not in raised}
     for node in ast.walk(tree):
@@ -882,6 +931,52 @@ def test_only_need_shell_skips() -> None:
     pytest.param('t.py', 'import pytest\nraise ValueError("x") from pytest.skip.Exception\n', False,
                  id='outcome-type-as-a-cause'),
     pytest.param('t.py', 'try:\n    pass\nexcept ValueError:\n    raise\n', False, id='bare-reraise'),
+    pytest.param('t.py', 'import pytest\nraise pytest.skip.Exception("x") from None\n', True,
+                 id='raised-outcome-with-a-cause'),
+    pytest.param('t.py', 'import pytest\nraise pytest.skip.Exception("x") if True else ValueError()\n', True,
+                 id='raised-outcome-in-a-conditional'),
+    pytest.param('t.py', 'import pytest\nraise ValueError() if False else pytest.xfail.Exception("x")\n', True,
+                 id='raised-outcome-in-a-conditionals-else'),
+    pytest.param('t.py', 'import pytest\nraise (error := pytest.skip.Exception("x"))\n', True,
+                 id='raised-outcome-through-a-walrus'),
+    pytest.param('t.py', 'import pytest\nraise None or pytest.xfail.Exception("x")\n', True,
+                 id='raised-outcome-in-a-boolean'),
+    pytest.param('t.py', 'import pytest\nraise AssertionError(pytest.skip.Exception)\n', False,
+                 id='outcome-type-in-a-raised-argument'),
+    pytest.param('t.py', 'import pytest\nraise AssertionError(f"not {pytest.xfail.Exception}")\n', False,
+                 id='outcome-type-in-a-raised-message'),
+    pytest.param('t.py', 'import pytest\nraise TypeError(repr(pytest.skip.Exception))\n', False,
+                 id='outcome-type-in-a-raised-repr'),
+    pytest.param('t.py', 'import pytest\nraise pytest.skip.Exception.__name__\n', False,
+                 id='outcome-types-attribute-raised'),
+    pytest.param('t.py', 'import pytest\nraise ValueError() if pytest.skip.Exception else TypeError()\n', False,
+                 id='outcome-type-as-a-conditionals-test'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nhelpers = (need_git,)\n',
+                 False, id='helper-read-at-module-scope'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nneed_git: object\n', False,
+                 id='helper-annotated-without-a-value'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'names = [need_git for need_git in ()]\n', False, id='helper-name-in-a-comprehension'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'def other():\n    global need_git\n    return need_git\n', False,
+                 id='helper-declared-global-without-a-store'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nglobal need_git\n', False,
+                 id='helper-declared-global-at-module-scope'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'def other():\n    global elsewhere\n    need_git = print\n', False,
+                 id='helper-stored-beside-another-global'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'need_git: object = print\n', True, id='helper-rebound-by-an-annotated-assignment'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\n'
+                 'names = [x for x in (print,) if (need_git := x)]\n', True,
+                 id='helper-rebound-by-a-walrus-in-a-comprehension'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git():\n    pytest.skip("git")\nclass Tools:\n'
+                 '    def swap(self):\n        global need_git\n        need_git = print\n', True,
+                 id='helper-rebound-by-global-in-a-method'),
+    pytest.param('conftest.py', 'import pytest\ndef need_shell(s):\n    class need_git:\n        pytest.skip(s)\n',
+                 True, id='helper-named-class-in-the-helper'),
+    pytest.param('conftest.py', 'import pytest\ndef need_git(x=pytest.skip("git")): pass\n', True,
+                 id='skip-in-a-one-line-helpers-default'),
 ])
 def test_skip_check_catches_planted_skips(name: str, text: str, found: bool) -> None:
     assert bool(skip_violations(name, text)) == found

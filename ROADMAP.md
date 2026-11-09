@@ -125,9 +125,10 @@ exists today. Found while planning that cycle, 2026-11-09.
 
 ## A conftest can drop rows from a CI run without skipping them
 
-`collect_ignore`, a `pytest_collection_modifyitems` that removes items, or `pytest.exit` in a
-conftest make rows vanish from CI as surely as a skip, and the skip check does not look for them.
-None does so today. Raised by the adversarial review of `skip-check-fence-gaps`'s plan, 2026-11-09.
+`collect_ignore`, a `pytest_collection_modifyitems` that removes items, or
+`pytest.exit(..., returncode=0)` make rows vanish from a passing CI run as surely as a skip, and the
+skip check does not look for them (`pytest.exit` with its default return code fails the run). None
+does so today. Raised by the adversarial review of `skip-check-fence-gaps`'s plan, 2026-11-09.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §4a, §5, Q2); `tests/conftest.py`*
 **Seed:** [`issues/skip-check-deselection.md`](issues/skip-check-deselection.md) · *status: unshaped*

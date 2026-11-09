@@ -234,23 +234,93 @@ def _attribute(name, tree):
     return any(isinstance(n, ast.Attribute) and n.attr != 'Exception' and _skipper(n.value) for n in ast.walk(tree))
 
 
-def _raised(word: str):
-    """`raise X.Exception`, `raise X.Exception(...)`, or that call with `.with_traceback(...)` chained."""
+def _outcome(e: ast.AST, word: str | None = None) -> bool:
+    """`X.Exception`, `X.Exception(...)`, or that call with `.with_traceback(...)` chained, X a skipper."""
+    while True:
+        if isinstance(e, ast.Call):
+            e = e.func
+        elif isinstance(e, ast.Attribute) and e.attr == 'with_traceback' and isinstance(e.value, ast.Call):
+            e = e.value
+        else:
+            break
+    return isinstance(e, ast.Attribute) and e.attr == 'Exception' and _skipper(e.value, word)
+
+
+def _raised(word: str, cause: bool = False):
+    """`raise` of the outcome (`_outcome`), with a `from` cause when `cause`."""
+    def shape(name, tree):
+        return any(isinstance(r, ast.Raise) and r.exc is not None and _outcome(r.exc, word)
+                   and (r.cause is not None or not cause) for r in ast.walk(tree))
+    return shape
+
+
+def _raised_in(kind, field: str):
+    """`raise` of a `kind` expression whose `field` (one node or a list) holds the outcome."""
     def shape(name, tree):
         for r in ast.walk(tree):
-            if isinstance(r, ast.Raise) and r.exc is not None:
-                e = r.exc
-                while True:
-                    if isinstance(e, ast.Call):
-                        e = e.func
-                    elif isinstance(e, ast.Attribute) and e.attr == 'with_traceback' and isinstance(e.value, ast.Call):
-                        e = e.value
-                    else:
-                        break
-                if isinstance(e, ast.Attribute) and e.attr == 'Exception' and _skipper(e.value, word):
+            if isinstance(r, ast.Raise) and isinstance(r.exc, kind):
+                part = getattr(r.exc, field)
+                if any(_outcome(p) for p in (part if isinstance(part, list) else [part])):
                     return True
         return False
     return shape
+
+
+def _value_in_a_raise(where):
+    """A skipper's `.Exception` inside a raise's exception expression, at the place `where(exc, value)` names."""
+    def shape(name, tree):
+        return any(isinstance(v, ast.Attribute) and v.attr == 'Exception' and _skipper(v.value) and where(r.exc, v)
+                   for r in ast.walk(tree) if isinstance(r, ast.Raise) and r.exc is not None
+                   for v in ast.walk(r.exc))
+    return shape
+
+
+def _within(kind, test=lambda n: True):
+    """`where` for `_value_in_a_raise`: the value sits inside a `kind` node meeting `test`."""
+    return lambda exc, v: any(isinstance(n, kind) and test(n) and any(m is v for m in ast.walk(n))
+                              for n in ast.walk(exc))
+
+
+def _top_level(kind, test):
+    """A top-level helper, and a top-level `kind` statement meeting `test`."""
+    def shape(name, tree):
+        return bool(_top(name, tree)) and any(isinstance(s, kind) and test(s) for s in tree.body)
+    return shape
+
+
+def _loads_helper(s: ast.AST) -> bool:
+    names = [n for n in ast.walk(s) if isinstance(n, ast.Name) and n.id in HELPERS]
+    return bool(names) and all(isinstance(n.ctx, ast.Load) for n in names)
+
+
+def _stores_helper(f: ast.AST) -> bool:
+    return any(_binds(n) in HELPERS for n in ast.walk(f) if n is not f)
+
+
+def _global_in(f: ast.AST, of_helper: bool) -> bool:
+    return any(isinstance(n, ast.Global) and bool(set(n.names) & HELPERS) is of_helper for n in f.body)
+
+
+def _comprehension_binds(where: str):
+    """A top-level helper, and a comprehension whose `where` ('target', or a walrus in 'ifs') binds a helper."""
+    def shape(name, tree):
+        def binds(part):
+            return any(_binds(n.target if isinstance(n, ast.NamedExpr) else n) in HELPERS
+                       for p in (part if isinstance(part, list) else [part]) for n in ast.walk(p)
+                       if where == 'target' or isinstance(n, ast.NamedExpr))
+        return bool(_top(name, tree)) and any(isinstance(c, ast.comprehension) and binds(getattr(c, where))
+                                              for c in ast.walk(tree))
+    return shape
+
+
+def _class_in_helper(name, tree):
+    return any(isinstance(inner, ast.ClassDef) and inner.name in HELPERS and _has_skip(inner)
+               for outer in _top(name, tree) for inner in ast.walk(outer))
+
+
+def _skip_on_the_helpers_line(name, tree):
+    return any(any(_skipper(n) and n.lineno == d.body[0].lineno for a in d.args.defaults for n in ast.walk(a))
+               for d in _top(name, tree))
 
 
 def _as_value(name, tree):
@@ -286,6 +356,24 @@ SCOPE_ROWS = {
     'helper-rebound-by-a-match-rest': (True, _rebound_by(ast.MatchMapping)),
     'helper-rebound-by-a-class': (True, _rebound_by(ast.ClassDef, lambda n, t: any(n is s for s in t.body))),
     'async-helper-nested-in-the-helper': (True, _async_nested_in_helper),
+    # Review cycle 2: only a module-scope store rebinds a helper. Each store form below is a gap the
+    # base had; each non-store beside it the reviewed check reported (verify/mutant-sweep.md).
+    'helper-rebound-by-an-annotated-assignment': (True, _top_level(
+        ast.AnnAssign, lambda s: _binds(s.target) in HELPERS and s.value is not None)),
+    'helper-rebound-by-a-walrus-in-a-comprehension': (True, _comprehension_binds('ifs')),
+    'helper-rebound-by-global-in-a-method': (True, _top_level(ast.ClassDef, lambda c: any(
+        isinstance(f, ast.FunctionDef) and _global_in(f, True) and _stores_helper(f) for f in c.body))),
+    'helper-named-class-in-the-helper': (True, _class_in_helper),
+    'skip-in-a-one-line-helpers-default': (True, _skip_on_the_helpers_line),
+    'helper-read-at-module-scope': (False, _top_level((ast.Assign, ast.Expr), _loads_helper)),
+    'helper-annotated-without-a-value': (False, _top_level(
+        ast.AnnAssign, lambda s: _binds(s.target) in HELPERS and s.value is None)),
+    'helper-name-in-a-comprehension': (False, _comprehension_binds('target')),
+    'helper-declared-global-without-a-store': (False, _top_level(
+        ast.FunctionDef, lambda f: f.name not in HELPERS and _global_in(f, True) and not _stores_helper(f))),
+    'helper-declared-global-at-module-scope': (False, _top_level(ast.Global, lambda s: bool(set(s.names) & HELPERS))),
+    'helper-stored-beside-another-global': (False, _top_level(
+        ast.FunctionDef, lambda f: f.name not in HELPERS and _global_in(f, False) and _stores_helper(f))),
 }
 SPELLING_ROWS = {
     'skip-through-an-attribute': (True, _attribute),
@@ -296,6 +384,22 @@ SPELLING_ROWS = {
     'raised-outcome-of-a-bare-skip': (True, _raised('skip')),
     'outcome-type-as-an-argument': (False, _as_value),
     'outcome-type-caught': (False, _as_value),
+    # Review cycle 2: a raise whose exception is the outcome, each a gap the base had; the outcome type
+    # as any other value in a raise, each one the reviewed check reported.
+    'raised-outcome-with-a-cause': (True, _raised('skip', cause=True)),
+    'raised-outcome-in-a-conditional': (True, _raised_in(ast.IfExp, 'body')),
+    'raised-outcome-in-a-conditionals-else': (True, _raised_in(ast.IfExp, 'orelse')),
+    'raised-outcome-through-a-walrus': (True, _raised_in(ast.NamedExpr, 'value')),
+    'raised-outcome-in-a-boolean': (True, _raised_in(ast.BoolOp, 'values')),
+    'outcome-type-in-a-raised-argument': (False, _value_in_a_raise(
+        lambda exc, v: isinstance(exc, ast.Call) and any(a is v for a in exc.args))),
+    'outcome-type-in-a-raised-message': (False, _value_in_a_raise(_within(ast.JoinedStr))),
+    'outcome-type-in-a-raised-repr': (False, _value_in_a_raise(
+        _within(ast.Call, lambda c: isinstance(c.func, ast.Name) and c.func.id == 'repr'))),
+    'outcome-types-attribute-raised': (False, _value_in_a_raise(
+        lambda exc, v: isinstance(exc, ast.Attribute) and exc.value is v)),
+    'outcome-type-as-a-conditionals-test': (False, _value_in_a_raise(
+        lambda exc, v: isinstance(exc, ast.IfExp) and exc.test is v)),
 }
 MODES = {'scope': SCOPE_ROWS, 'spelling': SPELLING_ROWS, 'all': SCOPE_ROWS | SPELLING_ROWS}
 

@@ -95,6 +95,18 @@ A prototype of exactly this design (P1's tree, then P2's) passed the gate's mode
 **The tightened check flags nothing in the suite as it stands**: `test_only_need_shell_skips` passes
 on the prototype, and a direct run over the real `tests/conftest.py` reports nothing.
 
+**2026-11-09, amended in review cycle 2's remediation** (`REVIEW.md` A and B; `TECH.md` →
+Amendments). Two rules above were wider than R5 allows, and are replaced; the text above stays as
+the record. *What a raise raises:* not every node in `Raise.exc`'s subtree, but only what the
+expression hands on as the exception (`_raised`): a call's callee, a called method's value
+(`.with_traceback(...)`), either branch of a conditional, a walrus's value, each `and` / `or`
+operand. An argument, a message, an f-string, a conditional's test and an uncalled attribute are
+values, so `raise AssertionError(pytest.skip.Exception)` is admitted. *What binds at module scope:*
+`_module_bindings` reads stores per scope (`_scope_bindings`): a load, an annotation with no value
+and a comprehension's own variable bind nothing, and a `global` counts only when its own function
+or class body also stores the name (at any depth of nesting); a `global` with no store, or at
+module scope, binds nothing. Each side has planted rows (`TECH.md` P2, review cycle 2).
+
 ### Requirement → design map
 
 | R-ID | Design element(s) that satisfy it |
