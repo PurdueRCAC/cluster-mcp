@@ -48,6 +48,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/integration-marker-wording/verify/gate.sh P3
 review:
   last_reviewed_commit: ''
@@ -197,7 +198,7 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
 **Satisfies:** R1–R5 · **Depends on:** P2
 **Goal:** the whole profile `verify` is green with the change, and every deferral is recorded.
 
-- [ ] Deferral ledger: walk P1 and P2 above, and PLAN, for every "do not fix here", "known
+- [x] Deferral ledger: walk P1 and P2 above, and PLAN, for every "do not fix here", "known
       limitation", "left as a follow-up" or deferral; each names a committed `issues/` seed with a
       `ROADMAP.md` entry. This cycle's one deferral is `issues/marker-rule-gaps.md` (filed with the
       plan); `issues/integration-marker-check.md` was filed at the GOAL gate. Any new one is filed
