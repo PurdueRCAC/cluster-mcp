@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 30 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
+Thirty entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -70,11 +70,11 @@ through an attribute or an outcome raised directly.
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (thirteen entries), because every later gate rests on them: the mutation run and
+- **Gates first** (fourteen entries), because every later gate rests on them: the mutation run and
   its children, the two gaps the skip check still leaves and the pins it still lacks, the
   timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
-  wording and its check, the image's init, and the surface fixture, which must land before the
-  first cycle that changes the served surface.
+  wording, its check and the gaps in what enforces it, the image's init, and the surface fixture,
+  which must land before the first cycle that changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
@@ -218,6 +218,19 @@ scope or a helper module, which a check of the test body alone misses. Deferred 
 
 *Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (GOAL, Q1); `tests/conftest.py` (`guard`)*
 **Seed:** [`issues/integration-marker-check.md`](issues/integration-marker-check.md) · *status: unshaped*
+
+## The checks behind the marker rules miss routes the rules forbid
+
+An executed probe against `tests/conftest.py` found routes the marker rules forbid and their checks
+leave open: in a `unit` test, a `Popen` class bound before the test (`conftest.REAL_POPEN`) still
+launches, a `_socket` connect, a UDP send, an early-bound `getaddrinfo` and the `gethostbyname`
+family still reach the network, and a fixture of wider scope launches before the guard is active;
+and `tests/test_ssh_exec.py`'s `_host` runs `hdiutil` through
+`REAL_POPEN`, outside `bin/sandbox.sh`, a call the static launch check does not read. Found by the
+`integration-marker-wording` plan, 2026-11-09.
+
+*Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (PLAN); `tests/conftest.py` (`guard`, `REAL_POPEN`); `tests/test_ssh_exec.py` (`_host`)*
+**Seed:** [`issues/marker-rule-gaps.md`](issues/marker-rule-gaps.md) · *status: unshaped*
 
 ## The image's init is pinned by its recipe, not by what it reaps
 
