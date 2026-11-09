@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py row 1
 - id: P2
   name: Row 2 measures the call's waits on the row's clock
-  status: pending
+  status: done
   satisfies:
   - R2
   - R7
@@ -186,19 +186,19 @@ time the call returns, and still fails on each fault in PLAN § 6's row-1 list.
 **Goal:** the worker-cannot-start row reads what the call waited on an attempt from `FakeClock`'s
 offset, which the MCP round trip never moves, and fails on any such wait.
 
-- [ ] In `test_a_reconnect_worker_that_cannot_start_frees_the_attempt`, after `_fake_time`, wrap
+- [x] In `test_a_reconnect_worker_that_cannot_start_frees_the_attempt`, after `_fake_time`, wrap
   `ssh._await` (`monkeypatch.setattr(ssh, '_await', wait)`) to record each wait the first call makes on
   an unfinished attempt (`seconds > 0`, event unset), then call `clock.wait`.
-- [ ] `spent` = `clock.offset` after the first call minus before it. Fail on `round(spent, 9) >=
+- [x] `spent` = `clock.offset` after the first call minus before it. Fail on `round(spent, 9) >=
   ssh.ATTEMPT_POLL` (D2) with `'the call whose worker could not start waited {spent:.2f} s for an
   attempt on the row's clock, not giving up within ATTEMPT_POLL ({ATTEMPT_POLL} s)'`, and on any
   recorded wait with `'the call whose worker could not start waited on an attempt ({n} waits, the first
   asking {w:.2f} s), not giving up at once without one'`.
-- [ ] Wrap `SSHExecutor._ensure_connected` for the first call only, timing it on `_REAL_MONOTONIC`
+- [x] Wrap `SSHExecutor._ensure_connected` for the first call only, timing it on `_REAL_MONOTONIC`
   into `ensured`; fail on `ensured >= ssh.ATTEMPT_POLL` with `'the executor took {x:.3f} s from
   entering its reconnect to giving up, on the real clock, not under ATTEMPT_POLL ({ATTEMPT_POLL} s)'`
   (`math.inf` when it never ran).
-- [ ] Keep the message, `held` (`'stayed taken'`), the next call, the refused/started counts and the
+- [x] Keep the message, `held` (`'stayed taken'`), the next call, the refused/started counts and the
   connection count as they are.
 - **Verify:** `timing-gate.py row 2`: values, scope, the row in both eras, faults 2/* (five, ~13 s),
   control 2 in each era (the base fails with `not giving up at once`). Prototype: about 35 s.
