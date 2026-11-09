@@ -218,7 +218,7 @@ per mutation sweep, and 18,061 on one developer Mac. Pre-existing; `capability-p
 add one or two per run, through the shared SSH test server.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
-**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: unshaped*
+**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: adopted:sandbox-dirs-left-on-kill*
 
 ## A disk-image step that hangs outlives its test
 

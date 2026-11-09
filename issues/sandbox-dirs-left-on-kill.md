@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:sandbox-dirs-left-on-kill
 kind: fix
 appetite: small
 lane: public
