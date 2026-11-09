@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:integration-marker-wording
 kind: test
 appetite: small
 lane: public

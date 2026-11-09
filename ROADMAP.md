@@ -203,7 +203,7 @@ instead of fixing it. Rewording both markers to the line the unit guard draws se
 the `absence-check-leftover-classification` plan, 2026-10-19.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
-**Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: unshaped*
+**Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: adopted:integration-marker-wording*
 
 ## The image's init is pinned by its recipe, not by what it reaps
 
