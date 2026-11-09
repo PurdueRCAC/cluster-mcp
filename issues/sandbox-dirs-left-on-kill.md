@@ -50,8 +50,10 @@ harness, and either one is a change of its own.
 
 ## Outcome / vision
 
-A drive, test or gate leaves no `cluster-mcp-sandbox.*` directory in the host's `TMPDIR`, however the
-sandbox is stopped. The directories already there are the developer's to remove; nothing here
+The suite, the profile's `verify` and the mutation runner leave no `cluster-mcp-sandbox.*` directory
+behind, however a sandbox they started is stopped. `bin/sandbox.sh` stays as it is, so a caller
+outside those runs that kills a sandbox outright still leaves its directory, a known limitation
+(maintainer, 2026-11-09). The directories already there are the developer's to remove; nothing here
 deletes them.
 
 ## Sketch of the acceptance criteria
