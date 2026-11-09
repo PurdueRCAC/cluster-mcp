@@ -405,3 +405,19 @@ Each finding as its property over its whole domain:
   findings and found a new layer of the same class (pin gaps in the skip check, now from additive
   mutants). HEAD's behaviour is correct on every reachable input tried. This goes to the maintainer:
   a fourth build round, or a ruling on the remaining pin gaps.
+
+## Maintainer override — land (2026-11-09)
+
+- **Ruling.** The maintainer ruled to land the cycle at its reviewed head, overriding the review
+  rubric for G1–G3 (cycle 3), and to name the override in the landing body. His reason: a cycle's
+  diff sweep is the complete list a review works through; hand-made deeper layers of a class
+  already pinned become seeds, not findings. `review.verdict` stays `changes-requested` and no
+  review cycle is added; this section is the record of the override.
+- **Seed.** G1–G3 are one entry, [`issues/skip-check-pin-completeness.md`](../../issues/skip-check-pin-completeness.md),
+  indexed in `ROADMAP.md` Part I's gates group after this cycle's two sibling seeds. Its shape: one
+  planted row per module-scope binding form (G1), per raise operand position (G2) and per admitted
+  value position (G3), plus a mutant sweep with additive mutants.
+- **What lands.** The reviewed head `18a1026`, plus spec-only commits (the cycle 3 review record and
+  this section) and the seed pair (`ROADMAP.md` and the seed file). No code or test changed after
+  the review: `git diff --stat 18a1026..HEAD -- . ':(exclude)spec/' ':(exclude)ROADMAP.md'
+  ':(exclude)issues/'` is empty.
