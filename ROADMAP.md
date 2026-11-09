@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 28 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,10 +45,10 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-eight entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
-Since 0.1.5, six cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
+Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
 the uv-workspace restructure landed on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
@@ -63,11 +63,15 @@ The silent-link check landed on 2026-11-06 ([`spec/ssh-half-open-link/`](spec/ss
 over `ssh`, a link that goes silent without a reset is noticed within the reconnect bound. The CI
 time budget landed the same day ([`spec/suite-ci-time-budget/`](spec/suite-ci-time-budget/)): each
 era's suite runs as four CI jobs, each within 10 minutes, a budget `AGENTS.md` § Factory holds.
+The skip check's fence closed on 2026-11-09
+([`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/)): it admits a skip only inside the
+single top-level `need_shell` and `need_git` in `tests/conftest.py`, and reports a skipper reached
+through an attribute or an outcome raised directly.
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (thirteen entries), because every later gate rests on them: the mutation run and
-  its children, the skip check, the two gaps it still leaves and the pins it still lacks, the
+- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
+  its children, the two gaps the skip check still leaves and the pins it still lacks, the
   timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
   wording, the image's init, and the surface fixture, which must land before the first cycle that
   changes the served surface.
@@ -103,17 +107,6 @@ group.
 *Horizon: 0.2.0, gates · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
 **Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
 
-## The static skip check admits a skip it should catch
-
-`test_only_need_shell_skips` keeps a test from skipping on CI unseen, but it admits a skip inside an
-allowed helper that is nested or redefined in conftest, inside any module whose name ends in
-`conftest.py`, and a skip called as `pytest.skip.__call__`. None exists today; any would let a row
-vanish from CI without failing. Found by the landing-merge check of
-`absence-check-leftover-classification`, 2026-10-23.
-
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
-**Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: adopted:skip-check-fence-gaps*
-
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
 The skip check reads a skip by the word it is spelled with, so `from pytest import skip as go`
@@ -121,7 +114,7 @@ then `go("x")` passes it, and so does a class that subclasses `pytest.skip.Excep
 are statically visible, and both pass the check before and after `skip-check-fence-gaps`. None
 exists today. Found while planning that cycle, 2026-11-09.
 
-*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §5, Q1)*
+*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §5, Q1)*
 **Seed:** [`issues/skip-check-import-aliases.md`](issues/skip-check-import-aliases.md) · *status: unshaped*
 
 ## A conftest can drop rows from a CI run without skipping them
@@ -143,7 +136,7 @@ change it and pass every row. The fix is one planted row per binding form, raise
 and admitted value position, and a mutant sweep with additive mutants. Seeded by the maintainer's
 landing ruling, 2026-11-09.
 
-*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
+*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
 **Seed:** [`issues/skip-check-pin-completeness.md`](issues/skip-check-pin-completeness.md) · *status: unshaped*
 
 ## A real-time reconnect test fails under full-suite load
