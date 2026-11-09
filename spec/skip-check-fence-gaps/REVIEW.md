@@ -254,3 +254,154 @@ Each finding is routed as a property over its whole domain. The instances above 
 - This is review cycle 2 without convergence. All three findings are LOW and fail-closed or prose,
   and F1 and F3 have closed. Under the bounded loop this goes to the maintainer before a third
   build↔review round.
+
+## Review cycle 3 — changes-requested (2026-11-09)
+
+- **Reviewed commit:** 18a1026  ·  **Base:** develop  ·  **Cycle:** 3 of ≤3
+- **Mode:** a fresh blind pass over the full spec-excluded diff (one reviewer, a fresh subagent), which
+  also checked that F1–F3 and A–C are closed as properties. The reviewer was given those findings'
+  text from this file. Evidence is in the worktree's gitignored `.local/review3/`.
+- **Blindness:** the reviewer searched only with `git grep … ':(exclude)spec/'`, opened no spec file
+  and did not read the earlier cycles' evidence folders. No leak this cycle.
+
+### Verification run
+
+- `uv sync --locked`, `uv lock --check` → pass (`sync.log`, `lock-check.log`).
+- `uv run pytest -q tests/test_hygiene.py` → 142 passed in the handshake era and 142 passed with
+  `CLUSTER_MCP_TEST_ERA=modern` (`hygiene-handshake.log`, `hygiene-modern.log`).
+- The skip-check rows run by name, verbose → 68 passed in each era (`skipcheck-verbose-*.log`).
+- `bin/sandbox.sh uv run cluster-mcp --help` → exit 0 (`cli-help.log`).
+- Mutant sweep over `_scope_bindings`, `_module_bindings`, `_allowed`, `_raised` and
+  `skip_violations`: 99 mutants, 80 killed, 19 survived (`mut-sweep.log`). Every survivor was re-run
+  under real pytest in both eras, 68 passed each (`mut-pytest-confirm.log`,
+  `mut-pytest-confirm-ext.log`). Equivalence was tested over 11,275 generated inputs
+  (`equivalence.log`).
+- Real scans: `scan_scenarios.log` plants each distinguishing input in a copy of `tests/` and runs
+  `test_only_need_shell_skips` on it at HEAD; `scan_mutant_demo.log` runs the same copies under the
+  surviving mutant. Every copy was restored and checked equal to HEAD.
+- Runtime claims: `runtime_probes.sh` / `runtime_probes.log` run real pytest under `bin/sandbox.sh`
+  for every runtime claim in the seeds and ROADMAP entries, and for the raised-`or` shape.
+- Not run: the profile `verify`'s other commands (`test_ssh_exec`, `test_timeout_stop`,
+  `test_startup`, `test_launch`, the rest of the fourth command) in either era. Nothing imports
+  `tests/test_hygiene.py`. Not observed, not satisfied: publish runs the full gate.
+- `git status --porcelain` empty at hand-back (re-checked by the orchestrator at `18a1026`). No build
+  state was mutated; mutants ran on copies under `.local/review3/`.
+
+### Requirement → evidence matrix
+
+There is no artifact-deliverable R-ID. The blind reviewer verified every row. The orchestrator
+spot-checked G1–G3 in `mut-sweep.log`, `mut-pytest-confirm.log`, `scan_scenarios.log`,
+`scan_mutant_demo.log` and `runtime_probes.log`, and checked the one claim the reviewer could not
+see: the seeds' and ROADMAP's anchors into `PLAN.md` (§ 4a, § 5, Q1, Q2) all exist.
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 | Nested-in-fixture, method, nested-in-helper (def, async, class) and below-top-level rows pass; the real scan fails on a nested fixture helper and on a method helper in both eras; mutants on the nested subtraction and the top-level requirement are killed. | ✅ |
+| R2 | The real scan reports a def twice and an async def after the def. The report itself is pinned by `helper-defined-twice-without-a-skip`. Several binding forms are reported but unpinned: G1. | ✅ behaviour, ❌ pin (G1) |
+| R3 | `look-alike-conftest` and `another-conftest` pass; the real scan reports a planted `tests/test_conftest.py`; suffix, basename and anywhere mutants are killed. | ✅ |
+| R4 | The real scan reports `pytest.skip.__call__`, a raised `xfail.Exception` and a raised `or`; runtime probes confirm the raised shapes skip. A raised `or` is pinned for its last operand only: G2. | ✅ behaviour, ❌ pin (G2) |
+| R5 | The suite scan passes in both eras; value rows pass; HEAD admits every value and non-binding probe (55/55, `mut-baseline.log`). Some admissions are unpinned: G3. | ✅ behaviour, ❌ pin (G3) |
+| R6 | 58 rows added; the 9 rows from develop are unchanged and keep their results (`rows_kept.log`). The G1–G2 shapes lack rows. | ❌ (G1, G2) |
+
+Unmapped changes: only the deferral bookkeeping (`ROADMAP.md`, the two seeds and the seed status),
+which the foreman ruled in scope. Every count and reference in it agrees and resolves
+(`roadmap_check.log`, `refs-exist.log`). No spec ids in the 249 added test lines
+(`spec-id-grep.log`). No `AGENTS.md` drift: no new module, flag or artifact, and § Testing still
+describes the check accurately.
+
+### Prior findings
+
+- **F1: closed as a property.** Intro 28, header "Twenty-eight", groups 12+6+5+3+2 = 28, 28 entries.
+- **F2: closed as a property.** Every runtime claim in the import-alias seed holds on a real run.
+- **F3: closed as a property.** The "defined again" report and "only defs are bindings" are killed;
+  the surviving top-level guard is equivalent.
+- **A: closed as a property in behaviour.** HEAD admits the outcome type as a positional, keyword or
+  starred argument, in an f-string, `repr`, subscript, lambda body, conditional test and cause, and
+  every name that binds nothing at module scope. The keyword-argument admission is unpinned: G3.
+- **B: instance closed, class open.** The load mutant is killed by three rows. Other admissions of
+  the same class are unpinned: G3.
+- **C: closed as a property.** Every runtime claim in the deselection seed and its ROADMAP entry
+  holds on a real pytest run (`runtime_probes.log`, `unmarked.log`).
+
+### Findings
+
+All three are pin gaps. HEAD behaves correctly on every reachable input tried; in each, a mutant
+passes all 68 skip-check rows in both eras yet flips HEAD's verdict on a reachable input. CONFIRMED
+under the rubric's coverage-observation rule (a survivor that breaks an R-ID's stated check on
+reachable input).
+
+#### [LOW/CONFIRMED] G1 — R2/R6: "defined again" is pinned for some binding forms, not all
+- **Where:** `tests/test_hygiene.py:724-726` (a def or class binds by name) and `:761-764` (which
+  scopes are searched for a `global` rebind).
+- **Failure scenario:** `async def need_git(): pass` after the real `def need_git` is reported at
+  HEAD; mutant `scope-async-def-not-a-binding` admits it and the real scan passes. A `global need_git;
+  need_git = print` inside an `async def` or a class body is reported at HEAD; mutants
+  `module-walk-no-async`, `-no-classes`, `-functions-only` admit it. Additive survivors drop a binding
+  form: `for need_git in ()`, `need_git += 1`, `with … as need_git`, `type need_git = int`; HEAD
+  reports each, the mutants do not.
+- **Evidence:** `mut-sweep.log` (8 survivors), `mut-pytest-confirm*.log`; `scan_scenarios.log`
+  R2-async-def-again (HEAD fails the scan), `scan_mutant_demo.log` (mutant passes it).
+- **Touches:** R2, R6.
+
+#### [LOW/CONFIRMED] G2 — R4/R6: a raised `or` is pinned for its last operand only
+- **Where:** `tests/test_hygiene.py:811-812`.
+- **Failure scenario:** `raise pytest.skip.Exception("x") or ValueError()` skips the row at run time
+  (exit 0, "1 passed, 1 skipped"). HEAD reports it; mutant `raise-boolop-last-only` admits it, and the
+  only boolean row (`raise None or …`) pins the last operand.
+- **Evidence:** `runtime_probes.log`; `scan_scenarios.log` R4-raised-or-first (HEAD fails the scan),
+  `scan_mutant_demo.log` (mutant passes it); `mut-pytest-confirm.log`.
+- **Touches:** R4, R6.
+
+#### [LOW/CONFIRMED] G3 — R5: some admissions are unpinned
+- **Where:** `tests/test_hygiene.py:803-806` (`_raised`) and `_scope_bindings`.
+- **Failure scenario:** `raise Mismatch(expected=pytest.skip.Exception)` is admitted at HEAD; mutant
+  `raise-call-kwargs` reports it as a skip and the real scan fails, while its positional sibling is
+  killed. Additive survivors count non-bindings as bindings in conftest: a parameter
+  (`def run(need_git=None)`), a keyword name (`f(need_git=1)`), an attribute store
+  (`tools.need_git = need_git`). Each makes the mutant report "defined again" and stop admitting the
+  real helper's skip; HEAD admits all three.
+- **Evidence:** `mut-sweep.log`, `mut-pytest-confirm-ext.log`, `mut-baseline.log`;
+  `scan_scenarios.log` R5-outcome-as-keyword (HEAD passes), `scan_mutant_demo.log` (mutant fails).
+- **Touches:** R5, R6. Same class as cycle 2's B.
+
+### Coverage observations (not findings)
+
+- **Equivalent survivors** (`equivalence.log`): `below-top-level-allowed` (identical output: the
+  nested subtraction already removes it), `first-binding-allowed` and `last-binding-allowed` (same
+  verdict: two bindings always report), `module-unsorted` and `module-reverse-sorted` (only the line
+  in the message changes).
+- **`subtract-body-only`** admits a skip in the decorator or default of a helper-named function
+  nested inside the real helper. That code sits in the real helper's body, which R5 admits; no R-ID
+  breaks.
+- **Dropped by the reviewer:** `raise pytest.skip.Exception("x") and None` is reported though it raises
+  `TypeError` (exit 1); it can never skip, so it fails closed.
+
+### Routing (to build, if the maintainer continues)
+
+Each finding as its property over its whole domain:
+
+- **The "defined again" report (G1):** every way Python binds a module-scope name in conftest (def,
+  async def, class, every assignment and target form, import, `except as`, match capture, `type`,
+  and a `global` store from any function, async function or class body) has a planted row that fails
+  if that form stops counting.
+- **The raise side (G2):** every operand a raised expression can hand on as the exception (each
+  operand of `and`/`or`, either branch of a conditional, a walrus value, a called or method-called
+  outcome) has a row that fails if that position stops being reported.
+- **The admission side (G3):** every value position inside a raise (positional, keyword, starred,
+  message, cause, test) and every name occurrence that binds nothing at module scope (load, bare
+  annotation, comprehension variable, parameter, keyword name, attribute store, type parameter) has
+  a row that fails if the check starts reporting it.
+- **The sweep:** a module-wide mutant sweep that includes additive mutants (a binding or raise
+  position dropped or added, one per form), run under both eras, with equivalents recorded.
+
+### Human-gate triggers
+
+- Not triggered: `tests/test_hygiene.py` is not on § Invariants' high-blast-radius list, and no
+  finding violates a `[human gate]` section. No trigger recorded in an earlier cycle.
+
+### Convergence
+
+- Review cycle 3 without convergence: the bound is reached. Every cycle has closed its predecessor's
+  findings and found a new layer of the same class (pin gaps in the skip check, now from additive
+  mutants). HEAD's behaviour is correct on every reachable input tried. This goes to the maintainer:
+  a fourth build round, or a ruling on the remaining pin gaps.

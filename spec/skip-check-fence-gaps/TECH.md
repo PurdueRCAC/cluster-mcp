@@ -3,7 +3,7 @@ slug: skip-check-fence-gaps
 title: The static skip check catches the skips it admits today
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/skip-check-fence-gaps
 base: develop
 current_phase: done
@@ -37,10 +37,10 @@ phases:
   hill: uphill
   verify: export UV_PYTHON=3.14 && uv run python -I spec/skip-check-fence-gaps/verify/planted-rows.py controls all && uv run python -I spec/skip-check-fence-gaps/verify/planted-rows.py all && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
-  last_reviewed_commit: fb96211e7a59f26fe3e60792c1e453409bab9040
+  last_reviewed_commit: 18a10265424b1f855ccc802fe5ee04ddf64ed930
   verdict: changes-requested
-  blocked_reason: 'review 2: R5 over-reports values in a raise and non-binding names; R5 admission unpinned vs a load (surviving mutant); deselection seed overstates pytest.exit'
-  cycle: 2
+  blocked_reason: 'review 3: R2/R4/R5 pin gaps (binding forms, raised or-operands, admissions unpinned vs additive mutants); bound reached'
+  cycle: 3
 ---
 
 # TECH.md — The static skip check catches the skips it admits today
