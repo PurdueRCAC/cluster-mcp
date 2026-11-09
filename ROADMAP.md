@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 26 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 28 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -66,8 +66,8 @@ era's suite runs as four CI jobs, each within 10 minutes, a budget `AGENTS.md` �
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (ten entries), because every later gate rests on them: the mutation run and its
-  children, the skip check, the timing-sensitive reconnect test, an annotation check, the test
+- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
+  its children, the skip check and the two gaps it still leaves, the timing-sensitive reconnect test, an annotation check, the test
   harnesses' leftovers, the marker wording, the image's init, and the surface fixture, which must
   land before the first cycle that changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
@@ -112,6 +112,25 @@ vanish from CI without failing. Found by the landing-merge check of
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
 **Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: adopted:skip-check-fence-gaps*
+
+## The static skip check admits a renamed skipper and a subclassed outcome type
+
+The skip check reads a skip by the word it is spelled with, so `from pytest import skip as go`
+then `go("x")` passes it, and so does a class that subclasses `pytest.skip.Exception`, raised. Both
+are statically visible, and both pass the check before and after `skip-check-fence-gaps`. None
+exists today. Found while planning that cycle, 2026-11-09.
+
+*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §5, Q1)*
+**Seed:** [`issues/skip-check-import-aliases.md`](issues/skip-check-import-aliases.md) · *status: unshaped*
+
+## A conftest can drop rows from a CI run without skipping them
+
+`collect_ignore`, a `pytest_collection_modifyitems` that removes items, or `pytest.exit` in a
+conftest make rows vanish from CI as surely as a skip, and the skip check does not look for them.
+None does so today. Raised by the adversarial review of `skip-check-fence-gaps`'s plan, 2026-11-09.
+
+*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §4a, §5, Q2); `tests/conftest.py`*
+**Seed:** [`issues/skip-check-deselection.md`](issues/skip-check-deselection.md) · *status: unshaped*
 
 ## A real-time reconnect test fails under full-suite load
 

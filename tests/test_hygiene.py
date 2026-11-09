@@ -770,13 +770,22 @@ def skip_violations(name: str, text: str) -> list[str]:
     """Every skip, conditional skip or expected failure in `text` outside the `SKIP_HELPERS`.
 
     A helper is the body of the single top-level `def` of its name in the suite's conftest; a second
-    binding of a helper's name there is reported as well.
+    binding of a helper's name there is reported as well. A skipper reached through any attribute
+    is a skip, and so is its outcome type raised directly; the outcome type read as a value is not.
+
+    What a static parse of names cannot see, and this check does not: a lookup by string
+    (`getattr`, `vars`, `globals()`); a skipper or its outcome type carried through a name, a
+    container or an argument, then called, raised or subclassed (`class S(pytest.skip.Exception)`);
+    a skipper renamed on import (`from pytest import skip as go`); unittest's spellings; and
+    pytest's private outcome classes imported by name.
     """
     found: list[str] = []
     tree = ast.parse(text, name)
     allowed = _allowed(name, tree, found)
-    # `pytest.skip.Exception` names the outcome without skipping anything.
-    named = {id(node.value) for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    # `pytest.skip.Exception` names the outcome type without skipping anything; raised, it skips.
+    raised = {id(n) for r in ast.walk(tree) if isinstance(r, ast.Raise) and r.exc is not None for n in ast.walk(r.exc)}
+    named = {id(node.value) for node in ast.walk(tree)
+             if isinstance(node, ast.Attribute) and node.attr == 'Exception' and id(node) not in raised}
     for node in ast.walk(tree):
         word = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else None
         if word in SKIPPERS and id(node) not in allowed and id(node) not in named:
@@ -828,6 +837,18 @@ def test_only_need_shell_skips() -> None:
                  id='look-alike-conftest'),
     pytest.param('elsewhere/conftest.py', 'import pytest\ndef need_shell(s):\n    pytest.skip(s)\n', True,
                  id='another-conftest'),
+    pytest.param('t.py', 'import pytest\npytest.skip.__call__("x")\n', True, id='skip-through-an-attribute'),
+    pytest.param('t.py', 'import pytest\n@pytest.mark.skip.with_args(reason="x")\ndef test(): pass\n', True,
+                 id='mark-through-an-attribute'),
+    pytest.param('t.py', 'import pytest\nraise pytest.skip.Exception("x")\n', True, id='raised-skip-outcome'),
+    pytest.param('t.py', 'import pytest\nraise pytest.xfail.Exception("x")\n', True, id='raised-xfail-outcome'),
+    pytest.param('t.py', 'import pytest\nraise pytest.skip.Exception\n', True, id='raised-outcome-type'),
+    pytest.param('t.py', 'from pytest import skip\nraise skip.Exception("x").with_traceback(None)\n', True,
+                 id='raised-outcome-of-a-bare-skip'),
+    pytest.param('t.py', 'import pytest\npytest.param(None, pytest.skip.Exception)\n', False,
+                 id='outcome-type-as-an-argument'),
+    pytest.param('t.py', 'import pytest\nwith pytest.raises(pytest.xfail.Exception):\n    pass\n', False,
+                 id='outcome-type-caught'),
 ])
 def test_skip_check_catches_planted_skips(name: str, text: str, found: bool) -> None:
     assert bool(skip_violations(name, text)) == found

@@ -3,10 +3,10 @@ slug: skip-check-fence-gaps
 title: The static skip check catches the skips it admits today
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/skip-check-fence-gaps
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -25,7 +25,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run python -I spec/skip-check-fence-gaps/verify/planted-rows.py controls scope && uv run python -I spec/skip-check-fence-gaps/verify/planted-rows.py scope && uv run pytest -q tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_hygiene.py
 - id: P2
   name: Every spelling of a skip the cycle covers, the outcome type as a value admitted, and the ledger
-  status: pending
+  status: done
   satisfies:
   - R4
   - R5
@@ -137,11 +137,11 @@ twelve scope rows prove each shape was a gap and is now reported (or, for the cl
 `raise`'s exception expression; the eight spelling rows prove it; the docstring names what the check
 cannot see; the ledger holds every deferral; the profile's full `verify` is green.
 
-- [ ] Narrow the exemption in `skip_violations` as PLAN § 2 "What counts as a skip" describes, with
+- [x] Narrow the exemption in `skip_violations` as PLAN § 2 "What counts as a skip" describes, with
       its comment saying why (`.Exception` names the outcome type; raised, it skips).
-- [ ] Append PLAN § 2's eight P2 rows after the P1 rows, ids and `found` values exactly as tabled.
-- [ ] Give `skip_violations` the docstring PLAN § 2 "Docstring" lists.
-- [ ] **Q1, per the sign-off's ruling on PLAN § 5.** Default (seed): file
+- [x] Append PLAN § 2's eight P2 rows after the P1 rows, ids and `found` values exactly as tabled.
+- [x] Give `skip_violations` the docstring PLAN § 2 "Docstring" lists.
+- [x] **Q1, per the sign-off's ruling on PLAN § 5.** Default (seed): file
       `issues/skip-check-import-aliases.md` from the KB's `ISSUE.md` template, `status: unshaped`,
       with both probes, each reporting nothing before and after this cycle (`from pytest import skip
       as go` then `go("x")`; `class S(pytest.skip.Exception): pass` then `raise S("x")`), and its
@@ -150,24 +150,24 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
       `skip-renamed-on-import`, and/or report a skipper's `.Exception` among a class's bases and add
       a row `outcome-type-subclassed` (`found` yes each; the gate's `SPELLING_ROWS` gains them in
       the same commit). Ruled 2026-11-09: the default stands (the seed; see Amendments).
-- [ ] **Q2, per the sign-off's ruling on PLAN § 5** (2026-11-09; see Amendments): file a seed for
+- [x] **Q2, per the sign-off's ruling on PLAN § 5** (2026-11-09; see Amendments): file a seed for
       conftest-level deselection (`collect_ignore`, `pytest_collection_modifyitems`, `pytest.exit`
       making rows vanish from a CI run) from the KB's `ISSUE.md` template, `status: unshaped`, and
       its `ROADMAP.md` entry in Part I's gates group, placed after this cycle's entry.
-- [ ] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and the branch's
+- [x] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and the branch's
       commit bodies for "do not fix here", "known limitation", "left as a follow-up", "deferred",
       "limit" and "not covered"; each must have an `issues/` seed and a `ROADMAP.md` entry. Expected:
       Q1's seed and Q2's seed. The outcome type raised through a name is a GOAL non-goal, and
       PLAN § 5's unpinned binding forms are a review risk; neither is a deferral. An unrecorded
       deferral fails the phase.
-- [ ] Standing last-phase items: the previous cycle's last phase carried no project-level obligation
+- [x] Standing last-phase items: the previous cycle's last phase carried no project-level obligation
       beyond the ledger (no `## Times` quote in this repo).
-- [ ] Stage, then run the `verify:`.
+- [x] Stage, then run the `verify:`.
 - **Verify:** the frontmatter's: gate `controls all` and `all`, then the profile's full `verify`,
   both eras (≈ 26 min, 1,571 s, measured once on the prototype; PLAN § 6). The whole command runs past the 10-minute cap of one foreground
   shell call: run it in the background and wait for its exit.
-- **Touches:** `tests/test_hygiene.py`; `issues/skip-check-import-aliases.md`, Q2's deselection
-  seed under `issues/`, and `ROADMAP.md`.
+- **Touches:** `tests/test_hygiene.py`; `issues/skip-check-import-aliases.md`,
+  `issues/skip-check-deselection.md` and `ROADMAP.md`.
 
 ## Amendments
 
@@ -179,6 +179,12 @@ cannot see; the ledger holds every deferral; the profile's full `verify` is gree
   `pytest_collection_modifyitems`, `pytest.exit` making rows vanish), `status: unshaped`, with its
   `ROADMAP.md` entry in Part I's gates group, placed after this cycle's entry. Both seeds follow
   the KB's `ISSUE.md` template. The gate's fence already admits `issues/*.md` and `ROADMAP.md`.
+- **2026-11-09, P2 build.** Q2's seed is `issues/skip-check-deselection.md`. Its `ROADMAP.md` entry
+  follows Q1's, and both follow this cycle's. Part I's count goes from 26 entries to 28, and the
+  gates group goes from ten to twelve, both in the intro text. The `skip_violations` docstring
+  leaves out "a star import" from PLAN § 2's list, because the check does see one:
+  `from pytest import *` then `skip("x")` reads the word `skip` and is reported. The rest of the
+  list stands, with the renamed import added because Q1 is seeded.
 
 ---
 
