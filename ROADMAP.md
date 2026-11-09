@@ -111,7 +111,7 @@ vanish from CI without failing. Found by the landing-merge check of
 `absence-check-leftover-classification`, 2026-10-23.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (REVIEW, landing merge)*
-**Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: unshaped*
+**Seed:** [`issues/skip-check-fence-gaps.md`](issues/skip-check-fence-gaps.md) · *status: adopted:skip-check-fence-gaps*
 
 ## A real-time reconnect test fails under full-suite load
 
