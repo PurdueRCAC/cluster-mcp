@@ -59,8 +59,8 @@ mismatch.
 
 - **R1** — The `unit` marker's description in `pyproject.toml` SHALL state what the unit guard
   enforces on a `unit` test: it starts no process, opens no network connection (a name lookup
-  included) and sees no real HOME. [NEEDS CLARIFICATION: Q2, whether "fast" stays in the `unit`
-  description.]
+  included) and sees no real HOME. It SHALL NOT call `unit` "fast" or make speed part of the
+  definition (Q2).
 - **R2** — The `integration` marker's description in `pyproject.toml` SHALL say the marker is for a
   test that needs what a `unit` test is refused, and SHALL keep the rule the suite enforces on it:
   every process the test launches goes through `bin/sandbox.sh`. It SHALL NOT describe the marker
@@ -84,8 +84,7 @@ mismatch.
   says what a marker means (§ Testing; the development-commands block; § Conventions' marker
   bullet), and SHALL NOT keep the note that an `integration` test drives no CLI by exception (the
   `tests/test_registry.py` entry in § Testing).
-- **R5** — [NEEDS CLARIFICATION: Q1, whether this cycle adds a check, and which.] Draft for the
-  recommended option (B): a `unit` test SHALL hold `AGENTS.md` § Testing's statement of the two
+- **R5** — A `unit` test SHALL hold `AGENTS.md` § Testing's statement of the two
   markers to the `pyproject.toml` descriptions word for word, as
   `test_the_id_rule_is_stated_as_the_check_enforces_it` does for the spec-id rule. Its standing
   negative controls SHALL include planted rows for: a description changed in `pyproject.toml`
@@ -103,8 +102,8 @@ mismatch.
   filed as a seed.
 - No new rule on `integration` tests beyond what the suite enforces today (for example
   "loopback hosts only" or "never the real HOME"): the descriptions state existing rules.
-- No check that every `integration` test needs what `unit` forbids (option C under Q1) unless Q1
-  chooses it; otherwise it is filed as a seed.
+- No check that every `integration` test needs what `unit` forbids (option C under Q1): it is the
+  seed [`issues/integration-marker-check.md`](../../issues/integration-marker-check.md).
 - The sibling gate cycles' own tests: this cycle settles the wording they are checked against.
 - No change to `verify`, the CI jobs or their split, and no timing or CI-cost bound.
 - Docstrings in `tests/` are not part of the contract; the plan may align the `guard` fixture's if
@@ -112,17 +111,16 @@ mismatch.
 
 ## Clarifications
 
-- **Q1** — [NEEDS CLARIFICATION: does the cycle add a check?] (A) wording only: R1–R4, reviewed by
-  reading against R3's kinds; (B) wording plus a static `unit` check that holds `AGENTS.md` §
-  Testing's statement to `pyproject.toml` word for word (R5 as drafted); (C) B plus a check that
-  every `integration` test needs what the guard refuses, classifying every kind in R3 (each kind a
-  planted row, kind 8 the hardest, since a launch in a fixture of wider scope or in `harness.py`,
-  `ssh_server.py` or `mutants.py` happens outside the test body), with additive mutants for each
-  carve-out a check could grow; its CI cost would need before-and-after figures. Open.
-- **Q2** — [NEEDS CLARIFICATION: does "fast" stay in the `unit` description?] (a) drop it: `unit`
-  is defined only by what the guard refuses, and nothing enforces speed; (b) keep it as a
-  non-binding note beside the rule; (c) make it a rule, which needs a bound (the maintainer's call,
-  with figures). Open.
+- **Q1:** Does the cycle add a check, and which? (A) wording only; (B) wording plus a static check
+  holding `AGENTS.md` § Testing's statement to `pyproject.toml` word for word; (C) B plus a check
+  that every `integration` test needs what the unit guard refuses. — **A:** B: R1–R4 plus R5 as
+  drafted, its planted rows including the additive drifts. C is not this cycle; it is filed as the
+  `unshaped` seed `issues/integration-marker-check.md` (kind `test`, appetite `big`), naming the nine
+  kinds of R3 and the fixture and helper-launch trap (resolved 2026-11-09, foreman ruling at the
+  GOAL gate).
+- **Q2:** Does "fast" stay in the `unit` description? (a) drop it; (b) keep it as a non-binding
+  note; (c) make it a rule with a bound. — **A:** (a): drop it; `unit` is defined only by what the
+  unit guard refuses (resolved 2026-11-09, foreman ruling at the GOAL gate).
 
 ## Related materials
 
@@ -133,6 +131,7 @@ mismatch.
   `pytest_collection_modifyitems`); `tests/test_hygiene.py` (`sandbox_violations`,
   `test_cli_drives_are_sandboxed`, `test_the_id_rule_is_stated_as_the_check_enforces_it`);
   `AGENTS.md` § Testing, § Conventions, development commands.
+- Follow-up seed (option C of Q1): `issues/integration-marker-check.md`.
 - Sibling 0.2.0 gate seeds whose tests R3 names: `issues/annotation-check.md`,
   `issues/full-volume-fixture-leaks-hdiutil.md`, `issues/mutant-child-outlives-timeout.md`,
   `issues/sandbox-dirs-left-on-kill.md`.
