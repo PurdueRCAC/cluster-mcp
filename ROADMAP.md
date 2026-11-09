@@ -105,7 +105,7 @@ reparented to init, and the runner raises out of the sweep instead of reporting 
 group.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
-**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
+**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: adopted:mutant-child-outlives-timeout*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
