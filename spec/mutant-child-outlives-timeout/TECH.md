@@ -3,10 +3,10 @@ slug: mutant-child-outlives-timeout
 title: A mutant whose child run hangs is reported, and leaves nothing running
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/mutant-child-outlives-timeout
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -24,7 +24,7 @@ phases:
   verify: uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py controls && uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py untouched && uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py rows legacy && uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py rows modern && uv run pytest -q tests/test_hygiene.py tests/test_mutations.py && uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py within-limit
 - id: P2
   name: The ledger, and the full gate in both eras
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -159,14 +159,14 @@ within its limit is read exactly as before.
 **Goal:** the branch's final tree passes the profile's full `verify`, the cycle's changes stay in its
 files, and the ledger is clean.
 
-- [ ] The ledger (`code-plan` Step 6.8): walk P1's and P2's bodies, PLAN.md and the branch's commit
+- [x] The ledger (`code-plan` Step 6.8): walk P1's and P2's bodies, PLAN.md and the branch's commit
       bodies for the phrases the `prepush` mode lists; each such item names an `issues/` seed with a
       `ROADMAP.md` entry (the `prepush` mode checks it). This plan files no new seed: its deferrals are
       the sandbox home ([`issues/sandbox-dirs-left-on-kill.md`](../../issues/sandbox-dirs-left-on-kill.md))
       and the sweep's arrangement ([`issues/mutants-workflow-timeout.md`](../../issues/mutants-workflow-timeout.md)),
       both already seeded and indexed.
-- [ ] Put P1's measured integration-row times into PLAN § 5 (D5), naming the run that measured them.
-- [ ] Stage, then run the frontmatter `verify:` through `run_in_background`: `prepush`, `untouched`,
+- [x] Put P1's measured integration-row times into PLAN § 5 (D5), naming the run that measured them.
+- [x] Stage, then run the frontmatter `verify:` through `run_in_background`: `prepush`, `untouched`,
       then the profile's full `verify`, both eras.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/mutant-child-outlives-timeout/PLAN.md`, `spec/mutant-child-outlives-timeout/TECH.md`.
