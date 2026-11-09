@@ -1572,9 +1572,11 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
       "import sys; sys.path.insert(0, 'tests'); import mutants; print(*(c.id for c in mutants.CASES))")
   ```
 
-  A `FAILED` line means a case survived (the test does not pin its contract) or was killed for the
-  wrong reason (the test failed on something else, an import error say): fix the test, never the
-  targets. A reworded violation message also reads as a wrong reason until the case's `why` follows
+  A `FAILED` line means a case survived (the test does not pin its contract), was killed for the
+  wrong reason (the test failed on something else, an import error say), or that its child ran past
+  the runner's 300 s limit (`LIMIT`), in which case the runner first stopped the whole run: fix the
+  test, never the targets. A reworded violation message also reads as a wrong reason until the
+  case's `why` follows
   it. A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget
   or removal records its reason in the commit body. `.github/workflows/mutants.yml` runs every case

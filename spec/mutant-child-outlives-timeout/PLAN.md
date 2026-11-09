@@ -118,9 +118,11 @@ import (the suite imports the module), and installs nothing outside the main thr
 **Docs, same commit.** The module docstring gains one sentence on the limit and the stop.
 `AGENTS.md` § Testing's mutation-runner bullet: "A `FAILED` line means a case survived … or was killed
 for the wrong reason …" gains "or that its child ran past the runner's 300 s limit (`LIMIT`), in which
-case the runner first stopped the whole run". `issues/sandbox-dirs-left-on-kill.md`'s sentence naming
-this runner's timeout path is corrected to the new mechanism (the runner SIGKILLs the whole run,
-`bin/sandbox.sh` included), so the seed stays true.
+case the runner first stopped the whole run". *Amended 2026-11-09 (foreman ruling):*
+`issues/sandbox-dirs-left-on-kill.md` is not rewritten here. That seed belongs to the
+`sandbox-dirs-left-on-kill` cycle, which keeps `bin/sandbox.sh` as it is and has each harness that
+SIGKILLs a sandbox point its `TMPDIR` into a directory the harness owns, plus a suite-session sweep;
+its sentence naming this runner's timeout path is that cycle's to restate.
 
 **Touch points for the sibling cycle** (`mutants-workflow-timeout`, which may shard or run cases
 concurrently): the import block (`signal`, `time`); the run-child block (new, between `apply_repo` and
@@ -176,7 +178,10 @@ high-blast-radius list) is only run, never edited. The sections it touches:
 Each row was read against R1–R4's wording. D1 and D7 are the two where the design reads or shows an
 R-ID in a way the GOAL's words did not settle; both went to the sign-off and are now GOAL
 Clarifications (§ 5). D3 and D5
-are figures; their before-and-after is in § 5.
+are figures; their before-and-after is in § 5. *Amended 2026-11-09:* D3 (`GONE_POLL = 0.1`,
+`GONE_WITHIN = 10`) and D5 (one integration row at about 10–11 s per era, in each era's fourth suite
+command; above 15 s per era as P1 measures it, it goes back to the maintainer) were approved by the
+maintainer at the PLAN/TECH gate, 2026-11-09.
 
 ## 4. Rabbit holes (resolved)
 
