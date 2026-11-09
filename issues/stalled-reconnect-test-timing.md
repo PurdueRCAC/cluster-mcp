@@ -100,6 +100,13 @@ A test that fails on load, not on behaviour, teaches builders to re-run red gate
   test module): a raised ending must be decided in under 0.15 s and took 0.18 s. 4323 others passed
   in that job and the other seven suite jobs passed; attempts 1, 2 and 4 of the same run, each a
   full re-run, passed. That cycle counted the attempt as its one replaced run.
+- 2026-11-09: the probes row, a fourth parameter:
+  `tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability[base-exception-core-only]`
+  failed once in a local full-suite run (macOS, modern era, `integration-marker-wording`'s P3 gate
+  at `7ca3d01`, load about 7.2 with other sessions' gates running): a raised ending must be decided
+  in under 0.15 s and took 0.19 s. 4366 others passed. It passed three times run alone (about
+  0.11 s each), and one re-run of the same gate on the identical tree passed both eras whole. That
+  branch changes only the marker descriptions, AGENTS.md and a hygiene check.
 
 ## Why it was deferred
 
