@@ -20,7 +20,9 @@ Several test harnesses stop a sandboxed process that way. The one measured here 
 started that is still running), whose sandboxes take the host's `TMPDIR`. Others that SIGKILL a
 sandbox group on some path: `tests/test_startup.py` (`run_bounded`, on a timeout),
 `tests/test_transports.py` (after SIGTERM's grace), `tests/test_probe_startup.py` (`over_http`) and
-`spec/capability-probe/verify/drives.py`. The last three point the drive's `TMPDIR` at the test's
+`spec/capability-probe/verify/drives.py`. The mutation runner kills its sandbox outright too:
+`tests/mutants.py` `run_child`, on its 300 s timeout, where `subprocess.run` SIGKILLs the
+`bin/sandbox.sh` it started. The last three point the drive's `TMPDIR` at the test's
 own directory, so what they leave is removed with it, and `test_transports.py` asserts the sandbox
 was removed on its SIGTERM path.
 
