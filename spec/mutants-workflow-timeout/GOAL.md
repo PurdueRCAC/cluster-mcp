@@ -53,21 +53,21 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
 ## Acceptance criteria (the contract)
 
 - **R1** — WHEN the mutation workflow is dispatched, it SHALL run every case `tests/mutants.py`
-  defines on the runner's platform, each exactly once, and SHALL finish with a reported verdict for
-  every case before any of its jobs reaches its timeout, within the wall-time bound
-  `[NEEDS CLARIFICATION: Q1]` sets.
+  defines on the runner's platform, each exactly once, split across jobs each of which finishes
+  within 10 minutes of wall time and carries `timeout-minutes: 20`, and SHALL finish with a reported
+  verdict for every case before any of its jobs reaches its timeout.
 - **R2** — WHEN a dispatched run finishes, the run SHALL fail IF any case survived, was killed for
   the wrong reason, or has no reported verdict, or IF no case was found; and its log SHALL name
   each such case. A run in which every case was killed SHALL pass. (The current single-job checks,
-  carried to whatever arrangement the plan chooses.)
+  carried across the split.)
 - **R3** — WHEN cases are added to `tests/mutants.py`, the workflow SHALL run all of them with no
   edit to it. The recorded figures (R4) SHALL let a cycle that adds cases tell, without dispatching
-  a run, whether the full run still fits the bound Q1 sets.
-- **R4** — `AGENTS.md` § Testing SHALL state the measured cost of a full run on the hosted runner
-  (the case count, the run's wall time and, where it is split, each job's), measured on the cycle
-  branch's head, replacing "a child takes about 2 s, all cases about 3 minutes".
-  `[NEEDS CLARIFICATION: Q2]` decides whether that figure is also held as a § Factory profile
-  baseline.
+  a run, whether the full run still fits the `mutants budget` bound.
+- **R4** — `AGENTS.md` § Factory's profile SHALL gain a `mutants budget` row holding the bound (each
+  job ≤ 10 minutes of wall time, `timeout-minutes: 20`) and the run's cost as measured at landing:
+  the case count, the commit, the runs counted, and each job's wall time, the worst of the counted
+  runs. `AGENTS.md` § Testing SHALL state that measured cost, replacing "a child takes about 2 s,
+  all cases about 3 minutes", and point to the row.
 - **R5** — `AGENTS.md` § Testing and the workflow's header comment SHALL state the workflow's
   current dispatch state (`main` carries it, so a run can be dispatched against any branch that
   has the file), not that it becomes dispatchable at a future release.
@@ -82,7 +82,8 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
   wait is loosened, to make the run fit. Whether a case is killed is not this cycle's to change.
 - **A child that outlives its timeout.** `run_child`'s `subprocess.run(timeout=300)` leaving a
   pytest behind is [`issues/mutant-child-outlives-timeout.md`](../../issues/mutant-child-outlives-timeout.md),
-  its own cycle. This GOAL needs a verdict per case only from children that return.
+  its own cycle (in flight as `mutant-child-outlives-timeout`). It changes how the runner stops a
+  hung case, not the limit: 300 s per case stays, and a hung case still costs up to about 310 s.
 - **The timing-sensitive reconnect test.** [`issues/stalled-reconnect-test-timing.md`](../../issues/stalled-reconnect-test-timing.md)
   stays its own cycle; if the plan runs children concurrently, its rows are a known hazard the
   plan's risk section must face, not fix.
@@ -93,33 +94,28 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
 
 ## Clarifications
 
-- **Q1 — the run's timing bound.** [NEEDS CLARIFICATION: What wall-time bound must a full
-  dispatched run meet, and what `timeout-minutes` does each of its jobs carry? The profile does not
-  fix it: § Factory's `ci budget` row covers jobs that run a suite command, which this workflow does
-  not. Before: one job, `timeout-minutes: 30`, projected 49–97 min serial for 1,164 cases
-  (2.5–5 s per case on a development host; never measured on the hosted runner), so it is
-  cancelled with no report. After, by option:
-  (a) **jobs held to the `ci budget` figures** — each job ≤ 10 min wall with `timeout-minutes: 20`;
-  full run ≈ 10 min wall plus queueing, at about 6–13 jobs for today's count, runner-minutes ≈ the serial total
-  plus each job's setup (checkout and `uv sync`, about 1 min);
-  (b) **one job, longer timeout** — e.g. `timeout-minutes: 120`; wall ≈ 49–97 min now, growing about
-  11–23 min per 271-case sweep, fewest runner-minutes;
-  (c) **a different per-job or whole-run figure** the maintainer names.
-  The mechanism (shards, in-job concurrency, both) stays the plan's choice within the bound.]
-- **Q2 — a profile baseline for the run.** [NEEDS CLARIFICATION: The run's cost is cumulative
-  across cycles, like the suite's. Should this cycle add a § Factory profile row (e.g.
-  `mutants budget`) holding the bound from Q1 and the baseline measured at landing, so a later
-  cycle that adds cases checks against the profile? (a) yes, a profile row; (b) no, § Testing's
-  figure (R4) only.]
-- **Q3 — survivors found by the first hosted run.** [NEEDS CLARIFICATION: The full set has never
-  run on the hosted runner. If the first complete run shows a case that survives or is killed for
-  the wrong reason there, (a) record each as an `issues/` seed and land this cycle with R2 correctly
-  reporting it red; (b) fix each in this cycle (scope unbounded for a `small` appetite); or (c) hold
-  the cycle until those seeds land?]
-- **Q4 — the hosted-runner evidence.** [NEEDS CLARIFICATION: R1 and R4 need dispatched runs of
-  this workflow against the cycle branch, each a GitHub workflow run that needs the maintainer's go.
-  How many runs count, and is the figure the worst of them (as `ci budget` takes the worst of 3)?
-  (a) worst of 3 runs; (b) one run; (c) another number.]
+- **Q1 — the run's timing bound.** Before: one job, `timeout-minutes: 30`, projected 49–97 min
+  serial for 1,164 cases (2.5–5 s per case on a development host; never measured on the hosted
+  runner), so it is cancelled with no report. The profile's `ci budget` row does not cover it (it
+  binds jobs that run a suite command). — **A:** shard the run; each job finishes within 10 minutes
+  of wall time and carries `timeout-minutes: 20` (the `ci budget` figures). At today's count that is
+  about 6–13 jobs and about 10 minutes of wall time plus queueing; runner-minutes are the serial
+  total plus each job's setup. The mechanism stays the plan's choice. Shard sizing assumes the
+  sibling cycle `mutant-child-outlives-timeout`'s behaviour: a hung case is still stopped at the
+  300 s per-case limit and costs up to about 310 s of its job. (Resolved 2026-11-09, maintainer.)
+- **Q2 — a profile baseline for the run.** The run's cost is cumulative across cycles, like the
+  suite's. — **A:** add a `mutants budget` row to `AGENTS.md` § Factory with the bound and the run's
+  cost as measured at landing (R4). (Resolved 2026-11-09, maintainer.)
+- **Q3 — survivors found by the first hosted run.** The full set has never run on the hosted
+  runner. — **A:** a case that survives or is killed for the wrong reason on the first full run is
+  seeded as its own `issues/` entry, not fixed here; the cycle lands with the run reporting it (R2).
+  More than a few such cases go back to the foreman before the cycle continues. (Resolved
+  2026-11-09, foreman ruling at the GOAL gate.)
+- **Q4 — the hosted-runner evidence.** R1 and R4 need dispatched runs on the hosted runner. —
+  **A:** up to 3 `workflow_dispatch` runs of `mutants.yml` on `ci/mutants-workflow-timeout`, the
+  worst of the 3 counted; no other dispatches. (Resolved 2026-11-09, maintainer.)
+- **Q5 — R5's scope.** R5 (the stale dispatch-state sentence) was added in shaping, beyond the
+  seed. — **A:** R5 stays. (Resolved 2026-11-09, foreman ruling at the GOAL gate.)
 
 ## Related materials
 
