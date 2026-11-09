@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py row 2
 - id: P3
   name: Row 3 decides the raised endings on a probe clock
-  status: pending
+  status: done
   satisfies:
   - R3
   - R7
@@ -156,6 +156,9 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
   for P1–P3. D2–D7 accepted. D1 (row 4: the collector paused for the timed start, or fallback (c))
   is with the maintainer: P4 does not start until he rules, and if he picks (c), PLAN and TECH are
   amended as Conventions says and re-signed before P4.
+- **2026-11-09, P2 (accepted at its gate).** `ensured` is the sum of every span from an entry to
+  `SSHExecutor._ensure_connected` to its return during the first call (`math.inf` when there is
+  none): should the call enter its reconnect more than once, each entry counts toward the 0.1 s.
 
 ---
 
@@ -209,21 +212,21 @@ offset, which the MCP round trip never moves, and fails on any such wait.
 **Goal:** a raised ending's "decided when it happened" is read on a clock only the probe's waits move,
 and the row proves the probe read it.
 
-- [ ] Add `ProbeClock` (`ORIGIN` 100.0, `SETTLE` 10.0 real seconds) to `tests/test_probes.py`, as
+- [x] Add `ProbeClock` (`ORIGIN` 100.0, `SETTLE` 10.0 real seconds) to `tests/test_probes.py`, as
   PLAN § 2 describes: proxies for `probes.time` (`monotonic`, `perf_counter`, `monotonic_ns`, and a
   `sleep` that waits for the other probe workers to end before it advances) and `probes.threading`
   (`Event` whose `wait` returns at once when set, and advances the clock by its timeout once every
   other probe worker has ended with it unset; `Thread` that records each worker, or raises
   `unstartable`), and `routed_sleep` for the real `time.sleep` (the clock on the main thread and the
   probe's workers, the real sleep elsewhere).
-- [ ] In `test_every_ending_without_an_answer_serves_the_capability`, install both proxies for every
+- [x] In `test_every_ending_without_an_answer_serves_the_capability`, install both proxies for every
   ending (`thread-cannot-start` through `unstartable`; keep `threading_whose_start_raises` for the
   interrupt row). Keep the reason check and `took <= BOUND + SLACK`, its message naming both
   (`'the verdicts took {took:.2f} s, past the bound ({BOUND} s) and its slack ({SLACK} s)'`). Add the
   engagement check (D3), wanting a recorded worker for every ending but `thread-cannot-start`, and
   route `time.sleep` (`monkeypatch.setattr(time, 'sleep', clock.routed_sleep)`). For RAISED endings, `waited < BOUND / 2` on the clock, with the message of
   PLAN § 2 (it keeps `decided only at the deadline`).
-- [ ] Keep `BOUND`, `SLACK`, `RAISED` and the executor-call count as they are.
+- [x] Keep `BOUND`, `SLACK`, `RAISED` and the executor-call count as they are.
 - **Verify:** `timing-gate.py row 3`: values, scope, the 56 RAISED tests in both eras, faults 3/*
   (six, ~12 s), control 3 in each era (the base's 56 fail with `decided only at the deadline`).
   Prototype: about 1 min.
