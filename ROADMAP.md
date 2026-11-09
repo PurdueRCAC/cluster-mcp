@@ -157,7 +157,7 @@ behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
   `spec/ssh-half-open-link/`'s branch; the seed records both rates.
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
-**Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: unshaped*
+**Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: adopted:stalled-reconnect-test-timing*
 
 ## Nothing would catch the next silently wrong annotation
 
