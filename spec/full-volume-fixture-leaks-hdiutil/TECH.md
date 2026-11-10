@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-10'
 phases:
 - id: P1
   name: Each hdiutil step runs in its own group under its bound; a hung or failed one is stopped and named
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -22,7 +22,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: sh spec/full-volume-fixture-leaks-hdiutil/verify/rows.sh p1
+  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p1
 - id: P2
   name: A failed create or attach is cleaned up; a failed detach is kept and named, after the body's failure
   status: pending
@@ -166,6 +166,28 @@ Cycle-specific, every phase:
   annotation step (159 functions) and the hygiene module, run by hand on the same tree, were green.
   The gate kills nothing it did not start, so the image stays until the maintainer clears it; P1
   then re-runs its gate unchanged.
+- **2026-11-10, P1's gate runs the frozen `verify/rows.sh p1` under a wrapper** (foreman ruling,
+  code-build's frozen-gate wrapper rule): `remediation/scoped-leftovers.sh p1`. Which gate: rows.sh's
+  `leftovers` step. Why: it reads any image under a pytest temp root, and any stand-in process, as
+  the rows'; other suites on the build host still run the fixture as it was and can leak an image
+  while the gate runs, so the step goes red on host state no row made (seen red first: attempt 1
+  above; that image was ejected before the re-run). The wrapper runs rows.sh unchanged with pytest's
+  `--basetemp` set to a directory of its own whose name carries `pytest-of-` and a unique token, and
+  with two PATH shims that drop, from exactly rows.sh's `hdiutil info` and `ps -A -ww -o stat= -o
+  args=`, each line naming a temp root or the stand-in without the token; every other call runs the
+  real tool. Every other check of rows.sh stays as it is. After a green rows.sh it asserts the rows ran
+  under its base directory and the leftover step read both shims, so the scoping is never vacuous.
+  Shown before use, each with all nine ids passing in both eras: an image attached under the run's
+  base directory, red ("a disk image the rows made is still attached"); a hanging stand-in under it,
+  red ("a stand-in process is still running"); a foreign image and a foreign stand-in under another
+  `pytest-of-…/pytest-9999`, green, with rows.sh unwrapped red on the same state. P2's `verify:`
+  (`rows.sh p2`) and P3's `pre` (`rows.sh all`) run rows.sh directly and have the same exposure; each
+  takes the wrapper (`… scoped-leftovers.sh p2`, `… all`) when it is built, on the foreman's word.
+- **2026-11-10, a sibling seed's name:** this cycle removes `_host` from `tests/test_ssh_exec.py`;
+  every `hdiutil` step now runs through `_step` (the real tool still through `REAL_POPEN`, outside
+  `bin/sandbox.sh`). `issues/marker-rule-gaps.md` (from `integration-marker-wording`, item 4 and its
+  R3) names `_host`: whichever of the two cycles lands second adds a dated correction line to that
+  seed naming `_step`.
 
 ---
 
@@ -175,23 +197,23 @@ Cycle-specific, every phase:
 with its group, waited on up to `STOP_WAIT`, and reported with the verb, how it ended and any
 survivor; the success path is today's; the stand-in exists and the rows that need no cleanup pass.
 
-- [ ] `tests/test_ssh_exec.py`: add the module constants (`HDIUTIL_BOUND`, `STOP_WAIT`,
+- [x] `tests/test_ssh_exec.py`: add the module constants (`HDIUTIL_BOUND`, `STOP_WAIT`,
       `STOP_SIGNAL`, `HDIUTIL_VERBS`), `HostFailure`, `_bounds`, `_processes`, `_group`, `_stop` and
       `_step` as PLAN §2 specifies (KILL suppressing `ProcessLookupError` and `PermissionError`;
       `ps` with one `-o` per field, refusing a listing without this process; the wait ignoring `Z`;
       the two failure texts; the survivor text). Remove `_host`.
-- [ ] Split `full_volume` into `attached_image(where, hdiutil=('hdiutil',), bounds=None)` and the
+- [x] Split `full_volume` into `attached_image(where, hdiutil=('hdiutil',), bounds=None)` and the
       fill (`full_volume`, unchanged in effect). In this phase a failed or hung `create`/`attach`
       raises `HostFailure(failure)` and a failed `detach` raises `HostFailure(failure)`; a body that
       fails with a good `detach` has its image removed and its own exception re-raised. P2 adds the
       cleanup and the texts R4 and R5 need.
-- [ ] `tests/hdiutil_standin.py` whole, as PLAN §2 specifies (per-call plans, one handling of
+- [x] `tests/hdiutil_standin.py` whole, as PLAN §2 specifies (per-call plans, one handling of
       `image`, `device`, `child` and the ending for every verb; a hang and its child survive TERM and
       record it; a failing verb's child drops its streams; `info -plist` with a `/./` path and
       `mount-point`, and `garbled`; `detach` by whole device or mount point only; `STATE` in every
       argv). It forks and launches nothing, runs only through `bin/sandbox.sh` (exit 2 otherwise),
       and its module docstring states what it is.
-- [ ] The row harness (`HDIUTIL_STANDIN`, `SHORT_BOUND`, `EASY_BOUND`, `ROW_LIMIT`,
+- [x] The row harness (`HDIUTIL_STANDIN`, `SHORT_BOUND`, `EASY_BOUND`, `ROW_LIMIT`,
       `PAST`, `FAILS`, `HANGS`, `DISK_IMAGE_ROWS` with this phase's rows `create-hangs`,
       `create-fails`, `every-step-succeeds`, `body-fails`, `_left_running`, `FOREIGN`, `_stand_in`
       seeding the foreign device, `_kill_recorded` of what is still running) and
@@ -199,9 +221,10 @@ survivor; the success path is today's; the stand-in exists and the rows that nee
       row checks (leftover processes, own devices and the foreign one, image, texts in order in
       `traceback.format_exception`, no false survivor, no TERM, the run within `ROW_LIMIT`, each
       planned hang reached).
-- [ ] `test_a_stopped_step_still_running_is_named` (SIGCONT, 0.5 s, the window
+- [x] `test_a_stopped_step_still_running_is_named` (SIGCONT, 0.5 s, the window
       `[SHORT_BOUND + 0.5, SHORT_BOUND + 3.5)`) and `test_the_disk_image_figures`.
-- **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/verify/rows.sh p1`: the six P1 ids and
+- **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p1`, which runs
+  `verify/rows.sh p1` unchanged with its leftover checks scoped to the run (Amendments): the six P1 ids and
   the three real `out_of_room` rows (real `hdiutil` on the build Mac, R6), each by exact id, in both
   eras; no stand-in process and no image of the rows' left; every function in both files resolves
   its annotations. Dry-run on a P1-cut prototype: green; P2's ids on that tree: 11 red.
