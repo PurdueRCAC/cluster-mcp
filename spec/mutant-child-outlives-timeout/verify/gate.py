@@ -41,8 +41,21 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-BASE = '71a3a4901ceaa4369373556c58211139bbc1a2b8'
 SLUG = 'mutant-child-outlives-timeout'
+# The cycle's shape commit, found by its subject on HEAD's history, so a rebase of the branch cannot
+# leave the gate measuring from a commit that is no longer the cycle's start.
+SHAPE_SUBJECT = f'[fix] Shape {SLUG} goal'
+
+
+def shape_commit() -> str:
+    log = subprocess.run(['git', 'log', '--format=%H%x00%s', 'HEAD'], check=True, capture_output=True, text=True).stdout
+    found = [h for h, _, subject in (line.partition('\0') for line in log.splitlines()) if subject == SHAPE_SUBJECT]
+    if len(found) != 1:
+        raise SystemExit(f'gate.py: {len(found)} commits on HEAD carry the subject {SHAPE_SUBJECT!r}, expected one')
+    return found[0]
+
+
+BASE = shape_commit()
 HERE = Path(__file__).resolve().parent
 EXPECTED = HERE / 'within-limit.expected'
 UNMUTATED = HERE / 'unmutated.expected'

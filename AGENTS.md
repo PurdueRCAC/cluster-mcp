@@ -1429,7 +1429,14 @@ import has no effect.
     wrapper's online "advisory source unreachable (uv audit exited N)" and **at least one**
     connection, the positive control that shows the canary sees this uv's requests. The networked
     proofs belong to the release gate, not the suite.
-  - `tests/test_mutations.py` (`unit`): the fast half of the mutation runner (below).
+  - `tests/test_mutations.py` (`unit`, `integration`): the suite half of the mutation runner
+    (below). Unit rows: every case's anchor still applies, `mutation_violations` refuses each way a
+    child can fail to prove a kill, and each decision of the stop a child run past its limit gets
+    (`run_members`, `_wait_gone`, `stop_run`, `run_child`, the signal handling), on fakes. One
+    `integration` row hangs a real child under `bin/sandbox.sh` at a patched 8 s limit, with a
+    same-group child, a new-session child and an orphan in the run, and asserts the whole run is
+    gone, the scratch copy removed, processes outside the run untouched and the case reported;
+    it takes about 10 s per era.
   - `tests/test_sdist_hygiene.py` (`unit`): `member_violations`, `sdist_violations` and `main` of
     `bin/sdist_hygiene.py`, loaded by path and fed tarballs built in `tmp_path`. Each furniture
     entry is named, lookalikes (`binary.txt`, `specs/`, `tests/fixturesX/`) pass, a member outside
@@ -1576,8 +1583,24 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   wrong reason (the test failed on something else, an import error say), or that its child ran past
   the runner's 300 s limit (`LIMIT`), in which case the runner first stopped the whole run: fix the
   test, never the targets. A reworded violation message also reads as a wrong reason until the
-  case's `why` follows
-  it. A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
+  case's `why` follows it.
+
+  Each child runs in a session of its own. Past `LIMIT` the runner stops the run whole
+  (`stop_run`): it holds SIGINT, SIGTERM and SIGHUP (`HELD`), freezes the run with SIGSTOP, finds
+  every process reachable from the wrapper through a live parent or a process group of the run
+  (`run_members`), SIGKILLs every group and pid it found, and waits up to `GONE_WITHIN` (10 s,
+  looking every `GONE_POLL`, 0.1 s) until none of them is running (`_wait_gone`). The case is then
+  reported `FAILED` with `timeout: the child ran past its 300 s limit and was stopped`
+  (`ChildTimeout`), plus `still running 10 s after the stop: pids …` for any it could not end, and
+  the sweep goes on. A process that left every group of the run and lost its parent before the
+  stop is out of reach. Since the run no longer shares the runner's process group, Ctrl-C, SIGTERM
+  or SIGHUP to the runner reach the run through the runner: it stops the whole run first
+  (`stop_on_signals` turns TERM and HUP into `RunnerSignal`), then dies by the signal it got
+  (`die_by` for TERM and HUP, Python's own exit for Ctrl-C). A SIGKILL to the runner's process group ends the runner alone and leaves its current
+  run to finish by itself. The killed `bin/sandbox.sh` leaves its home in the runner's `TMPDIR`
+  ([`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md)).
+
+  A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget
   or removal records its reason in the commit body. `.github/workflows/mutants.yml` runs every case
   in `mutants.CASES` on demand (`workflow_dispatch`) and fails when a case survives or none are
