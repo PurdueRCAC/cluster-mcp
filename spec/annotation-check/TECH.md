@@ -3,10 +3,10 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_progress
+status: in_review
 branch: ci/annotation-check
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
   verify: sh spec/annotation-check/verify/gate.sh P1
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: pending
+  status: done
   satisfies:
   - R6
   - R7
@@ -138,16 +138,16 @@ of position in the core and in other members.
 **Goal:** the operating manual describes the new check, the deferral ledger is clean, and the
 profile's full `verify` passes with the check in its fourth command of each era.
 
-- [ ] Add a `tests/test_annotations.py` (`unit`, `integration`) entry to AGENTS.md § Testing, beside
+- [x] Add a `tests/test_annotations.py` (`unit`, `integration`) entry to AGENTS.md § Testing, beside
       `tests/test_auth_modes.py`'s: what it checks, its check functions (`workspace_violations`,
       `annotation_positions`, `type_expression_violations`), why the tree check runs in a fresh
       interpreter, and that `AUTH_MODES`'s exact-shape pin stays. Point to rules; don't restate
       them. Leave § Factory untouched (`gate.sh static` compares it).
-- [ ] Deferral ledger: walk P1's and this phase's bodies, and PLAN, for every deferral (the
+- [x] Deferral ledger: walk P1's and this phase's bodies, and PLAN, for every deferral (the
       phrases `code-plan` Step 6.7 names, which `gate.sh` → `ledger` greps for); each needs an
       `issues/` seed, pre-shaped from the KB's `ISSUE.md`, and a `ROADMAP.md` entry. The plan
       files none.
-- [ ] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
+- [x] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
       background (the profile's `verify`, about 26 min).
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P2` (static, docs, ledger, then the profile's
   full `verify`, read from AGENTS.md § Factory at run time). R6's CI-budget clause is graded at

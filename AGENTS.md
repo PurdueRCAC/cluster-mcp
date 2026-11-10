@@ -944,6 +944,21 @@ import has no effect.
     provider and answers a tokenless HTTP call. `typing.get_type_hints(cluster_mcp.core.auth)['AUTH_MODES']`
     resolves to `Final` of a mapping from `str` to `Callable[[], AuthProvider | None]`; a `slice`,
     `Callable[..., X]` and a factory taking an argument are rejected. A live OIDC flow is untested.
+  - `tests/test_annotations.py` (`unit`, `integration`): `workspace_violations`,
+    `annotation_positions`, `type_expression_violations`. Every annotation Python keeps at run time
+    (module variables, class attributes, and every function's and method's parameters and return)
+    in every workspace member's `src/` must resolve to a type. `workspace_violations` takes the
+    members from the root `pyproject.toml`'s `[tool.uv.workspace]` and their modules from each
+    member's `src/`, so a member or module added later is checked with no edit to the check;
+    `annotation_positions` reads the positions from the syntax tree, each is evaluated as
+    `typing.get_type_hints` evaluates a postponed annotation, and `type_expression_violations`
+    refuses what is not a type (a `slice`, a number, an unresolved name), naming module, line,
+    qualified name and the text as written. Its docstrings hold the rules: what is read, what an
+    annotation reading a class-body or enclosing-function name gets, a `__main__` module, a failed
+    import. The tree check, `test_every_kept_annotation_in_the_workspace_is_a_type`, runs in a fresh
+    interpreter under `bin/sandbox.sh`, because in process the unit guard replaces
+    `subprocess.Popen` and an annotation naming it would resolve to the guard's refuser. It does
+    not replace `AUTH_MODES`'s exact-shape pin in `tests/test_auth_modes.py`, which stays.
   - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
     `stack_import_violations`, `spec_id_violations`, `skip_violations`,
     `sandbox_unset_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
