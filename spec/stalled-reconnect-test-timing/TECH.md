@@ -87,10 +87,10 @@ phases:
   attempts: 2
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/load-protocol.py check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py profile check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py sweep-check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py scope && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py ledger
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 0dbb3fff3459f48eeb77ccde8dd3f011fdddd452
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 
 # TECH.md — Real-time tests fail on behaviour, not on a busy host
