@@ -1451,6 +1451,14 @@ import has no effect.
     duplicates) are judged as before. The furniture cases run over a tuple written in the test,
     never the script's own `FURNITURE`, and `test_furniture_matches_the_recorded_set` pins the two
     together, so dropping an entry is red.
+  - `tests/test_mutant_shards.py` (`unit`): the mutation runner's (below) split and ledger for a
+    dispatched run (`--matrix`, `--shard`, `--ledger`), with `run_case` faked. Every case this
+    platform defines runs in exactly one shard of at most `SHARD_SIZE`; every job splits the sorted
+    ids alike, whatever order `CASES` was built in; a shard outside the run, and named cases beside
+    a shard, are refused. The ledger reads the report the real `main` and `self_check` write, and
+    fails a shard for each case with no verdict, reported twice, not killed or foreign to it, for
+    each control missing, failed or doubled, and for a run with no case; a missing report names
+    every case of its shard.
   - `tests/test_suite_parts.py` (`unit`): `suite_part_violations`, `list_violations`, and the
     readers `verify_commands`, `gate_commands` and `workflow_commands`. The suite's commands
     partition it, so every test runs exactly once per protocol era (§ Conventions, "CI mirrors the

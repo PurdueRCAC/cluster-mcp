@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: ci/mutants-workflow-timeout
 base: develop
-current_phase: P1
-last_updated: '2026-11-09'
+current_phase: P2
+last_updated: '2026-11-10'
 phases:
 - id: P1
   name: The runner splits the cases into shards and checks a shard report
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -134,19 +134,19 @@ and makes one atomic code+state commit.
 **Goal:** `tests/mutants.py` can name the run's shards, run one, and check one's report, every case of
 the platform exactly once, each decision pinned by a row that kills a named mutant.
 
-- [ ] In `tests/mutants.py`, between `self_check` and `main`: `SHARD_SIZE = 15`, `CONTROLS`,
+- [x] In `tests/mutants.py`, between `self_check` and `main`: `SHARD_SIZE = 15`, `CONTROLS`,
       `shard_count`, `shard_ids`, `parse_shard`, `report_violations`, `sharded`, as PLAN § 2.1
       specifies (the names are the `untouched` mode's `NEW_TOP`; no other new top-level name).
       `typing` gains `Iterable`; nothing else in the import block changes.
-- [ ] `main`: the `--matrix`, `--shard NUMBER/COUNT` and `--ledger REPORT` options after
+- [x] `main`: the `--matrix`, `--shard NUMBER/COUNT` and `--ledger REPORT` options after
       `--self-check`, and `status = sharded(parser, args, list(known))` / `if status is not None:` /
       `return status` right after `known`: exactly the six lines the `untouched` mode's `MAIN_ADDED`
       names, and nothing else in `main` changes. The docstring's Usage block gains the three forms.
-- [ ] A new module `tests/test_mutant_shards.py` (SPDX header, a docstring, `unit` rows only, no
+- [x] A new module `tests/test_mutant_shards.py` (SPDX header, a docstring, `unit` rows only, no
       launch: `run_case` is faked) holding the eleven runner rows the `rows 1` mode names (PLAN
       § 6.2's table, every row but the workflow's). `tests/test_mutations.py` is not touched.
       `AGENTS.md` § Testing's module list gains one item for it, after `tests/test_mutations.py`.
-- [ ] Write `spec/mutants-workflow-timeout/verify/shard-mutants.py`, mode `runner`: for each runner
+- [x] Write `spec/mutants-workflow-timeout/verify/shard-mutants.py`, mode `runner`: for each runner
       mutant of PLAN § 6.2 (24 entries), plant it into a copy of the staged `tests/mutants.py` in a
       fresh `mktemp -d` export of the index (never the working copy), run the killing row by id, and
       require it red; then require the unplanted rows green. One pytest at a time; header states the
@@ -283,6 +283,30 @@ Two runs: Run A dispatches, Run B records.
       - seeds.
 - **Verify:** the frontmatter `verify:` (Run B). Run A runs only `prepush` and `untouched 5`.
 - **Touches:** `AGENTS.md` (the row's baseline, § Testing's cost sentence), `runs.txt`; seeds.
+
+## Amendments
+
+- **2026-11-10, rulings at the PLAN/TECH gate.** The foreman signed off the amended plan: five
+  phases, each job's timeout 15 minutes, the cases' step capped at 12, the 900 s envelope in R1.
+  The maintainer's (B), 15 cases a shard, stands; P3's first measured run decides whether the size
+  changes to fit the envelope, and the foreman resizes per the maintainer's instruction and reports.
+  Up to three `workflow_dispatch` runs are approved (GOAL Q4), none in P1 or P2.
+- **2026-11-10, P1 build.**
+  - The frozen gate pins no literal commit: its base is `git merge-base HEAD origin/develop` and its
+    plan commit the one that added `PLAN.md`, both read at run time, so the rebase onto `146cbc6`
+    left nothing stale and no wrapper under `remediation/` was needed. `untouched 1` was seen red on
+    a planted `run_child` change, then green on the restored tree.
+  - The module-list item for `tests/test_mutant_shards.py` sits after `tests/test_sdist_hygiene.py`,
+    not directly after `tests/test_mutations.py`: the sibling's built branch rewrites the
+    `tests/test_mutations.py` item, and an item inserted beside it conflicts in a 3-way merge. Placed
+    one item away, `AGENTS.md` and `tests/mutants.py` both merge clean with
+    `fix/mutant-child-outlives-timeout` (`git merge-file`, 2026-11-10).
+  - `parse_shard` refuses a malformed shard and a COUNT other than `shard_count(ids)`; the NUMBER's
+    range is refused once, by `shard_ids`, which `sharded` calls right after it. The CLI refuses
+    the same shards PLAN § 2.1 names, and each sweep anchor occurs once.
+  - `--matrix` prints the list of shard numbers as Python prints a list of ints, which is JSON: the
+    imports may gain only `Iterable`. Its "no mutation cases found" line goes to stderr, beside the
+    shard listing, so the plan job's log shows it.
 
 ---
 
