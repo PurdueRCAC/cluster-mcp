@@ -6,8 +6,8 @@ appetite: small
 status: in_progress
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P5
-last_updated: '2026-11-09'
+current_phase: P6
+last_updated: '2026-11-10'
 phases:
 - id: P1
   name: Row 1 counts each reconnect worker as it starts
@@ -62,7 +62,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py row 4
 - id: P5
   name: The final sweep on the final tree, every row and the named cases, and R8's figures
-  status: pending
+  status: done
   satisfies:
   - R6
   - R8
@@ -265,13 +265,13 @@ green on the tree and red on the base, the 32 existing cases that name the rows 
 quote the reworded give-up message) still killed; and each
 touched module's local time before and after.
 
-- [ ] Commit the final row code first (nothing in `tests/` changes after this phase's runs).
-- [ ] Run `timing-gate.py sweep 1`, `sweep 2`, `sweep 3`, `sweep 4`, `sweep cases`, `sweep times`, one
+- [x] Commit the final row code first (nothing in `tests/` changes after this phase's runs).
+- [x] Run `timing-gate.py sweep 1`, `sweep 2`, `sweep 3`, `sweep 4`, `sweep cases`, `sweep times`, one
   at a time (measured on the prototype: under 2 min each for parts 1–3, about 4.5 min for part 4 and
   for `times`, 198 s for `cases`; any in the background if a measured run nears 10 min). Each appends its line, with the staged `tests/` tree and
   the gate's blobs, to `verify/sweep.txt`. A red part on the final tree goes to the foreman with its
   line: `sweep-check` keeps failing on it, and a later green on the same tree does not wash it out.
-- [ ] Note in this phase's commit body the `times` lines (R8: per-module seconds, base and HEAD).
+- [x] Note in this phase's commit body the `times` lines (R8: per-module seconds, base and HEAD).
 - **Verify:** `sweep-check`, `values 1 2 3 4`, `scope`. R6 is graded from `verify/sweep.txt` by the
   orchestrator.
 - **Touches:** `spec/stalled-reconnect-test-timing/verify/sweep.txt`.

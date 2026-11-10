@@ -1,0 +1,14 @@
+2026-11-10 00:00 · part 1 · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 50 s
+2026-11-10 00:01 · part 2 · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 50 s
+2026-11-10 00:02 · part 3 · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 98 s
+2026-11-10 00:07 · part 4 · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 271 s
+2026-11-10 00:10 · part cases · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 212 s
+times · abe12e3 · tests/test_ssh_exec.py::test_a_stalled_reconnect_is_abandoned_against_a_real_handshake · 1 tests · 0 not passed · 4.3-4.6 s · load 8.4
+times · abe12e3 · tests/test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt · 1 tests · 0 not passed · 1.4-1.4 s · load 8.4
+times · abe12e3 · tests/test_probes.py · 167 tests · 0 not passed · 8.0-8.0 s · load 7.0
+times · abe12e3 · tests/test_probe_startup.py · 405 tests · 0 not passed · 22.5-23.4 s · load 6.3
+times · HEAD · tests/test_ssh_exec.py::test_a_stalled_reconnect_is_abandoned_against_a_real_handshake · 1 tests · 0 not passed · 4.3-4.7 s · load 5.7
+times · HEAD · tests/test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt · 1 tests · 0 not passed · 1.4-2.3 s · load 5.8
+times · HEAD · tests/test_probes.py · 167 tests · 0 not passed · 8.0-8.2 s · load 5.6
+times · HEAD · tests/test_probe_startup.py · 405 tests · 0 not passed · 22.4-24.7 s · load 4.9
+2026-11-10 00:14 · part times · tests tree 22f4238d1977eff547d98cc40adb32a1637a36db · gate 3c0ee39aee+b2d822f751 · green · 223 s
