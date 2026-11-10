@@ -3,10 +3,10 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/integration-marker-wording
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
   verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F2
 - id: P3
   name: The full verify and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -218,7 +218,7 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
 - [x] Review cycle 1, finding 4: the claims of the ledger lines this cycle adds hold against the
       code and the history (`issues/integration-marker-check.md`'s fixture scope,
       `issues/stalled-reconnect-test-timing.md`'s commit). Checker: `remediation/checks.sh F4`.
-- [ ] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
+- [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
   `sweep`, `scope-P3`, `ledger`, then `full`, the profile's `verify` word for word in both eras (about
