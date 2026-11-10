@@ -21,10 +21,12 @@ reason and counts as surviving.
 Each child runs in a session of its own. One that passes `LIMIT` (300 s) is stopped whole (`stop_run`):
 frozen, every process reachable from it through a live parent or a process group of the run found
 (`run_members`) and SIGKILLed, and waited for until none is running (`_wait_gone`, up to `GONE_WITHIN`).
-Its case is then reported `FAILED` with the timeout named, plus the pids of any process of the run
-still running, and the sweep goes on. A SIGTERM or SIGHUP to the runner (`stop_on_signals`), or a
-Ctrl-C, stops the run in progress the same way, and the runner then ends by that signal (`die_by`
-for TERM and HUP).
+Its case is then reported `FAILED` with the timeout named (`ChildTimeout`, `child_timeout_violations`),
+plus the pids of any process of the run still running, and the sweep goes on. A stop that cannot look
+at the run (its `ps`, `_processes`, fails or cannot start) still kills the wrapper's group and what it
+had found, and the case's line says the stop could not finish rather than that the run was stopped.
+A SIGTERM or SIGHUP to the runner (`stop_on_signals`), or a Ctrl-C, stops the run in progress the same
+way, and the runner then ends by that signal (`die_by` for TERM and HUP).
 
 This module is not collected: a child takes seconds, so the phase gates run it and its report is
 recorded with the change. `test_mutations.py` keeps the suite's part: every anchor still applies,
@@ -5707,19 +5709,25 @@ GONE_WITHIN = 10
 GONE_POLL = 0.1
 
 # The signals held while a run is being stopped, so a stop is never left half-way.
-HELD = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+HELD_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
 
 # One process table: pid -> (parent pid, process group, `ps` state letters).
 Table = dict[int, tuple[int, int, str]]
 
 
 class ChildTimeout(Exception):
-    """A child run passed its limit and was stopped; `left` holds the pids of it still running after the stop."""
+    """A child run passed its limit and the runner stopped it.
 
-    def __init__(self, limit: float, left: Sequence[int]) -> None:
+    `left` holds the pids of the run still running after the stop. `unfinished` is None when the stop
+    looked at the run to the end; otherwise it names what cut the stop short (a `ps` that failed or
+    could not start), and the stop killed only the wrapper's group and what it had found by then.
+    """
+
+    def __init__(self, limit: float, left: Sequence[int], unfinished: str | None = None) -> None:
         super().__init__(f'the child ran past its {limit} s limit')
         self.limit = limit
         self.left = list(left)
+        self.unfinished = unfinished
 
 
 class RunnerSignal(BaseException):
@@ -5813,7 +5821,7 @@ def stop_run(proc: subprocess.Popen, *, processes=_processes, kill=os.kill, kill
     the wrapper's group last, even when the walk is cut short. The wrapper is reaped only once the
     rest of the run is gone, so its pid and group stay reserved meanwhile.
     """
-    mask(signal.SIG_BLOCK, HELD)
+    mask(signal.SIG_BLOCK, HELD_SIGNALS)
     try:
         pids, groups = [proc.pid], [proc.pid]
         order = [(killpg, proc.pid)]
@@ -5840,11 +5848,15 @@ def stop_run(proc: subprocess.Popen, *, processes=_processes, kill=os.kill, kill
         return _wait_gone(pids, groups, processes=processes, kill=kill, clock=clock, sleep=sleep)
     finally:
         proc.wait()
-        mask(signal.SIG_UNBLOCK, HELD)
+        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)
 
 
-def timeout_violations(exc: ChildTimeout) -> list[str]:
-    """The violations a case whose child run passed its limit reports."""
+def child_timeout_violations(exc: ChildTimeout) -> list[str]:
+    """The violations a case whose child run passed its limit reports; "stopped" only when the stop finished."""
+    if exc.unfinished is not None:
+        return [f'timeout: the child ran past its {exc.limit} s limit',
+                f'the stop could not finish ({exc.unfinished}): it killed the wrapper\'s process group and every '
+                f'process it had found, and others of the run may still be running']
     violations = [f'timeout: the child ran past its {exc.limit} s limit and was stopped']
     if exc.left:
         violations.append(f'still running {GONE_WITHIN} s after the stop: pids {", ".join(map(str, exc.left))}')
@@ -5890,11 +5902,16 @@ def run_child(src_root: Path, targets: Sequence[str], junit: Path,
     try:
         out, err = proc.communicate(timeout=LIMIT)
     except subprocess.TimeoutExpired:
-        left = stop_run(proc)
+        left, unfinished = [], None
+        try:
+            left = stop_run(proc)
+        except Exception as exc:
+            # The stop could not look (a `ps` that failed or could not start); it has killed what it could.
+            unfinished = f'{type(exc).__name__}: {exc}'
         # Closed unread: a process the stop could not reach may still hold the write end.
         proc.stdout.close()
         proc.stderr.close()
-        raise ChildTimeout(LIMIT, left) from None
+        raise ChildTimeout(LIMIT, left, unfinished) from None
     except BaseException:
         stop_run(proc)
         proc.stdout.close()
@@ -5960,7 +5977,7 @@ def run_case(case: Case, src_override: Path | None = None, omit: str | None = No
         try:
             child = run_child(src_override or src_root, case.targets, junit, repo)
         except ChildTimeout as exc:
-            return timeout_violations(exc)
+            return child_timeout_violations(exc)
         report = junit.read_text() if junit.exists() else None
         violations = mutation_violations(child.returncode, report, case.targets, case.why)
         if violations and child.returncode not in (0, 1):

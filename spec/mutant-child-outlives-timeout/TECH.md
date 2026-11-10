@@ -3,7 +3,7 @@ slug: mutant-child-outlives-timeout
 title: A mutant whose child run hangs is reported, and leaves nothing running
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/mutant-child-outlives-timeout
 base: develop
 current_phase: done
@@ -35,7 +35,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py prepush && uv run python -I spec/mutant-child-outlives-timeout/remediation/untouched.py && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+  verify: uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py prepush && uv run python -I spec/mutant-child-outlives-timeout/remediation/untouched.py && uv run python -I spec/mutant-child-outlives-timeout/remediation/names.py && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
   last_reviewed_commit: 3f5bdf991876e499651fd9efe896810d936a2f1c
   verdict: changes-requested
@@ -207,6 +207,43 @@ files, and the ledger is clean.
     runner each left the run gone and the scratch copy removed, and the runner ended by that signal
     (exit -15, -1, -2); a SIGKILL to the runner's process group ended the runner alone and left the
     run running (then killed by the drive).
+- **Remediation, review cycle 2** (`REVIEW.md` cycle 2, changes-requested at `3f5bdf9`; branch
+  rebased onto develop `146cbc6` first; P2 reopened):
+  - [x] F4: `run_child` turns any `Exception` out of `stop_run` (a `ps` that fails or cannot start, a
+        look cut short) into `ChildTimeout(LIMIT, [], unfinished)`; `stop_run` has already killed the
+        wrapper's group and every process it found. `child_timeout_violations` then reports
+        `timeout: the child ran past its N s limit` (never "and was stopped") and `the stop could not
+        finish (<error>): … others of the run may still be running`; `run_case` returns it and the
+        sweep goes on. A `KeyboardInterrupt` or `RunnerSignal` during the stop still propagates.
+        Rows: `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start|ps-fails-mid-walk|
+        interrupt-during-stop]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on`,
+        `a_timeout_reason_names_the_limit[unfinished]`, `a_failed_ps_is_an_error_not_an_empty_table`.
+  - [x] F5: every name the cycle adds is described: the runner's in `AGENTS.md` § Testing (the
+        private ones there or in its docstring), the test module's helpers in its docstring. Two
+        runner names renamed where they collided with other test modules' top-level names:
+        `timeout_violations` → `child_timeout_violations` (`tests/test_executors.py` has a different
+        `timeout_violations`) and `HELD` → `HELD_SIGNALS` (`tests/test_auth_modes.py`,
+        `tests/test_ssh_exec.py` and `tests/test_timeout_stop.py` each bind a `HELD`); the manual
+        tells `child_timeout_violations` apart from `test_executors.py`'s helper.
+        [`remediation/names.py`](remediation/names.py) checks it mechanically.
+  - [x] `wg-end-absolute`: `gone_waits_until_every_process_ends[clock-not-at-zero]`.
+  - [x] Sweep extended ([`verify/sweep.md`](verify/sweep.md)); the retuned frontmatter `verify:`
+        run in the background.
+- **Amendments (2026-11-10, review cycle 2 remediation):**
+  - R2-1. P2's `verify:` runs [`remediation/names.py`](remediation/names.py) after the `untouched`
+    wrapper. It lists the top-level names the cycle adds since the shape commit and refuses one not
+    described (above), a public runner name bound at the top level of another `tests/` module, and an
+    empty list; its controls plant each. Seen red on the reviewed tree: 24 violations, among them
+    `timeout_violations` and `HELD` colliding, and `Table`, `_processes`, `_send`,
+    `_raise_runner_signal` and the test module's helpers undescribed.
+  - R2-2. F4 seen on the real path with review cycle 2's own probe (`probe_psfail2.py`: the run's
+    new-session filler forks until the probe's lowered process budget is spent): the hang case is
+    now reported, `FAILED  hang: timeout: the child ran past its 6 s limit; the stop could not
+    finish (BlockingIOError: [Errno 35] Resource temporarily unavailable): …`, and the runner goes
+    on to the next case. That case's own launch then fails with the same `BlockingIOError`, since the
+    filler the stop could not reach (a new-session child of the frozen pytest, found by no look)
+    still holds the budget; the probe then killed the 51 run processes left. The line names that
+    others may be running.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/mutant-child-outlives-timeout/PLAN.md`, `spec/mutant-child-outlives-timeout/TECH.md`;
   in the remediation, `AGENTS.md`, `tests/mutants.py`, `tests/test_mutations.py`,

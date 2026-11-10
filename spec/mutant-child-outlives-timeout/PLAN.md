@@ -99,7 +99,9 @@ second cleanup is built here.
 
 **`timeout_violations(exc)`** is pure: `[f'timeout: the child ran past its {exc.limit} s limit and was
 stopped']`, plus `f'still running {GONE_WITHIN} s after the stop: pids {…}'` when `exc.left` is not
-empty.
+empty. *Amended 2026-11-10 (review cycle 2, TECH P2):* renamed `child_timeout_violations` (and `HELD`
+`HELD_SIGNALS`), clear of other test modules' names; a stop that could not finish reaches it as
+`ChildTimeout.unfinished` and is reported without "and was stopped" (F4).
 
 **`run_case`**: `child = run_child(...)` becomes `try: child = run_child(...)` /
 `except ChildTimeout as exc: return timeout_violations(exc)`, inside the existing
