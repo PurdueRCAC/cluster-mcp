@@ -3,7 +3,7 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
 current_phase: done
@@ -55,10 +55,10 @@ phases:
   hill: uphill
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 6650254c2bf154c1c4fb5faef4753f0cf3488c5c
+  verdict: changes-requested
+  blocked_reason: 'Review cycle 1: F1 AGENTS.md omits tests/hdiutil_standin.py; F2 body-failure pin admits a BaseException carve-out (M32 survives)'
+  cycle: 1
 ---
 
 # TECH.md — A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
