@@ -1,6 +1,7 @@
 # PLAN — A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 
-> **Status:** Draft for review · **Last updated:** 2026-11-09
+> **Status:** Signed at the PLAN/TECH gate, 2026-11-09 (rulings in [`TECH.md`](TECH.md) → Amendments) ·
+> **Last updated:** 2026-11-09
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/01-probes.md`](research/01-probes.md) (executed probes; lean path, no fan-out). Every
@@ -30,10 +31,10 @@ All in `tests/test_ssh_exec.py` (the fixture's section, today `:775-799`) and a 
 | Name | Value | Meaning |
 |---|---|---|
 | `HDIUTIL_BOUND` | `120` | each real verb's bound, s (GOAL T1, unchanged) |
-| `STOP_WAIT` | `5` (proposed, **maintainer's figure**) | the wait after KILL for the group to empty, s (GOAL T2) |
+| `STOP_WAIT` | `5` (**maintainer's figure**, signed 2026-11-09) | the wait after KILL for the group to empty, s (GOAL T2) |
 | `STOP_SIGNAL` | `signal.SIGKILL` | the stop's one signal: KILL at once, no TERM first (GOAL T2 (a)) |
 | `HDIUTIL_VERBS` | `create`, `attach`, `detach`, `info` | the verbs the fixture runs; `_bounds(overrides)` maps each to `HDIUTIL_BOUND` unless the caller names another |
-| `SHORT_BOUND` (rows) | `1` (proposed, **maintainer's figure**) | the bound a hanging stand-in verb meets (GOAL T3) |
+| `SHORT_BOUND` (rows) | `1` (**maintainer's figure**, signed 2026-11-09) | the bound a hanging stand-in verb meets (GOAL T3) |
 | `EASY_BOUND` (rows) | `30` | the bound every non-hanging stand-in verb gets: never met (a stand-in verb takes ~25 ms) |
 | `ROW_LIMIT` (rows) | `10` | a row's whole run, at most (two hangs plus stops measured at 2.2 s) |
 
@@ -42,8 +43,11 @@ All in `tests/test_ssh_exec.py` (the fixture's section, today `:775-799`) and a 
 ### `_step(hdiutil, verb, bound, *args) -> (failure | None, stdout)`
 
 `REAL_POPEN([*hdiutil, verb, *args], stdout=PIPE, stderr=PIPE, start_new_session=True)` (the fence
-bypass `_host` uses today; `sandbox_violations` reads no `REAL_POPEN` call, and none goes through
-`bin/sandbox.sh`, as none does today). `communicate(timeout=bound)`:
+bypass `_host` uses today). The rows' `hdiutil` argv starts with `bin/sandbox.sh`, so every stand-in
+step goes through it (amended at the PLAN/TECH gate: every process an integration test launches goes
+through `bin/sandbox.sh`); the real `hdiutil` argv, `('hdiutil',)`, does not, as `_host`'s does not
+today, a gap seeded elsewhere. The group the stop KILLs is then `bin/sandbox.sh`'s, which holds the
+stand-in and what it started. `communicate(timeout=bound)`:
 
 - **Hang** (`TimeoutExpired`): `_stop`, then `"{verb}: ran past its bound of {bound} s and was stopped"`
   plus `_stop`'s survivor text (R1, R2).
@@ -61,7 +65,8 @@ answers EPERM for a group of zombies only, P-c); a deadline `STOP_WAIT` from now
 it (reaps the step); close its pipes; then poll `_group(pgid)` every 50 ms until it is empty or the
 deadline passes. Returns `""` or `"; still running {STOP_WAIT} s after it was stopped: pid N (command), …"`
 (R1's IF clause). `_group` reads `_processes()`, one listing of
-`ps -A -ww -o pid= -o pgid= -o stat= -o args=` (one `-o` per field: procps reads a comma list with
+`bin/sandbox.sh ps -A -ww -o pid= -o pgid= -o stat= -o args=` (through `bin/sandbox.sh`, as every
+launch of the rows is; one `-o` per field: procps reads a comma list with
 `=` headers by personality, and may give one column; BSD and procps both read this form), and keeps
 the group's rows whose state is not `Z`. `_processes()` refuses a listing in which it cannot find
 this process's own pid with a command, so a `ps` of another shape fails loudly instead of listing
@@ -119,7 +124,10 @@ shape, each image named by a path with a `/./` in it (equal by `realpath`, not b
 whole disk and slice, the slice carrying `mount-point` when attached. `detach` takes a whole device
 or a mount point and fails as `hdiutil` does (P-d) on anything else. Every process it runs carries
 `STATE` in its argv: the rows find leftovers by that text. It forks; it launches no program, so
-`sandbox_violations` has nothing to flag in it, and it carries no skip and no spec id.
+`sandbox_violations` has nothing to flag in it, and it carries no skip and no spec id. It runs only
+through `bin/sandbox.sh`: unless its working directory is the sandbox `CLUSTER_MCP_SANDBOX` names, it
+exits 2 saying so, which fails every row. Each row sets `TMPDIR` to its `tmp_path`, so the directory
+`bin/sandbox.sh` makes, and leaves when a stop KILLs it, goes with the row.
 
 ### The rows (`tests/test_ssh_exec.py`, after `test_a_write_that_runs_out_of_room_keeps_the_file`)
 
@@ -205,7 +213,9 @@ deliverable is test infrastructure (a fixture and its pinning rows), so the adve
   `importorskip` or `xfail` in either file (`test_only_need_shell_skips` reads both;
   the sibling `skip-check-fence-gaps` widens that check, and nothing here is a shape it adds).
 - § Testing / § Conventions, CLI drives through `bin/sandbox.sh`: the rows drive no CLI and reach no
-  host; their launches are `REAL_POPEN` calls, as `_host` is today, and the stand-in launches nothing.
+  host; their launches are `REAL_POPEN` calls whose argv starts with `bin/sandbox.sh` (the stand-in's
+  steps and `ps`), and the stand-in launches nothing. The real `hdiutil` steps stay `REAL_POPEN` calls
+  outside it, as `_host`'s are today (amended at the PLAN/TECH gate).
 - § Conventions, no spec ids in the suite: none in code, strings or row ids
   (`test_no_spec_ids_in_the_package_or_the_suite` reads both files).
 - § Conventions, "CI mirrors the gate": no suite command changes; the rows join an existing part.
@@ -220,7 +230,7 @@ deliverable is test infrastructure (a fixture and its pinning rows), so the adve
 | 2. A step that **fails** (exit ≠ 0) is stopped too, not only one that hangs. | GOAL Outcome: "however one of the fixture's `hdiutil` steps ends (on time, failed, or hung), nothing it started is still running". R1 words only the hang; the stop is the same call, and on a step that exited it only reaches what it left. | Stop on hang only: a failed `create` whose helper lingers would outlive the test, which the Outcome rules out. |
 | 3. Four rows and two tests beyond R7's thirteen: `body-fails`, `cleanup-detach-fails`, `info-fails-in-cleanup`, `info-answers-garbled`, `test_a_stopped_step_still_running_is_named`, `test_the_disk_image_figures`; and every failing plan starts a child. | Each pins a decision R7's thirteen cannot reach: a failing body with a good `detach` re-raised (R6: without it, dropping the `raise` swallows a failed test, adversarial finding 1), R1 and R2 for the cleanup's own `detach` when it fails (R3's last sentence), the two `info` branches (row 1 above), R1's survivor clause (no stand-in survives KILL), the signed figures (value mutants), and the stop after a failure for every verb (row 2 above). | The thirteen alone: the pre-sweep and the review (§4) showed the survivor wait, the body's re-raise and the stop after a failed `attach` or `detach` unpinned without them. |
 | 4. The survivor test runs with `STOP_SIGNAL = SIGCONT` and `STOP_WAIT = 0.5` patched in. | No process can be made to outlive KILL portably (that takes an uninterruptible sleep); CONT stands in for a stop that does not end it. The real wait is pinned by the figures test. | Running the real `STOP_WAIT`: +4.5 s per era for no extra decision covered. |
-| 5. **Timing figures for the maintainer (T2, T3, CI cost).** T2 = `STOP_WAIT` = **5 s** proposed; T3 = `SHORT_BOUND` = **1 s** proposed. See the figures table below this one. | GOAL T2 and T3 leave both to the PLAN/TECH sign-off. | — (the maintainer sets them) |
+| 5. **Timing figures for the maintainer (T2, T3, CI cost).** T2 = `STOP_WAIT` = **5 s** proposed; T3 = `SHORT_BOUND` = **1 s** proposed; both approved by the maintainer at the PLAN/TECH gate, 2026-11-09 (`TECH.md` → Amendments). See the figures table below this one. | GOAL T2 and T3 leave both to the PLAN/TECH sign-off. | — (the maintainer sets them) |
 | 6. R4's text for the cleanup's own `detach` names the **device** and the mount point `hdiutil info` reports for it (", not mounted" for a `create`'s device), not the fixture's mount point. | The cleanup detaches by device: a failed `create` made a device that is mounted nowhere, so "the mount point" R4 names is the listing's, when there is one. | Always naming `where`: false for a `create`'s device, which was never attached there. |
 | 7. `full_volume` splits into `attached_image` (lifecycle, stand-in-drivable) and the fill. | The stand-in makes no filesystem, so the fill (statvfs of a 4 MB volume) cannot run under it; the rows drive the lifecycle, and the fill stays in the body R5 covers. | A stand-in that fakes `statvfs`: patches `os` for the whole test process and pins nothing R7 asks. |
 | 8. The rows live in `tests/test_ssh_exec.py`, beside the fixture. | Their part is `-k 'not silent'` (`suite-legacy-2` 2:46, `suite-modern-2` 5:48), the room the budget has. | A new module lands in the last part (`suite-*-4`, 7:22 and 7:33) for no gain. |
@@ -344,7 +354,9 @@ the review's mutants (all killed).
   - `mutant-child-outlives-timeout`, `mutants-workflow-timeout`: `tests/mutants.py` and its
     workflow; untouched here (GOAL non-goal), and this cycle's sweep is its own script under
     `spec/…/verify/`.
-  - `sandbox-dirs-left-on-kill`: `bin/sandbox.sh`; untouched here, and the rows run nothing under it.
+  - `sandbox-dirs-left-on-kill`: `bin/sandbox.sh`; untouched here. The rows run the stand-in under it
+    (amended at the PLAN/TECH gate), and a stop's KILL leaves its directory, under the row's
+    `tmp_path` (`TMPDIR`), so pytest's own cleanup takes it.
   - No `AGENTS.md` § Testing edit of ours touches the skip, annotation, mutation-runner or sandbox
     paragraphs.
 

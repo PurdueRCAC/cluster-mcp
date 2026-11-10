@@ -80,12 +80,15 @@ import errno
 import json
 import os
 import re
+import signal
 import socket
 import stat
+import subprocess
 import sys
 import threading
 import time
 import tomllib
+import traceback
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
@@ -95,7 +98,7 @@ import pytest
 from fabric import Config, Connection
 
 import argv_echo
-from conftest import REAL_POPEN, need_sftp_server, need_shell
+from conftest import REAL_POPEN, SANDBOX, need_sftp_server, need_shell
 from harness import CONTEXT_URIS, Outcome, call, drive, in_memory, read_resource, scheme, shared_server
 from cluster_mcp.core.executor import CONNECTION_LOST_EXIT_CODE, NOT_STARTED_EXIT_CODE, TIMEOUT_EXIT_CODE, CommandResult, Executor, UserPath
 from cluster_mcp.core.executor import launch, ssh
@@ -772,31 +775,134 @@ SCRIPT_BYTES = 36_027
 KEPT = b'the file before the write\n' * 16
 
 
-def _host(*argv: str) -> None:
-    """Run a host tool the fixture needs (not a command under test), and check it succeeded."""
-    proc = REAL_POPEN(list(argv), stdout=-1, stderr=-1)
-    out, err = proc.communicate(timeout=120)
-    assert proc.returncode == 0, f'{argv[:2]!r} failed: {err.decode(errors="replace")[-400:]}'
+# Each real `hdiutil` step's bound, in seconds.
+HDIUTIL_BOUND = 120
+# After a step is stopped, how long to wait for its process group to empty, in seconds.
+STOP_WAIT = 5
+# The one signal that stops a step and everything it started: KILL at once, no TERM first.
+STOP_SIGNAL = signal.SIGKILL
+# Every `hdiutil` verb the fixture runs.
+HDIUTIL_VERBS = ('create', 'attach', 'detach', 'info')
+
+
+class HostFailure(Exception):
+    """A host tool the fixture needs (not a command under test) failed or hung."""
+
+
+def _bounds(overrides: dict[str, float] | None) -> dict[str, float]:
+    """Each verb's bound: `HDIUTIL_BOUND`, unless `overrides` names another."""
+    unknown = set(overrides or {}) - set(HDIUTIL_VERBS)
+    assert not unknown, f'no such hdiutil verb: {sorted(unknown)}'
+    return {verb: HDIUTIL_BOUND for verb in HDIUTIL_VERBS} | dict(overrides or {})
+
+
+def _processes() -> list[tuple[int, int, str, str]]:
+    """Every process on the host, as (pid, process group, state, command).
+
+    A listing that does not show this process, with its command, is refused: `ps` answered in a
+    shape this parse does not read, and an empty reading would say nothing runs.
+    """
+    proc = REAL_POPEN([str(SANDBOX), 'ps', '-A', '-ww', '-o', 'pid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'args='],
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = proc.communicate(timeout=30)
+    listed = []
+    for line in out.decode(errors='replace').splitlines():
+        fields = line.split(None, 3)
+        if len(fields) >= 3 and fields[0].isdigit() and fields[1].isdigit():
+            listed.append((int(fields[0]), int(fields[1]), fields[2], fields[3] if len(fields) > 3 else ''))
+    if not any(pid == os.getpid() and command for pid, _, _, command in listed):
+        raise HostFailure(f'ps listed no process {os.getpid()} with its command (status {proc.returncode}): '
+                          f'{out.decode(errors="replace")[:400]!r} {err.decode(errors="replace")[-400:]!r}')
+    return listed
+
+
+def _group(pgid: int) -> list[tuple[int, str]]:
+    """The processes of group `pgid` still running (a zombie is not), as (pid, command)."""
+    return [(pid, command) for pid, group, state, command in _processes() if group == pgid and not state.startswith('Z')]
+
+
+def _stop(proc: subprocess.Popen[bytes]) -> str:
+    """Stop a step and everything it started (its process group), then wait up to `STOP_WAIT` for
+    them to exit; name each process still running then."""
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        # macOS answers EPERM for a group that holds only zombies.
+        os.killpg(proc.pid, STOP_SIGNAL)
+    deadline = time.monotonic() + STOP_WAIT
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
+    while (left := _group(proc.pid)) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not left:
+        return ''
+    return f'; still running {STOP_WAIT} s after it was stopped: ' + ', '.join(f'pid {pid} ({command})' for pid, command in left)
+
+
+def _step(hdiutil: tuple[str, ...], verb: str, bound: float, *args: str) -> tuple[str | None, bytes]:
+    """Run one `hdiutil` verb as the leader of a process group of its own, up to `bound` seconds.
+
+    It returns (None, its output) when it succeeded. A step that runs past its bound, or exits
+    with a failure, is stopped with everything it started, and the failure text names the verb and
+    how it ended (the bound, or the exit status and the tail of its standard error).
+    """
+    proc = REAL_POPEN([*hdiutil, verb, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=bound)
+    except subprocess.TimeoutExpired:
+        return f'{verb}: ran past its bound of {bound} s and was stopped' + _stop(proc), b''
+    if proc.returncode != 0:
+        left = _stop(proc)
+        return f'{verb}: exited with status {proc.returncode}: {err.decode(errors="replace")[-400:].strip()}' + left, out
+    return None, out
+
+
+@contextlib.contextmanager
+def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
+                   bounds: dict[str, float] | None = None) -> Iterator[Path]:
+    """A 4 MB HFS+ image beside `where`, attached at `where` (macOS); detached and removed afterwards.
+
+    `hdiutil` is the argv that runs the tool (a stand-in's, in the rows that pin this). Every step
+    runs through `_step`. A `create` or `attach` that fails or hangs raises `HostFailure` naming it.
+    After the body the volume is detached: a detach that fails raises its failure, and one that
+    succeeds removes the image, then raises an exception from the body unchanged.
+    """
+    bound = _bounds(bounds)
+    image = where.parent / f'{where.name}.dmg'
+    failure, _ = _step(hdiutil, 'create', bound['create'], '-size', '4m', '-fs', 'HFS+', '-volname', 'cluster-mcp-full',
+                       str(image))
+    if failure is None:
+        where.mkdir()
+        failure, _ = _step(hdiutil, 'attach', bound['attach'], '-nobrowse', '-noautoopen', '-mountpoint', str(where),
+                           str(image))
+    if failure is not None:
+        raise HostFailure(failure)
+    try:
+        yield where
+    except BaseException:
+        failure, _ = _step(hdiutil, 'detach', bound['detach'], '-force', str(where))
+        if failure is not None:
+            raise HostFailure(failure)
+        image.unlink()
+        raise
+    failure, _ = _step(hdiutil, 'detach', bound['detach'], '-force', str(where))
+    if failure is not None:
+        raise HostFailure(failure)
+    image.unlink()
 
 
 @contextlib.contextmanager
 def full_volume(where: Path, free: int) -> Iterator[Path]:
     """A 4 MB HFS+ volume attached at `where` (macOS), filled until `free` bytes are left; detached
     and its image removed afterwards."""
-    image = where.parent / f'{where.name}.dmg'
-    _host('hdiutil', 'create', '-size', '4m', '-fs', 'HFS+', '-volname', 'cluster-mcp-full', str(image))
-    where.mkdir()
-    _host('hdiutil', 'attach', '-nobrowse', '-noautoopen', '-mountpoint', str(where), str(image))
-    try:
+    with attached_image(where):
         room = os.statvfs(where)
         with open(where / 'filler', 'wb') as filler:
             filler.write(b'\0' * (room.f_bavail * room.f_frsize - free))
         room = os.statvfs(where)
         assert room.f_bavail * room.f_frsize == free, f'the volume has {room.f_bavail * room.f_frsize} bytes free'
         yield where
-    finally:
-        _host('hdiutil', 'detach', '-force', str(where))
-        image.unlink()
 
 
 ROOM = {
@@ -861,6 +967,204 @@ def test_a_write_that_runs_out_of_room_keeps_the_file(room: str, tmp_path: Path,
         if _staging_left(home, volume, volume / 'jobs'):
             violations.append(f'a write left its staging behind: {_staging_left(home, volume, volume / "jobs")!r}')
     assert violations == [], f'{room}:\n' + '\n'.join(violations)
+
+
+# The stand-in that plays `hdiutil` in the rows below, run through bin/sandbox.sh.
+HDIUTIL_STANDIN = Path(__file__).resolve().parent / 'hdiutil_standin.py'
+# The bound a hanging stand-in verb meets, in seconds (the stand-in reaches its hang in ~25 ms).
+SHORT_BOUND = 1
+# The bound every other stand-in verb gets, in seconds: never met.
+EASY_BOUND = 30
+# A row's whole run, at most, in seconds.
+ROW_LIMIT = 10
+PAST = f'ran past its bound of {SHORT_BOUND} s and was stopped'
+# Every failing and every hanging plan starts a child, so the stop is pinned whichever way a step ends.
+FAILS = {'end': 'fail', 'child': True}
+HANGS = {'end': 'hang', 'child': True}
+# What a failing stand-in step says last, as `hdiutil` does.
+STANDIN_FAILURE = 'failed - stand-in failure'
+BODY_FAILURE = 'the body failed'
+
+DISK_IMAGE_ROWS = {
+    # (each verb's plans, whether the body raises, the row's own devices left, whether the image is
+    #  left, what is raised: None, 'body' (the body's own exception) or 'failure', and the texts the
+    #  report carries, in order)
+    'create-hangs': ({'create': [HANGS]}, False, 0, False, 'failure', [f'create: {PAST}']),
+    'create-fails': ({'create': [FAILS]}, False, 0, False, 'failure',
+                     ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
+    'every-step-succeeds': ({}, False, 0, False, None, []),
+    'body-fails': ({}, True, 0, False, 'body', [BODY_FAILURE]),
+}
+
+# A device no row made, from an image of the same name in another directory: no cleanup may touch it.
+FOREIGN = '/dev/standin1'
+
+
+def _stand_in(tmp_path: Path, plan: dict[str, list[dict[str, Any]]]) -> Path:
+    """The stand-in's state directory for one row: its plan, and the foreign device already attached."""
+    state = tmp_path / 'hdiutil-state'
+    state.mkdir()
+    (state / 'plan.json').write_text(json.dumps(plan))
+    elsewhere = tmp_path / 'elsewhere'
+    (state / 'devices.json').write_text(json.dumps([{'dev-entry': FOREIGN, 'image-path': str(elsewhere / 'vol.dmg'),
+                                                      'mount-point': str(elsewhere / 'vol')}]))
+    (state / 'pids').write_text('')
+    return state
+
+
+def _standin_devices(state: Path) -> list[dict[str, Any]]:
+    return json.loads((state / 'devices.json').read_text())
+
+
+def _left_running(state: Path) -> list[tuple[int, str]]:
+    """Every process still running whose command names the stand-in's state, as (pid, command)."""
+    return [(pid, command) for pid, _, status, command in _processes()
+            if str(state) in command and not status.startswith('Z')]
+
+
+def _kill_recorded(state: Path) -> None:
+    """KILL what the stand-in started that is still running (never a pid reused since)."""
+    for pid, _ in _left_running(state):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+
+
+def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]],
+                 body_raises: bool) -> tuple[BaseException | None, BaseException | None, list[str]]:
+    """Run `attached_image` against the stand-in: (what it raised, what the body raised, the
+    mount points the body saw)."""
+    hdiutil = (str(SANDBOX), sys.executable, '-I', str(HDIUTIL_STANDIN), str(state))
+    bounds = {verb: SHORT_BOUND if any(p.get('end') == 'hang' for p in plan.get(verb, [])) else EASY_BOUND
+              for verb in HDIUTIL_VERBS}
+    body: BaseException | None = None
+    seen: list[str] = []
+    try:
+        with attached_image(where, hdiutil, bounds) as at:
+            seen = [d['mount-point'] for d in _standin_devices(state) if d['mount-point'] == str(at)]
+            if body_raises:
+                body = AssertionError(BODY_FAILURE)
+                raise body
+    except Exception as exc:
+        return exc, body, seen
+    return None, body, seen
+
+
+def _hangs_reached(state: Path, plan: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Each verb whose planned hangs the stand-in did not all reach (a hang's child is recorded)."""
+    recorded = [line.split()[1:] for line in (state / 'pids').read_text().splitlines()]
+    return [verb for verb, plans in plan.items()
+            if recorded.count(['child', verb, 'hang']) != sum(1 for p in plans if p.get('end') == 'hang')]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('row', list(DISK_IMAGE_ROWS))
+def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    """However an `hdiutil` step ends, nothing it started still runs, and the failure names the step.
+
+    A stand-in plays `hdiutil` through bin/sandbox.sh (no disk image, on every platform): a step that
+    hangs meets a short bound, and one that fails exits 1; each starts a child that runs until it is
+    killed. When the fixture has returned or raised, no stand-in process is left, the row's own
+    devices and image are as expected, a device it did not make is untouched, and the report names
+    each step that went wrong and how, in order, and names no survivor. No TERM is sent before the
+    KILL, the row ends within its limit, and the stand-in reached each hang it was planned to.
+    """
+    plan, body_raises, devices_left, image_left, outcome, says = DISK_IMAGE_ROWS[row]
+    # bin/sandbox.sh makes its directory under TMPDIR: under the row's, it goes with the row.
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    state = _stand_in(tmp_path, plan)
+    where, image = tmp_path / 'vol', tmp_path / 'vol.dmg'
+    try:
+        started = time.monotonic()
+        raised, body, seen = _drive_image(state, where, plan, body_raises)
+        took = time.monotonic() - started
+        violations = []
+        if _left_running(state):
+            violations.append(f'still running after the fixture: {_left_running(state)!r}')
+        unreached = _hangs_reached(state, plan)
+        if unreached:
+            violations.append(f'the stand-in did not reach its planned hang of {unreached} within {SHORT_BOUND} s '
+                              f'(a host too loaded to start it?)')
+        listed = _standin_devices(state)
+        own = [d for d in listed if d['dev-entry'] != FOREIGN]
+        if len(own) != devices_left:
+            violations.append(f'{len(own)} of its own devices left attached, not {devices_left}: {own!r}')
+        if not any(d['dev-entry'] == FOREIGN for d in listed):
+            violations.append(f'the device {FOREIGN} it did not make was detached')
+        if image.exists() != image_left:
+            violations.append(f'the image {"was left" if image.exists() else "is gone"}: {image}')
+        terms = [line for line in (state / 'pids').read_text().splitlines() if line.startswith('term ')]
+        if terms:
+            violations.append(f'a stand-in process was sent TERM: {terms!r}')
+        if took >= ROW_LIMIT:
+            violations.append(f'the row took {took:.1f} s, past its limit of {ROW_LIMIT} s')
+        body_runs = not any(p.get('end') in ('fail', 'hang') for verb in ('create', 'attach') for p in plan.get(verb, [])[:1])
+        if bool(seen) != body_runs:
+            violations.append(f'the body ran with a device at {where}: {bool(seen)}; it should have: {body_runs}')
+        report = ''.join(traceback.format_exception(raised)) if raised is not None else ''
+        if outcome is None and raised is not None:
+            violations.append(f'raised although every step succeeded: {report}')
+        elif outcome == 'body' and (raised is not body or raised.__cause__ is not None):
+            violations.append(f'the body\'s own failure was not raised unchanged: {report or "nothing raised"}')
+        elif outcome == 'failure' and not isinstance(raised, HostFailure):
+            violations.append(f'raised no HostFailure: {report or "nothing raised"}')
+        at = 0
+        for text in says:
+            found = report.find(text, at)
+            if found < 0:
+                violations.append(f'the report does not carry {text!r} (in order, after offset {at}): {report}')
+                break
+            at = found + len(text)
+        if 'still running' in report:
+            violations.append(f'the report names a survivor where none was left: {report}')
+        assert violations == [], f'{row}:\n' + '\n'.join(violations)
+    finally:
+        _kill_recorded(state)
+
+
+@pytest.mark.integration
+def test_a_stopped_step_still_running_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stopped step whose processes outlive the wait after the stop is named, pid and command, and
+    the wait is bounded.
+
+    No process outlives KILL portably, so the stop here is CONT (which ends nothing) and the wait
+    0.5 s: `create` hangs past its bound with its child, and both are still running when it ends.
+    """
+    monkeypatch.setattr(sys.modules[__name__], 'STOP_SIGNAL', signal.SIGCONT)
+    monkeypatch.setattr(sys.modules[__name__], 'STOP_WAIT', 0.5)
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    plan = {'create': [HANGS]}
+    state = _stand_in(tmp_path, plan)
+    try:
+        started = time.monotonic()
+        raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, False)
+        took = time.monotonic() - started
+        report = ''.join(traceback.format_exception(raised)) if raised is not None else 'nothing raised'
+        recorded = [line.split() for line in (state / 'pids').read_text().splitlines()]
+        pids = [int(line[0]) for line in recorded if line[1:3] in (['step', 'create'], ['child', 'create'])]
+        violations = []
+        if len(pids) != 2:
+            violations.append(f'the stand-in recorded {recorded!r}, not a step and its child')
+        if f'create: {PAST}; still running 0.5 s after it was stopped: ' not in report:
+            violations.append(f'the report does not say what is still running: {report}')
+        for pid in pids:
+            if not re.search(rf'pid {pid} \([^)]*{re.escape(str(HDIUTIL_STANDIN))} {re.escape(str(state))} create', report):
+                violations.append(f'pid {pid} is not named with its command: {report}')
+        if not SHORT_BOUND + 0.5 <= took < SHORT_BOUND + 3.5:
+            violations.append(f'the run took {took:.2f} s, outside [{SHORT_BOUND + 0.5}, {SHORT_BOUND + 3.5})')
+        assert violations == [], '\n'.join(violations)
+    finally:
+        _kill_recorded(state)
+
+
+@pytest.mark.unit
+def test_the_disk_image_figures() -> None:
+    """Each real `hdiutil` step's bound is 120 s; a stopped step is KILLed at once, its group then
+    waited on for 5 s; a hanging stand-in meets a bound of 1 s."""
+    assert _bounds(None) == {'create': 120, 'attach': 120, 'detach': 120, 'info': 120}
+    assert STOP_WAIT == 5
+    assert STOP_SIGNAL is signal.SIGKILL
+    assert SHORT_BOUND == 1
 
 
 FAULTS = {

@@ -7,11 +7,11 @@ status: in_progress
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
 current_phase: P1
-last_updated: '2026-11-09'
+last_updated: '2026-11-10'
 phases:
 - id: P1
   name: Each hdiutil step runs in its own group under its bound; a hung or failed one is stopped and named
-  status: pending
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -21,6 +21,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: sh spec/full-volume-fixture-leaks-hdiutil/verify/rows.sh p1
 - id: P2
   name: A failed create or attach is cleaned up; a failed detach is kept and named, after the body's failure
@@ -126,16 +127,45 @@ checklists below are the work. `code-build` executes the next actionable phase, 
 
 Cycle-specific, every phase:
 
-- **The figures.** `STOP_WAIT` and `SHORT_BOUND` take the values the maintainer set at the
-  PLAN/TECH sign-off (proposed 5 s and 1 s; PLAN §3, deviation row 5). If the sign-off changed them,
-  the figures test and PLAN's figures table use the signed values.
+- **The figures.** `STOP_WAIT` = 5 s and `SHORT_BOUND` = 1 s, the values the maintainer signed at
+  the PLAN/TECH gate (2026-11-09; PLAN §3, deviation row 5; Amendments below). The figures test pins
+  both.
 - No file under `packages/`, `bin/` or `.github/` changes; no skip of any kind; no spec id in either
   file (row ids included); every new test carries `unit` or `integration`; no test name contains
   `silent`. Every launch in the two files is a `REAL_POPEN` call (the stand-in forks and launches
-  nothing), as `_host` is today.
+  nothing). Every launch the rows make (each stand-in step, each `ps`) starts with `bin/sandbox.sh`;
+  only the real `hdiutil` steps do not, as `_host`'s do not today (Amendments below).
 - Run gates from the cycle worktree root, staged, with `UV_PYTHON=3.14` (the gate scripts export it).
   Each gate kills nothing it did not start; the rows' own teardown KILLs every pid the stand-in
   recorded.
+
+## Amendments
+
+- **2026-11-09, the PLAN/TECH gate rulings** (recorded at P1's build):
+  - The foreman accepted PLAN §3's deviation rows 1–4 and 6–8.
+  - The maintainer approved **T2 = `STOP_WAIT` = 5 s** and **T3 = `SHORT_BOUND` = 1 s** (voice,
+    2026-11-09). Come-back: if a CI suite job lands more than 30 s above PLAN §3's projected figures
+    (`suite-legacy-2` ~2:58, `suite-modern-2` ~6:00), the figures go back to the maintainer. Every CI
+    run stays under the maintainer's 15-minute wall envelope.
+  - Foreman ruling (the marker wording a sibling cycle settles: "every process an integration test
+    launches goes through `bin/sandbox.sh`"): the `hdiutil` stand-in the rows launch goes through
+    `bin/sandbox.sh`; the real `hdiutil` path through `REAL_POPEN` stays as `_host` has it (that gap
+    is seeded elsewhere). Built as: the rows' `hdiutil` argv is `bin/sandbox.sh`, the interpreter,
+    `-I`, the stand-in and `STATE`, so the group `_step` leads and the stop KILLs is the sandbox
+    script's, holding the stand-in and its child; the stand-in exits 2 unless its working directory
+    is the sandbox `CLUSTER_MCP_SANDBOX` names (a row whose stand-in ran unsandboxed fails); the
+    `ps` listing `_processes()` reads runs through `bin/sandbox.sh` too; and each row sets `TMPDIR`
+    to its `tmp_path`, so the directory a KILLed sandbox script leaves goes with the row
+    (`sandbox-dirs-left-on-kill` stays its own cycle). PLAN §2, §3 and §5 amended to match. Every
+    R-ID is kept; no row, test name or gate changes.
+- **2026-11-10, P1 gate attempt 1: red from outside the phase.** Both eras passed all nine ids by
+  exact id, and no stand-in was left. The leftover check then failed on a disk image an earlier suite
+  run had attached on the build host hours before, its device attached and unmounted and its
+  disk-image helper still running: the leak this cycle fixes, left by the fixture as it was. The
+  check matches any image under the pytest temp root, so it reads that image as the rows'. The
+  annotation step (159 functions) and the hygiene module, run by hand on the same tree, were green.
+  The gate kills nothing it did not start, so the image stays until the maintainer clears it; P1
+  then re-runs its gate unchanged.
 
 ---
 
@@ -159,7 +189,8 @@ survivor; the success path is today's; the stand-in exists and the rows that nee
       `image`, `device`, `child` and the ending for every verb; a hang and its child survive TERM and
       record it; a failing verb's child drops its streams; `info -plist` with a `/./` path and
       `mount-point`, and `garbled`; `detach` by whole device or mount point only; `STATE` in every
-      argv). It forks and launches nothing; its module docstring states what it is.
+      argv). It forks and launches nothing, runs only through `bin/sandbox.sh` (exit 2 otherwise),
+      and its module docstring states what it is.
 - [ ] The row harness (`HDIUTIL_STANDIN`, `SHORT_BOUND`, `EASY_BOUND`, `ROW_LIMIT`,
       `PAST`, `FAILS`, `HANGS`, `DISK_IMAGE_ROWS` with this phase's rows `create-hangs`,
       `create-fails`, `every-step-succeeds`, `body-fails`, `_left_running`, `FOREIGN`, `_stand_in`
