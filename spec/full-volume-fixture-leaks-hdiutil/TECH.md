@@ -3,7 +3,7 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: blocked
+status: in_review
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
 current_phase: done
@@ -53,7 +53,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
+  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/remediation/seed-in-scope.sh sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/remediation/F1-every-test-module-named.sh && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py rows && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py frozen-modern && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-modern-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
 review:
   last_reviewed_commit: 6650254c2bf154c1c4fb5faef4753f0cf3488c5c
   verdict: changes-requested
@@ -204,6 +204,82 @@ Cycle-specific, every phase:
   half by count; PLAN §6's `figures` case is planted as two (`figures-bound`, `figures-wait`), so
   the sweep has 40 cases, 26 decisions and 14 carve-outs.
 
+- **2026-11-10, review cycle 1 remediation (F1, F2 and the seed), P3 reopened.** `REVIEW.md` cycle
+  1 routed two MEDIUM findings to build. Both map to P3, which satisfies R1–R7 and owns the docs, the
+  sweep and the full gate, so P3 alone is reopened (`set_phase.py --phase P3 --phase-status
+  in_progress`); P1's and P2's gates run a subset of P3's `pre` (`rows.sh all`), so reopening them
+  would add no evidence. The fixture's code (`_bounds` to `attached_image`) is unchanged: the review
+  found it correct and the pins short.
+  - **F1:** `AGENTS.md` § Testing names `tests/hdiutil_standin.py` (a helper, not collected), its
+    argv, its state files (`plan.json`, `devices.json`, `pids`) and its sandbox rule, and the `unit`
+    tests `test_the_disk_image_figures` and `test_every_way_a_body_can_end_has_its_rows`. The
+    predicate is evaluated over every `tests/*.py` (46 modules), not one name:
+    `remediation/F1-every-test-module-named.sh`. Seen red first on the reviewed `AGENTS.md`
+    (`does not name tests/hdiutil_standin.py`, and nothing else) and on a planted copy without two of
+    the interface words. No durable check is cited in the manual.
+  - **F2, the rows:** `BODY_EXITS` lists every way a body can end by raising: an assertion, pytest's
+    `fail`, `skip`, `xfail` and `exit` outcomes, each class Python puts directly under
+    `BaseException` (`KeyboardInterrupt`, `SystemExit`, `GeneratorExit`, `BaseExceptionGroup`; an
+    `Exception` is the assertion) and a class none of those names. Each kind has two rows, a `detach`
+    that succeeds (the body's own exception raised unchanged, nothing left) and one that fails (both
+    reported, the body's first, the leftovers named): `body-fails` and `body-and-detach-fail` for the
+    assertion, `body-{kind}` and `body-{kind}-and-detach-fail` for the other nine, 18 new rows.
+    `_drive_image` catches whatever the body raises (a real interrupt it did not raise is raised
+    on). `test_every_way_a_body_can_end_has_its_rows` (`unit`) holds the list against Python's and
+    pytest's classes, so a class either adds fails until it has its rows. pytest's skip and xfail
+    outcomes are raised as their exception types, only inside a row's body, and always caught: no
+    test skips (`test_only_need_shell_skips` stays green; it does not read a raise through an
+    argument, which the report raises as a question). The review's M32 (`except Exception`) survives
+    the reviewed rows (19 passed on an archive of 6650254, re-run here) and is killed by the new ones.
+  - **F2, the sweep:** `remediation/F2-fixture-sweep.py` derives its case list and checks it
+    (`coverage`): every line of the fixture's seven functions that holds a decision node (a branch,
+    a handler, an exit, a comparison, a call that starts, bounds, stops, waits for, detaches or
+    removes something; 71 lines, read from the AST) is changed by some case, the frozen 40 included;
+    and each of the ten body exits gets seven families (a narrowed catch, a skipped detach, a
+    skipped removal, an early return before the detach and one after it, a dropped cause, a dropped
+    name of what is left), plus `narrow-to-exception` (M32). 123 new cases. It runs the new cases in
+    both eras (`new-legacy-a`/`-b`, `new-modern-a`/`-b`) and the frozen 40 in the 2026-07-28 era
+    (`frozen-modern`); the frozen gate (`p3.sh sweep-a`, `sweep-b`) runs those 40 in the handshake
+    era, unchanged. A cheap pass found seven survivors: two cases of this checker's own that did
+    not plant (an edit that cut a line short, fixed), three aimed at the wrong row (re-aimed at the
+    survivor test and a new row), and two seeded (below). The sweep's own finding, a failing step
+    that started nothing (its group gone when `killpg` runs, so the `ProcessLookupError` it
+    suppresses is reached), gets a row: `create-fails-alone`. The rows also now say nothing of an
+    image kept or a device attached where none was, and the figures test pins `_bounds`' override and
+    its refusal of an unknown verb.
+  - **Expected survivors** (12, each run against every disk-image id): seeded, the review's six
+    (M03 `stop-poll-once`, M30 `cleanup-first-entry-only`, M19 `stderr-head`, M17
+    `group-zombies-counted`, M24 `stop-eperm-raised`, M25 `ps-self-unchecked`) and five more of the
+    same kind (`ps-self-returns`, `stop-streams-open`, `listing-type-unchecked`,
+    `stop-leader-unwaited`, `cleanup-deviceless-detached`); equivalent, one (`mount-point-unmade`:
+    `hdiutil attach -mountpoint` makes a missing directory itself and `detach` removes it, probed
+    with the real tool on the build host, its image detached and removed, `hdiutil info` as before).
+    The seed is filed as `issues/disk-image-fixture-deeper-pins.md`, with its ROADMAP.md entry.
+  - **P3's `verify:`** is retuned through `set_phase.py --verify-file` (read back byte-identical):
+    `pre` under `scoped-leftovers.sh --around` and a second wrapper, `remediation/seed-in-scope.sh`,
+    then the F1 checker, `F2-fixture-sweep.py rows`, `p3.sh sweep-a`, `sweep-b`, the five sweep
+    modes, and `p3.sh full`. Why the second wrapper: `p3.sh`'s frozen `scope` grades every path since
+    the plan commit against the cycle's own files, and the seed the review routed lies outside them
+    (seen red first: `pre` under `scoped-leftovers.sh` alone, `files outside the cycle's scope
+    changed: issues/disk-image-fixture-deeper-pins.md, ROADMAP.md`). The wrapper checks the two paths
+    itself (the seed `status: unshaped`, its ROADMAP link, ROADMAP losing only the counts the entry
+    moves; each shown red on a plant, then restored) and drops exactly them from `scope`'s two diffs.
+  - **Committed apart, gated once.** The gate ran on the combined tree, everything staged; the fix
+    and this state commit first, the seed and its ROADMAP entry second.
+  - **The gate's run** (build host, macOS 27, `UV_PYTHON=3.14`, the staged tree, 03:11 to 04:09,
+    load average 14 to 24 at the start, about 2.5 at the end): green. `pre` ok under both wrappers
+    (22 ids per era, hygiene 142 passed); F1 ok (46 modules); `rows` 39 ids passed in each era,
+    none skipped; `sweep-a` 19 of 19 killed (4.3 min), `sweep-b` 21 of 21 (1.4 min);
+    `frozen-modern` 40 of 40 killed (5.5 min); `new-legacy-a` and `new-modern-a` each 53 cases, 41
+    killed, 11 seeded and 1 equivalent survived as expected, none else (6.2 and 6.3 min);
+    `new-legacy-b` and `new-modern-b` each 70 of 70 killed (2.6 min each); `full` per era 44, 193,
+    507, and 4369 passed with 14 skipped (modules this cycle does not touch), and the CLI's usage.
+    No unviable case, no timeout, no process left; `hdiutil info` the same before and after.
+  - **Suite cost:** 20 more tests in the `-k 'not silent'` part (173 to 193 per era). The disk-image
+    tests, base (`6650254`) and branch back to back on the build host at load about 2.4, twice each:
+    13.7 s and 13.5 s, then 17.9 s and 18.1 s, about 4.5 s more per era (the part's 163 s and 174 s
+    above, under 3%). No figure changes.
+
 ---
 
 ## Phase P1 — Each hdiutil step runs in its own group under its bound; a hung or failed one is stopped and named
@@ -296,12 +372,25 @@ by a row; the docs say what the fixture does; the full gate is green.
       lists; each must name an `issues/` seed with a `ROADMAP.md` entry (none is planned).
       `p3.sh pre` checks it, reading prose and list items, never headings.
 - [x] Note in the phase's report: the rows' first Linux run is the cycle branch's CI (PLAN §5).
+- [x] Review cycle 1, F1 (Amendments): `AGENTS.md` § Testing names `tests/hdiutil_standin.py` as a
+      helper, not collected, with its interface, and the `unit` tests `test_the_disk_image_figures`
+      and `test_every_way_a_body_can_end_has_its_rows`; `remediation/F1-every-test-module-named.sh`
+      checks every `tests/*.py` is named.
+- [x] Review cycle 1, F2 (Amendments): `BODY_EXITS` and two rows per way the body can end (a `detach`
+      that succeeds, one that fails); `test_every_way_a_body_can_end_has_its_rows`; the rows' report
+      names no image or device left where none was; `_bounds`' override and refusal in the figures
+      test; `remediation/F2-fixture-sweep.py` (its derived case list, both eras, additive families).
+- [x] Review cycle 1, the seeds: the review's six coverage observations and the sweep's other
+      survivors as one seed, `issues/disk-image-fixture-deeper-pins.md`, with its `ROADMAP.md` Part I
+      entry and the counts it moves; committed apart (Amendments).
 - **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh all` (about 40 min: run it in
   the background): `pre` (`rows.sh all`, the docs name both tests, the change stays in
   `tests/test_ssh_exec.py`, `tests/hdiutil_standin.py`, `AGENTS.md` and `spec/…`, graded from the
   plan commit; the ledger), `sweep-a`, `sweep-b`, then the profile's `verify` verbatim. Each mode
   runs alone too, for build's fail-once mutation (`pre`, `sweep-a`, `sweep-b`).
-- **Touches:** `AGENTS.md`, `tests/test_ssh_exec.py`, `spec/full-volume-fixture-leaks-hdiutil/verify/`.
+- **Touches:** `AGENTS.md`, `tests/test_ssh_exec.py`, `spec/full-volume-fixture-leaks-hdiutil/verify/`;
+  review cycle 1 adds `spec/full-volume-fixture-leaks-hdiutil/remediation/`, `issues/disk-image-fixture-deeper-pins.md`
+  and `ROADMAP.md` (Amendments).
 
 ---
 

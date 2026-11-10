@@ -1161,10 +1161,24 @@ import has no effect.
     it ended (the bound, or its exit status and the tail of its standard error) and anything still
     running. A failed `create` or `attach` detaches every device `hdiutil info` lists for the image
     and removes it; a failed `detach` is never retried, and keeps the volume and the image and names
-    both, after the test's own failure when the test failed first. A stand-in for `hdiutil`, run
-    through `bin/sandbox.sh`, pins this on every platform
-    (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running[…]`,
-    `test_a_stopped_step_still_running_is_named`). A staged file
+    both, after the test's own failure when the test failed first, however it failed. A stand-in
+    for `hdiutil` pins this on every platform with no disk image: `tests/hdiutil_standin.py` (a
+    helper, not collected), run as `python -I hdiutil_standin.py STATE VERB ARGS…` only through
+    `bin/sandbox.sh` (it exits 2 otherwise). It keeps what `hdiutil` would make in the directory
+    `STATE`: `plan.json` maps each verb to one plan per call (write the image, record a device, fork
+    a child that runs until killed, answer with no listing, then succeed, fail with `hdiutil`'s
+    failure line, or hang), `devices.json` lists the devices made, which `info -plist` reports as
+    `hdiutil` does and `detach` takes by whole device or mount point, and every process it runs
+    appends `PID KIND VERB END` to `pids` (one that hangs outlives TERM and records it). The rows
+    (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running[…]`) end every step every
+    way, and end the test's body every way it can end by raising (an assertion, each pytest
+    outcome, an interrupt, an exit, any other `BaseException`), each with a `detach` that succeeds
+    and one that fails; pytest's skip and xfail outcomes are raised there as their exception types
+    and caught with the rest, so no row skips. `test_every_way_a_body_can_end_has_its_rows`
+    (`unit`) holds that list against Python's and pytest's classes.
+    `test_a_stopped_step_still_running_is_named` pins how a survivor is named, and
+    `test_the_disk_image_figures` (`unit`) the figures: 120 s per step, KILL, a 5 s wait, a 1 s bound
+    for a hanging stand-in. A staged file
     that falls short with no error, changes on its way to disk, or whose close fails is never
     placed (`test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short|changed|close-fails]`),
     and `ssh.cksum` matches POSIX `cksum` and the host's. A connection lost after the command ran,

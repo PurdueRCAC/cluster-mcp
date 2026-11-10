@@ -75,7 +75,9 @@ The macOS full-volume rows attach a disk image with `hdiutil`, each step under a
 group of its own: a step that hangs or fails is KILLed with what it started and named, and a failed
 `create` or `attach` is cleaned up, while a failed `detach` keeps and names what it left. A stand-in
 for `hdiutil` (`hdiutil_standin.py`, through `bin/sandbox.sh`) pins every way a step can end, on
-every platform, with no disk image (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running`).
+every platform, with no disk image (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running`),
+and every way the test's body can end inside it: an assertion, each pytest outcome, an interrupt or
+an exit, any `BaseException` (`test_every_way_a_body_can_end_has_its_rows`).
 """
 
 from __future__ import annotations
@@ -98,7 +100,7 @@ import tomllib
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, NoReturn
 
 import paramiko
 import pytest
@@ -1032,46 +1034,93 @@ HANGS = {'end': 'hang', 'child': True}
 # What a failing stand-in step says last, as `hdiutil` does.
 STANDIN_FAILURE = 'failed - stand-in failure'
 BODY_FAILURE = 'the body failed'
+
+
+class _BareExit(BaseException):
+    """An exit from a body that no class Python or pytest defines names."""
+
+
+def _raises(kind: type[BaseException]) -> Callable[[str], NoReturn]:
+    """A body's end that raises `kind` with the given text."""
+    def end(text: str) -> NoReturn:
+        raise kind(text)
+    return end
+
+
+def _interrupted_group(text: str) -> NoReturn:
+    """A body's end that raises a group holding an interrupt (so no `ExceptionGroup`)."""
+    raise BaseExceptionGroup(text, [KeyboardInterrupt()])
+
+
+# Every way a test body can end the fixture's `with` by raising: an assertion, each of pytest's
+# outcomes, each other class Python puts directly under `BaseException`, and a class none of these
+# names. Each takes the text it raises with. pytest's skip and xfail outcomes are raised as their
+# exception types, only inside a row's body, and `_drive_image` catches whatever that body raises:
+# no test skips or is marked xfail by them.
+BODY_EXITS: dict[str, Callable[[str], NoReturn]] = {
+    'assertion': _raises(AssertionError),
+    'pytest-fail': pytest.fail,
+    'pytest-skip': _raises(pytest.skip.Exception),
+    'pytest-xfail': _raises(pytest.xfail.Exception),
+    'pytest-exit': pytest.exit,
+    'keyboard-interrupt': _raises(KeyboardInterrupt),
+    'system-exit': _raises(SystemExit),
+    'generator-exit': _raises(GeneratorExit),
+    'base-exception-group': _interrupted_group,
+    'bare-base-exception': _raises(_BareExit),
+}
 # What a row's report says of what a failed detach leaves (`{where}` and `{image}` are the row's).
 STAYS = 'the volume stays attached at {where}, and its image is kept at {image}'
 KEPT_DEVICE = '/dev/standin2 stays attached at {where}, and its image is kept at {image}'
 
 DISK_IMAGE_ROWS = {
-    # (each verb's plans, whether the body raises, the row's own devices left, whether the image is
-    #  left, what is raised: None, 'body' (the body's own exception) or 'failure', and the texts the
-    #  report carries, in order)
-    'create-hangs': ({'create': [HANGS]}, False, 0, False, 'failure', [f'create: {PAST}']),
-    'create-fails': ({'create': [FAILS]}, False, 0, False, 'failure',
+    # (each verb's plans, how the body ends: None (it returns) or a `BODY_EXITS` kind, the row's own
+    #  devices left, whether the image is left, what is raised: None, 'body' (the body's own exception)
+    #  or 'failure', and the texts the report carries, in order)
+    'create-hangs': ({'create': [HANGS]}, None, 0, False, 'failure', [f'create: {PAST}']),
+    'create-fails': ({'create': [FAILS]}, None, 0, False, 'failure',
                      ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
-    'every-step-succeeds': ({}, False, 0, False, None, []),
-    'body-fails': ({}, True, 0, False, 'body', [BODY_FAILURE]),
-    'create-hangs-with-device': ({'create': [{**HANGS, 'image': True, 'device': True}]}, False, 0, False, 'failure',
+    # A failing step that started nothing: its group is gone when it is stopped.
+    'create-fails-alone': ({'create': [{'end': 'fail'}]}, None, 0, False, 'failure',
+                           ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
+    'every-step-succeeds': ({}, None, 0, False, None, []),
+    'body-fails': ({}, 'assertion', 0, False, 'body', [BODY_FAILURE]),
+    'create-hangs-with-device': ({'create': [{**HANGS, 'image': True, 'device': True}]}, None, 0, False, 'failure',
                                  [f'create: {PAST}']),
-    'create-fails-with-device': ({'create': [{**FAILS, 'image': True, 'device': True}]}, False, 0, False, 'failure',
+    'create-fails-with-device': ({'create': [{**FAILS, 'image': True, 'device': True}]}, None, 0, False, 'failure',
                                  ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
-    'attach-hangs': ({'attach': [HANGS]}, False, 0, False, 'failure', [f'attach: {PAST}']),
-    'attach-hangs-with-device': ({'attach': [{**HANGS, 'device': True}]}, False, 0, False, 'failure',
+    'attach-hangs': ({'attach': [HANGS]}, None, 0, False, 'failure', [f'attach: {PAST}']),
+    'attach-hangs-with-device': ({'attach': [{**HANGS, 'device': True}]}, None, 0, False, 'failure',
                                  [f'attach: {PAST}']),
-    'attach-fails': ({'attach': [FAILS]}, False, 0, False, 'failure',
+    'attach-fails': ({'attach': [FAILS]}, None, 0, False, 'failure',
                      ['attach: exited with status 1: ', f'attach {STANDIN_FAILURE}']),
-    'attach-fails-with-device': ({'attach': [{**FAILS, 'device': True}]}, False, 0, False, 'failure',
+    'attach-fails-with-device': ({'attach': [{**FAILS, 'device': True}]}, None, 0, False, 'failure',
                                  ['attach: exited with status 1: ', f'attach {STANDIN_FAILURE}']),
-    'detach-hangs': ({'detach': [HANGS]}, False, 1, True, 'failure', [f'detach: {PAST}', STAYS]),
-    'detach-fails': ({'detach': [FAILS]}, False, 1, True, 'failure',
+    'detach-hangs': ({'detach': [HANGS]}, None, 1, True, 'failure', [f'detach: {PAST}', STAYS]),
+    'detach-fails': ({'detach': [FAILS]}, None, 1, True, 'failure',
                      ['detach: exited with status 1: ', f'detach {STANDIN_FAILURE}', STAYS]),
-    'body-and-detach-fail': ({'detach': [FAILS]}, True, 1, True, 'failure',
+    'body-and-detach-fail': ({'detach': [FAILS]}, 'assertion', 1, True, 'failure',
                              [BODY_FAILURE, 'detach: exited with status 1: ', f'detach {STANDIN_FAILURE}', STAYS]),
-    'cleanup-detach-hangs': ({'attach': [{**HANGS, 'device': True}], 'detach': [HANGS]}, False, 1, True, 'failure',
+    'cleanup-detach-hangs': ({'attach': [{**HANGS, 'device': True}], 'detach': [HANGS]}, None, 1, True, 'failure',
                              [f'attach: {PAST}', f'detach: {PAST}', KEPT_DEVICE]),
-    'cleanup-detach-fails': ({'attach': [{**FAILS, 'device': True}], 'detach': [FAILS]}, False, 1, True, 'failure',
+    'cleanup-detach-fails': ({'attach': [{**FAILS, 'device': True}], 'detach': [FAILS]}, None, 1, True, 'failure',
                              ['attach: exited with status 1: ', 'detach: exited with status 1: ',
                               f'detach {STANDIN_FAILURE}', KEPT_DEVICE]),
-    'info-fails-in-cleanup': ({'attach': [{**FAILS, 'device': True}], 'info': [FAILS]}, False, 1, True, 'failure',
+    'info-fails-in-cleanup': ({'attach': [{**FAILS, 'device': True}], 'info': [FAILS]}, None, 1, True, 'failure',
                               ['attach: exited with status 1: ', 'info: exited with status 1: ', f'info {STANDIN_FAILURE}',
                                'the image is kept at {image}, and any device made from it stays attached']),
-    'info-answers-garbled': ({'attach': [{**FAILS, 'device': True}], 'info': [{'garbled': True}]}, False, 1, True,
+    'info-answers-garbled': ({'attach': [{**FAILS, 'device': True}], 'info': [{'garbled': True}]}, None, 1, True,
                              'failure', ['attach: exited with status 1: ', 'info: answered with no listing (',
                                          'the image is kept at {image}, and any device made from it stays attached']),
+}
+# However else the body ends: the image is gone and the body's own exception raised, or, when the
+# detach fails, both failures reported, the body's first.
+DISK_IMAGE_ROWS |= {
+    row: plans for kind in BODY_EXITS if kind != 'assertion' for row, plans in (
+        (f'body-{kind}', ({}, kind, 0, False, 'body', [BODY_FAILURE])),
+        (f'body-{kind}-and-detach-fail', ({'detach': [FAILS]}, kind, 1, True, 'failure',
+                                          [BODY_FAILURE, 'detach: exited with status 1: ', f'detach {STANDIN_FAILURE}',
+                                           STAYS])))
 }
 
 # A device no row made, from an image of the same name in another directory: no cleanup may touch it.
@@ -1108,9 +1157,10 @@ def _kill_recorded(state: Path) -> None:
 
 
 def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]],
-                 body_raises: bool) -> tuple[BaseException | None, BaseException | None, list[str]]:
-    """Run `attached_image` against the stand-in: (what it raised, what the body raised, the
-    mount points the body saw)."""
+                 body_ends: str | None) -> tuple[BaseException | None, BaseException | None, list[str]]:
+    """Run `attached_image` against the stand-in, its body ending as `body_ends` names (a
+    `BODY_EXITS` kind) or returning: (what it raised, what the body raised, the mount points the
+    body saw). An interrupt the body did not raise is raised on, so a real one still stops the run."""
     hdiutil = (str(SANDBOX), sys.executable, '-I', str(HDIUTIL_STANDIN), str(state))
     bounds = {verb: SHORT_BOUND if any(p.get('end') == 'hang' for p in plan.get(verb, [])) else EASY_BOUND
               for verb in HDIUTIL_VERBS}
@@ -1119,10 +1169,15 @@ def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]]
     try:
         with attached_image(where, hdiutil, bounds) as at:
             seen = [d['mount-point'] for d in _standin_devices(state) if d['mount-point'] == str(at)]
-            if body_raises:
-                body = AssertionError(BODY_FAILURE)
-                raise body
-    except Exception as exc:
+            if body_ends is not None:
+                try:
+                    BODY_EXITS[body_ends](BODY_FAILURE)
+                except BaseException as exc:
+                    body = exc
+                    raise
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt) and exc is not body:
+            raise
         return exc, body, seen
     return None, body, seen
 
@@ -1145,9 +1200,10 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
     killed. When the fixture has returned or raised, no stand-in process is left, the row's own
     devices and image are as expected, a device it did not make is untouched, and the report names
     each step that went wrong and how, in order, and names no survivor. No TERM is sent before the
-    KILL, the row ends within its limit, and the stand-in reached each hang it was planned to.
+    KILL, the row ends within its limit, and the stand-in reached each hang it was planned to. A body
+    that ends by raising, whatever it raises, is the fixture's to clean up after as an assertion is.
     """
-    plan, body_raises, devices_left, image_left, outcome, texts = DISK_IMAGE_ROWS[row]
+    plan, body_ends, devices_left, image_left, outcome, texts = DISK_IMAGE_ROWS[row]
     # bin/sandbox.sh makes its directory under TMPDIR: under the row's, it goes with the row.
     monkeypatch.setenv('TMPDIR', str(tmp_path))
     state = _stand_in(tmp_path, plan)
@@ -1155,7 +1211,7 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
     says = [text.format(where=where, image=image) for text in texts]
     try:
         started = time.monotonic()
-        raised, body, seen = _drive_image(state, where, plan, body_raises)
+        raised, body, seen = _drive_image(state, where, plan, body_ends)
         took = time.monotonic() - started
         violations = []
         if _left_running(state):
@@ -1187,7 +1243,7 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
             violations.append(f'the body\'s own failure was not raised unchanged: {report or "nothing raised"}')
         elif outcome == 'failure' and not isinstance(raised, HostFailure):
             violations.append(f'raised no HostFailure: {report or "nothing raised"}')
-        elif outcome == 'failure' and body_raises and (body is None or raised.__cause__ is not body):
+        elif outcome == 'failure' and body_ends is not None and (body is None or raised.__cause__ is not body):
             violations.append(f'the failure is not caused by the body\'s own: {report}')
         at = 0
         for text in says:
@@ -1198,6 +1254,10 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
             at = found + len(text)
         if 'still running' in report:
             violations.append(f'the report names a survivor where none was left: {report}')
+        if not image_left and 'is kept at' in report:
+            violations.append(f'the report names an image kept where none was: {report}')
+        if not devices_left and 'stays attached' in report:
+            violations.append(f'the report names a device attached where none was: {report}')
         assert violations == [], f'{row}:\n' + '\n'.join(violations)
     finally:
         _kill_recorded(state)
@@ -1218,7 +1278,7 @@ def test_a_stopped_step_still_running_is_named(tmp_path: Path, monkeypatch: pyte
     state = _stand_in(tmp_path, plan)
     try:
         started = time.monotonic()
-        raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, False)
+        raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, None)
         took = time.monotonic() - started
         report = ''.join(traceback.format_exception(raised)) if raised is not None else 'nothing raised'
         recorded = [line.split() for line in (state / 'pids').read_text().splitlines()]
@@ -1241,11 +1301,53 @@ def test_a_stopped_step_still_running_is_named(tmp_path: Path, monkeypatch: pyte
 @pytest.mark.unit
 def test_the_disk_image_figures() -> None:
     """Each real `hdiutil` step's bound is 120 s; a stopped step is KILLed at once, its group then
-    waited on for 5 s; a hanging stand-in meets a bound of 1 s."""
+    waited on for 5 s; a hanging stand-in meets a bound of 1 s. A bound asked for replaces the
+    verb's own, and one for a verb the fixture does not run is refused."""
     assert _bounds(None) == {'create': 120, 'attach': 120, 'detach': 120, 'info': 120}
     assert STOP_WAIT == 5
     assert STOP_SIGNAL is signal.SIGKILL
     assert SHORT_BOUND == 1
+    assert _bounds({'create': SHORT_BOUND})['create'] == SHORT_BOUND
+    with pytest.raises(AssertionError, match='no such hdiutil verb'):
+        _bounds({'mount': SHORT_BOUND})
+
+
+@pytest.mark.unit
+def test_every_way_a_body_can_end_has_its_rows() -> None:
+    """The rows end the fixture's body every way a body can end by raising, each twice: with a detach
+    that succeeds (the body's own exception raised unchanged) and with one that fails (both reported,
+    the body's first).
+
+    The ways are an assertion, each of pytest's outcomes, each class Python puts directly under
+    `BaseException`, and a class none of these names; one Python or pytest adds fails this test
+    until it has its rows.
+    """
+    raised: dict[str, BaseException] = {}
+    for kind, end in BODY_EXITS.items():
+        try:
+            end(BODY_FAILURE)
+        except BaseException as exc:
+            raised[kind] = exc
+    violations = [f'{kind} raised nothing' for kind in BODY_EXITS if kind not in raised]
+    violations += [f'{kind} does not carry {BODY_FAILURE!r}' for kind, exc in raised.items()
+                   if BODY_FAILURE not in ''.join(traceback.format_exception(exc))]
+    python = [cls for cls in BaseException.__subclasses__() if cls.__module__ == 'builtins']
+    outcomes = [pytest.fail.Exception, pytest.skip.Exception, pytest.xfail.Exception, pytest.exit.Exception]
+    if len(python) < 5:
+        violations.append(f'Python lists too few classes under BaseException: {python!r}')
+    violations += [f'no way raises a {cls.__name__}' for cls in python
+                   if not any(isinstance(exc, cls) for exc in raised.values())]
+    violations += [f'no way raises pytest\'s {cls.__name__}' for cls in outcomes
+                   if not any(type(exc) is cls for exc in raised.values())]
+    if not any(not isinstance(exc, (*python, *outcomes)) for exc in raised.values()):
+        violations.append('no way raises a class neither Python nor pytest names')
+    for kind in BODY_EXITS:
+        rows = [(plan, outcome) for plan, ends, _, _, outcome, _ in DISK_IMAGE_ROWS.values() if ends == kind]
+        if ({}, 'body') not in rows:
+            violations.append(f'no row ends the body by {kind} with a detach that succeeds')
+        if ({'detach': [FAILS]}, 'failure') not in rows:
+            violations.append(f'no row ends the body by {kind} with a detach that fails')
+    assert violations == [], '\n'.join(violations)
 
 
 FAULTS = {
