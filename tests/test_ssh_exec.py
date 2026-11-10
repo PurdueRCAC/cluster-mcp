@@ -79,6 +79,7 @@ import contextlib
 import errno
 import json
 import os
+import plistlib
 import re
 import signal
 import socket
@@ -858,15 +859,55 @@ def _step(hdiutil: tuple[str, ...], verb: str, bound: float, *args: str) -> tupl
     return None, out
 
 
+def _clean_up(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path) -> list[str]:
+    """After a `create` or `attach` that failed or hung: detach every device backed by `image`, then
+    remove it. It returns what is left to report, in order: nothing when all went.
+
+    The devices are the ones `hdiutil info` lists for the image (by real path; `hdiutil` reports the
+    path as it was handed over), each detached by its whole disk. When `info` fails or answers with
+    no listing, nothing is removed. When a detach fails, there is no further attempt: the device
+    and the image are kept and named.
+    """
+    failure, out = _step(hdiutil, 'info', bound['info'], '-plist')
+    listing: Any = None
+    if failure is None:
+        try:
+            listing = plistlib.loads(out)
+        except Exception as exc:
+            failure = f'info: answered with no listing ({type(exc).__name__}: {exc})'
+        else:
+            if not isinstance(listing, dict):
+                failure = f'info: answered with no listing ({type(listing).__name__})'
+    if failure is not None:
+        return [failure, f'the image is kept at {image}, and any device made from it stays attached']
+    for entry in listing.get('images', []):
+        if os.path.realpath(entry.get('image-path', '')) != os.path.realpath(image):
+            continue
+        entities = entry.get('system-entities', [])
+        devices = [e['dev-entry'] for e in entities if 'dev-entry' in e]
+        if not devices:
+            continue
+        device = min(devices, key=len)
+        failure, _ = _step(hdiutil, 'detach', bound['detach'], '-force', device)
+        if failure is not None:
+            mounts = [e['mount-point'] for e in entities if e.get('mount-point')]
+            at = f' at {mounts[0]}' if mounts else ', not mounted'
+            return [failure, f'{device} stays attached{at}, and its image is kept at {image}']
+    image.unlink(missing_ok=True)
+    return []
+
+
 @contextlib.contextmanager
 def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
                    bounds: dict[str, float] | None = None) -> Iterator[Path]:
     """A 4 MB HFS+ image beside `where`, attached at `where` (macOS); detached and removed afterwards.
 
     `hdiutil` is the argv that runs the tool (a stand-in's, in the rows that pin this). Every step
-    runs through `_step`. A `create` or `attach` that fails or hangs raises `HostFailure` naming it.
-    After the body the volume is detached: a detach that fails raises its failure, and one that
-    succeeds removes the image, then raises an exception from the body unchanged.
+    runs through `_step`. A `create` or `attach` that fails or hangs raises `HostFailure` naming it,
+    then what `_clean_up` left. After the body the volume is detached, once: a detach that fails
+    raises its failure and names the volume and the image it keeps (caused by the body's exception,
+    when the body raised), and one that succeeds removes the image, then raises an exception from the
+    body unchanged.
     """
     bound = _bounds(bounds)
     image = where.parent / f'{where.name}.dmg'
@@ -877,18 +918,19 @@ def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
         failure, _ = _step(hdiutil, 'attach', bound['attach'], '-nobrowse', '-noautoopen', '-mountpoint', str(where),
                            str(image))
     if failure is not None:
-        raise HostFailure(failure)
+        raise HostFailure('\n'.join([failure, *_clean_up(hdiutil, bound, image)]))
+    left = f'the volume stays attached at {where}, and its image is kept at {image}'
     try:
         yield where
-    except BaseException:
+    except BaseException as body:
         failure, _ = _step(hdiutil, 'detach', bound['detach'], '-force', str(where))
         if failure is not None:
-            raise HostFailure(failure)
+            raise HostFailure(f'{failure}\n{left}') from body
         image.unlink()
         raise
     failure, _ = _step(hdiutil, 'detach', bound['detach'], '-force', str(where))
     if failure is not None:
-        raise HostFailure(failure)
+        raise HostFailure(f'{failure}\n{left}')
     image.unlink()
 
 
@@ -984,6 +1026,9 @@ HANGS = {'end': 'hang', 'child': True}
 # What a failing stand-in step says last, as `hdiutil` does.
 STANDIN_FAILURE = 'failed - stand-in failure'
 BODY_FAILURE = 'the body failed'
+# What a row's report says of what a failed detach leaves (`{where}` and `{image}` are the row's).
+STAYS = 'the volume stays attached at {where}, and its image is kept at {image}'
+KEPT_DEVICE = '/dev/standin2 stays attached at {where}, and its image is kept at {image}'
 
 DISK_IMAGE_ROWS = {
     # (each verb's plans, whether the body raises, the row's own devices left, whether the image is
@@ -994,6 +1039,33 @@ DISK_IMAGE_ROWS = {
                      ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
     'every-step-succeeds': ({}, False, 0, False, None, []),
     'body-fails': ({}, True, 0, False, 'body', [BODY_FAILURE]),
+    'create-hangs-with-device': ({'create': [{**HANGS, 'image': True, 'device': True}]}, False, 0, False, 'failure',
+                                 [f'create: {PAST}']),
+    'create-fails-with-device': ({'create': [{**FAILS, 'image': True, 'device': True}]}, False, 0, False, 'failure',
+                                 ['create: exited with status 1: ', f'create {STANDIN_FAILURE}']),
+    'attach-hangs': ({'attach': [HANGS]}, False, 0, False, 'failure', [f'attach: {PAST}']),
+    'attach-hangs-with-device': ({'attach': [{**HANGS, 'device': True}]}, False, 0, False, 'failure',
+                                 [f'attach: {PAST}']),
+    'attach-fails': ({'attach': [FAILS]}, False, 0, False, 'failure',
+                     ['attach: exited with status 1: ', f'attach {STANDIN_FAILURE}']),
+    'attach-fails-with-device': ({'attach': [{**FAILS, 'device': True}]}, False, 0, False, 'failure',
+                                 ['attach: exited with status 1: ', f'attach {STANDIN_FAILURE}']),
+    'detach-hangs': ({'detach': [HANGS]}, False, 1, True, 'failure', [f'detach: {PAST}', STAYS]),
+    'detach-fails': ({'detach': [FAILS]}, False, 1, True, 'failure',
+                     ['detach: exited with status 1: ', f'detach {STANDIN_FAILURE}', STAYS]),
+    'body-and-detach-fail': ({'detach': [FAILS]}, True, 1, True, 'failure',
+                             [BODY_FAILURE, 'detach: exited with status 1: ', f'detach {STANDIN_FAILURE}', STAYS]),
+    'cleanup-detach-hangs': ({'attach': [{**HANGS, 'device': True}], 'detach': [HANGS]}, False, 1, True, 'failure',
+                             [f'attach: {PAST}', f'detach: {PAST}', KEPT_DEVICE]),
+    'cleanup-detach-fails': ({'attach': [{**FAILS, 'device': True}], 'detach': [FAILS]}, False, 1, True, 'failure',
+                             ['attach: exited with status 1: ', 'detach: exited with status 1: ',
+                              f'detach {STANDIN_FAILURE}', KEPT_DEVICE]),
+    'info-fails-in-cleanup': ({'attach': [{**FAILS, 'device': True}], 'info': [FAILS]}, False, 1, True, 'failure',
+                              ['attach: exited with status 1: ', 'info: exited with status 1: ', f'info {STANDIN_FAILURE}',
+                               'the image is kept at {image}, and any device made from it stays attached']),
+    'info-answers-garbled': ({'attach': [{**FAILS, 'device': True}], 'info': [{'garbled': True}]}, False, 1, True,
+                             'failure', ['attach: exited with status 1: ', 'info: answered with no listing (',
+                                         'the image is kept at {image}, and any device made from it stays attached']),
 }
 
 # A device no row made, from an image of the same name in another directory: no cleanup may touch it.
@@ -1069,11 +1141,12 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
     each step that went wrong and how, in order, and names no survivor. No TERM is sent before the
     KILL, the row ends within its limit, and the stand-in reached each hang it was planned to.
     """
-    plan, body_raises, devices_left, image_left, outcome, says = DISK_IMAGE_ROWS[row]
+    plan, body_raises, devices_left, image_left, outcome, texts = DISK_IMAGE_ROWS[row]
     # bin/sandbox.sh makes its directory under TMPDIR: under the row's, it goes with the row.
     monkeypatch.setenv('TMPDIR', str(tmp_path))
     state = _stand_in(tmp_path, plan)
     where, image = tmp_path / 'vol', tmp_path / 'vol.dmg'
+    says = [text.format(where=where, image=image) for text in texts]
     try:
         started = time.monotonic()
         raised, body, seen = _drive_image(state, where, plan, body_raises)
@@ -1108,6 +1181,8 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
             violations.append(f'the body\'s own failure was not raised unchanged: {report or "nothing raised"}')
         elif outcome == 'failure' and not isinstance(raised, HostFailure):
             violations.append(f'raised no HostFailure: {report or "nothing raised"}')
+        elif outcome == 'failure' and body_raises and (body is None or raised.__cause__ is not body):
+            violations.append(f'the failure is not caused by the body\'s own: {report}')
         at = 0
         for text in says:
             found = report.find(text, at)

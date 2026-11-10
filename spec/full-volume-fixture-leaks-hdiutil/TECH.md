@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-10'
 phases:
 - id: P1
@@ -25,7 +25,7 @@ phases:
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p1
 - id: P2
   name: A failed create or attach is cleaned up; a failed detach is kept and named, after the body's failure
-  status: pending
+  status: done
   satisfies:
   - R3
   - R4
@@ -36,7 +36,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/full-volume-fixture-leaks-hdiutil/verify/rows.sh p2
+  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2
 - id: P3
   name: The mutant sweep, the docs, the ledger and the full gate
   status: pending
@@ -188,6 +188,10 @@ Cycle-specific, every phase:
   `bin/sandbox.sh`). `issues/marker-rule-gaps.md` (from `integration-marker-wording`, item 4 and its
   R3) names `_host`: whichever of the two cycles lands second adds a dated correction line to that
   seed naming `_step`.
+- **2026-11-10, P2's and P3's gates take the wrapper too** (foreman ruling, at P2's build): P2's
+  `verify:` is retuned through `set_phase.py` to `sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2`,
+  which runs the frozen `verify/rows.sh p2` unchanged with the leftover checks scoped as above. P3's
+  `pre` (`rows.sh all`) takes `… scoped-leftovers.sh all` when P3's build starts, recorded then.
 
 ---
 
@@ -235,21 +239,22 @@ survivor; the success path is today's; the stand-in exists and the rows that nee
 **Goal:** the cleanup R3 asks (find devices by `info`, detach each whole disk, remove the image), the
 "no further attempt" and the named leftovers of R4, and the body-first report of R5.
 
-- [ ] `_clean_up(hdiutil, bound, image)` as PLAN §2 specifies (`info` through `_step`; an `info`
+- [x] `_clean_up(hdiutil, bound, image)` as PLAN §2 specifies (`info` through `_step`; an `info`
       failure, or an answer that is not a plist, keeps the image and says so; `realpath` match; the shortest `dev-entry`; stop at the
       first failed detach and name the device, its `mount-point` or ", not mounted", and the kept
       image; `unlink(missing_ok=True)` only when every device detached).
-- [ ] `attached_image`: a failed or hung `create`/`attach` raises `HostFailure` with the step's text
+- [x] `attached_image`: a failed or hung `create`/`attach` raises `HostFailure` with the step's text
       then `_clean_up`'s, in that order; after the body, a failed `detach` raises with the step's
       text and "the volume stays attached at {where}, and its image is kept at {image}", `from body`
       when the body raised; no second detach anywhere after a failed one; the image removed only after
       a detach that succeeded.
-- [ ] Add the rows `create-hangs-with-device`, `create-fails-with-device`, `attach-hangs`,
+- [x] Add the rows `create-hangs-with-device`, `create-fails-with-device`, `attach-hangs`,
       `attach-hangs-with-device`, `attach-fails`, `attach-fails-with-device`, `detach-hangs`,
       `detach-fails`, `body-and-detach-fail`, `cleanup-detach-hangs`, `cleanup-detach-fails`,
       `info-fails-in-cleanup`, `info-answers-garbled` (PLAN §2's table; a failing `detach` or `info` is planned for its first call only, so a retry
       would succeed and show).
-- **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/verify/rows.sh p2`: every P1 and P2 id and
+- **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2`, which runs
+  `verify/rows.sh p2` unchanged with its leftover checks scoped to the run (Amendments): every P1 and P2 id and
   the real rows, in both eras, plus the leftovers and annotation checks.
 - **Touches:** `tests/test_ssh_exec.py`.
 
