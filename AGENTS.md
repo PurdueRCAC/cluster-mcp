@@ -118,7 +118,8 @@ bin/sandbox.sh sh -c "uv run cluster-mcp -e local --generate-token"
 # otherwise set rootdir to the throwaway dir and never load pyproject.toml (losing
 # --strict-markers and every registered marker). HOME/auth/SSH isolation is unaffected. Wrapping
 # the whole run is a choice for a manual run; the rule the suite enforces is per launch: every
-# process an integration test launches goes through bin/sandbox.sh (§ Testing).
+# process an integration test launches goes through bin/sandbox.sh (§ Testing), and its static
+# check does not read a launch through conftest.REAL_POPEN (issues/marker-rule-gaps.md).
 bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
 ```
 
@@ -311,7 +312,8 @@ import has no effect.
   is `integration`: the unit guard (below) is inactive for it.
   Each marker means what its description in `pyproject.toml` says, word for word:
   - `unit`: starts no process, opens no network connection (a name lookup included) and sees no
-    real HOME; the unit guard holds it to that
+    real HOME; the unit guard holds it to that, except on the open routes AGENTS.md § Testing
+    names
   - `integration`: needs what a unit test is refused (a process, a network connection or name
     lookup, or the real HOME), itself or through a fixture or helper; every process it launches
     goes through bin/sandbox.sh
@@ -987,8 +989,11 @@ import has no effect.
     `test_the_markers_are_stated_as_pyproject_describes_them` holds § Testing's and § Conventions'
     statement of the markers to the `markers` descriptions in `pyproject.toml` word for word
     (`marker_statement_violations`): line wrapping is the only freedom, and case, punctuation,
-    markup, spacing, order, a missing or third marker and a clause added anywhere all count;
-    `test_marker_statement_check_catches_planted_drift` plants each. A row that needs a login shell calls `conftest.need_shell`: off
+    markup, spacing, order, a missing or third marker and a clause added to a description all
+    count, and the statement ends only where Markdown ends it: at the section's end, at a less
+    indented list item, or at a blank line before text no deeper than its items that starts no
+    item; `test_marker_statement_check_catches_planted_drift` and
+    `test_marker_statement_check_catches_narrower_drift` plant each. A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
@@ -1477,19 +1482,22 @@ import has no effect.
     each list's own form (`test_the_list_readers_read_each_list`).
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
-  - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point
-    under `tmp_path`, the auth and SSH environment is blanked as `bin/sandbox.sh` blanks it, and
-    every process launch (`subprocess.Popen`, `os.system`/`popen`/`exec*`/`spawn*`/`fork`,
-    `posix_spawn`, `pty`, `multiprocessing`) and network connect or lookup is refused and recorded.
+  - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME`, `XDG_CONFIG_HOME`,
+    `XDG_CACHE_HOME` and `XDG_DATA_HOME` point under `tmp_path`, the auth and SSH environment is
+    blanked as `bin/sandbox.sh` blanks it, and every process launch (`subprocess.Popen`,
+    `os.system`/`popen`/`exec*`/`spawn*`/`fork`, `posix_spawn`, `pty`, `multiprocessing`) and
+    network connect or lookup is refused and recorded.
     A refusal fails the test at teardown; contract tests also assert `guard.refused == []` in the
     body, because a refusal inside a tool comes back as a tool error. It replaces those names, so
     what was bound before the test or sits below them is not refused: a `Popen` class bound earlier
     (`conftest.REAL_POPEN`, a `from subprocess import Popen`) still launches; a `_socket` connect, a
     UDP `sendto` and an early-bound `getaddrinfo` still reach the network; `socket.gethostbyname`
     and its kin still look a name up; and a fixture of wider scope has launched before the guard is
-    active (`issues/marker-rule-gaps.md`). **File I/O is not guarded:** a
-    tool that falls back to local file operations is caught by `refusal_violations`' stated reason
-    and the `transfer-local-fallback` planted case, not by the guard.
+    active (`issues/marker-rule-gaps.md`). Of the `XDG_*` variables it sets those three alone: one
+    the shell exported beside them (`XDG_STATE_HOME`, say) reaches the test unchanged, and the
+    password database still names the real home (`issues/marker-rule-gaps.md`). **File I/O is not
+    guarded:** a tool that falls back to local file operations is caught by `refusal_violations`'
+    stated reason and the `transfer-local-fallback` planted case, not by the guard.
   - **The PATH shim**, for every test: `sudo` and `ssh` stand-ins come first on `PATH`; each
     prints `refused by the test PATH shim` and exits 126. `bin/sandbox.sh` keeps `PATH`, so
     sandboxed children inherit it. A login bash rebuilds `PATH` in `/etc/profile` (macOS's
@@ -3150,7 +3158,8 @@ What each mode means:
   nothing, or not the tests you meant, and pass green. Name the test ids the gate depends on.
   Each marker means what its description in `pyproject.toml` says, word for word:
   - `unit`: starts no process, opens no network connection (a name lookup included) and sees no
-    real HOME; the unit guard holds it to that
+    real HOME; the unit guard holds it to that, except on the open routes AGENTS.md § Testing
+    names
   - `integration`: needs what a unit test is refused (a process, a network connection or name
     lookup, or the real HOME), itself or through a fixture or helper; every process it launches
     goes through bin/sandbox.sh

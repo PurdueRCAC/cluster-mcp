@@ -610,6 +610,44 @@ def test_marker_statement_check_accepts_a_rewrapped_statement(change: dict[str, 
 def test_marker_statement_check_catches_planted_drift(change: dict[str, str]) -> None:
     assert marker_statement_violations(*planted(**change)) != []
 
+
+# Narrower drifts, each the row that refuses a check carrying a narrower carve-out than the rows
+# above: an item line that is not a marker item skipped, a bullet other than `-`, a statement line
+# found by its opening words, any whitespace before it or any case, a lazy wrap joined in, a
+# pyproject.toml that describes no marker, and one punctuation class, curly quotes, a parenthesised
+# phrase or a sentence after the last one ignored.
+@pytest.mark.unit
+@pytest.mark.parametrize('change', [
+    pytest.param({'testing': 'through bin/x.sh\n=>through bin/x.sh\n  - except a gate, which needs nothing\n'},
+                 id='exception-bullet-after-the-items-in-testing'),
+    pytest.param({'testing': 'through bin/x.sh\n=>through bin/x.sh\n  - beta: a third\n'},
+                 id='third-marker-without-backticks-in-testing'),
+    pytest.param({'testing': '  - `alpha`=>  * `alpha`||  - `omega`=>  * `omega`'}, id='star-bullets-in-testing'),
+    pytest.param({'testing': '\n    it to that=>\nit to that'}, id='lazy-wrap-in-testing'),
+    pytest.param({'testing': 'Each marker means=>each marker means'}, id='statement-line-lower-case-in-testing'),
+    pytest.param({'testing': '  Each marker=>> Each marker'}, id='statement-line-quoted-in-testing'),
+    pytest.param({'testing': 'word for word:=>in some words:'}, id='statement-line-tail-changed-in-testing'),
+    pytest.param({'testing': '  Each marker=>\tEach marker||  - `alpha`=> - `alpha`||\n    it to that=>\n   it to that'
+                             '||  - `omega`=> - `omega`||\n    through=>\n   through'},
+                 id='statement-line-tab-indented-items-follow-in-testing'),
+    pytest.param({'pyproject': f'    "{PLANTED_ALPHA}",\n    "{PLANTED_OMEGA}",\n=>',
+                  'testing': PLANTED_BLOCK.split('\n', 1)[1] + '=>',
+                  'conventions': PLANTED_BLOCK.split('\n', 1)[1] + '=>'},
+                 id='no-markers-anywhere'),
+    pytest.param({'testing': '(a window included)=>a window included'}, id='parentheses-dropped-in-testing'),
+    pytest.param({'pyproject': 'x/y.sh; the guard=>xy.sh; the guard'}, id='slash-dropped-in-pyproject'),
+    pytest.param({'pyproject': 'no door=>no side-door', 'testing': 'no door=>no sidedoor',
+                  'conventions': 'no door=>no side-door'},
+                 id='hyphen-dropped-in-testing'),
+    pytest.param({'pyproject': "needs what alpha=>needs what alpha's test", 'testing': 'needs what alpha=>needs what alpha’s test',
+                  'conventions': "needs what alpha=>needs what alpha's test"},
+                 id='curly-quote-in-testing'),
+    pytest.param({'testing': '(a window included)=>(a window excluded)'}, id='parenthesised-phrase-changed-in-testing'),
+    pytest.param({'testing': 'through bin/x.sh\n=>through bin/x.sh. Except a gate.\n'}, id='sentence-after-the-last-in-testing'),
+])
+def test_marker_statement_check_catches_narrower_drift(change: dict[str, str]) -> None:
+    assert marker_statement_violations(*planted(**change)) != []
+
 # Every name of the SSH-host and user-map variables bin/sandbox.sh must unset, the legacy ones included.
 SANDBOX_UNSET = ('CLUSTER_MCP_SSH_HOST', 'RCAC_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP')
 

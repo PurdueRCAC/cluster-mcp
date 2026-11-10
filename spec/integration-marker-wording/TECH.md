@@ -3,10 +3,10 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: blocked
+status: in_progress
 branch: test/integration-marker-wording
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -21,7 +21,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/integration-marker-wording/verify/gate.sh P1
+  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1
 - id: P2
   name: The word-for-word check, its planted drift and the mutant sweep
   status: done
@@ -33,10 +33,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/integration-marker-wording/verify/gate.sh P2
+  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F2
 - id: P3
   name: The full verify and the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -49,7 +49,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: sh spec/integration-marker-wording/verify/gate.sh P3
+  verify: sh spec/integration-marker-wording/verify/gate.sh P3 && sh spec/integration-marker-wording/remediation/checks.sh F1 F2 F4
 review:
   last_reviewed_commit: 0efe6bf35805b5536979513defed75d214e7832f
   verdict: changes-requested
@@ -153,6 +153,13 @@ the routes the probe found open.
       filed by the plan commit.
 - [x] Reference text for all of the above: `verify/draft/apply_edits.py` (`P1`). Stage, then run
       the gate.
+- [x] Review cycle 1, finding 1: every statement about what the guard or a check enforces is true
+      of the code. The `unit` description and its two copies end "the unit guard holds it to that,
+      except on the open routes AGENTS.md § Testing names"; the guard paragraph names the three
+      `XDG_*` variables it sets and the routes beside them (`XDG_STATE_HOME`, the password
+      database); the commands block says what the static check does not read;
+      `issues/marker-rule-gaps.md` and its ROADMAP entry name the XDG gap. Checker:
+      `remediation/checks.sh F1`.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P1` — `wording` (the probe of
   `tests/conftest.py`, the claimed phrases present and "fast", "CLI", "drives" absent, the drafted
   word-for-word check on the staged files, the commands' and § Testing's sentences, the note gone),
@@ -184,6 +191,11 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       exactly once. The gate's files are frozen at the plan commit (PLAN deviation row 8): a
       `STALE` line, or a check that cannot be written that way, stops the phase for the foreman;
       never re-key a mutant or drop a row.
+- [x] Review cycle 1, findings 2 and 3, and finding 1's check description: the narrower drift
+      table (`test_marker_statement_check_catches_narrower_drift`, 15 rows) and the module-wide
+      sweep `remediation/checks.sh F2` (74 mutants, each killed); § Testing describes the check
+      as it refuses (a clause added to a description; where the statement ends). The frozen
+      51-row table and `verify/` are unchanged but for `mutant-sweep.md`.
 - [x] Record the sweep's output in `verify/mutant-sweep.md` (one line a mutant, the run's date and
       commit).
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P2` — `wording`, `slice`, `ids`
@@ -203,7 +215,10 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       `ROADMAP.md` entry. This cycle's one deferral is `issues/marker-rule-gaps.md` (filed with the
       plan); `issues/integration-marker-check.md` was filed at the GOAL gate. Any new one is filed
       here, pre-shaped from the KB's `ISSUE.md` template, before the gate.
-- [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
+- [x] Review cycle 1, finding 4: the claims of the ledger lines this cycle adds hold against the
+      code and the history (`issues/integration-marker-check.md`'s fixture scope,
+      `issues/stalled-reconnect-test-timing.md`'s commit). Checker: `remediation/checks.sh F4`.
+- [ ] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
   `sweep`, `scope-P3`, `ledger`, then `full`, the profile's `verify` word for word in both eras (about
@@ -222,6 +237,19 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
   will launch through `bin/sandbox.sh`, and nothing changes in this cycle. Row 8 stands as the
   oracle freeze: no file under `verify/` changes except `mutant-sweep.md`, and a check that cannot
   take the sweep's substitutions stops the phase for the foreman rather than re-keying a mutant.
+
+- **2026-11-09, review cycle 1 remediation** (`REVIEW.md`, changes-requested). P1 (finding 1:
+  R1, R4), P2 (findings 2 and 3, and finding 1's check description: R5) and P3 (finding 4, and
+  the full verify) are reopened and built together in one commit, `P2: F1–F4`, by the foreman's
+  direction: the three fixes share `AGENTS.md` § Testing and the same gate run. Each reopened
+  phase's `verify:` runs the frozen gate unchanged, then the class checkers in `remediation/`.
+  P1 and P2 are retuned to the frozen `gate.sh prepush` (their own `scope-P1` and `scope-P2` cannot
+  pass once P3's ledger files exist), P3 keeps `gate.sh P3`. One `prepush` run on the final tree
+  stands in for P1's and P2's gates and P3's parts before `full`; one `checks.sh F1 F2 F4` run
+  stands in for all three phases' checkers. P3's `full` waits for the foreman's release, so P3
+  stays in progress. The frozen gate checks two sentences word for word (the commands block's
+  per-launch rule and the guard paragraph's open routes); finding 1 is fixed by text added after
+  each, so the frozen oracle passes unchanged and needs no wrapper.
 
 ## How `code-build` drives this
 

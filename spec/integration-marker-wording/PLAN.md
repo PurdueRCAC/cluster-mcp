@@ -36,6 +36,15 @@ not by what the test drives (R2), keeps the per-launch sandbox rule word for wor
 rails state it, and says "itself or through a fixture or helper" so R3's kind 8 is in the text, not
 inferred. `pytest --markers` prints both lines as written.
 
+**Amended at review cycle 1 (2026-11-09, finding 1).** The guard does not refuse every route
+(row 3), so "the unit guard holds it to that" alone overclaimed it. The `unit` description now
+ends "the unit guard holds it to that, except on the open routes AGENTS.md § Testing names", and
+§ Testing names every route the probes find open, an `XDG_*` variable beside the three the guard
+sets and the password database's home included (`issues/marker-rule-gaps.md`). The `integration`
+description is unchanged. The development commands keep their per-launch sentence and add that
+the static check does not read a `conftest.REAL_POPEN` launch. The probe of the new claims is
+`remediation/F1-guard-wording.py`.
+
 **R3, each kind against the wording.** Kinds 1–6 and 9 start a process (a CLI drive, git or a login
 shell, a child interpreter, an `hdiutil` stand-in, the `executes` backends' bash, a stdio server, a
 killed or timed-out sandboxed child); kind 7 opens a network connection (loopback TCP: the probe
@@ -132,6 +141,15 @@ changes. Reference text: [`verify/draft/check_block.py`](verify/draft/check_bloc
   `clause-over-indented-after-last-item`, `clause-after-a-blank-in-last-item`,
   `third-marker-after-a-blank-in-testing`, `third-marker-other-bullet-in-testing`). The ids are
   [`verify/drift-ids.txt`](verify/drift-ids.txt).
+
+**Amended at review cycle 1 (2026-11-09, findings 2 and 3).** A second drift table,
+`test_marker_statement_check_catches_narrower_drift` (15 rows), plants the narrower carve-outs the
+review's sweep found surviving: a non-item line after the items, a bullet other than `-`, a lazy
+wrap, the statement line found by its opening words, by a substring, after any whitespace or in
+any case, no markers at all, and one punctuation class, curly quotes, a parenthesised phrase or a
+trailing sentence ignored. It is a test of its own so the 51-row table and its sweep stay as the
+gate froze them (row 8). `remediation/F2-marker-check-sweep.py` sweeps 74 mutants over the whole
+check, the review's 71 among them, against all three tables.
 
 ### The mutant sweep (R5, `verify/marker_mutants.py`)
 

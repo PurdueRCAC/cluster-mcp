@@ -1,0 +1,41 @@
+#!/bin/sh
+# Review cycle 1's class checkers for integration-marker-wording, run after the frozen gate
+# (verify/gate.sh) by each reopened phase's verify. From the worktree root, after staging:
+#
+#   sh spec/integration-marker-wording/remediation/checks.sh F1 [F2] [F4]
+#
+# F1: the guard and check wording against an executed probe of tests/conftest.py (F1-guard-wording.py).
+# F2: the module-wide mutant sweep of the marker-statement check (F2-marker-check-sweep.py).
+# F4: the ledger lines' claims about the code and the history (F4-ledger-claims.py).
+# Refuses a tree with unstaged or untracked changes, as the frozen gate does. One child at a time;
+# under 200 MB; offline; nothing outlives it.
+
+R=spec/integration-marker-wording/remediation
+
+fail() { echo "checks[$1]: $2" >&2; exit 1; }
+
+main() {
+    set -u
+    export UV_PYTHON=3.14
+    cd "$(git rev-parse --show-toplevel)" || exit 1
+    [ "$#" -gt 0 ] || fail usage 'name F1, F2 or F4'
+    git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ] ||
+        fail tree 'unstaged or untracked changes: stage first, so the checks grade what commits'
+    for one in "$@"; do
+        case $one in
+            F1) env XDG_STATE_HOME=/nonexistent/marker-f1/XDG_STATE_HOME \
+                    XDG_RUNTIME_DIR=/nonexistent/marker-f1/XDG_RUNTIME_DIR \
+                    XDG_CONFIG_DIRS=/nonexistent/marker-f1/XDG_CONFIG_DIRS \
+                    XDG_DATA_DIRS=/nonexistent/marker-f1/XDG_DATA_DIRS MARKER_F1_PROBE=1 \
+                    PYTHONPATH=tests:spec/integration-marker-wording/verify \
+                    uv run --no-sync pytest -q -p no:cacheprovider -p conftest -c pyproject.toml --rootdir=. \
+                    "$R/F1-guard-wording.py" || fail F1 'a statement about the guard or a check is not what the code does' ;;
+            F2) uv run --no-sync python -I "$R/F2-marker-check-sweep.py" || fail F2 'a mutant of the check survived' ;;
+            F4) uv run --no-sync python -I "$R/F4-ledger-claims.py" || fail F4 'a ledger claim does not hold' ;;
+            *) fail "$one" 'unknown checker' ;;
+        esac
+    done
+    echo "checks[$*]: ok"
+}
+
+main "$@"; exit $?

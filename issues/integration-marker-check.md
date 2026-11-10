@@ -35,9 +35,10 @@ A check that every `integration` test does need what `unit` forbids has to class
 9. a real sandboxed child that is killed, or that outlives a timeout (`mutant-child-outlives-timeout`,
    `sandbox-dirs-left-on-kill`).
 
-Kind 8 is the trap. A launch made by a session- or module-scoped fixture (the core-only install,
-the loopback SSH server) happens before the test body runs, or once for many tests; a launch made
-in `tests/harness.py`, `tests/ssh_server.py` or `tests/mutants.py` is outside the test module. A
+Kind 8 is the trap. A launch made by a session-scoped fixture (`core_only`, the core-only install
+in `tests/test_core_only.py`) happens before the test body runs, and once for many tests; a launch
+or connection made in a helper module (`tests/harness.py`'s `stdio_tools` and `url_tools`,
+`tests/ssh_server.py`'s loopback SSH server, `tests/mutants.py`) is outside the test module. A
 check that watches only the test body, or only the test's own module, misclassifies them, and the
 pins for such a check tend to be found one layer at a time in review.
 

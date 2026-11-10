@@ -224,7 +224,8 @@ scope or a helper module, which a check of the test body alone misses. Deferred 
 An executed probe against `tests/conftest.py` found routes the marker rules forbid and their checks
 leave open: in a `unit` test, a `Popen` class bound before the test (`conftest.REAL_POPEN`) still
 launches, a `_socket` connect, a UDP send, an early-bound `getaddrinfo` and the `gethostbyname`
-family still reach the network, and a fixture of wider scope launches before the guard is active;
+family still reach the network, a fixture of wider scope launches before the guard is active, and
+an `XDG_*` variable other than the three the guard sets (`XDG_STATE_HOME`) arrives unchanged;
 and `tests/test_ssh_exec.py`'s `_host` runs `hdiutil` through
 `REAL_POPEN`, outside `bin/sandbox.sh`, a call the static launch check does not read. Found by the
 `integration-marker-wording` plan, 2026-11-09.

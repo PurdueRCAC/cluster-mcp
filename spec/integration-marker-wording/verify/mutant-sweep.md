@@ -41,3 +41,89 @@ name-stripped: killed (strips a stated marker's name) by name-changed-in-testing
 name-shape-free: killed (takes an item whose name is not in backticks) by item-without-backticks-in-testing
 34 mutants, 0 not killed
 ```
+
+## Review cycle 1 remediation: the module-wide sweep
+
+Run 2026-11-09 by `remediation/checks.sh F2` (`remediation/F2-marker-check-sweep.py`) on the staged
+remediation tree over commit `78eaa24`, `tests/test_hygiene.py` blob `577a9e013368`. Python 3.14. Every mutant
+is killed; none is recorded as equivalent. The frozen sweep above was re-run on the same tree by
+`gate.sh prepush`: `34 mutants, 0 not killed`.
+
+```
+unmutated: 66 drift rows (15 narrower), 4 accept rows, live test passed, not passed: []
+always-true: killed [plain] by case-in-pyproject, case-in-testing, changed-in-conventions, changed-in-pyproject …
+only-first-marker: killed [plain] by clause-at-end-in-pyproject, clause-at-end-in-testing, curly-quote-in-testing, markup-in-testing …
+zip-common-prefix: killed [plain] by one-missing-from-pyproject, one-missing-from-testing, repeated-in-pyproject, repeated-in-testing …
+only-described-count: killed [additive:third-marker-in-agents] by one-missing-from-pyproject, repeated-in-testing, third-marker-in-testing
+only-stated-count: killed [additive:third-marker-in-pyproject] by one-missing-from-testing, repeated-in-pyproject, statement-without-items, third-marker-in-pyproject
+names-only: killed [plain] by case-in-pyproject, case-in-testing, changed-in-conventions, changed-in-pyproject …
+texts-only: killed [plain] by name-case-in-testing, name-changed-in-testing
+skip-conventions: killed [plain] by changed-in-conventions, missing-from-conventions
+skip-testing: killed [plain] by case-in-testing, changed-in-testing, clause-after-a-blank-in-last-item, clause-at-end-in-testing …
+stop-at-first-line(ignore wraps): killed [plain] by +as-planted, +paragraph-after-a-blank, +rewrapped, +unwrapped …
+end-problems-never: killed [plain] by clause-after-a-blank-in-last-item, clause-at-item-indent-after-last-item, clause-lazy-after-last-item, clause-over-indented-after-last-item …
+drop-statement-problems: killed [plain] by clause-after-a-blank-in-last-item, clause-at-item-indent-after-last-item, clause-lazy-after-last-item, clause-over-indented-after-last-item …
+drop-no-markers-line: killed [plain] by no-markers-anywhere
+no-markers-returns-empty: killed [plain] by missing-from-pyproject, no-markers-anywhere
+first-of-duplicate-statements: killed [plain] by stated-twice
+skip-bad-item-line: killed [plain] by exception-bullet-after-the-items-in-testing, third-marker-without-backticks-in-testing
+whole-file-sections: killed [plain] by +as-planted, +paragraph-after-a-blank, +rewrapped, +unwrapped …
+section-ends-at-same-level-only: killed [plain] by +as-planted, +paragraph-after-a-blank, +rewrapped, +unwrapped …
+set-compare(order+repeat): killed [additive:order/repeat] by reordered-in-testing, repeated-in-pyproject, repeated-in-testing
+sorted-compare(order): killed [additive:order] by reordered-in-testing
+dedupe(repeat): killed [additive:repeat] by repeated-in-pyproject, repeated-in-testing
+casefold(names+texts): killed [additive:case] by case-in-pyproject, case-in-testing, name-case-in-testing
+casefold(texts): killed [additive:case] by case-in-pyproject, case-in-testing
+casefold(names): killed [additive:case] by name-case-in-testing
+strip-all-punctuation: killed [additive:punctuation] by curly-quote-in-testing, emphasis-in-testing, hyphen-dropped-in-testing, markup-in-testing …
+strip-trailing-punctuation: killed [additive:punctuation] by trailing-period-in-testing
+ignore-commas: killed [additive:punctuation] by punctuation-in-pyproject
+ignore-semicolons-as-commas: killed [additive:punctuation] by punctuation-in-testing
+ignore-periods: killed [additive:punctuation] by trailing-period-in-testing
+ignore-parens-chars: killed [additive:punctuation] by parentheses-dropped-in-testing
+ignore-slashes-hyphens: killed [additive:punctuation] by slash-dropped-in-pyproject, hyphen-dropped-in-testing
+curly-to-straight-quotes: killed [additive:unicode/punctuation] by curly-quote-in-testing
+strip-markup(`*_): killed [additive:markup] by emphasis-in-testing, markup-in-testing
+collapse-all-whitespace: killed [additive:whitespace] by double-space-in-pyproject, double-space-in-testing, name-changed-in-testing, no-break-space-in-testing …
+collapse-space-runs: killed [additive:whitespace] by double-space-in-pyproject, double-space-in-testing, trailing-space-at-wrap-in-testing
+tabs-to-space: killed [additive:whitespace] by tab-in-testing
+strip-ends: killed [additive:whitespace] by name-changed-in-testing, trailing-space-in-pyproject, two-spaces-after-name-in-testing
+rstrip-ends: killed [additive:whitespace] by name-changed-in-testing, trailing-space-in-pyproject
+lstrip-ends: killed [additive:whitespace] by two-spaces-after-name-in-testing
+rstrip-each-line-before-join: killed [additive:whitespace] by trailing-space-at-wrap-in-testing
+nbsp-to-space: killed [additive:unicode/whitespace] by no-break-space-in-testing
+nfkc: killed [additive:unicode] by decomposed-in-testing, no-break-space-in-testing
+nfc: killed [additive:unicode] by decomposed-in-testing
+nfd: killed [additive:unicode] by decomposed-in-testing
+lenient-name-space(`:\s*`): killed [additive:whitespace] by two-spaces-after-name-in-testing
+pyproject-split-at-colon+strip: killed [additive:whitespace] by no-space-after-name-in-pyproject, trailing-space-in-pyproject
+name-without-backticks-ok: killed [additive:markup] by item-without-backticks-in-testing
+name-strip: killed [additive:whitespace] by name-changed-in-testing
+prefix-match(trailing clause): killed [additive:clause-end] by clause-at-end-in-pyproject, clause-at-end-in-testing, sentence-after-the-last-in-testing, trailing-period-in-testing …
+suffix-match(leading clause): killed [additive:clause-start] by clause-at-start-in-pyproject, clause-at-start-in-testing, two-spaces-after-name-in-testing
+containment(any clause): killed [additive:clause] by clause-at-end-in-pyproject, clause-at-end-in-testing, clause-at-start-in-pyproject, clause-at-start-in-testing …
+word-subsequence(middle clause): killed [additive:clause-middle] by clause-at-end-in-pyproject, clause-at-end-in-testing, clause-at-start-in-pyproject, clause-at-start-in-testing …
+ignore-parenthesised-text: killed [additive:clause-middle] by parenthesised-phrase-changed-in-testing
+ignore-after-last-semicolon: killed [additive:clause-end] by clause-at-end-in-pyproject, clause-at-end-in-testing, markup-in-testing, sentence-after-the-last-in-testing …
+ignore-before-first-semicolon: killed [additive:clause-start] by case-in-pyproject, case-in-testing, changed-in-conventions, changed-in-pyproject …
+ignore-except-clauses: killed [additive:clause] by clause-at-end-in-pyproject, clause-at-end-in-testing, clause-at-start-in-pyproject, clause-at-start-in-testing …
+ignore-after-last-sentence-period: killed [additive:clause-after] by sentence-after-the-last-in-testing
+lazy-wrap-joins(equivalent?): killed [additive:lazy] by lazy-wrap-in-testing
+lazy-continuation-ok: killed [additive:lazy] by clause-lazy-after-last-item
+same-depth-other-bullet-ends: killed [additive:bullet] by third-marker-other-bullet-in-testing
+same-depth-any-item-ends: killed [additive:bullet] by third-marker-other-bullet-in-testing
+anything-after-blank-ok: killed [additive:paragraph] by clause-after-a-blank-in-last-item, third-marker-after-a-blank-in-testing
+after-blank-same-depth-item-ok: killed [additive:paragraph] by third-marker-after-a-blank-in-testing
+other-bullets-are-items: killed [additive:bullet] by star-bullets-in-testing
+deeper-wrap-ok: killed [additive:whitespace] by over-indented-wrap-in-testing
+wrap-joins-tab-indent: killed [additive:whitespace] by over-indented-wrap-in-testing
+statement-line-strip(): killed [additive:whitespace] by statement-line-tab-indented-items-follow-in-testing, statement-line-trailing-space-in-testing
+statement-line-lstrip(): killed [additive:whitespace] by statement-line-tab-indented-items-follow-in-testing
+statement-line-substring: killed [additive:statement] by statement-line-quoted-in-testing
+statement-line-prefix: killed [additive:statement] by statement-line-tail-changed-in-testing
+statement-line-casefold: killed [additive:case] by statement-line-lower-case-in-testing
+ignore-slashes: killed [additive:punctuation] by slash-dropped-in-pyproject
+ignore-hyphens: killed [additive:punctuation] by hyphen-dropped-in-testing
+ignore-apostrophes: killed [additive:punctuation] by curly-quote-in-testing
+74 mutants, 0 not killed
+```
