@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
   name: A suite run sweeps what its killed sandboxes left, and nothing else
-  status: pending
+  status: done
   satisfies:
   - R1
   - R3
@@ -22,7 +22,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files units kinds guards && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
+  attempts: 1
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files units kinds guards && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
 - id: P2
   name: A mutation case's scratch is its child run's TMPDIR
   status: pending
@@ -114,21 +115,21 @@ and makes one atomic code+state commit.
 no process uses; another run's, an earlier one's, a running sandbox's and anything not named as a
 sandbox directory stay; every harness kind of the GOAL's Problem items 1–5 is covered.
 
-- [ ] `tests/sandbox_dirs.py` as PLAN § 2 specifies: `SANDBOX_NAME`, `RUN_PREFIX`, `leftovers`,
+- [x] `tests/sandbox_dirs.py` as PLAN § 2 specifies: `SANDBOX_NAME`, `RUN_PREFIX`, `leftovers`,
       `in_use` (pure; both path spellings), `processes` (`/proc` on Linux; `lsof` and `ps -E`
       through `[str(SANDBOX), …]` elsewhere, `lsof -b`; raises when the probe cannot run), `sweep`
       (no probe when nothing is found), `own_tmp` (sweeps before it puts `TMPDIR` back, then
       removes the run directory whole unless a sandbox directory in it is still in use). The planner's prototype,
       [`verify/prototype.diff`](verify/prototype.diff), is the reference shape.
-- [ ] `tests/conftest.py`: the session `autouse` fixture `sandbox_tmp(tmp_path_factory)` entering
+- [x] `tests/conftest.py`: the session `autouse` fixture `sandbox_tmp(tmp_path_factory)` entering
       `own_tmp(tmp_path_factory.getbasetemp())`, and the module docstring naming it. No timing
       instrumentation.
-- [ ] `tests/test_sandbox_dirs.py`: the six rows PLAN § 2 lists (two `unit`, four `integration`;
+- [x] `tests/test_sandbox_dirs.py`: the six rows PLAN § 2 lists (two `unit`, four `integration`;
       the `in_use` row parametrised with the seven ids PLAN names). No skips; every launch through
       `[str(SANDBOX), …]`.
-- [ ] `AGENTS.md`: the Throwaway environment sentence, the § Testing fixture bullet and module bullet,
+- [x] `AGENTS.md`: the Throwaway environment sentence, the § Testing fixture bullet and module bullet,
       as PLAN § 2 words them.
-- [ ] Measure and put in the commit body: the new module's time in each era
+- [x] Measure and put in the commit body: the new module's time in each era
       (`pytest --durations=0 tests/test_sandbox_dirs.py`, both eras), for PLAN § 3 row D4.
 - **Verify:** the frontmatter `verify:`: `files` (R5), `units`, `kinds` (R1, one row per harness
   kind) and `guards` (R3/R4), about a minute in all; then the narrowed suite (the new module,
@@ -152,7 +153,8 @@ reported, and every sample case and control prints what develop printed.
       `TMPDIR` set and put back, the scratch kept and named on stderr while a sandbox directory in it
       is in use, else removed) between `run_case` and `self_check`.
 - [ ] `AGENTS.md` § Testing's mutation-runner bullet: one clause, a case's scratch is its child's
-      `TMPDIR` (PLAN § 2).
+      `TMPDIR` (PLAN § 2); and § Factory → Throwaway environment's sentence (written in P1 for the
+      suite only) gains the same clause for the mutation runner.
 - [ ] Measure and put in the commit body: the sample's wall time before (develop's runner) and after,
       from the `sample` mode's run and `verify/sample.expected`'s recording run (PLAN § 3 row D4).
 - **Verify:** the frontmatter `verify:`: `files`; `rebase` (the text merges with the sibling's in
@@ -179,6 +181,16 @@ skips exactly what develop skips; the ledger is clean.
       checks this file). This plan files no new seed.
 - [ ] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
       `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications).
+- [ ] The seed's other facts, in `issues/sandbox-dirs-left-on-kill.md`: its sentence on the mutation
+      runner's timeout path (this cycle's own text, not on `develop`, so corrected in place) is
+      replaced by `mutant-child-outlives-timeout`'s corrected wording once that cycle lands; and
+      "the last three point the drive's `TMPDIR` at the test's own directory" is false for
+      `spec/capability-probe/verify/drives.py`, which sets no `TMPDIR` and starts no sandbox of its
+      own (it SIGKILLs a bare `uv run` inside a gate's outer sandbox, GOAL § Problem), and for
+      `tests/mutants.py`: the sites that point a sandbox's `TMPDIR` at `tmp_path` are
+      `tests/test_transports.py`, `tests/test_probe_startup.py` (`drive_env`) and one
+      `tests/test_audit.py` site. That sentence is on `develop` since before this cycle, so it takes
+      a dated correction beneath it (append-only), unless the seed is retired at landing (PLAN § 5).
 - [ ] Put the `suite` mode's figures into PLAN § 3 row D4 beside the planner's, naming this run: each
       command's time and leftover count.
 - [ ] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
@@ -190,6 +202,32 @@ skips exactly what develop skips; the ledger is clean.
   above applies.
 
 ---
+
+## Amendments
+
+- **2026-11-09, rulings at the PLAN/TECH gate.** The maintainer approved the full-depth sweep
+  (PLAN § 3 row D4: the walk at any depth, not the walk limited to `tmp_path` and one level below)
+  with the measured figures (voice, 2026-11-09), inside his 15-minute CI envelope. The foreman
+  accepted D1 and D3–D7, and recorded D2 and D3 as GOAL readings (GOAL Clarifications, foreman
+  ruling at the PLAN/TECH gate, 2026-11-09, committed on their own before P1). Under D5, P2 waits
+  until `mutant-child-outlives-timeout` has landed on `develop`.
+- **2026-11-09, P1 build: the branch rebased, and the `files` mode run from the fork point.** Before
+  P1 the branch was rebased onto `origin/develop` at `146cbc6` (from `0bfacae`), cleanly. The frozen
+  gate pins `BASE = '0bfacae'` and its `files` mode lists `git diff --cached --name-only BASE`, so on
+  the rebased branch it named develop's own changes since `0bfacae` (the `skip-check-fence-gaps`
+  landing: four `issues/skip-check-*.md`, `spec/skip-check-fence-gaps/`, `tests/test_hygiene.py`) as
+  paths outside the allowed set. P1's gate was seen red on that alone (attempt 1; R5 and every
+  other mode green on the same run). P1's `verify:` now runs the gate unchanged under
+  [`remediation/fork-base.py`](remediation/fork-base.py), which checks R5 against `0bfacae` as
+  written (tree and index), checks `bin/sandbox.sh` is unchanged from `0bfacae` to the fork point,
+  then runs the gate's modes with `BASE` set to `git merge-base HEAD origin/develop`. Its teeth: a
+  staged stray file and a byte appended to `bin/sandbox.sh` each turn it red. P2's and P3's
+  `verify:` also run `files`: retune each to the wrapper the same way when its build starts (P2's
+  own rebase onto the sibling moves the fork point again, which the wrapper follows).
+- **2026-11-09, P1 build: the docs split.** P1's Throwaway environment sentence names the suite's
+  cleanup and the known limitation only; the mutation runner's clause joins it in P2, with
+  `case_scratch` (§ Conventions, docs in the same commit). The seed's facts the foreman flagged are
+  P3's (a new checklist item there): P1 has no ledger work.
 
 ## How `code-build` drives this
 

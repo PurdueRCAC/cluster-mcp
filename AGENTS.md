@@ -301,6 +301,23 @@ import has no effect.
   by removing the variable: `monkeypatch.delenv` in process, or a child environment without it
   (`tests/test_probe_startup.py`, `tests/test_probes.py`). `tests/test_hygiene.py::test_the_suite_skips_probes_by_default`
   pins the fixture.
+- **The suite's sandboxes make their directories in a directory of the run's own.** A session
+  `autouse` fixture in `tests/conftest.py` (`sandbox_tmp`) makes a `cluster-mcp-run.*` directory in
+  the `TMPDIR` the run was given and points `TMPDIR` at it for every test and every child it starts,
+  so each sandbox the run starts makes its directory there, unless the test gives it its own
+  `tmp_path`; in-process temporary files keep their directory, and `tmp_path` does not move. When the
+  session ends it sweeps that directory and the session's pytest temporary directory
+  (`tests/sandbox_dirs.py`): it removes every real directory named as `bin/sandbox.sh` names them
+  (`cluster-mcp-sandbox.` and six characters), at any depth, unless a process still has its working
+  directory in it or names it in its environment (`/proc` on Linux; elsewhere `lsof` and `ps -E`,
+  launched through `bin/sandbox.sh` and only when a leftover is found; a probe that cannot run fails
+  the sweep rather than guess). It then puts the caller's `TMPDIR` back and removes the run's
+  directory whole, with whatever the run's processes left in it, unless a sandbox directory in it is
+  still in use. Another run's directories, those left before the run, and anything in the pytest
+  temporary directory not named as a sandbox directory are never touched. A sandbox whose wrapper
+  was killed alone, whose command still runs outside its directory at the session's end, and whose
+  environment the host does not show (a system binary on macOS) is not seen as in use.
+  `tests/test_sandbox_dirs.py` pins the sweep.
 - `uv run pytest`. Only **`@mark.unit`** and **`@mark.integration`** are real markers under
   `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
   hook that fails the run with a `pytest.UsageError` listing any collected test that carries
@@ -1463,6 +1480,16 @@ import has no effect.
     compound expression and its parenthesised negation, no pair at all), and a list reordered,
     short a command or differing in one, which the list check must refuse; the readers are fed
     each list's own form (`test_the_list_readers_read_each_list`).
+  - `tests/test_sandbox_dirs.py` (`unit`, `integration`): `leftovers`, `in_use`, `sweep` and
+    `own_tmp` of `tests/sandbox_dirs.py` (a helper, not collected). `leftovers` returns only real
+    directories with a sandbox's exact name, nested ones included, never a file, a link or another
+    name; `in_use` (pure, fed planted process tables) keeps a directory a process has as its working
+    directory, below it or by its real path, or names in its environment, and nothing beside it or
+    only its parent named; this run's `TMPDIR` is a `cluster-mcp-run.*` directory and a sandbox makes
+    its directory in it; a real sandbox is kept while it runs and removed by the next sweep once a
+    group SIGKILL left it; a sandbox whose wrapper was SIGKILLed alone while its command runs on
+    outside its directory is kept by the command's environment (on Linux, through `/proc`); and
+    `own_tmp` redirects children only and puts `TMPDIR` back.
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
   - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point
@@ -1947,6 +1974,12 @@ whichever one the calling shell exports; `UV_ENV_FILE` is unset and `UV_NO_ENV_F
 source, with `UV_PROJECT` and `CLUSTER_MCP_REPO` pinning discovery back to the repo. The unset list
 is pinned by `tests/test_hygiene.py::test_sandbox_unsets_both_names`, and the fail-closed drive with
 each name exported by `tests/test_cli.py::test_sandbox_fails_closed_with_either_host_exported`.
+
+A SIGKILL skips the trap and leaves the state directory behind, and the suite's harnesses stop
+sandboxes that way, so a pytest run points `TMPDIR` at a directory of the run's own and sweeps it,
+with the session's pytest temporary directory, when the session ends (`tests/sandbox_dirs.py`, the
+`sandbox_tmp` fixture, § Testing); a caller outside the repository's own runs that kills a sandbox
+outright still leaves its directory (a known limitation).
 
 ### Where deferred work goes
 
