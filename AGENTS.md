@@ -947,15 +947,22 @@ import has no effect.
   - `tests/test_annotations.py` (`unit`, `integration`): `workspace_violations`,
     `annotation_positions`, `type_expression_violations`. Every annotation Python keeps at run time
     (module variables, class attributes, and every function's and method's parameters and return)
-    in every workspace member's `src/` must resolve to a type. `workspace_violations` takes the
-    members from the root `pyproject.toml`'s `[tool.uv.workspace]` and their modules from each
-    member's `src/`, so a member or module added later is checked with no edit to the check;
-    `annotation_positions` reads the positions from the syntax tree, each is evaluated as
-    `typing.get_type_hints` evaluates a postponed annotation, and `type_expression_violations`
-    refuses what is not a type (a `slice`, a number, an unresolved name), naming module, line,
-    qualified name and the text as written. Its docstrings hold the rules: what is read, what an
-    annotation reading a class-body or enclosing-function name gets, a `__main__` module, a failed
-    import. The tree check, `test_every_kept_annotation_in_the_workspace_is_a_type`, runs in a fresh
+    in every workspace member's `src/` must resolve to a type. `workspace_violations(root)` returns
+    the check's refusal lines for a workspace: it takes the members from the root `pyproject.toml`'s
+    `[tool.uv.workspace]` and their modules from each member's `src/`, so a member or module added
+    later is checked with no edit to the check. A refused annotation's line names its module, line,
+    qualified name, the text as written and why. A module refused whole (its import raised, it
+    loaded from another file, it does not parse) gets a line naming the module and the reason, and a
+    member with no `src/` one naming its directory. `annotation_positions(source, module, path)` returns the positions a module's
+    syntax tree holds; it imports nothing. Each position is evaluated as `typing.get_type_hints`
+    evaluates a postponed annotation, and one that does not resolve (an undefined name, a name
+    imported only under `TYPE_CHECKING`) is refused there, before any type is examined.
+    `type_expression_violations(hint, kind)` takes what a position resolved to and the kind of
+    position, and returns the reasons it is not a valid type expression (a `slice`, a number, a
+    string left unresolved, a qualifier out of its place), empty for a type; it names no position.
+    The module's docstrings hold the rules: what is read, what an annotation reading a class-body or
+    enclosing-function name gets, a `__main__` module, a failed import. The tree check,
+    `test_every_kept_annotation_in_the_workspace_is_a_type`, runs in a fresh
     interpreter under `bin/sandbox.sh`, because in process the unit guard replaces
     `subprocess.Popen` and an annotation naming it would resolve to the guard's refuser. It does
     not replace `AUTH_MODES`'s exact-shape pin in `tests/test_auth_modes.py`, which stays.

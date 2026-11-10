@@ -3,10 +3,10 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: blocked
+status: in_progress
 branch: ci/annotation-check
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -23,10 +23,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/annotation-check/verify/gate.sh P1
+  verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R7
@@ -96,6 +96,41 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
   during the case: forgetting a standard-library module a scratch import loaded first would leave a
   second copy of it for later tests. The module holds 112 tests (PLAN § 4's prototype held 87): the
   controls are parametrized per position kind and per evaluation mode.
+- **2026-11-09, review cycle 1 remediation** (`REVIEW.md`, changes-requested at `82f5744`; the branch
+  rebased onto develop `e378c33` before it). P1 and P2 are reopened: F2 to F5 fall under P1 (R1, R4,
+  R5), F1 under P2's `AGENTS.md` entry. They land in one commit (a foreman ruling): F1's entry
+  describes the functions F2 to F5 change, so each is checked against the other. P1's `verify:` is
+  retuned to run the frozen gate, then `verify/sweep.py`; `gate.sh` and `seen_red.sh` are unchanged.
+  P2's full `verify` waits on the foreman's release (the host is at its limit of heavy runs);
+  `gate.sh phase` runs now.
+  - F1: the `AGENTS.md` § Testing entry credits each named function with only what it does:
+    `workspace_violations` returns the refusal lines, `annotation_positions` returns positions and
+    imports nothing, an unresolvable name is refused at evaluation, and `type_expression_violations`
+    returns reasons and names no position. Each sentence was checked against the code.
+  - F2 to F4: `verify/sweep.py`, a mutant sweep of 102 mutants over every decision of the module
+    (discovery, the position reader, scope and evaluation, the failed-import fallback, the type
+    walk), additive carve-outs included, each run on the whole module in both eras, reading
+    committed state. Its record is `verify/sweep-record.md`. The rows that kill the survivors the
+    review named: a package `__init__`, a module at depth five, namespace directories, a private
+    module, a module that does not parse, the root's own `src/` and a second `members` glob; every
+    member checked whatever its place, in fixed directory order (`a-`, `m-`, `z-`), and a member added
+    later sorting before and after the first; a `Callable` return and parameters, a `tuple[X, ...]`
+    element, a `Concatenate` prefix, a `ParamSpec` generic's list argument, an `InitVar`, a
+    subscripted `type` alias; `try`, `except`, `else`, `finally`, `with`, `for`, `while` and `match`
+    blocks; aliased functional imports; a failed package `__init__`, whose traceback holds no frame
+    of the module checked; and scratch members imported through a symbolic link, so frame and file
+    matching is pinned on resolved paths. The review's coverage notes are re-judged and killed:
+    M22 by a hint whose walk raises (refused, never passed) and M31 by a module that does not
+    parse. Two mutants are recorded equivalent, with the reason in the record: the position filter's
+    decorator lines (no decorator holds an annotation) and `Concatenate`'s last-argument check
+    (typing refuses to build one with any other last argument).
+  - F5: the reader takes every functional class form whose annotations Python keeps:
+    `make_dataclass` (positional or `fields=`, pairs and triples), keyword-form `NamedTuple`, and a
+    three-argument `type` whose namespace literal holds `__annotations__`, alongside `TypedDict` and
+    positional `NamedTuple`, bare, as an attribute or by an imported alias. Each is pinned by a
+    planted red row, in both modes.
+  - The redundant `local_class` guard in `module_check` is gone: the reader leaves `owner` empty for
+    a class defined inside a function, which is what the guard decided.
 
 ---
 
@@ -130,8 +165,10 @@ of position in the core and in other members.
 - [x] If the tree test is red on the current tree, STOP: report each flagged annotation (R7).
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P1` (about 2 min, 113 s in the plan's dry
   run; it runs `verify/seen_red.sh`, R5's evidence, 35 plants, and prints the module's wall time,
-  the figure PLAN § 5 quotes).
-- **Touches:** `tests/test_annotations.py`.
+  the figure PLAN § 5 quotes), then `verify/sweep.py` (review cycle 1 remediation: 102 mutants in
+  both eras, about 12 min, reading committed state; its record is `verify/sweep-record.md`).
+- **Touches:** `tests/test_annotations.py`; `spec/annotation-check/verify/sweep.py` and its record
+  (remediation).
 
 ## Phase P2 — AGENTS.md names the check, and the full gate in both eras
 **Satisfies:** R6, R7 · **Depends on:** P1

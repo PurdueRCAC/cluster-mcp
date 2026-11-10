@@ -26,6 +26,7 @@ refuser. The controls plant scratch workspaces under `tmp_path` and run in proce
 from __future__ import annotations
 
 import ast
+import collections
 import collections.abc
 import dataclasses
 import enum
@@ -68,7 +69,11 @@ BARE_FORMS = (typing.Union, typing.Optional, typing.Literal, typing.Annotated, t
 TYPE_PARAMETERS = (typing.TypeVar, typing.ParamSpec, typing.TypeVarTuple,
                    typing.ParamSpecArgs, typing.ParamSpecKwargs)
 LITERAL_VALUES = (int, str, bytes, bool, enum.Enum)
-FUNCTIONAL_FORMS = frozenset({'TypedDict', 'NamedTuple'})
+# The calls that build a class whose annotations Python keeps, by the name they are called by, and
+# the modules a `from … import … as …` alias of them is read from. `type` counts only when called
+# with three arguments whose namespace is a dict literal holding `__annotations__`.
+FUNCTIONAL_FORMS = frozenset({'TypedDict', 'NamedTuple', 'make_dataclass', 'type'})
+FUNCTIONAL_MODULES = frozenset({'typing', 'typing_extensions', 'dataclasses'})
 TYPE_PARAMETER_KINDS = {'TypeVar': typing.TypeVar, 'ParamSpec': typing.ParamSpec,
                         'TypeVarTuple': typing.TypeVarTuple}
 
@@ -203,16 +208,18 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
 
     Module and class bodies give their simple variable annotations (inside `if`, `try`, `with`,
     `for`, `while` and `match` blocks too, never inside an `if TYPE_CHECKING:` body, which never
-    runs) and the fields of a functional `TypedDict` or `NamedTuple`; every function and method, at
-    any depth, gives its annotated parameters and its return. A function body's own variable
-    annotations are never evaluated, so they are not read; nor is an annotated attribute or
-    subscript target, which Python does not keep.
+    runs) and the fields of a class built by a call (`TypedDict` and `NamedTuple`, the latter's
+    keyword form included, `dataclasses.make_dataclass`, and a three-argument `type` whose namespace
+    holds `__annotations__`), whether the call names it bare, as an attribute or by an imported
+    alias; every function and method, at any depth, gives its annotated parameters and its return.
+    A function body's own variable annotations are never evaluated, so they are not read; nor is an
+    annotated attribute or subscript target, which Python does not keep.
     """
     tree = ast.parse(source, str(path))
-    forms = set(FUNCTIONAL_FORMS)
+    forms = {name: name for name in FUNCTIONAL_FORMS}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in ('typing', 'typing_extensions'):
-            forms.update(a.asname for a in node.names if a.name in FUNCTIONAL_FORMS and a.asname)
+        if isinstance(node, ast.ImportFrom) and node.module in FUNCTIONAL_MODULES:
+            forms.update((a.asname, a.name) for a in node.names if a.name in FUNCTIONAL_FORMS and a.asname)
     found: list[Position] = []
 
     def add(annotation: ast.expr, name: str, kind: str, scopes: list[_Scope], where: str,
@@ -238,22 +245,25 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
     def functional(statement: ast.Assign, scopes: list[_Scope], where: str) -> None:
         call = statement.value
         if (not isinstance(call, ast.Call) or len(statement.targets) != 1
-                or not isinstance(statement.targets[0], ast.Name) or len(call.args) < 2):
+                or not isinstance(statement.targets[0], ast.Name)):
             return
         func = call.func
-        called = (func.id in forms if isinstance(func, ast.Name)
-                  else isinstance(func, ast.Attribute) and func.attr in FUNCTIONAL_FORMS)
-        if not called:
-            return
-        fields = call.args[1]
+        form = (forms.get(func.id) if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute) and func.attr in FUNCTIONAL_FORMS else None)
+        keywords = {k.arg: k.value for k in call.keywords if k.arg}
         pairs: list[tuple[str, ast.expr]] = []
-        if isinstance(fields, ast.Dict):
-            pairs = [(k.value, v) for k, v in zip(fields.keys, fields.values)
-                     if isinstance(k, ast.Constant) and isinstance(k.value, str)]
-        elif isinstance(fields, (ast.List, ast.Tuple)):
-            pairs = [(e.elts[0].value, e.elts[1]) for e in fields.elts
-                     if isinstance(e, (ast.Tuple, ast.List)) and len(e.elts) == 2
-                     and isinstance(e.elts[0], ast.Constant) and isinstance(e.elts[0].value, str)]
+        if form == 'type':
+            namespace = call.args[2] if len(call.args) == 3 else None
+            if isinstance(namespace, ast.Dict):
+                for key, value in zip(namespace.keys, namespace.values):
+                    if isinstance(key, ast.Constant) and key.value == '__annotations__':
+                        pairs += _field_pairs(value)
+        elif form is not None:
+            fields = call.args[1] if len(call.args) > 1 else keywords.get('fields') if form == 'make_dataclass' else None
+            if fields is not None:
+                pairs += _field_pairs(fields)
+            if form == 'NamedTuple':
+                pairs += list(keywords.items())
         target = statement.targets[0].id
         for field, value in pairs:
             add(value, f'{prefix(scopes)}{target}.{field}', ATTRIBUTE, scopes, where)
@@ -293,6 +303,22 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
 
     body(tree.body, [], 'module')
     return found
+
+
+def _field_pairs(fields: ast.expr) -> list[tuple[str, ast.expr]]:
+    """The (name, annotation) pairs a functional class form's fields literal gives.
+
+    A dict literal maps names to annotations; a list or tuple holds `(name, annotation)` pairs, or
+    `(name, annotation, field)` triples for `make_dataclass`. A bare name has no annotation.
+    """
+    if isinstance(fields, ast.Dict):
+        return [(k.value, v) for k, v in zip(fields.keys, fields.values)
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+    if isinstance(fields, (ast.List, ast.Tuple)):
+        return [(e.elts[0].value, e.elts[1]) for e in fields.elts
+                if isinstance(e, (ast.Tuple, ast.List)) and len(e.elts) in (2, 3)
+                and isinstance(e.elts[0], ast.Constant) and isinstance(e.elts[0].value, str)]
+    return []
 
 
 def _blocks(statement: ast.stmt) -> list[list[ast.stmt]]:
@@ -606,7 +632,7 @@ def module_check(module: str, path: Path) -> tuple[list[Position], list[str]]:
     globalns = vars(loaded)
     refusals = []
     for position in positions:
-        localns = {} if position.local_class else _class_namespace(position, globalns)
+        localns = _class_namespace(position, globalns)
         why = localns if isinstance(localns, str) else _verdict(position, globalns, localns)
         if why:
             refusals.append(_refusal(position, why))
@@ -698,6 +724,22 @@ def test_every_kept_annotation_in_the_workspace_is_a_type() -> None:
     unread = [m for m, has_src in expected.items() if has_src and not report['members'][m]]
     assert len(expected) > 1 and unread == [], f'members with a src/ and no module read: {unread}'
     assert 'cluster_mcp.core.auth:AUTH_MODES' in report['positions'], 'AUTH_MODES was not among the positions read'
+    # Every `.py` file under every member's `src/`, found by a walk of its own, is a module the check
+    # listed, and each contributed every position its syntax tree holds: none was left out by depth,
+    # by being a package's `__init__`, or by its member's place in the workspace.
+    files: dict[str, Path] = {}
+    for member in workspace_members(ROOT):
+        for folder, _, names in os.walk(member / 'src'):
+            for name in names:
+                if name.endswith('.py'):
+                    file = Path(folder, name)
+                    dotted = file.relative_to(member / 'src').with_suffix('').parts
+                    files['.'.join(dotted[:-1] if dotted[-1] == '__init__' else dotted)] = file
+    listed = sorted(m for modules in report['members'].values() for m in modules)
+    assert listed == sorted(files)
+    held = collections.Counter(p.rsplit(':', 1)[0] for p in report['positions'])
+    wanted = collections.Counter({m: len(annotation_positions(f.read_text(), m, f)) for m, f in files.items()})
+    assert held == +wanted
 
 
 @pytest.mark.unit
@@ -739,16 +781,35 @@ class Scratch:
                 target = home / 'src' / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(textwrap.dedent(text))
-            sys.path.insert(0, str(home / 'src'))
+            self.importable(home / 'src')
         importlib.invalidate_caches()
         return home
 
-    def module(self, source: str, postponed: bool) -> str:
-        """A one-module member holding `source`; the module's dotted name."""
+    def importable(self, src: Path) -> None:
+        """Put `src` on `sys.path` through a symbolic link, as an installed tree's path may differ
+        from the path the check reads: frames and `__file__` then name the link, not the file read."""
+        links = self.root.parent / 'links'
+        links.mkdir(exist_ok=True)
+        link = links / uuid.uuid4().hex
+        link.symlink_to(src.resolve(), target_is_directory=True)
+        sys.path.insert(0, str(link))
+
+    def module(self, source: str, postponed: bool, directory: str | None = None) -> str:
+        """A one-module member holding `source`, in `directory` (its package name when None); the module's name."""
         package = self.package()
         head = 'from __future__ import annotations\n' if postponed else ''
-        self.member(package, {f'{package}/__init__.py': '', f'{package}/mod.py': head + textwrap.dedent(source)})
+        self.member(directory or package,
+                    {f'{package}/__init__.py': '', f'{package}/mod.py': head + textwrap.dedent(source)})
         return f'{package}.mod'
+
+    def root_files(self, files: dict[str, str]) -> None:
+        """Files under the root's own `src/`: the root is a member too."""
+        for name, text in files.items():
+            target = self.root / 'src' / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(textwrap.dedent(text))
+        self.importable(self.root / 'src')
+        importlib.invalidate_caches()
 
     def report(self) -> dict[str, Any]:
         importlib.invalidate_caches()
@@ -802,6 +863,49 @@ PLANTS = [
      'planted.inner(given)'),
     ('replaced-function', f'def replace(fn):\n    return 42\n@replace\ndef planted(given: {SLICE}) -> None: ...\n',
      'planted(given)'),
+    ('private-name', f'_held: {SLICE} = {{}}\n', '_held'),
+    ('string-annotation', f'held: "{SLICE}" = {{}}\n', 'held'),
+    ('multi-line', 'held: dict[\n    str,\n    int:\n] = {}\n', 'held'),
+    ('else-block', f'if False:\n    pass\nelse:\n    held: {SLICE} = {{}}\n', 'held'),
+    ('try-block', f'try:\n    held: {SLICE} = {{}}\nexcept ImportError:\n    pass\n', 'held'),
+    ('except-block', f'try:\n    pass\nexcept ImportError:\n    held: {SLICE} = {{}}\n', 'held'),
+    ('try-else-block', f'try:\n    pass\nexcept ImportError:\n    pass\nelse:\n    held: {SLICE} = {{}}\n', 'held'),
+    ('finally-block', f'try:\n    pass\nfinally:\n    held: {SLICE} = {{}}\n', 'held'),
+    ('with-block', f'import contextlib\nwith contextlib.suppress(ImportError):\n    held: {SLICE} = {{}}\n', 'held'),
+    ('for-block', f'for _ in range(1):\n    held: {SLICE} = {{}}\n', 'held'),
+    ('while-block', f'while False:\n    held: {SLICE} = {{}}\n', 'held'),
+    ('match-block', f'match 0:\n    case _:\n        held: {SLICE} = {{}}\n', 'held'),
+    ('class-block', f'class Planted:\n    if True:\n        held: {SLICE}\n', 'Planted.held'),
+    ('dataclass-field', f'import dataclasses\n@dataclasses.dataclass\nclass Planted:\n    held: {SLICE} | None = None\n',
+     'Planted.held'),
+    ('aliased-functional-typeddict', f'from typing import TypedDict as Shape\nPlanted = Shape("Planted", {{"held": {SLICE}}})\n',
+     'Planted.held'),
+    ('aliased-functional-namedtuple', f'from typing import NamedTuple as Row\nPlanted = Row("Planted", [("held", {SLICE})])\n',
+     'Planted.held'),
+    ('keyword-namedtuple', f'import typing\nPlanted = typing.NamedTuple("Planted", held={SLICE})\n', 'Planted.held'),
+    ('make-dataclass', f'import dataclasses\nPlanted = dataclasses.make_dataclass("Planted", [("held", {SLICE})])\n',
+     'Planted.held'),
+    ('make-dataclass-field', 'import dataclasses\nPlanted = dataclasses.make_dataclass("Planted", '
+     f'["bare", ("held", {SLICE}, dataclasses.field(default=None))])\n', 'Planted.held'),
+    ('aliased-make-dataclass', 'from dataclasses import make_dataclass as build\n'
+     f'Planted = build("Planted", fields=[("held", {SLICE})])\n', 'Planted.held'),
+    ('type-namespace', f'Planted = type("Planted", (), {{"__annotations__": {{"held": {SLICE}}}}})\n', 'Planted.held'),
+    ('class-functional', f'import typing\nclass Holder:\n    Planted = typing.NamedTuple("Planted", [("held", {SLICE})])\n',
+     'Holder.Planted.held'),
+    ('union-member', f'held: int | {SLICE} = 0\n', 'held'),
+    ('callable-parameters', f'from collections.abc import Callable\nheld: Callable[[{SLICE}], int] | None = None\n', 'held'),
+    ('callable-return', f'from collections.abc import Callable\nheld: Callable[[int], {SLICE}] | None = None\n', 'held'),
+    ('homogeneous-tuple', f'held: tuple[{SLICE}, ...] = ()\n', 'held'),
+    ('concatenate-prefix', 'from collections.abc import Callable\nfrom typing import Concatenate\n'
+     f'def planted[**P](fn: Callable[Concatenate[{SLICE}, P], int]) -> None: ...\n', 'planted(fn)'),
+    ('paramspec-list', f'class Over[**P]:\n    pass\nheld: Over[[int, {SLICE}]] | None = None\n', 'held'),
+    ('initvar', 'import dataclasses\n@dataclasses.dataclass\nclass Planted:\n'
+     f'    held: dataclasses.InitVar[{SLICE}] = None\n', 'Planted.held'),
+    ('final-argument', f'from typing import Final\nheld: Final[{SLICE}] = {{}}\n', 'held'),
+    ('annotated-type', f'from typing import Annotated\nheld: Annotated[{SLICE}, "meta"] = {{}}\n', 'held'),
+    ('alias-value', f'type Sliced = {SLICE}\nheld: Sliced = {{}}\n', 'held'),
+    ('generic-alias-value', 'type Sliced[T] = dict[T, int:]\nheld: Sliced[str] = {}\n', 'held'),
+    ('newtype-supertype', f'from typing import NewType\nSliced = NewType("Sliced", {SLICE})\nheld: Sliced = {{}}\n', 'held'),
 ]
 
 
@@ -813,7 +917,7 @@ def test_a_planted_slice_is_refused_naming_where(scratch: Scratch, source: str, 
     violations = scratch.report()['violations']
     assert len(violations) == 1, violations
     assert violations[0].startswith(f'{module}:') and f': {where}: ' in violations[0], violations
-    assert repr(SLICE) in violations[0] and 'slice' in violations[0].split(repr(SLICE), 1)[1], violations
+    assert 'slice' in violations[0].split(f': {where}: ', 1)[1].split("': ", 1)[1], violations
 
 
 @pytest.mark.unit
@@ -843,6 +947,16 @@ def test_an_unresolvable_annotation_is_refused(scratch: Scratch, source: str, wh
                  id='class-alias-shadowing-a-global'),
     pytest.param('def outer() -> None:\n    Local = int\n    def inner(given: Local) -> None: ...\n',
                  'outer.inner(given)', 'reads Local', id='enclosing-function-local'),
+    pytest.param('def outer() -> None:\n    from decimal import Decimal as Local\n    def inner(given: Local) -> None: ...\n',
+                 'outer.inner(given)', 'reads Local', id='enclosing-function-import'),
+    pytest.param('def outer(Local: type) -> None:\n    def inner(given: Local) -> None: ...\n',
+                 'outer.inner(given)', 'reads Local', id='enclosing-function-parameter'),
+    pytest.param('def outer() -> None:\n    class Local:\n        pass\n    def inner() -> Local: ...\n',
+                 'outer.inner() ->', 'reads Local', id='enclosing-function-class'),
+    pytest.param('Mode = int\nclass Holder:\n    Mode = str\n    def run(self, given: "Mode") -> None: ...\n',
+                 'Holder.run(given)', 'reads Mode', id='class-alias-read-through-a-string'),
+    pytest.param('Mode = int\nclass Holder:\n    Mode = str\n    def run(self, given: list[Mode]) -> None: ...\n',
+                 'Holder.run(given)', 'reads Mode', id='class-alias-read-inside-a-subscript'),
     pytest.param('def make() -> None:\n    Alias = int\n    class Local:\n        held: Alias\n',
                  'make.Local.held', 'reads Alias', id='local-class-reading-its-function'),
     pytest.param('class Planted:\n    held: int\nclass Other:\n    held: int\nPlanted = Other\n',
@@ -857,6 +971,17 @@ def test_a_scope_dependent_annotation_is_refused(scratch: Scratch, source: str, 
     assert len(violations) == 1, violations
     assert violations[0].startswith(f'{module}:') and f': {where}: ' in violations[0], violations
     assert why in violations[0], violations
+
+
+@pytest.mark.unit
+def test_a_class_rebound_from_another_module_is_refused(scratch: Scratch) -> None:
+    # Same name, a class, but another module's: the attribute is not evaluated in its namespace.
+    package = scratch.package()
+    scratch.member(package, {f'{package}/__init__.py': '', f'{package}/other.py': 'class Planted:\n    pass\n',
+                             f'{package}/mod.py': f'class Planted:\n    held: int\nfrom {package}.other import Planted\n'})
+    violations = scratch.report()['violations']
+    assert len(violations) == 1 and violations[0].startswith(f'{package}.mod:2: Planted.held: '), violations
+    assert 'cannot be reached as itself' in violations[0], violations
 
 
 @pytest.mark.unit
@@ -930,6 +1055,10 @@ class Model(type):
     pytest.param(f'{RAISING_DECORATOR}@tool\ndef planted(given: int) -> str: ...\n', [], id='good-annotations'),
     pytest.param(f'{REFUSING_METACLASS}class Planted(metaclass=Model):\n    held: {SLICE}\n',
                  ['Planted.held'], id='refusing-metaclass'),
+    pytest.param(f'{REFUSING_METACLASS}class Planted(metaclass=Model):\n    Alias = {SLICE}\n    held: Alias\n',
+                 ['Planted.held'], id='refusing-metaclass-class-alias'),
+    pytest.param(f'{RAISING_DECORATOR}@tool\ndef planted(given: {SLICE}, other: {SLICE}) -> None: ...\n',
+                 ['planted(given)', 'planted(other)'], id='two-positions'),
 ])
 def test_a_failed_import_names_the_statement_that_raised(scratch: Scratch, source: str, named: list[str],
                                                          postponed: bool) -> None:
@@ -939,7 +1068,41 @@ def test_a_failed_import_names_the_statement_that_raised(scratch: Scratch, sourc
     assert violations[0].startswith(f'{module}:') and ': the import raised TypeError: ' in violations[0], violations
     for line, where in zip(violations[1:], named):
         assert line.startswith(f'{module}:') and f': {where}: ' in line, violations
-        assert 'slice' in line.split(repr(SLICE), 1)[1], violations
+        assert 'slice' in line.split(f': {where}: ', 1)[1].split("': ", 1)[1], violations
+
+
+@pytest.mark.unit
+def test_a_failed_package_import_names_the_module(scratch: Scratch) -> None:
+    # The package's `__init__` raises, so the traceback holds no frame of the module checked.
+    package = scratch.package()
+    scratch.member(package, {f'{package}/__init__.py': 'import scratch_no_such_module_anywhere\n',
+                             f'{package}/mod.py': 'held: int = 0\n'})
+    violations = scratch.report()['violations']
+    assert violations == [f'{package}.mod: the import raised ModuleNotFoundError: '
+                          "No module named 'scratch_no_such_module_anywhere'"]
+
+
+# A generic whose origin raises when the check reads its parameters: the walk itself fails.
+UNWALKABLE = '''\
+import types
+class Meta(type):
+    @property
+    def __parameters__(cls):
+        raise RuntimeError("no parameters")
+class Odd(metaclass=Meta):
+    def __class_getitem__(cls, item):
+        return types.GenericAlias(cls, item)
+held: Odd[int] | None = None
+'''
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('postponed', MODES)
+def test_a_hint_the_check_cannot_walk_is_refused(scratch: Scratch, postponed: bool) -> None:
+    module = scratch.module(UNWALKABLE, postponed)
+    violations = scratch.report()['violations']
+    assert len(violations) == 1 and violations[0].startswith(f'{module}:'), violations
+    assert ': held: ' in violations[0] and 'could not be checked: RuntimeError: no parameters' in violations[0], violations
 
 
 VALID = '''\
@@ -1057,13 +1220,62 @@ def test_a_main_module_is_never_imported(scratch: Scratch) -> None:
 
 
 @pytest.mark.unit
-def test_a_member_added_later_is_checked(scratch: Scratch) -> None:
-    scratch.module('held: int = 0\n', postponed=True)
+@pytest.mark.parametrize('directory', ['a-later', 'z-later'])
+def test_a_member_added_later_is_checked(scratch: Scratch, directory: str) -> None:
+    # The member added later sorts before the first one, then after it: it is checked in either place.
+    first = scratch.module('held: int = 0\n', postponed=True, directory='m-first')
     assert scratch.report()['violations'] == []
-    module = scratch.module(f'held: {SLICE} = {{}}\n', postponed=True)
+    module = scratch.module(f'held: {SLICE} = {{}}\n', postponed=True, directory=directory)
     report = scratch.report()
-    assert len(report['members']) == 3
+    assert sorted(report['members']) == sorted(['.', 'packages/m-first', f'packages/{directory}'])
+    assert {f'{first}:held', f'{module}:held'} <= set(report['positions'])
     assert len(report['violations']) == 1 and report['violations'][0].startswith(f'{module}:'), report['violations']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('planted', ['a-member', 'm-member', 'z-member'])
+def test_every_member_is_checked_whatever_its_place(scratch: Scratch, planted: str) -> None:
+    modules = {d: scratch.module(f'held: {SLICE if d == planted else "int"} = 0\n', postponed=True, directory=d)
+               for d in ('a-member', 'm-member', 'z-member')}
+    report = scratch.report()
+    assert {f'{m}:held' for m in modules.values()} <= set(report['positions'])
+    assert len(report['violations']) == 1 and report['violations'][0].startswith(f'{modules[planted]}:2: held: '), \
+        report['violations']
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('files', 'module'), [
+    pytest.param({'{p}/__init__.py': f'held: {SLICE} = {{}}\n'}, '{p}', id='package-init'),
+    pytest.param({'{p}/__init__.py': '', '{p}/one/__init__.py': '', '{p}/one/two/__init__.py': '',
+                  '{p}/one/two/three/__init__.py': '', '{p}/one/two/three/mod.py': f'held: {SLICE} = {{}}\n'},
+                 '{p}.one.two.three.mod', id='depth-five'),
+    pytest.param({'{p}/one/two/mod.py': f'held: {SLICE} = {{}}\n'}, '{p}.one.two.mod', id='namespace-packages'),
+    pytest.param({'{p}/__init__.py': '', '{p}/_private.py': f'held: {SLICE} = {{}}\n'}, '{p}._private',
+                 id='private-module'),
+    pytest.param({'{p}/__init__.py': '', '{p}/broken.py': 'def (:\n'}, '{p}.broken', id='does-not-parse'),
+])
+def test_every_module_of_a_member_is_read(scratch: Scratch, files: dict[str, str], module: str) -> None:
+    package = scratch.package()
+    scratch.member(package, {name.format(p=package): text for name, text in files.items()})
+    violations = scratch.report()['violations']
+    assert len(violations) == 1 and violations[0].startswith(f'{module.format(p=package)}:'), violations
+    assert 'slice' in violations[0] or 'does not parse' in violations[0], violations
+
+
+@pytest.mark.unit
+def test_the_root_and_every_members_glob_are_read(scratch: Scratch) -> None:
+    rooted, extra = scratch.package(), scratch.package()
+    scratch.root_files({f'{rooted}/__init__.py': '', f'{rooted}/mod.py': f'held: {SLICE} = {{}}\n'})
+    home = scratch.root / 'extra' / 'more'
+    (home / 'src' / extra).mkdir(parents=True)
+    (home / 'pyproject.toml').write_text('[project]\nname = "more"\nversion = "0"\n')
+    (home / 'src' / extra / '__init__.py').write_text('')
+    (home / 'src' / extra / 'mod.py').write_text(f'held: {SLICE} = {{}}\n')
+    scratch.importable(home / 'src')
+    scratch.workspace(members=('packages/*', 'extra/*'))
+    report = scratch.report()
+    assert sorted(report['members']) == ['.', 'extra/more']
+    assert sorted(v.split(':', 1)[0] for v in report['violations']) == sorted([f'{rooted}.mod', f'{extra}.mod'])
 
 
 @pytest.mark.unit
