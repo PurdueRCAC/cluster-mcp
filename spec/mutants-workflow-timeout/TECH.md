@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: ci/mutants-workflow-timeout
 base: develop
-current_phase: P2
+current_phase: P3
 last_updated: '2026-11-10'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 1 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 1 && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run pytest -q tests/test_mutations.py tests/test_mutant_shards.py tests/test_hygiene.py
 - id: P2
   name: The workflow runs every shard to a ledger; the documents follow
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -162,21 +162,21 @@ the platform exactly once, each decision pinned by a row that kills a named muta
 **Goal:** `.github/workflows/mutants.yml` is the plan job and the sharded matrix job of PLAN § 2.2;
 `AGENTS.md` states the dispatch state, the sharded run and the bound; the full suite is green.
 
-- [ ] Rewrite `.github/workflows/mutants.yml` per PLAN § 2.2: header comment (dispatch state, the
+- [x] Rewrite `.github/workflows/mutants.yml` per PLAN § 2.2: header comment (dispatch state, the
       shape, least privilege), `workflow_dispatch` only, `contents: read`, `plan` and `mutants`, both
       `timeout-minutes: 15` on `ubuntu-24.04`, `fail-fast: false`, the matrix from `plan`'s output,
       `SHARD` from `matrix.shard` and `strategy.job-total`, the shared steps verbatim as ci.yml's
       `suite-legacy-1` carries them (checkout, setup-uv, the shells, `uv sync --locked`), the `run`
       step (`timeout-minutes: 12`) and the always-run `ledger` step. No new `uses:`.
-- [ ] Append the workflow row (`test_the_mutants_workflow_runs_each_shard_to_a_ledger`, matching each
+- [x] Append the workflow row (`test_the_mutants_workflow_runs_each_shard_to_a_ledger`, matching each
       step line for line, as PLAN § 7 finding 4 has it) to `tests/test_mutant_shards.py`.
-- [ ] Extend `verify/shard-mutants.py` with mode `workflow`: PLAN § 6.2's nine workflow mutants,
+- [x] Extend `verify/shard-mutants.py` with mode `workflow`: PLAN § 6.2's nine workflow mutants,
       each planted into the staged workflow and killed by the workflow row (additions only).
-- [ ] `AGENTS.md` § Factory profile: the `mutants budget` row after `ci budget`, as PLAN § 2.3 words
+- [x] `AGENTS.md` § Factory profile: the `mutants budget` row after `ci budget`, as PLAN § 2.3 words
       it, ending `Baseline: pending`. § Testing, the mutation-runner bullet: the stale figure replaced
       by a pointer to the row ("pending"), the usage block's three new forms, the closing sentences on
       the sharded run and the dispatch state (R5).
-- [ ] Run the gates, then the profile's full `verify` (the frontmatter's tail; ~26 min: run it in the
+- [x] Run the gates, then the profile's full `verify` (the frontmatter's tail; ~26 min: run it in the
       background) on the staged tree.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `.github/workflows/mutants.yml`, `tests/test_mutant_shards.py`, `AGENTS.md`,
@@ -307,6 +307,25 @@ Two runs: Run A dispatches, Run B records.
   - `--matrix` prints the list of shard numbers as Python prints a list of ints, which is JSON: the
     imports may gain only `Iterable`. Its "no mutation cases found" line goes to stderr, beside the
     shard listing, so the plan job's log shows it.
+- **2026-11-10, P2 build.**
+  - `mutants.yml` is PLAN § 2.2's shape, every timing figure as recorded: both jobs
+    `timeout-minutes: 15`, the `run` step capped at 12, `SHARD_SIZE` 15 unchanged. The `plan` job
+    carries `name: plan` (the `runs` gate reads the job by that name), and the shard job's `name`
+    is `mutants (N of S)` from `matrix.shard` and `strategy.job-total`.
+  - Slots: at today's 1,164 Linux cases the matrix is 78 shard jobs plus `plan`. The organisation's
+    Free plan allows 20 concurrent jobs, shared by every repository, so a run takes all 20 for
+    about four waves (PLAN § 2.5). Not changed here; P3's run measures it.
+  - The workflow row holds the shard job's setup steps equal to `ci.yml`'s `suite-legacy-1`
+    (everything but its suite command), as the `workflow` gate does, so a later change to the
+    suite jobs' setup shows as a red row in the suite, not only at a dispatch.
+  - `verify/shard-mutants.py` gained the `workflow` mode by addition only: a `MODES['workflow']`
+    line after the `MODES` literal, which is left as P1 wrote it. Its nine mutants are killed.
+  - The `mutants budget` row adds one clause to PLAN § 2.3's wording: the run keeps fitting while
+    its shards, run in waves of the account's concurrent jobs, finish within the 15 minutes. Without
+    it the row's "a case added makes more shards, not a longer job" reads as if the envelope held
+    at any count, which § 2.5 shows it does not (R3: a cycle that adds cases can tell).
+  - `git merge-file` of `tests/mutants.py` and `AGENTS.md` against
+    `fix/mutant-child-outlives-timeout` at `5ed1a63`, base `146cbc6`: both clean (2026-11-10).
 
 ---
 

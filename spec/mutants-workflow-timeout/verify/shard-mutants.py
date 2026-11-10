@@ -13,10 +13,15 @@ Modes:
             (exit 1, one failed, no error: a mutant that breaks collection is not a kill). Then the
             runner's rows, unplanted, in a fresh export, must all pass.
 
+  workflow  For each of the workflow's decisions (PLAN § 6.2, the P2 row: 9 entries): the same, planted
+            into the export's .github/workflows/mutants.yml and killed by the workflow row; then that
+            row, unplanted, in a fresh export, must pass.
+
 Footprint: one pytest at a time, never in parallel, each a single process of this environment's
 interpreter (no install, no child pytest of the runner, nothing under bin/sandbox.sh: the rows fake
 `run_case`) taking a few seconds; one export of the index (~550 files) per mutant, under the system
 temporary directory and removed after it. About two minutes in all on a development host.
+The `workflow` mode is nine more of the same, about half a minute.
 """
 
 from __future__ import annotations
@@ -86,7 +91,27 @@ RUNNER_MUTANTS = (
     ('the last shard never scheduled', 'numbers = list(range(1, count + 1))', 'numbers = list(range(1, count))', PLATFORM),
 )
 
+WORKFLOW = '.github/workflows/mutants.yml'
+WORKFLOW_ROW = 'test_the_mutants_workflow_runs_each_shard_to_a_ledger'
+
+# The workflow's decisions, each anchored on its own line, each killed by the workflow row.
+WORKFLOW_MUTANTS = (
+    ('one shard failing cancels the others', '      fail-fast: false\n', '      fail-fast: true\n', WORKFLOW_ROW),
+    ("the shard job's timeout back to 30", '    timeout-minutes: 15\n    strategy:\n',
+     '    timeout-minutes: 30\n    strategy:\n', WORKFLOW_ROW),
+    ("the cases' step capped at 20", '        timeout-minutes: 12\n', '        timeout-minutes: 20\n', WORKFLOW_ROW),
+    ('the ledger skipped after a failed step', '        if: always()\n', '', WORKFLOW_ROW),
+    ('a push trigger', 'on:\n  workflow_dispatch:\n', 'on:\n  workflow_dispatch:\n  push:\n', WORKFLOW_ROW),
+    ('a fixed matrix', '        shard: ${{ fromJSON(needs.plan.outputs.shards) }}\n', '        shard: [1, 2]\n',
+     WORKFLOW_ROW),
+    ("the runner's controls dropped", 'tests/mutants.py --self-check --shard', 'tests/mutants.py --shard', WORKFLOW_ROW),
+    ('a ledger that cannot fail', '--ledger mutants-report.txt --shard "$SHARD"\n',
+     '--ledger mutants-report.txt --shard "$SHARD" || true\n', WORKFLOW_ROW),
+    ('the default bash (-e, pipefail) dropped', '\ndefaults:\n  run:\n    shell: bash\n', '\n', WORKFLOW_ROW),
+)
+
 MODES = {'runner': (RUNNER, RUNNER_MUTANTS, RUNNER_ROWS)}
+MODES['workflow'] = (WORKFLOW, WORKFLOW_MUTANTS, (WORKFLOW_ROW,))
 
 
 def export(dest: Path) -> None:

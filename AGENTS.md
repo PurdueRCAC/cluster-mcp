@@ -1578,14 +1578,17 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   a test reads (`repo_edits`, into one of `REPO_FILES`: `README.md` and the served-surface fixture);
   its child, under this repository's `bin/sandbox.sh`, runs in a copy of `tests/`, `bin/` and the
   top-level files holding the plant, and a case with only such plants has an empty `file`. A child
-  takes about 2 s, all cases about 3 minutes,
-  which is why `uv run pytest` does not run it. Run it after changing a contract or its test, from
-  the repo root:
+  takes seconds and the file holds over a thousand cases (a full run's measured cost: the
+  `mutants budget` row, § Factory: pending), which is why `uv run pytest` does not run it. Run it
+  after changing a contract or its test, from the repo root:
 
   ```bash
   uv run python tests/mutants.py --self-check CASE_ID…     # named cases, plus the runner's controls
   uv run python tests/mutants.py --self-check $(uv run python -c \
       "import sys; sys.path.insert(0, 'tests'); import mutants; print(*(c.id for c in mutants.CASES))")
+  uv run python tests/mutants.py --matrix                             # the run's shards, as the workflow plans them
+  uv run python tests/mutants.py --self-check --shard NUMBER/COUNT    # one shard's cases, plus the controls
+  uv run python tests/mutants.py --ledger REPORT --shard NUMBER/COUNT # check one shard's report; runs nothing
   ```
 
   A `FAILED` line means a case survived (the test does not pin its contract), was killed for the
@@ -1624,10 +1627,17 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget
   or removal records its reason in the commit body. `.github/workflows/mutants.yml` runs every case
-  in `mutants.CASES` on demand (`workflow_dispatch`) and fails when a case survives or none are
-  found. It gates nothing: it never runs on push or pull request, and publish does not read it.
-  GitHub offers a manual run only for a workflow on the default branch, so it becomes dispatchable
-  at the release that first carries it to `main`.
+  in `mutants.CASES` on demand (`workflow_dispatch`), split into shards. Its `plan` job asks
+  `--matrix` for the commit's shards, at most `SHARD_SIZE` cases each, so a case added makes another
+  shard rather than a longer job, and the plan's log names every case of every shard. A job per
+  shard runs it (`--self-check --shard`) under a step cap, then always its ledger (`--ledger`): a
+  separate process that re-reads the shard's report however the runner ended, and fails the job
+  naming each case without exactly one kill and each control that did not pass. The run fails when
+  a case survives, is killed for the wrong reason or has no verdict, or when none are found. Each
+  job and the whole run keep the `mutants budget` row's bound. It gates nothing: it never runs on
+  push or pull request, and publish does not read it. GitHub offers a manual run only for a
+  workflow on the default branch; `main` carries this one, so a run can be dispatched against any
+  branch that has the file.
 - **Recorded limitations.** The **issuer/audience swap** is undetectable while `ISSUER ==
   AUDIENCE` (both `rcac-mcp` in `token.py`): no token can tell a verifier that swapped the two from
   a correct one, so no test pins it. If the constants ever differ, add the case. File I/O is not
@@ -1787,6 +1797,7 @@ This repo is built by the spec-driven factory: GOAL → PLAN/TECH → build → 
 | landing | `squash-local`: squash onto `origin/develop` in the cycle worktree as one `[category] What changed` commit, then push `develop` |
 | ci | `.github/workflows/ci.yml`: the one check publish reads, a run of nine jobs (`suite-legacy-1` to `suite-legacy-4` and `suite-modern-1` to `suite-modern-4`, one suite command each, four per protocol era, then `gate`, which needs all eight). Before a `squash-local` landing, list the push runs of the cycle branch's head commit with `gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" -e push --json databaseId,attempt,status,conclusion`: at least one run must be listed, and every listed run, in its latest attempt, must be `completed` with conclusion `success`. A red, cancelled, missing or unfinished run is not green. Pull-request runs and `.github/workflows/mutants.yml` are never read |
 | ci budget | Every job that runs a suite command finishes within 10 minutes of wall time, start to completion as `gh run view --json jobs` reports it, on the hosted `ubuntu-24.04` runner, with `timeout-minutes` at 20. Baseline (worst of each job over the 3 runs counted at landing, commit `ef301e6`, runs 42229254457#1, 42229254457#2, 42229254457#4): `suite-legacy-1` 3:48, `suite-legacy-2` 2:46, `suite-legacy-3` 7:10, `suite-legacy-4` 7:22, `suite-modern-1` 6:57, `suite-modern-2` 5:48, `suite-modern-3` 7:34, `suite-modern-4` 7:33 |
+| mutants budget | Every job of `.github/workflows/mutants.yml` finishes within 10 minutes of wall time, start to completion as `gh run view --json jobs` reports it, on the hosted `ubuntu-24.04` runner, with `timeout-minutes` at 15 (the cases' step capped at 12, so the shard's ledger still runs), and the whole run within 15 minutes from its dispatch to its last job's completion, queueing included. A shard holds at most 15 cases (`SHARD_SIZE` in `tests/mutants.py`), so that a job with one case stopped at the runner's 300 s per-case limit (about 310 s) still fits. A case added makes more shards, not a longer job: the run keeps fitting while the worst job plus 310 s stays within 600 s, and while its shards, run in waves of the account's concurrent jobs, still finish within the 15 minutes. Baseline: pending |
 | setup | `uv sync --locked`: dependency refresh, run before any verify |
 | verify | `uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help`: the full gate. Phases narrow it; publish and release run all of it. It runs the suite in both protocol eras: the handshake era first, then revision 2026-07-28 (§ Testing), each era as four commands that together run every test once (§ Conventions, "CI mirrors the gate") |
 | throwaway environment | `bin/sandbox.sh <cmd…>` (contract below) |

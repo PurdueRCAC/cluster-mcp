@@ -7,18 +7,22 @@ A dispatched run asks the runner for its shards, runs each in a job of its own, 
 job's report with the ledger, a separate process that reads the report however the runner ended.
 These rows pin that every case this platform defines runs in exactly one shard, that every job
 computes the same split, and that the ledger fails a shard for each case without exactly one kill
-and each control that did not pass. No child runs: `run_case` is faked.
+and each control that did not pass. One row holds `.github/workflows/mutants.yml` to that shape,
+its jobs and steps line for line. No child runs: `run_case` is faked.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 import mutants
 from mutants import CONTROLS, SHARD_SIZE, parse_shard, report_violations, shard_count, shard_ids
+
+WORKFLOWS = Path(__file__).resolve().parents[1] / '.github' / 'workflows'
 
 # A report line per control, as `self_check` prints it when the control passes.
 CONTROL_LINES = [f'control  {text}: [...]' for text in CONTROLS]
@@ -200,3 +204,62 @@ def test_a_run_with_no_cases_names_no_shard(monkeypatch: pytest.MonkeyPatch, cap
     out, err = capsys.readouterr()
     assert out == ''
     assert err == 'no mutation cases found in tests/mutants.py\n'
+
+
+def workflow_jobs(text: str) -> dict[str, tuple[list[str], list[list[str]]]]:
+    """Each job of a workflow by id: its lines before `steps:`, and each step's lines, comments and blanks dropped."""
+    jobs: dict[str, tuple[list[str], list[list[str]]]] = {}
+    parts = re.split(r'^  ([\w-]+):\n', text.split('\njobs:\n', 1)[1], flags=re.M)
+    for job_id, body in zip(parts[1::2], parts[2::2]):
+        head, _, rest = body.partition('    steps:\n')
+        steps: list[list[str]] = []
+        for line in rest.splitlines():
+            if not line.strip() or line.lstrip().startswith('#'):
+                continue
+            if line.startswith('      - '):
+                steps.append([line])
+            else:
+                steps[-1].append(line)
+        jobs[job_id] = ([line for line in head.splitlines() if line.strip()], steps)
+    return jobs
+
+
+@pytest.mark.unit
+def test_the_mutants_workflow_runs_each_shard_to_a_ledger() -> None:
+    text = (WORKFLOWS / 'mutants.yml').read_text()
+    # Dispatched only, under a read-only token, and every step under the default bash (-e, pipefail), so a
+    # runner that exits 1 fails its step through `tee`.
+    assert ('\non:\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\n'
+            'defaults:\n  run:\n    shell: bash\n\njobs:\n') in text
+    assert text.count('shell:') == 1 and text.count('permissions:') == 1
+    for word in ('|| true', 'continue-on-error', 'exclude:', 'include:', 'max-parallel'):
+        assert word not in text, word
+    jobs = workflow_jobs(text)
+    assert list(jobs) == ['plan', 'mutants']
+    # The setup steps are the suite jobs' own: the same pinned actions, the login shells the targets
+    # drive, and the locked environment.
+    suite = workflow_jobs((WORKFLOWS / 'ci.yml').read_text())['suite-legacy-1'][1][:-1]
+    sync = [['      - run: uv sync --locked']]
+    assert sync[0] in suite
+    plan_head, plan_steps = jobs['plan']
+    assert plan_head == ['    name: plan', '    runs-on: ubuntu-24.04', '    timeout-minutes: 15', '    outputs:',
+                         '      shards: ${{ steps.shards.outputs.shards }}']
+    assert plan_steps == suite[:2] + sync + [[
+        '      - id: shards',
+        '        run: |',
+        '          shards=$(uv run python tests/mutants.py --matrix)',
+        '          echo "shards=${shards}" >> "$GITHUB_OUTPUT"']]
+    # One job per shard the plan names, none cancelled by another's failure, each told the run's count.
+    shard_head, shard_steps = jobs['mutants']
+    assert shard_head == ['    name: mutants (${{ matrix.shard }} of ${{ strategy.job-total }})', '    needs: plan',
+                          '    runs-on: ubuntu-24.04', '    timeout-minutes: 15', '    strategy:',
+                          '      fail-fast: false', '      matrix:',
+                          '        shard: ${{ fromJSON(needs.plan.outputs.shards) }}', '    env:',
+                          '      SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}']
+    # The cases and the controls, unbuffered into the report under a cap inside the job's timeout; then
+    # the ledger, whatever the cases' step did.
+    assert shard_steps == suite + [
+        ['      - name: run', '        timeout-minutes: 12',
+         '        run: uv run python -u tests/mutants.py --self-check --shard "$SHARD" | tee mutants-report.txt'],
+        ['      - name: ledger', '        if: always()',
+         '        run: uv run python tests/mutants.py --ledger mutants-report.txt --shard "$SHARD"']]
