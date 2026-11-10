@@ -1,12 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""The fast half of the planted-violation runner (`mutants.py`), kept in the suite.
+"""The suite half of the planted-violation runner (`mutants.py`): unit rows, and one integration row.
 
 `test_mutation_anchor_applies[<case>]` goes red the moment a change moves the code a planted
 violation edits: the contract that case pins has moved, and the case must be re-planted against the
 new code before its targets can be trusted again. The `mutation_violations` controls prove the
 runner cannot count a child as a kill unless every target failed for the case's stated reason.
+
+The rows after them pin the stop a child run past its limit gets: each decision of `run_members`,
+`_wait_gone`, `stop_run`, `run_child` and the runner's signal handling as a unit row on fakes, and
+the whole stop as one integration row that hangs a real child under `bin/sandbox.sh` at a patched
+limit and checks every process of the run is gone, and nothing outside it touched, when the case
+is reported.
 """
 
 from __future__ import annotations
@@ -112,12 +118,21 @@ def test_mutation_check_flags_survivors(returncode: int, report: str | None, fra
 
 # A run as a process table sees it: the runner (10), the bin/sandbox.sh wrapper leading the run's
 # group (100), the child pytest (101), a grandchild in a group of its own (102), an orphan left in the
-# wrapper's group (103), a grandchild in a session of its own (104) and an orphan left in that
-# session's group (105), and an orphan of nothing in the run (200).
+# wrapper's group (103), a grandchild in a session of its own (104), an orphan left in that
+# session's group (105), a child of that orphan in a group of its own (50, a lower number than its
+# parent, so only a second pass over the table finds it), and an orphan of nothing in the run (200).
 RUN: dict[int, tuple[int, int, str]] = {
     10: (1, 10, 'S'), 100: (10, 100, 'S'), 101: (100, 100, 'S'), 102: (101, 102, 'S'), 103: (1, 100, 'S'),
-    104: (101, 104, 'Ss'), 105: (1, 104, 'S'), 200: (1, 200, 'S')}
+    104: (101, 104, 'Ss'), 105: (1, 104, 'S'), 50: (105, 50, 'S'), 200: (1, 200, 'S')}
 OWN = (10, 10)
+RUN_PIDS, RUN_GROUPS = {100, 101, 102, 103, 104, 105, 50}, {100, 102, 104, 50}
+
+# Init (1) and the kernel (0) put in reach of the run, and a child of the pytest in group 1 with an
+# orphan beside it: neither number, as a pid or a group, may join the run, or a signal to it would
+# go to `kill(0)`, `killpg(0)` or init.
+INIT_TABLE: dict[int, tuple[int, int, str]] = {
+    0: (0, 100, 'Ss'), 1: (100, 0, 'Ss'), 100: (10, 100, 'S'), 101: (100, 100, 'S'), 106: (101, 1, 'S'),
+    107: (1, 1, 'S')}
 
 
 def runner_group_table() -> tuple[dict[int, tuple[int, int, str]], set[int], set[int]]:
@@ -133,19 +148,26 @@ def runner_group_table() -> tuple[dict[int, tuple[int, int, str]], set[int], set
     pytest.param({102}, set(), id='grandchild'),
     pytest.param({103}, set(), id='orphan-in-the-group'),
     pytest.param({104, 105}, set(), id='new-session-group'),
+    pytest.param({50}, set(), id='found-later-in-the-table'),
     pytest.param(set(), {200, 10, 1}, id='unrelated-orphan'),
     pytest.param(set(), set(), id='runner-group'),
+    pytest.param(set(), set(), id='never-init-or-kernel'),
 ])
 def test_run_members_follow_parents_and_groups(present: set[int], absent: set[int], request: pytest.FixtureRequest) -> None:
     if request.node.callspec.id == 'runner-group':
         table, pids, groups = runner_group_table()
-        found, known = run_members(table, [100], [100])
+        # The runner's own group is never kept, even when handed in as known.
+        found, known = run_members(table, [100], [100, os.getpgrp()])
         assert (set(found), set(known)) == (pids, groups)
         assert os.getpid() not in found and os.getpgrp() not in known
         return
+    if request.node.callspec.id == 'never-init-or-kernel':
+        found, known = run_members(INIT_TABLE, [100], [100], OWN)
+        assert (set(found), set(known)) == ({100, 101, 106}, {100}), (found, known)
+        return
     found, known = run_members(RUN, [100], [100], OWN)
     assert present <= set(found) and not absent & set(found), found
-    assert set(found) == {100, 101, 102, 103, 104, 105} and set(known) == {100, 102, 104}, (found, known)
+    assert (set(found), set(known)) == (RUN_PIDS, RUN_GROUPS), (found, known)
 
 
 class Fakes:
@@ -221,6 +243,11 @@ HELD = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
                  [101], [100], [], [101, 102, 103], 2, id='new-member-in-a-group'),
     pytest.param([{101: (1, 100, 'S'), 102: (1, 100, 'S')}, {101: (1, 100, 'S')}, {101: (1, 100, 'S'), 102: (1, 100, 'S')}],
                  [101, 102], [100], [101], None, None, id='still-running'),
+    # 102 and 104 end, and 104's group with it; then 102's number comes back with a child (106), and
+    # a process (107) carries 104's group number: neither is the run's, so neither is signalled.
+    pytest.param([{101: (1, 100, 'S'), 102: (1, 100, 'S'), 104: (1, 104, 'S')}, {101: (1, 100, 'S')},
+                  {101: (1, 100, 'S'), 102: (1, 100, 'S'), 106: (102, 600, 'S'), 107: (1, 104, 'S')}, {}],
+                 [101, 102, 104], [100, 104], [], [101, 102, 104, 101, 101], 3, id='gone-numbers-never-followed'),
 ])
 def test_gone_waits_until_every_process_ends(tables: list[Any], pids: list[int], groups: list[int], left: list[int],
                                              kills: list[int] | None, sleeps: int | None) -> None:
@@ -256,6 +283,18 @@ def test_stop_run_freezes_then_kills_the_whole_run() -> None:
         ('wait',),
         ('mask', signal.SIG_UNBLOCK, HELD),
     ]
+
+
+@pytest.mark.unit
+def test_stop_run_waits_for_every_process_it_found() -> None:
+    # After the kill, the orphan 105 is still running; its parent is gone and its group's leader too,
+    # so only the stop's own record of it (and of group 104) links it to the run.
+    first = {100: (10, 100, 'S'), 101: (100, 100, 'T'), 104: (101, 104, 'Ts'), 105: (1, 104, 'T')}
+    fakes = Fakes([first, first, {100: (10, 100, 'Z'), 105: (1, 104, 'S')}, {100: (10, 100, 'Z')}])
+    assert fakes.stop() == []
+    confirm = fakes.calls[fakes.calls.index(('killpg', 100, KILL)) + 1:]
+    assert confirm == [('table',), ('kill', 105, KILL), ('sleep', GONE_POLL), ('table',), ('wait',),
+                       ('mask', signal.SIG_UNBLOCK, HELD)], confirm
 
 
 @pytest.mark.unit
