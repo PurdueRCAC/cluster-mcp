@@ -3,17 +3,19 @@
 Last run 2026-11-10, review cycle 2's remediation build, on its final `tests/mutants.py` and
 `tests/test_mutations.py`, with [`sweep.py`](sweep.py): each mutant planted into a working copy of its
 file (a plant that does not compile is reported `BOTCHED`, never run), only the rows it names run, the
-file restored from a backup after each mutant and byte-compared at the end. 62 mutants in about
-220 s on a development host: 61 killed (every named row red), 1 survived, recorded below as
+file restored from a backup after each mutant and byte-compared at the end. 68 mutants in about
+240 s on a development host: 67 killed (every named row red), 1 survived, recorded below as
 equivalent. One plant (`pipes-drained`) first matched inside the new `try` at the wrong indentation
 and broke the module's import; its anchor was moved to the statement after the `try` and it was run
 again, killed.
 
 The list holds PLAN § 6's decision list (the first 33), review cycle 1's surviving mutants (`sr-*`,
-`rm-*`, `wg-*`, pinned by that remediation), review cycle 2's (`wg-end-absolute`, `f4-*`, `ps-*`), and
+`rm-*`, `wg-*`, pinned by that remediation), review cycle 2's (`wg-end-absolute`, `f4-*`, `ps-*`), the gate's ruling on a child that cannot
+launch (`launch-*`), and
 additive mutants (`add-*`: code added, nothing removed), among them the three cycle 2 named: the
 stop's error swallowed silently, the report claiming "stopped" after a failed look, and the sweep
-halting.
+halting, and the ruling's three: a launch error swallowed as a kill, the sweep halting on it, and its
+cause dropped.
 
 | Mutant | Verdict | Rows it names |
 |---|---|---|
@@ -78,6 +80,12 @@ halting.
 | `add-f4-claims-stopped` | killed (2/2) | `a_timeout_reason_names_the_limit[unfinished]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
 | `add-f4-sweep-halts` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
 | `add-f4-left-claimed-empty` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `launch-no-catch` | killed (2/2) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit]`, `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
+| `launch-catch-oserror-only` | killed (1/1) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
+| `launch-case-no-catch` | killed (2/2) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit]`, `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
+| `launch-cause-dropped` | killed (2/2) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit]`, `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
+| `add-launch-swallowed-as-killed` | killed (2/2) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit]`, `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
+| `add-launch-sweep-halts` | killed (2/2) | `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit]`, `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[subprocess-error]` |
 | `orphan-not-waited` | killed (1/1) | `a_child_past_its_limit_is_stopped_whole_and_reported` |
 
 ## Survivors, and the reviews' coverage observations

@@ -1600,7 +1600,11 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   because the run has used up the user's processes), it still kills the wrapper's process group and
   every process it had found, and the case's line says so instead of "stopped": `timeout: the child
   ran past its 300 s limit; the stop could not finish (<the error>): … others of the run may still
-  be running`; the sweep goes on. A process that left every group of the run and lost its parent
+  be running`; the sweep goes on. A case whose child cannot be launched at all (its `Popen` raising,
+  at the user's process limit for one: `ChildNotStarted`) is reported as its own `FAILED  <id>:
+  could not start: <the error>`, never as killed, and the sweep goes on to the next case; a sandbox
+  that starts and then fails is a child that ended, read by `mutation_violations` as any other (no
+  JUnit report, its exit status). A process that left every group of the run and lost its parent
   before the stop is out of reach. Since the run no longer shares the runner's process group,
   Ctrl-C, SIGTERM or SIGHUP to the runner reach the run through the runner: it stops the whole run
   first (`stop_on_signals` installs `_raise_runner_signal`, which turns TERM and HUP into

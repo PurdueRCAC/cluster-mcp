@@ -25,7 +25,9 @@ Its case is then reported `FAILED` with the timeout named (`ChildTimeout`, `chil
 plus the pids of any process of the run still running, and the sweep goes on. A stop that cannot look
 at the run (its `ps`, `_processes`, fails or cannot start) still kills the wrapper's group and what it
 had found, and the case's line says the stop could not finish rather than that the run was stopped.
-A SIGTERM or SIGHUP to the runner (`stop_on_signals`), or a Ctrl-C, stops the run in progress the same
+A case whose child cannot be launched at all (`ChildNotStarted`) is reported `FAILED` with
+`could not start:` and the error, and the sweep goes on. A SIGTERM or SIGHUP to the runner
+(`stop_on_signals`), or a Ctrl-C, stops the run in progress the same
 way, and the runner then ends by that signal (`die_by` for TERM and HUP).
 
 This module is not collected: a child takes seconds, so the phase gates run it and its report is
@@ -5730,6 +5732,14 @@ class ChildTimeout(Exception):
         self.unfinished = unfinished
 
 
+class ChildNotStarted(Exception):
+    """A case's child run could not be launched at all; `cause` names the error (at the user's process limit, say)."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
+        self.cause = cause
+
+
 class RunnerSignal(BaseException):
     """A SIGTERM or SIGHUP the runner got, raised where it lands so the run in progress is stopped first."""
 
@@ -5891,14 +5901,18 @@ def run_child(src_root: Path, targets: Sequence[str], junit: Path,
               repo: Path | None = None) -> subprocess.CompletedProcess[str]:
     """Run `targets` against the package under `src_root` in a sandboxed child pytest, in `repo` (default: this one).
 
-    A run past `LIMIT` is stopped whole (`stop_run`) and raises `ChildTimeout`.
+    A run past `LIMIT` is stopped whole (`stop_run`) and raises `ChildTimeout`; a child that cannot be
+    launched raises `ChildNotStarted`.
     """
     env = {**os.environ, 'PYTHONPATH': str(src_root), 'PYTHONDONTWRITEBYTECODE': '1'}
     # A session of its own: the run can then be stopped whole without reaching the runner or its caller.
-    proc = subprocess.Popen(
-        [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit), str(repo or TESTS.parent),
-         *[f'tests/{target}' for target in targets]],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    try:
+        proc = subprocess.Popen(
+            [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit),
+             str(repo or TESTS.parent), *[f'tests/{target}' for target in targets]],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ChildNotStarted(f'{type(exc).__name__}: {exc}') from None
     try:
         out, err = proc.communicate(timeout=LIMIT)
     except subprocess.TimeoutExpired:
@@ -5978,6 +5992,8 @@ def run_case(case: Case, src_override: Path | None = None, omit: str | None = No
             child = run_child(src_override or src_root, case.targets, junit, repo)
         except ChildTimeout as exc:
             return child_timeout_violations(exc)
+        except ChildNotStarted as exc:
+            return [f'could not start: {exc.cause}']
         report = junit.read_text() if junit.exists() else None
         violations = mutation_violations(child.returncode, report, case.targets, case.why)
         if violations and child.returncode not in (0, 1):
