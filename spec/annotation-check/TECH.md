@@ -3,7 +3,7 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_review
+status: blocked
 branch: ci/annotation-check
 base: develop
 current_phase: done
@@ -37,10 +37,10 @@ phases:
   hill: uphill
   verify: sh spec/annotation-check/verify/gate.sh P2
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 82f5744b3226406eece36b5dc1accc7b7c3a2eff
+  verdict: changes-requested
+  blocked_reason: 'review 1: 5 CONFIRMED (1 MEDIUM AGENTS.md drift, 4 LOW unpinned discovery/walker/reader, unread functional forms)'
+  cycle: 1
 ---
 
 # TECH.md — Nothing would catch the next silently wrong annotation
