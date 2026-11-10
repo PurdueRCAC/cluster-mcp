@@ -1432,7 +1432,8 @@ import has no effect.
   - `tests/test_mutations.py` (`unit`, `integration`): the suite half of the mutation runner
     (below). Unit rows: every case's anchor still applies, `mutation_violations` refuses each way a
     child can fail to prove a kill, and each decision of the stop a child run past its limit gets
-    (`run_members`, `_wait_gone`, `stop_run`, `run_child`, the signal handling), on fakes. One
+    (`run_members`, `_wait_gone`, `stop_run`, `run_child`, `child_timeout_violations`, the signal
+    handling, a stop that could not finish), on fakes. One
     `integration` row hangs a real child under `bin/sandbox.sh` at a patched 8 s limit, with a
     same-group child, a new-session child and an orphan in the run, and asserts the whole run is
     gone, the scratch copy removed, processes outside the run untouched and the case reported;
@@ -1586,18 +1587,26 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   case's `why` follows it.
 
   Each child runs in a session of its own. Past `LIMIT` the runner stops the run whole
-  (`stop_run`): it holds SIGINT, SIGTERM and SIGHUP (`HELD`), freezes the run with SIGSTOP, finds
-  every process reachable from the wrapper through a live parent or a process group of the run
-  (`run_members`), SIGKILLs every group and pid it found, and waits up to `GONE_WITHIN` (10 s,
-  looking every `GONE_POLL`, 0.1 s) until none of them is running (`_wait_gone`). The case is then
-  reported `FAILED` with `timeout: the child ran past its 300 s limit and was stopped`
-  (`ChildTimeout`), plus `still running 10 s after the stop: pids …` for any it could not end, and
-  the sweep goes on. A process that left every group of the run and lost its parent before the
-  stop is out of reach. Since the run no longer shares the runner's process group, Ctrl-C, SIGTERM
-  or SIGHUP to the runner reach the run through the runner: it stops the whole run first
-  (`stop_on_signals` turns TERM and HUP into `RunnerSignal`), then dies by the signal it got
-  (`die_by` for TERM and HUP, Python's own exit for Ctrl-C). A SIGKILL to the runner's process group ends the runner alone and leaves its current
-  run to finish by itself. The killed `bin/sandbox.sh` leaves its home in the runner's `TMPDIR`
+  (`stop_run`): it holds SIGINT, SIGTERM and SIGHUP (`HELD_SIGNALS`), freezes the run with SIGSTOP,
+  finds every process reachable from the wrapper through a live parent or a process group of the
+  run (`run_members`, over one `ps` table per look: `_processes`, a `Table` of pid to parent, group
+  and state), SIGKILLs every group and pid it found (`_send` ignores one already gone or not the
+  runner's to signal), and waits up to `GONE_WITHIN` (10 s, looking every `GONE_POLL`, 0.1 s) until
+  none of them is running (`_wait_gone`). The case is then reported `FAILED` (`ChildTimeout`, turned
+  into the case's violations by `child_timeout_violations`, not to be confused with
+  `tests/test_executors.py`'s `timeout_violations`) with `timeout: the child ran past its 300 s
+  limit and was stopped`, plus `still running 10 s after the stop: pids …` for any it could not end,
+  and the sweep goes on. If the stop cannot look at the run (a `ps` that fails, or cannot start
+  because the run has used up the user's processes), it still kills the wrapper's process group and
+  every process it had found, and the case's line says so instead of "stopped": `timeout: the child
+  ran past its 300 s limit; the stop could not finish (<the error>): … others of the run may still
+  be running`; the sweep goes on. A process that left every group of the run and lost its parent
+  before the stop is out of reach. Since the run no longer shares the runner's process group,
+  Ctrl-C, SIGTERM or SIGHUP to the runner reach the run through the runner: it stops the whole run
+  first (`stop_on_signals` installs `_raise_runner_signal`, which turns TERM and HUP into
+  `RunnerSignal`), then dies by the signal it got (`die_by` for TERM and HUP, Python's own exit for
+  Ctrl-C). A SIGKILL to the runner's process group ends the runner alone and leaves its current run
+  to finish by itself. The killed `bin/sandbox.sh` leaves its home in the runner's `TMPDIR`
   ([`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md)).
 
   A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that

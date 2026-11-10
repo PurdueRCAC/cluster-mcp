@@ -1,14 +1,19 @@
-# Mutant sweep of the stop — record (review cycle 1 remediation)
+# Mutant sweep of the stop — record
 
-Run 2026-11-09 by the remediation build, on the final `tests/mutants.py` and `tests/test_mutations.py`
-of that build, with [`sweep.py`](sweep.py): each mutant planted into a working copy of its file, only
-the rows it names run, the file restored from a backup after each mutant and byte-compared at the
-end. 51 mutants in 205 s on a development host: 50 killed (every named row red), 1 survived, recorded
-below as equivalent.
+Last run 2026-11-10, review cycle 2's remediation build, on its final `tests/mutants.py` and
+`tests/test_mutations.py`, with [`sweep.py`](sweep.py): each mutant planted into a working copy of its
+file (a plant that does not compile is reported `BOTCHED`, never run), only the rows it names run, the
+file restored from a backup after each mutant and byte-compared at the end. 62 mutants in about
+220 s on a development host: 61 killed (every named row red), 1 survived, recorded below as
+equivalent. One plant (`pipes-drained`) first matched inside the new `try` at the wrong indentation
+and broke the module's import; its anchor was moved to the statement after the `try` and it was run
+again, killed.
 
-The list holds PLAN § 6's decision list (the first 33, as P1's build ran them), review cycle 1's
-surviving mutants (rows pinned by the remediation, `sr-*`, `rm-*`, `wg-*`), and additive mutants
-(`add-*`: code added, nothing removed).
+The list holds PLAN § 6's decision list (the first 33), review cycle 1's surviving mutants (`sr-*`,
+`rm-*`, `wg-*`, pinned by that remediation), review cycle 2's (`wg-end-absolute`, `f4-*`, `ps-*`), and
+additive mutants (`add-*`: code added, nothing removed), among them the three cycle 2 named: the
+stop's error swallowed silently, the report claiming "stopped" after a failed look, and the sweep
+halting.
 
 | Mutant | Verdict | Rows it names |
 |---|---|---|
@@ -62,22 +67,32 @@ surviving mutants (rows pinned by the remediation, `sr-*`, `rm-*`, `wg-*`), and 
 | `add-left-line-always` | killed (2/2) | `a_timeout_reason_names_the_limit[gone]`, `a_child_past_its_limit_is_stopped_whole_and_reported` |
 | `add-sigint-handler` | killed (2/2) | `a_runner_signal_exits_through_the_stop[term]`, `a_runner_signal_exits_through_the_stop[hup]` |
 | `add-rewait-after-unblock` | killed (2/2) | `stop_run_freezes_then_kills_the_whole_run`, `stop_run_waits_for_every_process_it_found` |
+| `wg-end-absolute` | killed (1/1) | `gone_waits_until_every_process_ends[clock-not-at-zero]` |
+| `f4-no-catch` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `f4-catch-base` | killed (1/1) | `run_child_reports_a_stop_that_could_not_finish[interrupt-during-stop]` |
+| `f4-claims-stopped` | killed (2/2) | `a_timeout_reason_names_the_limit[unfinished]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `f4-cause-dropped` | killed (2/2) | `a_timeout_reason_names_the_limit[unfinished]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `ps-check-false` | killed (1/1) | `a_failed_ps_is_an_error_not_an_empty_table` |
+| `ps-unsandboxed` | killed (1/1) | `a_failed_ps_is_an_error_not_an_empty_table` |
+| `add-f4-error-swallowed` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `add-f4-claims-stopped` | killed (2/2) | `a_timeout_reason_names_the_limit[unfinished]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `add-f4-sweep-halts` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
+| `add-f4-left-claimed-empty` | killed (3/3) | `run_child_reports_a_stop_that_could_not_finish[ps-cannot-start]`, `run_child_reports_a_stop_that_could_not_finish[ps-fails-mid-walk]`, `a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on` |
 | `orphan-not-waited` | killed (1/1) | `a_child_past_its_limit_is_stopped_whole_and_reported` |
 
-## Survivors and review cycle 1's coverage observations
+## Survivors, and the reviews' coverage observations
 
 - `wg-strict-end` (`_wait_gone`'s `clock() >= end` → `clock() > end`): **equivalent.** The two differ
   only when a look lands on the deadline exactly; then the strict form looks once more, `GONE_POLL`
   later. That is a zero-width boundary of a real-time bound, not a decision any caller can observe:
   no row could tell the forms apart without fixing the clock to the deadline's exact float, which the
   monotonic clock never yields.
-- `sr-wait-gone-wrapper-only` (review P1): pinned by `stop_run_waits_for_every_process_it_found`.
-- `rm-single-pass`: pinned by `run_members_follow_parents_and_groups[found-later-in-the-table]`.
-- `rm-own-group-seeded`: pinned by `run_members_follow_parents_and_groups[runner-group]`, which now
-  hands the runner's own group in as known.
-- `rm-pid1-included` (the review's equivalent): pinned anyway by
-  `run_members_follow_parents_and_groups[never-init-or-kernel]`, with `rm-pid0-and-1-included` and
-  `rm-group-1-added` beside it, since a 0 or 1 in the run would send a signal to `kill(0)`,
-  `killpg(0)` or init.
-- `wg-gone-not-filtered`, `wg-groups-not-pruned`: pinned by
-  `gone_waits_until_every_process_ends[gone-numbers-never-followed]`.
+- Review cycle 1: `sr-wait-gone-wrapper-only` pinned by `stop_run_waits_for_every_process_it_found`;
+  `rm-single-pass` by `run_members…[found-later-in-the-table]`; `rm-own-group-seeded` by the
+  `runner-group` row handing in the runner's own group; `rm-pid1-included` (with
+  `rm-pid0-and-1-included` and `rm-group-1-added`) by `[never-init-or-kernel]`;
+  `wg-gone-not-filtered` and `wg-groups-not-pruned` by `gone_waits…[gone-numbers-never-followed]`.
+- Review cycle 2: `wg-end-absolute` pinned by `gone_waits…[clock-not-at-zero]`; `ps-check-false`
+  by `a_failed_ps_is_an_error_not_an_empty_table`. Its other coverage observations
+  (`sr-wait-gone-groups-wrapper-only`, `sos-valueerror-propagates`, `main-extra-sigint-ignore`,
+  `send-no-swallow-perm`) and the survivors it classed equivalent were not routed to this build.

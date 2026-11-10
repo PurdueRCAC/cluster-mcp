@@ -27,6 +27,9 @@ def early(p): return M + 'test_run_child_stops_the_run_on_every_early_exit[' + p
 def sig(p): return M + 'test_a_runner_signal_exits_through_the_stop[' + p + ']'
 SCRIPT = M + 'test_the_script_installs_the_signal_stop'
 WAITS = M + 'test_stop_run_waits_for_every_process_it_found'
+def reports(p): return M + 'test_run_child_reports_a_stop_that_could_not_finish[' + p + ']'
+SWEEP_ON = M + 'test_a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on'
+FAILED_PS = M + 'test_a_failed_ps_is_an_error_not_an_empty_table'
 
 MUTANTS = [
  ('new-session-dropped', R, [("text=True, start_new_session=True)", "text=True)")], [RETURNS, INTEG]),
@@ -39,13 +42,13 @@ MUTANTS = [
                              "            for send, target in reversed(order):\n                if send is kill:\n                    _send(send, target, signal.SIGKILL)\n")], [FREEZE]),
  ('kill-in-discovery-order', R, [("for send, target in reversed(order):", "for send, target in order:")], [FREEZE]),
  ('wrapper-group-not-last', R, [("for send, target in reversed(order):", "for send, target in [order[0], *reversed(order[1:])]:")], [FREEZE]),
- ('mask-not-blocked', R, [("    mask(signal.SIG_BLOCK, HELD)\n", "")], [FREEZE, cut('table-fails')]),
- ('mask-not-unblocked', R, [("        mask(signal.SIG_UNBLOCK, HELD)\n", "")], [FREEZE, cut('table-fails')]),
+ ('mask-not-blocked', R, [("    mask(signal.SIG_BLOCK, HELD_SIGNALS)\n", "")], [FREEZE, cut('table-fails')]),
+ ('mask-not-unblocked', R, [("        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)\n", "")], [FREEZE, cut('table-fails')]),
  ('finally-kill-dropped', R, [("        finally:\n            for send, target in reversed(order):\n                _send(send, target, signal.SIGKILL)\n",
                                "        except BaseException:\n            raise\n        for send, target in reversed(order):\n            _send(send, target, signal.SIGKILL)\n")], [cut('table-fails')]),
  ('first-stop-lookup-not-ignored', R, [("            _send(killpg, proc.pid, signal.SIGSTOP)\n", "            killpg(proc.pid, signal.SIGSTOP)\n")], [cut('wrapper-gone')]),
  ('wait-before-confirmation', R, [("        return _wait_gone(pids, groups,", "        proc.wait()\n        return _wait_gone(pids, groups,"),
-                                  ("    finally:\n        proc.wait()\n        mask(signal.SIG_UNBLOCK, HELD)\n", "    finally:\n        mask(signal.SIG_UNBLOCK, HELD)\n")], [FREEZE]),
+                                  ("    finally:\n        proc.wait()\n        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)\n", "    finally:\n        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)\n")], [FREEZE]),
  ('gone-returns-at-once', R, [("        if not members:\n            return []\n", "        return []\n")], [gone('gone-after-polls'), gone('new-member-in-a-group'), gone('still-running')]),
  ('gone-ignores-zombie', R, [(" or 'Z' in table[pid][2])", ")")], [gone('zombie-is-gone')]),
  ('gone-never-rewalks', R, [("        members, known = run_members(table, members, known, own)\n", "")], [gone('new-member-in-a-group')]),
@@ -58,7 +61,8 @@ MUTANTS = [
  ('communicate-300', R, [("proc.communicate(timeout=LIMIT)", "proc.communicate(timeout=300)")], [RETURNS, INTEG]),
  ('except-base-dropped', R, [("    except BaseException:\n        stop_run(proc)\n        proc.stdout.close()\n        proc.stderr.close()\n        raise\n", "")], [early('interrupt'), early('signal')]),
  ('except-narrowed-to-interrupt', R, [("    except BaseException:\n        stop_run(proc)\n", "    except KeyboardInterrupt:\n        stop_run(proc)\n")], [early('signal')]),
- ('pipes-drained', R, [("        left = stop_run(proc)\n", "        left = stop_run(proc)\n        proc.communicate()\n")], [early('timeout')]),
+ ('pipes-drained', R, [("        # Closed unread: a process the stop could not reach may still hold the write end.\n",
+                        "        proc.communicate()\n        # Closed unread: a process the stop could not reach may still hold the write end.\n")], [early('timeout')]),
  ('run-case-no-catch', R, [("        except ChildTimeout as exc:\n", "        except ValueError as exc:\n")], [INTEG]),
  ('reason-omits-limit', R, [("ran past its {exc.limit} s limit and", "ran past its limit and")], [reason('gone'), reason('left'), INTEG]),
  ('scratch-kept', R, [("tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-')", "tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-', delete=False)")], [INTEG]),
@@ -87,7 +91,27 @@ MUTANTS = [
  ('add-sleep-before-first-look', R, [("    end = clock() + GONE_WITHIN\n", "    end = clock() + GONE_WITHIN\n    sleep(GONE_POLL)\n")], [gone('gone-at-once'), gone('zombie-is-gone')]),
  ('add-left-line-always', R, [("    if exc.left:\n", "    if True:\n")], [reason('gone'), INTEG]),
  ('add-sigint-handler', R, [("        for signum in (signal.SIGTERM, signal.SIGHUP):\n", "        for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):\n")], [sig('term'), sig('hup')]),
- ('add-rewait-after-unblock', R, [("        mask(signal.SIG_UNBLOCK, HELD)\n", "        mask(signal.SIG_UNBLOCK, HELD)\n        proc.wait()\n")], [FREEZE, WAITS]),
+ ('add-rewait-after-unblock', R, [("        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)\n", "        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)\n        proc.wait()\n")], [FREEZE, WAITS]),
+ # Review cycle 2: a stop that could not finish (F4), the ps look, and the deadline's origin.
+ ('wg-end-absolute', R, [("    end = clock() + GONE_WITHIN\n", "    end = GONE_WITHIN\n")], [gone('clock-not-at-zero')]),
+ ('f4-no-catch', R, [("            left = stop_run(proc)\n        except Exception as exc:\n", "            left = stop_run(proc)\n        except ZeroDivisionError as exc:\n")],
+  [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
+ ('f4-catch-base', R, [("            left = stop_run(proc)\n        except Exception as exc:\n", "            left = stop_run(proc)\n        except BaseException as exc:\n")],
+  [reports('interrupt-during-stop')]),
+ ('f4-claims-stopped', R, [("    if exc.unfinished is not None:\n", "    if False:\n")], [reason('unfinished'), SWEEP_ON]),
+ ('f4-cause-dropped', R, [("    return [f'timeout: the child ran past its {exc.limit} s limit',\n                f'the stop could not finish ({exc.unfinished}): ",
+                           "    return [f'timeout: the child ran past its {exc.limit} s limit',\n                f'the stop could not finish: ")], [reason('unfinished'), SWEEP_ON]),
+ ('ps-check-false', R, [("                         capture_output=True, text=True, check=True)\n", "                         capture_output=True, text=True, check=False)\n")], [FAILED_PS]),
+ ('ps-unsandboxed', R, [("    ran = subprocess.run([str(SANDBOX), 'ps', '-A',", "    ran = subprocess.run(['ps', '-A',")], [FAILED_PS]),
+ # Additive (review cycle 2): the error swallowed silently, "stopped" claimed after a failed look, the sweep halting.
+ ('add-f4-error-swallowed', R, [("            unfinished = f'{type(exc).__name__}: {exc}'\n", "            unfinished = f'{type(exc).__name__}: {exc}'\n            unfinished = None\n")],
+  [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
+ ('add-f4-claims-stopped', R, [("    return [f'timeout: the child ran past its {exc.limit} s limit',\n", "    return [f'timeout: the child ran past its {exc.limit} s limit and was stopped',\n")],
+  [reason('unfinished'), SWEEP_ON]),
+ ('add-f4-sweep-halts', R, [("            unfinished = f'{type(exc).__name__}: {exc}'\n", "            unfinished = f'{type(exc).__name__}: {exc}'\n            raise\n")],
+  [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
+ ('add-f4-left-claimed-empty', R, [("        raise ChildTimeout(LIMIT, left, unfinished) from None\n", "        raise ChildTimeout(LIMIT, left, unfinished if left else unfinished and None) from None\n")],
+  [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
  ('orphan-not-waited', T, [("while os.getppid() == spawner and time.monotonic() < end:", "while False:")], [INTEG]),
 ]
 
@@ -104,6 +128,13 @@ try:
         for old, new in edits:
             assert text.count(old) == 1, (name, old)
             text = text.replace(old, new, 1)
+        try:
+            compile(text, str(f), 'exec')
+        except SyntaxError as exc:
+            line = f'BOTCHED  {name}: the planted file does not compile ({exc.msg}, line {exc.lineno})'
+            print(line, flush=True)
+            results.append(line)
+            continue
         f.write_text(text)
         assert f.read_text() != backups[f].read_text(), name  # the mutation landed
         junit = SCR / f'{name}.xml'

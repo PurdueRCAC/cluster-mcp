@@ -9,15 +9,25 @@ new code before its targets can be trusted again. The `mutation_violations` cont
 runner cannot count a child as a kill unless every target failed for the case's stated reason.
 
 The rows after them pin the stop a child run past its limit gets: each decision of `run_members`,
-`_wait_gone`, `stop_run`, `run_child` and the runner's signal handling as a unit row on fakes, and
-the whole stop as one integration row that hangs a real child under `bin/sandbox.sh` at a patched
-limit and checks every process of the run is gone, and nothing outside it touched, when the case
-is reported.
+`_wait_gone`, `stop_run`, `run_child`, `child_timeout_violations`, `_processes` and the runner's
+signal handling as a unit row on fakes, a stop whose `ps` fails included, and the whole stop as one
+integration row that hangs a real child under `bin/sandbox.sh` at a patched limit and checks every
+process of the run is gone, and nothing outside it touched, when the case is reported.
+
+Their stand-ins: `Fakes` records every process call the stop makes and answers its `ps` looks from
+tables (`RUN` with `OWN`, `RUN_PIDS` and `RUN_GROUPS`, `INIT_TABLE`, `runner_group_table`), `Pipe`
+records a pipe's close, and `FakePopen` (installed with `LIMIT` = 7 by the `fake_popen` fixture)
+stands in for the child; `failing_stop` runs the real `stop_run` on fakes whose look fails. `KILL`,
+`STOP`, `HELD_SIGNALS`, `GONE_WITHIN` and `GONE_POLL` are the signals and figures the rows expect,
+stated here rather than imported. The integration row's child is `HANG_TEST`, starting `SLEEPER`s
+directly and through `SPAWNER`; `RECORDED` names the processes it writes down, `recorded_pids` reads
+them, and `process_state` checks each independently of the runner.
 """
 
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import signal
 import subprocess
@@ -31,8 +41,8 @@ import pytest
 
 import mutants
 from mutants import (CASES, CHILD, LIMIT, MEMBERS, REPO_FILES, SANDBOX, SURVIVOR_CONTROL, Case,
-                     ChildTimeout, RunnerSignal, apply, apply_repo, die_by, mutation_violations, run_child, run_members,
-                     stop_on_signals, stop_run, timeout_violations)
+                     ChildTimeout, RunnerSignal, apply, apply_repo, child_timeout_violations, die_by, mutation_violations,
+                     run_child, run_members, stop_on_signals, stop_run)
 
 TARGETS = ['test_isolation.py::test_a', 'test_isolation.py::test_b']
 WHY = 'ran as'
@@ -230,7 +240,7 @@ KILL, STOP = signal.SIGKILL, signal.SIGSTOP
 # The stop's figures as the maintainer approved them, stated here so a changed constant shows in the rows
 # that use them, not only in `test_the_stop_figures`.
 GONE_WITHIN, GONE_POLL = 10, 0.1
-HELD = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+HELD_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
 
 
 @pytest.mark.unit
@@ -248,10 +258,16 @@ HELD = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
     pytest.param([{101: (1, 100, 'S'), 102: (1, 100, 'S'), 104: (1, 104, 'S')}, {101: (1, 100, 'S')},
                   {101: (1, 100, 'S'), 102: (1, 100, 'S'), 106: (102, 600, 'S'), 107: (1, 104, 'S')}, {}],
                  [101, 102, 104], [100, 104], [], [101, 102, 104, 101, 101], 3, id='gone-numbers-never-followed'),
+    # The deadline counts from the first look, not from the clock's zero: with the clock far from zero,
+    # a member still running at the first look is killed and looked for again.
+    pytest.param([{101: (100, 100, 'S')}, {}], [101], [100], [], [101], 1, id='clock-not-at-zero'),
 ])
 def test_gone_waits_until_every_process_ends(tables: list[Any], pids: list[int], groups: list[int], left: list[int],
-                                             kills: list[int] | None, sleeps: int | None) -> None:
+                                             kills: list[int] | None, sleeps: int | None,
+                                             request: pytest.FixtureRequest) -> None:
     fakes = Fakes(tables)
+    if request.node.callspec.id == 'clock-not-at-zero':
+        fakes.now = 5000.0
     assert fakes.gone(pids, groups) == left
     killed = [c[1] for c in fakes.calls if c[0] == 'kill']
     assert all(c[2] == KILL for c in fakes.calls if c[0] == 'kill')
@@ -273,7 +289,7 @@ def test_stop_run_freezes_then_kills_the_whole_run() -> None:
     fakes = Fakes([first, second, second, {100: (10, 100, 'Z')}])
     assert fakes.stop() == []
     assert fakes.calls == [
-        ('mask', signal.SIG_BLOCK, HELD),
+        ('mask', signal.SIG_BLOCK, HELD_SIGNALS),
         ('killpg', 100, STOP),
         ('table',), ('kill', 101, STOP), ('killpg', 104, STOP), ('kill', 104, STOP),
         ('table',), ('kill', 105, STOP),
@@ -281,7 +297,7 @@ def test_stop_run_freezes_then_kills_the_whole_run() -> None:
         ('kill', 105, KILL), ('kill', 104, KILL), ('killpg', 104, KILL), ('kill', 101, KILL), ('killpg', 100, KILL),
         ('table',),
         ('wait',),
-        ('mask', signal.SIG_UNBLOCK, HELD),
+        ('mask', signal.SIG_UNBLOCK, HELD_SIGNALS),
     ]
 
 
@@ -294,7 +310,7 @@ def test_stop_run_waits_for_every_process_it_found() -> None:
     assert fakes.stop() == []
     confirm = fakes.calls[fakes.calls.index(('killpg', 100, KILL)) + 1:]
     assert confirm == [('table',), ('kill', 105, KILL), ('sleep', GONE_POLL), ('table',), ('wait',),
-                       ('mask', signal.SIG_UNBLOCK, HELD)], confirm
+                       ('mask', signal.SIG_UNBLOCK, HELD_SIGNALS)], confirm
 
 
 @pytest.mark.unit
@@ -305,16 +321,16 @@ def test_stop_run_kills_what_it_found_when_it_is_cut_short(cut: str) -> None:
         with pytest.raises(RuntimeError, match='ps failed'):
             fakes.stop()
         assert fakes.calls == [
-            ('mask', signal.SIG_BLOCK, HELD), ('killpg', 100, STOP),
+            ('mask', signal.SIG_BLOCK, HELD_SIGNALS), ('killpg', 100, STOP),
             ('table',), ('kill', 101, STOP), ('table',),
-            ('kill', 101, KILL), ('killpg', 100, KILL), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD)]
+            ('kill', 101, KILL), ('killpg', 100, KILL), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD_SIGNALS)]
         return
     fakes = Fakes([{}])
     fakes.wrapper_gone = True  # type: ignore[attr-defined]
     assert fakes.stop() == []
     assert fakes.calls == [
-        ('mask', signal.SIG_BLOCK, HELD), ('killpg', 100, STOP), ('table',), ('killpg', 100, KILL),
-        ('table',), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD)]
+        ('mask', signal.SIG_BLOCK, HELD_SIGNALS), ('killpg', 100, STOP), ('table',), ('killpg', 100, KILL),
+        ('table',), ('wait',), ('mask', signal.SIG_UNBLOCK, HELD_SIGNALS)]
 
 
 @pytest.mark.unit
@@ -327,9 +343,15 @@ def test_the_stop_figures() -> None:
     pytest.param(ChildTimeout(8, []), ['timeout: the child ran past its 8 s limit and was stopped'], id='gone'),
     pytest.param(ChildTimeout(300, [4242, 4343]), ['timeout: the child ran past its 300 s limit and was stopped',
                                                    'still running 10 s after the stop: pids 4242, 4343'], id='left'),
+    # A stop that could not look never says the run was stopped, and names what may be left.
+    pytest.param(ChildTimeout(8, [], 'BlockingIOError: [Errno 35] Resource temporarily unavailable'),
+                 ['timeout: the child ran past its 8 s limit',
+                  "the stop could not finish (BlockingIOError: [Errno 35] Resource temporarily unavailable): it killed "
+                  "the wrapper's process group and every process it had found, and others of the run may still be "
+                  'running'], id='unfinished'),
 ])
 def test_a_timeout_reason_names_the_limit(exc: ChildTimeout, violations: list[str]) -> None:
-    assert timeout_violations(exc) == violations
+    assert child_timeout_violations(exc) == violations
 
 
 class FakePopen:
@@ -337,26 +359,33 @@ class FakePopen:
 
     made: list[FakePopen] = []
     first: Any = None
+    # What each next instance's communicate does, in turn, before `first` applies.
+    plan: list[Any] = []
 
     def __init__(self, args: list[str], **kwargs: Any) -> None:
         self.args, self.kwargs, self.pid, self.returncode = args, kwargs, 4100, None
         self.calls: list[tuple[Any, ...]] = []
         self.stdout, self.stderr = Pipe(self.calls, 'stdout'), Pipe(self.calls, 'stderr')
+        self.raises = FakePopen.plan.pop(0) if FakePopen.plan else FakePopen.first
         FakePopen.made.append(self)
 
     def communicate(self, timeout: float | None = None) -> tuple[str, str]:
         self.calls.append(('communicate', timeout))
-        if FakePopen.first is not None:
-            raise FakePopen.first
+        if self.raises is not None:
+            raise self.raises
         self.returncode = 3
         return 'out', 'err'
+
+    def wait(self) -> int:
+        self.calls.append(('wait',))
+        return -9
 
 
 @pytest.fixture
 def fake_popen(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     """Patch in `FakePopen`, `LIMIT` = 7, and a recording `stop_run` that reports pid 4242 still running."""
     stops: list[tuple[Any, ...]] = []
-    FakePopen.made, FakePopen.first = [], None
+    FakePopen.made, FakePopen.first, FakePopen.plan = [], None, []
     monkeypatch.setattr(subprocess, 'Popen', FakePopen)
     monkeypatch.setattr(mutants, 'LIMIT', 7)
 
@@ -400,6 +429,78 @@ def test_run_child_stops_the_run_on_every_early_exit(exit_: str, fake_popen: lis
         assert (caught.value.limit, caught.value.left) == (7, [4242])  # type: ignore[attr-defined]
     elif exit_ == 'signal':
         assert caught.value.signum == signal.SIGTERM  # type: ignore[attr-defined]
+
+
+def failing_stop(tables: list[Any]) -> tuple[Fakes, Any]:
+    """The real `stop_run` on fakes whose `ps` looks return `tables` in turn (an exception in it is raised)."""
+    fakes = Fakes(tables, pid=4100)
+    return fakes, functools.partial(stop_run, processes=fakes.processes, kill=fakes.kill, killpg=fakes.killpg,
+                                    mask=fakes.mask, clock=fakes.clock, sleep=fakes.sleep)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('cut', ['ps-cannot-start', 'ps-fails-mid-walk', 'interrupt-during-stop'])
+def test_run_child_reports_a_stop_that_could_not_finish(cut: str, fake_popen: list[tuple[Any, ...]], tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    FakePopen.first = subprocess.TimeoutExpired('sh', 7)
+    if cut == 'ps-cannot-start':
+        fakes, stop = failing_stop([BlockingIOError(35, 'Resource temporarily unavailable')])
+        cause, killed = 'BlockingIOError: [Errno 35] Resource temporarily unavailable', [('killpg', 4100, KILL)]
+    elif cut == 'ps-fails-mid-walk':
+        fakes, stop = failing_stop([{4101: (4100, 4100, 'T'), 4104: (4101, 4104, 'Ts')},
+                                    subprocess.CalledProcessError(1, ['ps'])])
+        cause = "CalledProcessError: Command '['ps']' returned non-zero exit status 1."
+        killed = [('kill', 4104, KILL), ('killpg', 4104, KILL), ('kill', 4101, KILL), ('killpg', 4100, KILL)]
+    else:
+        # A Ctrl-C or a signal to the runner is not a failed look: it goes on, and ends the sweep.
+        fakes, stop = failing_stop([KeyboardInterrupt()])
+        cause, killed = None, [('killpg', 4100, KILL)]
+    monkeypatch.setattr(mutants, 'stop_run', stop)
+    with pytest.raises(ChildTimeout if cause else KeyboardInterrupt) as caught:
+        run_child(tmp_path / 'src', ['test_x.py::test_y'], tmp_path / 'junit.xml')
+    # Whatever cut the look short, the stop killed the wrapper's group and everything it had found.
+    assert [c for c in fakes.calls if c[0] in ('kill', 'killpg') and c[2] == KILL] == killed, fakes.calls
+    proc, = FakePopen.made
+    assert proc.calls == [('communicate', 7), ('wait',), ('close', 'stdout'), ('close', 'stderr')] or cause is None
+    if cause:
+        assert (caught.value.limit, caught.value.left, caught.value.unfinished) == (7, [], cause)  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+def test_a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on(fake_popen: list[tuple[Any, ...]],
+                                                                         monkeypatch: pytest.MonkeyPatch,
+                                                                         capsys: pytest.CaptureFixture[str]) -> None:
+    FakePopen.plan = [subprocess.TimeoutExpired('sh', 7)]
+    fakes, stop = failing_stop([BlockingIOError(35, 'Resource temporarily unavailable')])
+    monkeypatch.setattr(mutants, 'stop_run', stop)
+    control = SURVIVOR_CONTROL
+    monkeypatch.setattr(mutants, 'CASES', (Case('hang', control.file, control.edits, ('test_x.py::test_y',), 'hung'),
+                                           Case('next', control.file, control.edits, ('test_x.py::test_y',), 'why')))
+    assert mutants.main(['hang', 'next']) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == ('FAILED  hang: timeout: the child ran past its 7 s limit; the stop could not finish '
+                        "(BlockingIOError: [Errno 35] Resource temporarily unavailable): it killed the wrapper's "
+                        'process group and every process it had found, and others of the run may still be running')
+    assert len(lines) == 2 and lines[1].startswith('FAILED  next: '), lines
+    assert len(FakePopen.made) == 2
+
+
+@pytest.mark.unit
+def test_a_failed_ps_is_an_error_not_an_empty_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs: list[tuple[Any, ...]] = []
+    answers = [(0, '  12     1    12 Ss\n  13    12    12 S+\n'), (1, '')]
+
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        runs.append((argv, kwargs))
+        code, out = answers.pop(0)
+        if kwargs.get('check') and code:
+            raise subprocess.CalledProcessError(code, argv)
+        return subprocess.CompletedProcess(argv, code, out, '')
+    monkeypatch.setattr(subprocess, 'run', fake_run)
+    assert mutants._processes() == {12: (1, 12, 'Ss'), 13: (12, 12, 'S+')}
+    with pytest.raises(subprocess.CalledProcessError):
+        mutants._processes()
+    assert runs[0][0] == [str(SANDBOX), 'ps', '-A', '-o', 'pid=,ppid=,pgid=,stat=']
 
 
 @pytest.mark.unit
