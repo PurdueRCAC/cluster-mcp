@@ -78,6 +78,7 @@ import base64
 import contextlib
 import errno
 import json
+import math
 import os
 import re
 import socket
@@ -1270,7 +1271,8 @@ def not_run_violations(result: CommandResult, cause: str, elapsed: float, bound:
     if result.stdout:
         violations.append(f'a command that was not run has output: {result.stdout!r}')
     if elapsed > bound + slack:
-        violations.append(f'the call gave up {elapsed:.1f} s after it began, past its {bound} s bound')
+        violations.append(f'the call gave up {elapsed:.2f} s after it began, past its {bound} s bound and {slack} s '
+                          f'of slack')
     return violations
 
 
@@ -2048,15 +2050,41 @@ def test_a_reconnect_worker_that_cannot_start_frees_the_attempt(serve: Callable[
             started.append(thread.name)
         real_start(thread)
 
+    # The first call's waits on an attempt not yet done, each with the seconds it asked for.
+    waits: list[float] = []
+    # Real seconds from each entry to the executor's reconnect to its return, during the first call.
+    spans: list[float] = []
+    real_ensure = SSHExecutor._ensure_connected
+
+    def ensure(self: SSHExecutor, *args: Any, **kwargs: Any) -> Any:
+        began = _REAL_MONOTONIC()
+        try:
+            return real_ensure(self, *args, **kwargs)
+        finally:
+            spans.append(_REAL_MONOTONIC() - began)
+
     async def scenario() -> tuple[Outcome, float, bool, Outcome]:
         async with in_memory(shared_server(executor)) as client:
             server.refuse()
             _wait_dropped(executor)
             server.serve_again()
             clock = _fake_time(monkeypatch, executor)
+
+            def wait(event: threading.Event, seconds: float) -> bool:
+                if seconds > 0 and not event.is_set():
+                    waits.append(seconds)
+                return clock.wait(event, seconds)
+
+            monkeypatch.setattr(ssh, '_await', wait)
+            monkeypatch.setattr(SSHExecutor, '_ensure_connected', ensure)
             monkeypatch.setattr(threading.Thread, 'start', start)
+            # The row's clock moves only by the call's own waits and backoffs, never by the time the
+            # MCP round trip around the call takes.
+            offset = clock.offset
             failed = await call(client, 'run_command', {'command': command})
-            spent = clock.elapsed()
+            spent = clock.offset - offset
+            monkeypatch.setattr(ssh, '_await', clock.wait)
+            monkeypatch.setattr(SSHExecutor, '_ensure_connected', real_ensure)
             held = executor._inflight is not None
             clock.rebase()
             again = await call(client, 'run_command', {'command': command})
@@ -2066,14 +2094,23 @@ def test_a_reconnect_worker_that_cannot_start_frees_the_attempt(serve: Callable[
         failed, spent, held, again = drive(scenario(), timeout=60)
     finally:
         executor.close()
+    ensured = sum(spans) if spans else math.inf
     first, second = _command_result(failed), _command_result(again)
     violations = []
     head = f'cluster-mcp: cannot connect to {LOOPBACK}: {NO_THREAD}; the command was not run'
     if failed.is_error or first.get('exit_code') != NOT_STARTED_EXIT_CODE or not str(first.get('stderr')).startswith(head):
         violations.append(f'the call whose worker could not start gave {failed!r:.400}, not {NOT_STARTED_EXIT_CODE} '
                           f'with {head!r}')
-    if spent > ssh.ATTEMPT_POLL:
-        violations.append(f'the call whose worker could not start took {spent:.1f} s, not giving up at once')
+    # A one-poll wait moves the clock by exactly ATTEMPT_POLL, as a sum of floats: rounded, it is caught.
+    if round(spent, 9) >= ssh.ATTEMPT_POLL:
+        violations.append(f'the call whose worker could not start waited {spent:.2f} s for an attempt '
+                          f"on the row's clock, not giving up within ATTEMPT_POLL ({ssh.ATTEMPT_POLL} s)")
+    if waits:
+        violations.append(f'the call whose worker could not start waited on an attempt ({len(waits)} waits, the first '
+                          f'asking {waits[0]:.2f} s), not giving up at once without one')
+    if ensured >= ssh.ATTEMPT_POLL:
+        violations.append(f'the executor took {ensured:.3f} s from entering its reconnect to giving up, on the real '
+                          f'clock, not under ATTEMPT_POLL ({ssh.ATTEMPT_POLL} s)')
     if held:
         violations.append('the slot of an attempt whose worker never started stayed taken')
     if again.is_error or (second.get('stdout'), second.get('exit_code')) != ('back', 0):
@@ -2136,21 +2173,33 @@ def test_a_stalled_reconnect_is_abandoned_against_a_real_handshake(serve: Callab
                            connect_kwargs={'pkey': _key('client'), 'look_for_keys': False, 'allow_agent': False,
                                            'banner_timeout': 30})
     monkeypatch.setattr(ssh, 'CONNECT_TIMEOUT', connect_timeout)
-    before = set(threading.enumerate())
     window = executor._window
     server.refuse()
     _wait_dropped(executor)
     silent = Silent(server.port)
+    # Each of this executor's reconnect workers is counted as it starts, so one the call's give-up has
+    # already ended by the time the call returns still counts; another executor's worker never does.
+    workers: list[threading.Thread] = []
+    real_start = threading.Thread.start
+
+    def start(thread: threading.Thread) -> None:
+        ours = thread.name == WORKER and getattr(thread, '_target', None) == executor._settle
+        real_start(thread)
+        if ours:
+            workers.append(thread)
+
     try:
+        monkeypatch.setattr(threading.Thread, 'start', start)
         began = _REAL_MONOTONIC()
         result = executor.run(['true'])
         took = _REAL_MONOTONIC() - began
-        workers = [t for t in threading.enumerate() if t.name == WORKER and t not in before]
         for worker in workers:
             worker.join(STALL_WORKER)
         lingered = [worker for worker in workers if worker.is_alive()]
+        monkeypatch.setattr(threading.Thread, 'start', real_start)
         held = len(silent.held)
     finally:
+        monkeypatch.setattr(threading.Thread, 'start', real_start)
         silent.close()
         executor.close()
     violations = []
@@ -2160,9 +2209,10 @@ def test_a_stalled_reconnect_is_abandoned_against_a_real_handshake(serve: Callab
     if not held:
         violations.append('no attempt reached the silent host, so nothing stalled')
     if len(workers) != 1:
-        violations.append(f'{len(workers)} reconnect workers ran, not one')
+        violations.append(f'{len(workers)} reconnect workers started during the call, not one')
     if lingered:
-        violations.append(f'the abandoned attempt was still running {STALL_WORKER} s after the call gave up')
+        violations.append(f'the abandoned attempt was still running {STALL_WORKER} s after the call gave up, past its '
+                          f'{STALL_WORKER} s bound')
     assert violations == [], '\n'.join(violations)
 
 

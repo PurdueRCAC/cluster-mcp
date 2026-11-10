@@ -1,0 +1,25 @@
+Gate scripts changed since the plan commit, each with its reason (timing-gate.py `scope` reads this file).
+
+2026-11-09 · timing-gate.py · P4 · The maintainer, ruling D1 at the PLAN/TECH gate, added a requirement:
+a row-4 failure reports the collector's pause time in its message. MESSAGES[4] gains that message's
+fragment ('the collector pausing it'), and FAULTS[4] gains `collects-slowly-in-the-start` (a 0.6 s
+collection planted inside the start, which the row must fail naming it). Nothing was removed or
+reworded; the three planned row-4 faults and every other row's entries are as signed. Every sweep
+part runs under this gate in P5.
+
+2026-11-10 · timing-gate.py · P6 · The branch was rebased onto `origin/develop` before P6. BASE, the
+GOAL's sign-off commit, was a literal SHA that the rebase left off the branch. It is now found at run
+time by its subject on the branch (`goal_signoff()`), so it moves with any rebase. Its rows, and the
+product under them, are unchanged from the signed base. Every sweep part runs again under this
+gate on the rebased tree before P6's verify.
+
+2026-11-10 · timing-gate.py · P6 · Fault 4/collects-slowly-in-the-start went red on the rebased tree:
+killed for the wrong reason, its fragment 'the collector pausing it 0.6' against a reported pause of
+0.67-0.71 s (the planted 0.6 s sleep plus the explicit full collection). A digit-prefix fragment is a
+wall-clock match, so the fault is now killed on a predicate: its fragment is 'the collector pausing
+it', and `planted_pause_reported` wants each target's failure to carry the start-took line with a
+collector pause of at least the planted 0.6 s (a lower bound). The plant is unchanged. The runner is
+not edited: `run_with_predicate` runs `mutants.run_case`'s own steps (`apply`, `apply_repo`,
+`run_child`, `mutation_violations`) and then reads the report the runner would remove. Shown both
+ways on the rebased tree: killed on the row, and red ("the collector pause reported is 0.00 s, under
+the planted 0.6 s") on a row whose message reports no pause.

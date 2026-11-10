@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:stalled-reconnect-test-timing
 kind: test
 appetite: small
 lane: public

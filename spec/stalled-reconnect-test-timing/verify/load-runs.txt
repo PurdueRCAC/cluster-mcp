@@ -1,0 +1,172 @@
+# R5 load protocol · 2026-11-10 05:50 · macOS 27.0.1 · 10 cores · HEAD 19058f4 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127
+row 1 · alone · run 1 · handshake · pass · 4.4 s · load 2.9 · 1 passed in 3.42s
+row 1 · alone · run 2 · modern · pass · 4.4 s · load 3.1 · 1 passed in 3.44s
+row 1 · alone · run 3 · handshake · pass · 4.4 s · load 3.1 · 1 passed in 3.41s
+row 1 · alone · run 4 · modern · pass · 4.2 s · load 3.1 · 1 passed in 3.14s
+row 1 · alone · run 5 · handshake · pass · 4.2 s · load 3.0 · 1 passed in 3.14s
+row 1 · alone · run 6 · modern · pass · 4.1 s · load 3.0 · 1 passed in 3.08s
+row 1 · alone · run 7 · handshake · pass · 4.2 s · load 2.8 · 1 passed in 3.14s
+row 1 · alone · run 8 · modern · pass · 4.2 s · load 2.6 · 1 passed in 3.14s
+row 1 · alone · run 9 · handshake · pass · 4.3 s · load 2.6 · 1 passed in 3.17s
+row 1 · alone · run 10 · modern · pass · 4.2 s · load 2.7 · 1 passed in 3.15s
+row 1 · alone · run 11 · handshake · pass · 4.3 s · load 2.6 · 1 passed in 3.19s
+row 1 · alone · run 12 · modern · pass · 4.2 s · load 2.5 · 1 passed in 3.16s
+row 1 · alone · run 13 · handshake · pass · 4.2 s · load 2.4 · 1 passed in 3.12s
+row 1 · alone · run 14 · modern · pass · 4.2 s · load 2.2 · 1 passed in 3.12s
+row 1 · alone · run 15 · handshake · pass · 4.2 s · load 2.3 · 1 passed in 3.13s
+row 1 · alone · run 16 · modern · pass · 4.3 s · load 2.3 · 1 passed in 3.17s
+row 1 · alone · run 17 · handshake · pass · 4.2 s · load 2.4 · 1 passed in 3.15s
+row 1 · alone · run 18 · modern · pass · 4.2 s · load 2.2 · 1 passed in 3.17s
+row 1 · alone · run 19 · handshake · pass · 4.2 s · load 2.3 · 1 passed in 3.14s
+row 1 · alone · run 20 · modern · pass · 4.2 s · load 2.3 · 1 passed in 3.16s
+row 2 · alone · run 1 · handshake · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 2 · modern · pass · 1.1 s · load 2.3 · 1 passed in 0.14s
+row 2 · alone · run 3 · handshake · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 4 · modern · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 5 · handshake · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 6 · modern · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 7 · handshake · pass · 1.1 s · load 2.3 · 1 passed in 0.15s
+row 2 · alone · run 8 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 9 · handshake · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 10 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 11 · handshake · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 12 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 13 · handshake · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 14 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 15 · handshake · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 16 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 17 · handshake · pass · 1.2 s · load 2.6 · 1 passed in 0.16s
+row 2 · alone · run 18 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 19 · handshake · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 2 · alone · run 20 · modern · pass · 1.1 s · load 2.6 · 1 passed in 0.15s
+row 3 · alone · run 1 · handshake · pass · 1.1 s · load 2.6 · 56 passed in 0.10s
+row 3 · alone · run 2 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.09s
+row 3 · alone · run 3 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.09s
+row 3 · alone · run 4 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 5 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 6 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 7 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 8 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 9 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 10 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 11 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 12 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 13 · handshake · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 14 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 3 · alone · run 15 · handshake · pass · 1.1 s · load 2.6 · 56 passed in 0.12s
+row 3 · alone · run 16 · modern · pass · 1.1 s · load 2.6 · 56 passed in 0.12s
+row 3 · alone · run 17 · handshake · pass · 1.1 s · load 2.6 · 56 passed in 0.12s
+row 3 · alone · run 18 · modern · pass · 1.1 s · load 2.6 · 56 passed in 0.12s
+row 3 · alone · run 19 · handshake · pass · 1.1 s · load 2.6 · 56 passed in 0.12s
+row 3 · alone · run 20 · modern · pass · 1.1 s · load 2.7 · 56 passed in 0.12s
+row 4 · alone · run 1 · handshake · pass · 6.5 s · load 2.5 · 192 passed in 5.44s
+row 4 · alone · run 2 · modern · pass · 6.4 s · load 2.6 · 192 passed in 5.41s
+row 4 · alone · run 3 · handshake · pass · 6.5 s · load 2.5 · 192 passed in 5.43s
+row 4 · alone · run 4 · modern · pass · 6.5 s · load 2.8 · 192 passed in 5.50s
+row 4 · alone · run 5 · handshake · pass · 6.5 s · load 2.7 · 192 passed in 5.52s
+row 4 · alone · run 6 · modern · pass · 6.5 s · load 2.7 · 192 passed in 5.50s
+row 4 · alone · run 7 · handshake · pass · 6.5 s · load 2.8 · 192 passed in 5.51s
+row 4 · alone · run 8 · modern · pass · 6.5 s · load 3.1 · 192 passed in 5.55s
+row 4 · alone · run 9 · handshake · pass · 6.5 s · load 2.8 · 192 passed in 5.50s
+row 4 · alone · run 10 · modern · pass · 6.5 s · load 2.8 · 192 passed in 5.50s
+row 4 · alone · run 11 · handshake · pass · 6.5 s · load 2.6 · 192 passed in 5.53s
+row 4 · alone · run 12 · modern · pass · 6.5 s · load 2.7 · 192 passed in 5.50s
+row 4 · alone · run 13 · handshake · pass · 6.5 s · load 2.5 · 192 passed in 5.51s
+row 4 · alone · run 14 · modern · pass · 6.5 s · load 2.4 · 192 passed in 5.50s
+row 4 · alone · run 15 · handshake · pass · 6.5 s · load 2.2 · 192 passed in 5.52s
+row 4 · alone · run 16 · modern · pass · 6.5 s · load 2.4 · 192 passed in 5.51s
+row 4 · alone · run 17 · handshake · pass · 6.5 s · load 2.3 · 192 passed in 5.52s
+row 4 · alone · run 18 · modern · pass · 6.5 s · load 2.3 · 192 passed in 5.51s
+row 4 · alone · run 19 · handshake · pass · 6.5 s · load 2.2 · 192 passed in 5.51s
+row 4 · alone · run 20 · modern · pass · 6.5 s · load 2.2 · 192 passed in 5.50s
+row 1 · loaded · run 1 · handshake · pass · 4.4 s · load 2.6 · suite yes · spinners up · 1 passed in 3.37s
+row 1 · loaded · run 2 · modern · pass · 4.3 s · load 2.9 · suite yes · spinners up · 1 passed in 3.28s
+row 1 · loaded · run 3 · handshake · pass · 4.2 s · load 3.1 · suite yes · spinners up · 1 passed in 3.18s
+row 1 · loaded · run 4 · modern · pass · 4.2 s · load 3.4 · suite yes · spinners up · 1 passed in 3.17s
+row 1 · loaded · run 5 · handshake · pass · 4.2 s · load 3.6 · suite yes · spinners up · 1 passed in 3.16s
+row 1 · loaded · run 6 · modern · pass · 4.1 s · load 3.8 · suite yes · spinners up · 1 passed in 3.15s
+row 1 · loaded · run 7 · handshake · pass · 4.2 s · load 3.8 · suite yes · spinners up · 1 passed in 3.16s
+row 1 · loaded · run 8 · modern · pass · 4.1 s · load 3.9 · suite yes · spinners up · 1 passed in 3.08s
+row 1 · loaded · run 9 · handshake · pass · 4.1 s · load 4.2 · suite yes · spinners up · 1 passed in 3.12s
+row 1 · loaded · run 10 · modern · pass · 4.2 s · load 4.2 · suite yes · spinners up · 1 passed in 3.16s
+row 1 · loaded · run 11 · handshake · pass · 4.1 s · load 4.2 · suite yes · spinners up · 1 passed in 3.15s
+row 1 · loaded · run 12 · modern · pass · 4.1 s · load 4.5 · suite yes · spinners up · 1 passed in 3.13s
+row 1 · loaded · run 13 · handshake · pass · 4.2 s · load 4.5 · suite yes · spinners up · 1 passed in 3.16s
+row 1 · loaded · run 14 · modern · pass · 4.2 s · load 4.6 · suite yes · spinners up · 1 passed in 3.15s
+row 1 · loaded · run 15 · handshake · pass · 4.1 s · load 4.7 · suite yes · spinners up · 1 passed in 3.14s
+row 1 · loaded · run 16 · modern · pass · 4.2 s · load 4.6 · suite yes · spinners up · 1 passed in 3.15s
+row 1 · loaded · run 17 · handshake · pass · 4.1 s · load 4.8 · suite yes · spinners up · 1 passed in 3.08s
+row 1 · loaded · run 18 · modern · pass · 4.1 s · load 4.8 · suite yes · spinners up · 1 passed in 3.15s
+row 1 · loaded · run 19 · handshake · pass · 4.2 s · load 4.8 · suite yes · spinners up · 1 passed in 3.17s
+row 1 · loaded · run 20 · modern · pass · 4.2 s · load 4.9 · suite yes · spinners up · 1 passed in 3.16s
+row 2 · loaded · run 1 · handshake · pass · 1.2 s · load 4.9 · suite yes · spinners up · 1 passed in 0.15s
+row 2 · loaded · run 2 · modern · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 3 · handshake · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 4 · modern · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 5 · handshake · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.15s
+row 2 · loaded · run 6 · modern · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 7 · handshake · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 8 · modern · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 9 · handshake · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 10 · modern · pass · 1.2 s · load 5.2 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 11 · handshake · pass · 1.2 s · load 5.5 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 12 · modern · pass · 1.2 s · load 5.5 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 13 · handshake · pass · 1.2 s · load 5.5 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 14 · modern · pass · 1.2 s · load 5.5 · suite yes · spinners up · 1 passed in 0.15s
+row 2 · loaded · run 15 · handshake · pass · 1.2 s · load 5.4 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 16 · modern · pass · 1.2 s · load 5.4 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 17 · handshake · pass · 1.2 s · load 5.4 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 18 · modern · pass · 1.2 s · load 5.4 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 19 · handshake · pass · 1.2 s · load 5.6 · suite yes · spinners up · 1 passed in 0.16s
+row 2 · loaded · run 20 · modern · pass · 1.2 s · load 5.6 · suite yes · spinners up · 1 passed in 0.16s
+row 3 · loaded · run 1 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.10s
+row 3 · loaded · run 2 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.10s
+row 3 · loaded · run 3 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.10s
+row 3 · loaded · run 4 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 5 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 6 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 7 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 8 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 9 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 10 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 11 · handshake · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 12 · modern · pass · 1.1 s · load 5.6 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 13 · handshake · pass · 1.1 s · load 5.8 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 14 · modern · pass · 1.1 s · load 5.8 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 15 · handshake · pass · 1.1 s · load 5.8 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 16 · modern · pass · 1.1 s · load 5.8 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 17 · handshake · pass · 1.1 s · load 5.7 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 18 · modern · pass · 1.2 s · load 5.7 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 19 · handshake · pass · 1.1 s · load 5.7 · suite yes · spinners up · 56 passed in 0.13s
+row 3 · loaded · run 20 · modern · pass · 1.1 s · load 5.7 · suite yes · spinners up · 56 passed in 0.13s
+row 4 · loaded · run 1 · handshake · pass · 6.3 s · load 5.8 · suite yes · spinners up · 192 passed in 5.33s
+row 4 · loaded · run 2 · modern · pass · 6.3 s · load 5.7 · suite yes · spinners up · 192 passed in 5.32s
+row 4 · loaded · run 3 · handshake · pass · 6.3 s · load 5.6 · suite yes · spinners up · 192 passed in 5.29s
+row 4 · loaded · run 4 · modern · pass · 6.4 s · load 5.5 · suite yes · spinners up · 192 passed in 5.40s
+row 4 · loaded · run 5 · handshake · pass · 6.4 s · load 5.4 · suite yes · spinners up · 192 passed in 5.39s
+row 4 · loaded · run 6 · modern · pass · 6.4 s · load 5.4 · suite yes · spinners up · 192 passed in 5.36s
+row 4 · loaded · run 7 · handshake · pass · 6.4 s · load 5.5 · suite yes · spinners up · 192 passed in 5.40s
+row 4 · loaded · run 8 · modern · pass · 6.4 s · load 5.4 · suite yes · spinners up · 192 passed in 5.38s
+row 4 · loaded · run 9 · handshake · pass · 6.4 s · load 5.3 · suite yes · spinners up · 192 passed in 5.40s
+row 4 · loaded · run 10 · modern · pass · 6.4 s · load 5.2 · suite yes · spinners up · 192 passed in 5.39s
+row 4 · loaded · run 11 · handshake · pass · 6.4 s · load 5.5 · suite yes · spinners up · 192 passed in 5.39s
+row 4 · loaded · run 12 · modern · pass · 6.4 s · load 5.5 · suite yes · spinners up · 192 passed in 5.37s
+row 4 · loaded · run x · handshake · pass · 6.4 s · load 5.5 · suite partly · spinners up · 192 passed in 5.43s
+row 4 · loaded · run 13 · handshake · pass · 6.6 s · load 5.4 · suite yes · spinners up · 192 passed in 5.54s
+row 4 · loaded · run 14 · modern · pass · 6.4 s · load 5.5 · suite yes · spinners up · 192 passed in 5.40s
+row 4 · loaded · run 15 · handshake · pass · 6.4 s · load 5.7 · suite yes · spinners up · 192 passed in 5.40s
+row 4 · loaded · run 16 · modern · pass · 6.3 s · load 5.8 · suite yes · spinners up · 192 passed in 5.26s
+row 4 · loaded · run 17 · handshake · pass · 6.4 s · load 5.9 · suite yes · spinners up · 192 passed in 5.38s
+row 4 · loaded · run 18 · modern · pass · 6.4 s · load 6.1 · suite yes · spinners up · 192 passed in 5.37s
+row 4 · loaded · run 19 · handshake · pass · 6.4 s · load 6.1 · suite yes · spinners up · 192 passed in 5.39s
+row 4 · loaded · run 20 · modern · pass · 6.4 s · load 5.9 · suite yes · spinners up · 192 passed in 5.40s
+beside: pytest -q tests/test_ssh_exec.py -k silent · exit 0 · 217 s
+beside: pytest -q tests/test_ssh_exec.py -k not silent · exit 0 · 154 s
+summary · row 1 · alone · 20 of 20
+summary · row 1 · loaded · 20 of 20
+summary · row 2 · alone · 20 of 20
+summary · row 2 · loaded · 20 of 20
+summary · row 3 · alone · 20 of 20
+summary · row 3 · loaded · 20 of 20
+summary · row 4 · alone · 20 of 20
+summary · row 4 · loaded · 20 of 20

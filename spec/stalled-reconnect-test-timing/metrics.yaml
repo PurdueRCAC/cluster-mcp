@@ -1,0 +1,24 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: stalled-reconnect-test-timing
+escaped_from: null
+planned: {date: '2026-11-09', phases: 6}
+landed: {date: '2026-11-10', phases: 6, failed_verifies: 2}
+open: null
+runs:
+- {step: feature, start: '2026-11-09T12:17:48-05:00', stop: '2026-11-09T12:21:14-05:00', seconds: 206, end: question, agent: claude-opus-5-5}
+- {step: feature, start: '2026-11-09T17:18:48-05:00', stop: '2026-11-09T17:21:08-05:00', seconds: 140, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-09T17:21:08-05:00', stop: '2026-11-09T18:49:10-05:00', seconds: 5282, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-09T18:49:12-05:00', stop: '2026-11-09T18:52:29-05:00', seconds: 197, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-09T18:52:29-05:00', stop: '2026-11-09T18:54:43-05:00', seconds: 134, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P3', start: '2026-11-09T18:54:43-05:00', stop: '2026-11-09T18:58:48-05:00', seconds: 245, end: question, agent: claude-opus-5-5}
+- {step: 'build:P4', start: '2026-11-09T23:51:59-05:00', stop: '2026-11-09T23:59:23-05:00', seconds: 444, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P5', start: '2026-11-09T23:59:23-05:00', stop: '2026-11-10T00:15:37-05:00', seconds: 974, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P6', start: '2026-11-10T05:24:11-05:00', stop: '2026-11-10T06:27:48-05:00', seconds: 3817, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-10T06:27:48-05:00', stop: '2026-11-10T07:20:50-05:00', seconds: 3182, end: gate, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-10T07:20:50-05:00', stop: '2026-11-10T07:27:21-05:00', seconds: 391, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-10'
+  verdict: approved
+  confirmed: {critical: 0, high: 0, medium: 0, low: 0}
+  plausible: 0

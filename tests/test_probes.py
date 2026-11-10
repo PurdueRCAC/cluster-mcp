@@ -27,6 +27,7 @@ lost mid-command is no answer.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 import types
@@ -60,6 +61,10 @@ SLACK = 0.5
 
 # The worker thread's name, by which a row finds the threads a probe started.
 WORKER = 'cluster-mcp-probe'
+
+# The real clock and sleep, taken at import: a row may route `time.sleep` to a clock of its own.
+_REAL_MONOTONIC = time.monotonic
+_REAL_SLEEP = time.sleep
 
 
 def made(name: str, commands: tuple[str, ...]) -> Loaded:
@@ -269,6 +274,111 @@ def threading_whose_start_raises(exc: BaseException) -> types.ModuleType:
     return proxy
 
 
+class ProbeClock:
+    """A clock only the probe's own waits move, read by `probes` as its `time` and `threading`.
+
+    It reads `ORIGIN` until a wait or a sleep moves it, however long the host takes. A wait on its
+    `Event` returns True, moving nothing, once the event is set, at once or while a probe worker
+    still runs (for up to `SETTLE` real seconds, then it fails naming that). An event still unset
+    once every worker the probe started but the waiting thread has ended has reached its deadline:
+    the clock moves by the wait's timeout and the wait returns False. Its `sleep` moves the clock once
+    every other probe worker has ended, so a move never races a worker on its way to its answer.
+    `routed_sleep` stands in for the real `time.sleep`: the clock's on the main thread and the probe's
+    workers, the real one on any other thread. Its `Thread` records each worker it starts, or raises
+    `unstartable` when one is given.
+    """
+
+    ORIGIN = 100.0
+    SETTLE = 10.0
+
+    def __init__(self, unstartable: BaseException | None = None) -> None:
+        self.now = self.ORIGIN
+        self.unstartable = unstartable
+        self.workers: list[threading.Thread] = []
+        self.ended: set[threading.Thread] = set()
+        self.lock = threading.Lock()
+        clock = self
+
+        class Event(threading.Event):
+            def wait(self, timeout: float | None = None) -> bool:
+                return clock.wait(self, timeout)
+
+        class Thread(threading.Thread):
+            def start(self) -> None:
+                if clock.unstartable is not None:
+                    raise clock.unstartable
+                with clock.lock:
+                    clock.workers.append(self)
+                began = False
+                try:
+                    super().start()
+                    began = True
+                finally:
+                    if not began:
+                        clock.end(self)
+
+            def run(self) -> None:
+                try:
+                    super().run()
+                finally:
+                    clock.end(self)
+
+        self.Event = Event
+        self.Thread = Thread
+        self.time = types.ModuleType('time')
+        self.time.__dict__.update(time.__dict__)
+        self.time.monotonic = self.time.perf_counter = lambda: self.now  # type: ignore[attr-defined]
+        self.time.monotonic_ns = lambda: round(self.now * 1e9)  # type: ignore[attr-defined]
+        self.time.sleep = self.sleep  # type: ignore[attr-defined]
+        self.threading = types.ModuleType('threading')
+        self.threading.__dict__.update(threading.__dict__)
+        self.threading.Event = Event  # type: ignore[attr-defined]
+        self.threading.Thread = Thread  # type: ignore[attr-defined]
+
+    def end(self, thread: threading.Thread) -> None:
+        with self.lock:
+            self.ended.add(thread)
+
+    def settled(self) -> bool:
+        """Whether every probe worker but the calling thread has ended."""
+        me = threading.current_thread()
+        with self.lock:
+            return all(t in self.ended for t in self.workers if t is not me)
+
+    def advance(self, seconds: float) -> None:
+        with self.lock:
+            self.now += max(0.0, seconds)
+
+    def settle(self, done: Callable[[], bool]) -> None:
+        """Wait in real time until `done()` or every other probe worker has ended, `SETTLE` s at most."""
+        limit = _REAL_MONOTONIC() + self.SETTLE
+        while not done() and not self.settled():
+            if _REAL_MONOTONIC() > limit:
+                raise AssertionError(f'a probe worker neither answered nor ended within {self.SETTLE} real seconds')
+            _REAL_SLEEP(0.0005)
+
+    def wait(self, event: threading.Event, timeout: float | None) -> bool:
+        if event.is_set():
+            return True
+        if timeout is not None and timeout <= 0:
+            return False
+        self.settle(event.is_set)
+        if event.is_set():
+            return True
+        self.advance(math.inf if timeout is None else timeout)
+        return event.is_set()
+
+    def sleep(self, seconds: float) -> None:
+        self.settle(lambda: False)
+        self.advance(seconds)
+
+    def routed_sleep(self, seconds: float) -> None:
+        me = threading.current_thread()
+        with self.lock:
+            ours = me is threading.main_thread() or me in self.workers
+        (self.sleep if ours else _REAL_SLEEP)(seconds)
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize('names', MEMBER_SETS)
 @pytest.mark.parametrize('ending', list(ENDINGS))
@@ -277,18 +387,30 @@ def test_every_ending_without_an_answer_serves_the_capability(ending: str, names
     why = 'an ending without an answer did not serve the capability with its reason'
     capabilities = capability_set(names)
     respond, reason = ENDINGS[ending]
+    # The probe decides on a clock only its own waits move, so a raised ending decided as it happens
+    # reads 0 s however long the host takes, and one decided at the deadline reads the whole bound.
+    clock = ProbeClock(RuntimeError("can't start new thread") if respond is None else None)
     if respond is None:
-        monkeypatch.setattr(probes, 'threading', threading_whose_start_raises(RuntimeError("can't start new thread")))
         respond = answering(set())
+    monkeypatch.setattr(probes, 'time', clock.time)
+    monkeypatch.setattr(probes, 'threading', clock.threading)
+    monkeypatch.setattr(time, 'sleep', clock.routed_sleep)
     executor = ProbeExecutor(respond)
     began = time.monotonic()
     pending = started(why, executor, capabilities)
     got = decided(why, pending)
     took = time.monotonic() - began
+    waited = clock.now - ProbeClock.ORIGIN
     assert got == unanswered(capabilities, reason), f'{why}: {ending}: {got}'
-    assert took <= BOUND + SLACK, f'{why}: {ending}: the verdicts took {took:.2f} s'
+    assert took <= BOUND + SLACK, \
+        f'{why}: {ending}: the verdicts took {took:.2f} s, past the bound ({BOUND} s) and its slack ({SLACK} s)'
+    engaged = (math.isclose(pending._deadline, ProbeClock.ORIGIN + BOUND)
+               and isinstance(pending._answered, clock.Event)
+               and (ending == 'thread-cannot-start' or bool(clock.workers)))
+    assert engaged, f"{why}: {ending}: the probe did not take its deadline and its wait on the row's clock"
     if ending in RAISED:
-        assert took < BOUND / 2, f'{why}: {ending}: decided only at the deadline ({took:.2f} s), not when it happened'
+        assert waited < BOUND / 2, (f"{why}: {ending}: decided only at the deadline ({waited:.2f} s into its {BOUND} s "
+                                    f"bound on the row's clock, not under {BOUND / 2} s), not when it happened")
     assert len(executor.calls) == (0 if ending == 'thread-cannot-start' else 1), f'{why}: {ending}: {executor.calls}'
 
 
