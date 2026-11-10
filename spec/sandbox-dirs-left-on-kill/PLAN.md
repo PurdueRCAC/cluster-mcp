@@ -1,386 +1,314 @@
-# PLAN — A sandbox killed with SIGKILL leaves no directory behind
+# PLAN — The suite and the mutation runner leave no sandbox directory behind
 
-> **Status:** Draft for review · **Last updated:** 2026-11-09
+> **Status:** Draft for review (re-plan) · **Last updated:** 2026-11-09
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
-> the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
-> [`research/`](research/) ([`00-digest.md`](research/00-digest.md) first). Every design element
-> traces to a GOAL R-ID.
+> the phased executable roadmap is [`TECH.md`](TECH.md). This re-plan replaces the keeper design of
+> `8520d9c`, which the maintainer rejected (GOAL Q4). That plan's `research/00`, `02`–`04` and
+> `verify/keeper.py` stay as the record of the rejected design; only
+> [`research/01-callers-and-contract.md`](research/01-callers-and-contract.md), the survey of
+> callers at `0bfacae`, still informs this one. Every design element traces to a GOAL R-ID.
 
 ## 1. Summary
 
-`bin/sandbox.sh` gains a **keeper**: a small perl process, detached from the wrapper (a double fork,
-a process group of its own, parent pid 1, stdio on `/dev/null`), that makes the sandbox directory,
-waits on a pipe whose write end only the wrapper holds, and on that pipe's end of file waits for the
-command to end, then removes the directory as its last act. SIGKILL of the wrapper, alone or with its
-group, is an end of file like any other, so the directory goes within a bound after the wrapper and
-its command have both ended (R1, R2); every exit path the trap covered still removes it before the
-wrapper exits (R3). Nothing else moves: the command keeps its stdin, group, environment, status and
-signals (R7). Where no keeper can start (no perl, an odd `TMPDIR`) the wrapper runs exactly as on
-develop (D5). The change is one file
-of code, its contract paragraph in `AGENTS.md`, and one test module, which fits `appetite: small`;
-research ran because `bin/sandbox.sh` is a high-blast-radius path.
+`bin/sandbox.sh` stays as it is (R5). A suite run points `TMPDIR`, for every process it starts, at a
+directory of its own, made when the session starts; when the session ends it removes every
+`cluster-mcp-sandbox.*` directory left there or in the session's pytest temporary directory, unless
+a process still uses it. The mutation runner gives each case's child run the case's scratch
+directory as its `TMPDIR`, so the scratch removal the runner already does takes everything the
+child's sandboxes made, however the child ended. Three small changes in `tests/`, one new helper
+module and its rows; nothing in the package, the harnesses' stops or the wrapper.
 
 ## 2. Design
 
-### The wrapper, in order (`bin/sandbox.sh`)
+### The suite side (R1, R3, R4)
 
-1. **`set -eu`, then the re-run under perl.** The script reads and unsets
-   `CLUSTER_MCP_SANDBOX_KEEPER` before anything else. When it was empty, a perl is found
-   (`command -v perl`, else `/usr/bin/perl`), and `template` (develop's
-   `"${TMPDIR:-/tmp}/cluster-mcp-sandbox.XXXXXX"`) is absolute and holds no newline, the script
-   execs `perl -e '<the starter>' "$0" "$template" <7 saved> "$@"`. Otherwise it runs develop's path
-   (D5). Perl's own variables would change how it starts (`PERL5OPT`, `PERL5LIB`, `PERLLIB`,
-   `PERLIO`, `PERL_UNICODE`, `PERL_BADLANG`, and `LC_ALL` against a broken locale's warning): the
-   script passes each one's state as an argument (`"${V+x$V}"`: empty when unset), exports a neutral
-   value, and every perl puts the caller's back, unset or set, before it execs anything. The pid stays
-   the caller's child and the group leader the caller made, with its stdio.
-2. **The starter (perl, builtins only).** `$^F = 255`, so the pipes it opens survive `exec`. It opens
-   two pipes, *up* (wrapper → keeper) and *down* (keeper → wrapper). If either fails, or any of the
-   three descriptors the wrapper will hold (up's two ends, down's read end) is above 9 (dash
-   redirects single digits only), it closes them and execs `/bin/sh "$0" "$@"` with the variable
-   deleted: develop's path. Otherwise it forks a **middle** child and waits for it (a caller that
-   ignores SIGCHLD makes the wait return early, which the starter accepts). The middle forks the
-   **keeper** and exits at once. The starter closes down's write end, sets
-   `CLUSTER_MCP_SANDBOX_KEEPER="<its pid> <up-r> <up-w> <down-r> <its perl>"` and execs
-   `/bin/sh "$0" "$@"`.
-3. **The keeper (the middle's child).** `setpgrp(0, 0)` first; HUP and PIPE ignored; stdin and stdout
-   to `/dev/null`; it closes up's write end, down's read end and every other descriptor from 3 to
-   255; its environment is cut to `PATH`. It then writes `ready` to down and reads up for `go`, which
-   the wrapper writes once it has read `ready` (step 4); end of file instead ends it, with nothing
-   made. By `go` the keeper has no parent link to the run: the starter waited for the middle's exit
-   before it became the shell that answers, so the keeper is pid 1's (or a subreaper's) by then. A stop that freezes the wrapper before it looks (the sibling's) and found the keeper while
-   it was still in the run froze the wrapper before `go`, so the keeper never makes a directory that
-   stop could orphan by killing it late. Only then does it run `mktemp -d "$template"` (list form, its stderr still the
-   wrapper's, so mktemp's own message reaches the caller as on develop), check that the result is one
-   line naming a directory, write it to down, send stderr to `/dev/null`, `chdir "/"`, and re-exec
-   perl as `cluster-mcp-sandbox-keeper -e <the waiter> <dir> <up-r> <down-w>`, with an environment of
-   `PATH` alone: its command line shows its name, its code and its directory, and nothing of the
-   caller's argv or environment. The waiter ignores HUP and PIPE and reads up line by line to end of
-   file, keeping each line that is a pid and noting a `now` line. End of file comes when every holder
-   of up's write end is gone: the wrapper (by any death) and, for the moment between its fork and its
-   close, the shim (step 6). Unless it read `now`, it then waits until each pid is gone (`kill 0`
-   fails other than with EPERM, or, on Linux, the state after the last `)` of `/proc/<pid>/stat` is
-   `Z`), polling at 5 ms doubling to 0.1 s, and `exec rm -rf -- <dir>` with down's write end still
-   open: down's end of file means the directory is removed.
-4. **The second run.** `trap : HUP INT TERM` first. If `CLUSTER_MCP_SANDBOX_KEEPER` read
-   `"$$ <d> <d> <d> <perl>"` with three digits 3–9, the script reads `ready` from down, writes `go`
-   to up, and reads the directory from down, each with `IFS= read -r` (retried while a trapped signal interrupts it; any other failure exits 1, as a
-   failed `mktemp` does on develop); otherwise it runs develop's `mktemp -d` itself. HOME, XDG,
-   `UV_PROJECT`, `UV_CACHE_DIR`, the unsets, `CLUSTER_MCP_SANDBOX`, `CLUSTER_MCP_REPO` and the `cd`
-   are develop's lines, unchanged.
-5. **Traps.** The `EXIT` trap is inline (no function, so no command name can call it): with a
-   keeper, if the command may still be running (`running` set: a signal no trap names, which
-   bash-as-sh lets run this trap at once), it first writes `now` to up, so the keeper removes the
-   directory at once, as develop's trap did; it closes up's two ends, reads down to end of file
-   (retried while interrupted: the keeper has exited, its removal done), closes down, and runs
-   develop's `rm -rf "$sandbox"`. `HUP INT TERM` trap `:`: as on develop they wait for the
-   foreground command, and the script then ends through `EXIT`, so the directory is gone before the
-   wrapper exits. Under dash an untrapped signal runs no trap; the wrapper dies and the keeper removes
-   the directory once the command ends (develop left it).
-6. **The command.** With a keeper:
-   - when `command -v "$1"` gives a path (found on `PATH` or given by path), `"$@"` becomes
-     `<perl> -e '<the shim>' "$0" "$found" <up-w> <up-r> <down-r> <7 saved> "$@"`, with perl's
-     variables exported neutral as in step 1. The **shim** puts the caller's perl variables back,
-     writes its pid to up, closes the three pipe ends, and `exec { $found } @ARGV`: it becomes the
-     command, still the wrapper's child, in its group, with its stdin, descriptors and signal
-     dispositions; the wrapper reaps it as on develop (its "Killed" line included). If that `exec`
-     fails (a directory, a missing `#!` interpreter, any other reason), the shim execs
-     `/bin/sh -c '"$@"' "$0" "$@"`, which fails as the wrapper's own `"$@"` would have, with the
-     shell's message and status;
-   - when `"$1"` is `exec`, it runs as on develop, in the wrapper, pipes and all: the program it
-     becomes holds up until it and its children end, and the keeper removes the directory then
-     (develop's trap never ran there, and left it);
-   - any other builtin, a function or a missing command runs in a subshell that reports its pid
-     (`/bin/sh -c 'printf "%s\n" "$PPID"' >&<up-w>`), closes the three pipe ends with a plain `exec`, and
-     runs `"$@"`. Closing them with redirections on the builtin itself would not do: bash-as-sh
-     keeps saved copies of redirected descriptors open in the programs a builtin starts (prototype:
-     descriptors 10–12).
+**`tests/sandbox_dirs.py`** (new, beside `harness.py` and `ssh_server.py`; not collected):
 
-   The script then runs `status=0; running=yes`, the command, `|| status=$?; running=; exit
-   "$status"`. Without a keeper it is develop's `"$@"`.
+- `SANDBOX_NAME = re.compile(r'cluster-mcp-sandbox\.[A-Za-z0-9]{6}')`, the name `bin/sandbox.sh`'s
+  `mktemp -d "…/cluster-mcp-sandbox.XXXXXX"` makes (six characters on macOS and GNU coreutils), and
+  `RUN_PREFIX = 'cluster-mcp-run.'`.
+- `leftovers(roots) -> list[Path]`: walks each root (`os.walk`, links not followed) and returns every
+  directory whose name fully matches `SANDBOX_NAME` and that is not a symlink, without descending
+  into one it found. Regular files, links and other names are never returned.
+- `in_use(candidates, table) -> set[Path]`, pure: a candidate is in use when some row of `table`
+  (one `(cwd, environment)` pair per process) has its working directory equal to or below the
+  candidate, or names the candidate anywhere in its environment text; each candidate is compared by
+  its own path and its `realpath` (macOS reports `/private/var/…` for a `TMPDIR` under `/var/…`).
+- `processes() -> list[tuple[str, str]]`: on Linux, read in process from `/proc/<pid>/cwd` and
+  `/proc/<pid>/environ` for every process the account can read (no launch). Elsewhere (macOS): two
+  launches through `bin/sandbox.sh`, as the suite's rail requires of every launch in `tests/*.py`:
+  `/usr/sbin/lsof -b -a -d cwd -u <uid> -n -P -Fn` (every working directory of the account's
+  processes) and `/bin/ps -E -ww -U <uid> -o command=` (each process's command line with its
+  environment, where macOS shows it; § 3 row D2). A probe that cannot run raises, naming both exit
+  statuses: the sweep never guesses that a directory is free.
+- `sweep(roots) -> list[Path]`: `leftovers(roots)`; when there is none, return at once (no probe);
+  otherwise read `processes()` once, `shutil.rmtree` every leftover not `in_use`, return those kept.
+- `own_tmp(basetemp)`, a context manager: `run = tempfile.mkdtemp(prefix=RUN_PREFIX)` in the
+  `TMPDIR` the process was given (which also settles `tempfile`'s own directory for the process, so
+  in-process temporary files never move); save `TMPDIR`, set `os.environ['TMPDIR'] = run`; on exit
+  `sweep([run, basetemp])` while `TMPDIR` still names the run directory (so the probe's own
+  sandboxes, even one a probe timeout kills, land there and not in the host's `TMPDIR`), then, in a
+  `finally`, put the saved value back (or remove the variable); then, unless the sweep kept a
+  sandbox directory inside the run directory (one still in use), `shutil.rmtree(run,
+  ignore_errors=True)`: the run directory goes with whatever this run's own processes left in it
+  besides sandboxes (`uv` keeps a lock file in `TMPDIR`; links are removed, never followed). A run
+  directory holding a sandbox still in use is left whole (R4; § 3 row D3 for the reading).
 
-### The contract text
+**`tests/conftest.py`**: one session `autouse` fixture beside `path_shim` and `skip_probes`,
+`sandbox_tmp(tmp_path_factory)`, which enters `own_tmp(tmp_path_factory.getbasetemp())` and yields
+the run directory. Every harness inherits `os.environ` at launch (the loopback server's `_launch`
+and `sftp` Popens, `launch.run_process` through the `executes` fixture and `_sandboxed`, the MCP
+stdio client, the group-stopped servers, every `subprocess.run([SANDBOX, …])`; each `env=` the
+suite builds starts from `os.environ`: `child_env`, `git_env`, `broken_env`, `drive_env`, the
+`outside_hook` and `test_cli` maps, surveyed 2026-11-09), so each sandbox they start makes its
+directory in the run directory. The three sites that already pass `TMPDIR=tmp_path`
+(`tests/test_transports.py`, `tests/test_probe_startup.py`'s `drive_env`, `tests/test_audit.py`)
+keep it: their directories land in the session's basetemp, which the sweep covers, and
+`test_transports`' immediate glob of its `tmp_path` is unchanged (GOAL constraint 1). The basetemp is
+resolved by the fixture argument before `TMPDIR` changes, so `tmp_path` stays where it was. Session
+fixtures tear down in reverse order of set-up, so every session fixture a test requests (set up after
+the autouse ones) has stopped its sandboxes before the sweep runs; module and function fixtures end
+earlier still. The module docstring names the new fixture with the others.
 
-`AGENTS.md` § Factory → Throwaway environment, the sentence "the state directory is a `mktemp -d`
-under `$TMPDIR`, removed by a trap" becomes: the state directory is a `mktemp -d` under `$TMPDIR`
-made by a keeper the script starts under perl (by the script itself without perl), removed by the
-script's exit trap before it exits, and, when the wrapper is killed outright, by the keeper once the
-wrapper and its command have both ended; the keeper runs detached (a process group of its own, parent
-pid 1, stdio on `/dev/null`), holds none of the caller's descriptors, and exits as it removes the
-directory. It names the new test
-module as the pin. The script's header gets the same paragraph in place of "removed on exit (any
-path)". The numbered contract list is unchanged (item 2 already says "every exit path").
+**Path lengths (GOAL constraint 2).** A sandbox's directory, and so its `HOME`, moves from
+`$T/cluster-mcp-sandbox.XXXXXX` (75 bytes under this host's `$T` of 49) to
+`$T/cluster-mcp-run.XXXXXXXX/cluster-mcp-sandbox.XXXXXX` (100 bytes). Nothing in the package or
+the suite makes a Unix socket under `TMPDIR` or a sandbox's `HOME`: the one `AF_UNIX` bind
+(`tests/test_registry.py` `make_special`) binds by name from inside its directory, in `tmp_path`,
+which does not move; the loopback SSH server, the transports and the probes use TCP on loopback;
+`ssh` is the PATH shim's stand-in. The planner's full prototype run passed in both eras (§ 4). A
+child run of the mutation runner nests one level deeper (`$T/mutant-<case>-XXXXXXXX/…`); the
+22-case sample and the controls print what develop printed (§ 4).
 
-### The test module (`tests/test_sandbox_keeper.py`)
+### The runner side (R2)
 
-Linux evidence comes from CI at landing, which runs the suite on `ubuntu-24.04` (dash as `/bin/sh`):
-the module's rows run there with no phase waiting on a hosted run. It follows § Testing: a pure
-check, `keeper_violations(record) -> list[str]`, over a record of one stop (the directory's state
-after the bound, the keepers found while the sandbox ran, the keepers alive after removal, whether
-the command outlived the wrapper with its directory), with standing `unit` controls that plant each
-broken record; and `integration` rows that drive the real wrapper with `TMPDIR` under `tmp_path`,
-launch only through `SANDBOX` (the hygiene rail), and read `ps` through it too:
+**`tests/mutants.py`**, four touch points, all outside the lines `mutant-child-outlives-timeout`
+changes (its PLAN § 2: the import block's `signal` and `time`, the new run-child block before
+`run_child`, `run_child`'s body, the `child = run_child(...)` line of `run_case`, one line of
+`__main__`):
 
-- `test_a_killed_sandbox_leaves_no_directory[group]`, `[wrapper-then-command]`, `[frozen-then-killed]`,
-  `[pipes]`, `[background]` (R1, R6; the third also asserts that a walk by parent and group from the
-  wrapper finds no keeper; the fourth that the caller's pipes end while the command, which closed its
-  own, still runs; the fifth that a background job outliving both does not hold the directory);
-- `test_an_ending_sandbox_removes_its_directory_first[exit]`, `[TERM]` (R3, R6);
-- `test_a_sandbox_leaves_other_directories_alone` (R4, R5: a running neighbour and planted
-  `cluster-mcp-sandbox.*` decoys, through a kill and an exit beside them);
-- `test_keeper_violations_rejects[...]` (`unit`, one id per planted broken record).
+1. Imports: `import contextlib` after `import argparse`; `from typing import Iterator, Sequence` in
+   place of `from typing import Sequence`; `import sandbox_dirs` after `import cluster_mcp.slurm`
+   (the runner runs from `tests/`, and the suite imports it with `tests/` on the path).
+2. `run_case`: its first line, `with tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-') as scratch:`,
+   becomes `with case_scratch(case.id) as scratch:`. Nothing else in `run_case` changes.
+3. New, between `run_case` and `self_check`: `case_scratch(case_id)`, a `contextlib.contextmanager`:
+   `scratch = tempfile.mkdtemp(prefix=f'mutant-{case_id}-')` (the name `TemporaryDirectory` gave it),
+   `os.environ['TMPDIR'] = scratch` for the block; in a `finally`, the saved value back (or the
+   variable removed), then `left = sandbox_dirs.leftovers([scratch])`: when some of `left` is
+   `in_use` (one process-table read, only when a sandbox directory is there at all), the scratch is
+   kept and one line on stderr names it ("kept …: a process of the child run still uses a sandbox
+   directory in it"); otherwise `shutil.rmtree(scratch)`. stdout, the verdict lines, never changes.
 
-`BOUND = 2.0` lives in the module and in the gate, as one figure (D1); a ruling changes both.
+`run_child` builds its child's environment from `os.environ` at call time (`{**os.environ, …}`, today
+and in the sibling's rewrite), so the child's `bin/sandbox.sh` makes its directory in the scratch, and
+the child pytest inherits that `TMPDIR`: its basetemp, its own run directory and every sandbox its
+tests start land there too. A child that ends normally sweeps its own (the suite side); a child the
+runner stops, which never reaches its session's end (GOAL constraint 3), has all of it removed with
+the scratch, which the runner removes once the stop has left nothing running (the sibling's
+`_wait_gone`, then `case_scratch`'s exit). A child that ends normally but leaves a sandbox running
+(its own sweep keeps that directory, in use) gets its scratch kept rather than removed under it (R4;
+the adversarial review's finding 1). The same check keeps R4 on the timeout path before the sibling
+lands: today's runner kills the wrapper alone and the child pytest runs on, its environment naming
+its sandbox, so the scratch is kept. The sibling's own `ps` launches during the stop
+take the scratch as `TMPDIR` too, and exit normally (their trap removes them). The runner is one
+thread; `case_scratch` changes `os.environ` for one case at a time.
+
+Merging: `git merge-file` of this change and the sibling's planned change (simulated from its
+PLAN § 2) is clean in both orders, with the same result; the gate's `rebase` mode repeats the check
+against the sibling's real branch (or `origin/develop` once it has landed). Landing order: § 3 row D5.
+
+### Docs, same commit (§ Conventions)
+
+- `AGENTS.md` § Factory → Throwaway environment: after "removed by a trap", one sentence: a SIGKILL
+  skips the trap, so the suite points `TMPDIR` at a directory of the run's own and sweeps it at the
+  session's end (`tests/sandbox_dirs.py`), the mutation runner makes each case's scratch its child's
+  `TMPDIR`, and a caller outside those runs that kills a sandbox outright leaves its directory.
+- `AGENTS.md` § Testing: a bullet for the `sandbox_tmp` fixture beside `skip_probes`' (what it sets,
+  what the sweep removes and keeps, pinned by `tests/test_sandbox_dirs.py`); a module bullet for
+  `tests/test_sandbox_dirs.py`; in the mutation runner bullet, one clause: a case's scratch is its
+  child's `TMPDIR`.
+- `tests/conftest.py`'s module docstring lists the fixture. Comments are declarative and carry no
+  spec, phase or finding id.
+
+### The suite's own rows: `tests/test_sandbox_dirs.py` (new)
+
+- `unit` `test_leftovers_are_directories_with_a_sandbox_name`: names of six characters only, nested
+  ones found, a file, a link and other names never.
+- `unit` `test_a_directory_in_use_is_kept[...]`: `in_use` against fake tables: a working directory in
+  it, below it, by its real path; beside it (not in use); its path in an environment; only its
+  parent named (not in use); unrelated.
+- `integration` `test_this_run_points_its_sandboxes_at_a_directory_of_its_own`: `TMPDIR` is a
+  `cluster-mcp-run.*` directory, and a sandbox's `CLUSTER_MCP_SANDBOX` is in it.
+- `integration` `test_the_sweep_keeps_a_running_sandbox_and_removes_it_once_killed`: a real sandbox
+  under `tmp_path` that wrote a file under its `HOME`: kept while it runs, left by a group SIGKILL,
+  removed by the next sweep.
+- `integration` `test_the_sweep_keeps_a_sandbox_whose_command_runs_on_elsewhere`: a Python command
+  that left its sandbox's directory, its wrapper SIGKILLed alone: the sweep keeps the directory by
+  the command's environment. On CI's Linux this is the row that reads `/proc/<pid>/environ`.
+- `integration` `test_own_tmp_redirects_children_only_and_puts_tmpdir_back`: inside `own_tmp`,
+  `TMPDIR` is the run directory and `tempfile.gettempdir()` is unchanged; after it, `TMPDIR` is put
+  back and the run directory (holding only a sandbox directory) is gone.
+
+All run in each era's fourth suite command (§ 3 row D4).
 
 ### Requirement → design map
 
 | R-ID | Design element(s) that satisfy it |
 |------|-----------------------------------|
-| R1   | The keeper (§ 2.3): end of file on up when the wrapper dies by any signal, then a wait for the command's pid (the shim's, which becomes the command, § 2.6), then `rm`. Gate `kill`, `race`; rows `test_a_killed_sandbox_leaves_no_directory[*]`. |
-| R2   | R1 for every start, and the keeper out of every caller's stop: no parent link and no group shared with a run, and none of a run's descriptors (§ 2.3). Gate `suite`, `mutants` (the runner within its limit and past a patched one), `verify` (the profile's whole `verify` under a fresh `TMPDIR`). |
-| R3   | `EXIT` waits for the keeper's exit, then removes; `HUP INT TERM` defer as on develop and end through `EXIT`; a signal no trap names, where the shell runs `EXIT` at once (bash-as-sh), sends `now` so the directory goes before the wrapper exits, as develop's did (§ 2.5). Gate `exit` (and a builtin that ends the wrapper), `kill` (USR1 against develop); rows `test_an_ending_sandbox_removes_its_directory_first[*]`. |
-| R4   | Each keeper removes only the path its own `mktemp` printed; sandboxes share no pipe, file or pid list. Gate `share`; row `test_a_sandbox_leaves_other_directories_alone`. |
-| R5   | `rm -rf -- <its dir>` is the only removal the keeper makes, and the wrapper's is develop's; no glob, no sweep. Gate `decoys`; the same row. |
-| R6   | The keeper's last act is `exec rm`; the wrapper's `EXIT` waits for down's end of file before its own removal; the middle child is gone before the wrapper runs; `mktemp` is reaped by the keeper. Every gate mode checks the keeper it found while the sandbox ran is gone once the directory is. |
-| R7   | Develop's environment lines unchanged and the variable unset first; stdout of every new process is `/dev/null` or the pipe; the command keeps the wrapper's stdin, group and default signal dispositions, gets no new descriptor, and its status passes through `status`; no signal is forwarded (§ 2.5, § 2.6). Gate `same` compares develop's wrapper and the tree's on each listed observable, in bash-as-sh and dash. |
+| R1   | `sandbox_tmp` → `own_tmp`: every sandbox a suite run starts inherits `TMPDIR` = the run directory, or is given the test's `tmp_path` (or a directory in it); at the session's end `sweep([run, basetemp])` removes every sandbox directory in both, at any depth, that no process uses. Each harness kind of § Problem items 1–5 is a row of the gate's `kinds` mode; each of the profile `verify`'s eight suite commands is checked by the `suite` mode. Reading in § 3 row D2. |
+| R2   | `case_scratch`: the child run's `TMPDIR` is the case scratch (for a case on the package and one planting a repository copy alike), so the child's own sandbox, its tests' sandboxes, its run directory and its basetemp are all inside the scratch; the scratch is removed when `run_case` leaves it, after a normal end (the child's own sweep has run) or after the sibling's stop (the `runner`, `runner-timeout` modes). Readings in § 3 rows D3, D5. |
+| R3   | The sweep looks only in the run directory it made (new, so nothing in it predates the run, and no other run uses it) and the session's own basetemp (`pytest-N`, numbered for this session); in the basetemp it removes only real directories named exactly as `bin/sandbox.sh` names them; the run directory itself, which only this run's processes were given, goes whole unless a sandbox in it is still in use (§ 3 row D3). Gate: `guards` (a concurrent run, directories left before the run in three places, a file, a link, a wrongly named directory, other files). Runner side: § 3 row D3. |
+| R4   | The sweep runs only once the session's tests and fixtures are done, and keeps every directory a process still has as its working directory or names in its environment (`in_use`, with both path spellings); `case_scratch` keeps a scratch holding such a directory. Gate: `guards` (a running wrapper; a command still running outside its directory after its wrapper was killed), `runner` (a child that ends normally leaving a sandbox running), `units` (the Linux `/proc` row). Reading in § 3 row D2. |
+| R5   | `bin/sandbox.sh` is not edited; the `files` mode compares it with `0bfacae`, in the index and the tree. |
+| R6   | No harness's signals, order or graces change, `tmp_path` does not move, and no assertion changes. The full `verify` passes in both eras with the same skips as develop on this host (`suite` mode; the planner's prototype run, § 4); the mutation sample and the controls print what develop's runner printed (`sample`; § 3 row D6). |
 
 ## 3. Invariant gate (AGENTS.md constitution check)
 
-Checked against `AGENTS.md` § Invariants before research and again against this design.
+Checked before the design (Step 2) and again against it. The change touches no numbered section
+(§1–§9): nothing under `packages/` changes, and `bin/sandbox.sh`, on the high-blast-radius list, is
+only run (R5). The sections it touches:
 
-- **§ Invariants, high-blast-radius paths** — `bin/sandbox.sh` is on the list: research ran
-  (`research/`), and a CONFIRMED review finding in it needs the maintainer's sign-off before landing
-  (GOAL Clarifications).
-- **§ Factory, Throwaway environment** — all seven contract items hold; item 2 is what this cycle
-  makes true for SIGKILL. The paragraph that says how ("removed by a trap") changes in the same
-  commit as the script (§ 2, the contract text). Protection 1 (fail closed on SSH), 2 (HOME is the
-  sandbox) and 3 (auth env blank) are develop's lines, unchanged, and still run before the command;
-  the keeper re-executes with an environment of `PATH` alone and an argv of its own, so it holds
-  and shows none of the auth environment (gate: a planted variable and the caller's argv token never
-  appear on a keeper's command line).
-- **§ Conventions, "A CLI drive … never touches the developer's real home"** — every drive still
-  goes through the wrapper; the unset list is unchanged, so
-  `tests/test_hygiene.py::test_sandbox_unsets_both_names` and its four anchors (each exactly once)
-  hold; the perl text names none of them.
-- **§ Conventions, "CI mirrors the gate"** — no list changes: the new module joins the fourth suite
-  command (every other module) of each era with no edit to `verify`, the recipe or the workflow, and
-  `tests/test_suite_parts.py` is untouched.
-- **§ Conventions, comments and spec ids** — the script's comments and the module's text are
-  declarative, with no R/P/Q/F ids (`test_no_spec_ids_in_the_package_or_the_suite`).
-- **§ Conventions, markers** — every new test carries `unit` or `integration`; no gate is a marker
-  selection (the gate names test ids).
-- **§ Testing, pure checks with negative controls** — `keeper_violations` and its planted records.
-- **§ Testing, the suite's rails** — every launch in the module is `[str(SANDBOX), …]`, `ps`
-  included; `tests/test_registry.py`'s `SANDBOX_NEEDS` row runs the wrapper on a `PATH` of
-  `dirname`, `mktemp`, `mkdir` and `rm` alone: the keeper starts from `/usr/bin/perl` and itself
-  needs only `mktemp` and `rm` from `PATH`, so the row stays green unedited and its comment ("what
-  bin/sandbox.sh needs on PATH to start") stays true.
-- **Numbered sections §1–§9** — none touched: nothing under `packages/`.
+- **§ Factory → Throwaway environment.** The contract (seven points) is unchanged; one sentence names
+  the suite's and the runner's cleanup and the limitation for other callers, in the same commit as the
+  fixture.
+- **§ Testing.** A session fixture beside `skip_probes` and `path_shim`, the same shape (sets an
+  environment variable for every test and child, puts the caller's value back); a new module bullet;
+  the mutation runner bullet; § Testing's internals-bound item 5 (`tests/mutants.py` and its anchors):
+  no case and no anchor moves (`test_mutation_anchor_applies` stays green). Every new test carries
+  `unit` or `integration`; unit rows launch nothing; every launch in `tests/*.py`, the sweep's `lsof`
+  and `ps` included, starts with `str(SANDBOX)` (`test_cli_drives_are_sandboxed`). No row skips
+  (the `need_shell`/`need_git` rule).
+- **§ Factory, `ci budget`.** The new module runs in each era's fourth command; the session sweep runs
+  in each of the eight; their cost is row D4.
+- **§ Conventions.** Declarative comments, no spec ids (`test_no_spec_ids_in_the_package_or_the_suite`),
+  no `Co-Authored-By`, docs in the same commit, a rule pointed to rather than restated.
 
 ### Deviation justifications
 
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
-| **D1 — R1's bound and the keeper's poll (the maintainer's figures).** Proposed: the directory is gone within **2.0 s** of the moment the wrapper and its command have both ended; the keeper polls the command's pid at **5 ms doubling to 0.1 s**. Before (develop): never removed. After, measured on the final prototype (2026-11-09, macOS, gate `kill`, bash-as-sh and dash): 21–122 ms after the gate saw both had ended, in every scenario (group kill, wrapper alone then the command 1 s or 6 s later, freeze-walk-kill, caller's group, USR1, a background job outliving both); the gate's own 20 ms poll and a `ps` per check make each figure up to ~40 ms late or early. Brief 03 measured 3.5–21 ms from kill to removal with the backoff. Rederived from the rule: after both have ended the keeper needs at most one poll (≤ 0.1 s), one `rm -rf` of a skeleton (a few ms) and the reaping of an orphan by pid 1 (0.4–1.3 ms, 03 § 4): ~0.11 s worst case on an idle host, so 2.0 s leaves ~18× for a loaded CI runner. | R1 needs a figure (GOAL Q1); the poll is what the figure rests on. | A bound of 1 s or less: within the idle-host worst case's slack, but the CI runner's load is unmeasured, and the rows run there. A fixed 0.1 s poll: its tail is one interval (03 § 6). |
-| **D2 — Cost per sandbox start (the maintainer's call).** Medians of 30 starts, three rounds, the planner's macOS host, 2026-11-09 (the final prototype; other worktrees' gates ran on the host meanwhile). `bin/sandbox.sh sh -c 'exit 0'` (a command through the shim, the common case): bash-as-sh **18.4 → 33.3 ms (+14.9)**, dash **15.2 → 27.8 ms (+12.6)**. `bin/sandbox.sh true` (a builtin, through the reporting subshell): bash-as-sh **14.7 → 31.0 ms (+16.3)**, dash **11.4 → 24.8 ms (+13.4)**. A full pytest run makes **3,356** starts (03 § 6, counted): about **+42–55 s** if every start were serial, ~5–6% of that run's 888 s. The profile's whole `verify` (the suite in both eras), measured: **1,542 → 1,610 s (+68 s, +4.4%)** (§ 5). The sibling's stop starts 3–4 sandboxes per timed-out case (`ps` tables, 02 § 2): about +45–65 ms a case. | Two perl starts (the starter, ~4 ms; the shim, ~4 ms), the second `/bin/sh` (~2–4 ms), the `ready`/`go` exchange and `command -v` (~1 ms) are the price of a detached keeper and of knowing when the command ends; the keeper's own re-exec and `mktemp` overlap the wrapper's start. | `perl -MPOSIX` (`setsid`, `dup2`): +6 ms more a start. A `/bin/sh` shim: cheaper by ~1–2 ms, but it changes failed commands' statuses (D3). A keeper started only when the caller asks: every caller would have to ask, which R2 and the GOAL ("every caller") rule out. |
-| **D3 — Where the command runs, for the commands `exec` does not start (needs the maintainer's reading of R7 at the sign-off).** A command found as a file is the shim's `exec`: the wrapper's child, same pid as the shim, as on develop. Two kinds of command run one process further down: (a) one whose `exec` fails is retried by `/bin/sh -c '"$@"'` named as the wrapper, which prints the shell's own message and exits with its own status, as develop's `"$@"` does, but the message's line number reads 1 (develop's reads the script's line, which any edit to the script moves too); (b) a program a builtin starts (`command sh …`, `eval '…'`) runs in a subshell of the wrapper, so its parent is that subshell. R7 lists its observables after a colon (status, stdout, HOME/XDG/cwd, the environment, no forwarding), and these keep all of them; the parent pid and a line number are not on the list, and no test reads either (01 § 2). Gate `same` compares a missing command, a directory, a missing `#!` interpreter, a directory as interpreter, a shebang-less script, `exit`, `eval` and `command`, in both shells. If "every other observable" is read to include the parent pid of a builtin's program, (b) is a deviation. | The keeper must know the command's pid to wait for it after the wrapper has gone, and only a process the wrapper starts on purpose can report it. | A `/bin/sh` shim that `exec`s (03's sketch): a failed `exec` ends that shell with another status (bash-as-sh, a missing interpreter: 126 → 1); pre-checking the `#!` line in sh cost dash ~6 ms a start. A shim that runs the command without `exec`: it holds the caller's stdout, stderr and passed descriptors for the command's life (gate `kill`, pipes, red on that form). Builtins in the wrapper with the pipes closed by redirection: bash-as-sh leaks its saved copies to the builtin's programs (prototype). No shim: after a lone SIGKILL of the wrapper the keeper cannot tell a live command from a dead one. |
-| **D4 — R6, read as one act (needs the maintainer's reading at the sign-off).** The keeper's last act is `exec rm -rf -- <dir>`: the process that removes the directory is the keeper's pid, and it exits as `rm` returns, so for the microseconds between the last unlink and that exit the "upkeep process" still exists. On every path that runs the wrapper's `EXIT` trap the keeper has exited before the wrapper's own `rm` (gate `exit` looks at the instant the wrapper is reaped). A command that removes its own `HOME` is not an exit path of `bin/sandbox.sh`; the keeper then waits for that command as usual. | R6 cannot be met more strictly: any remover is a process that exits after its last unlink. | A keeper that removes in-process and then exits: the same instant, one step later. |
-| **D5 — Where no keeper starts, R1 does not hold (needs the maintainer's ruling at the sign-off: R1 says "by any caller").** The keeper needs a perl (on `PATH` or `/usr/bin/perl`), an absolute `TMPDIR` without a newline, and three free descriptors among 3–9 in the caller's process; without one, the wrapper is develop's, trap only, and a SIGKILL leaves the directory as today. macOS ships perl and `perl-base` is Essential on Ubuntu; in the suite only `tests/test_registry.py`'s `SANDBOX_NEEDS` row runs with a reduced `PATH`, and `/usr/bin/perl` still serves it; it kills nothing. A relative `TMPDIR` is broken on develop already (HOME is relative to the directory the script then leaves), and a newline in one made the prototype remove a directory it did not make, which R5 forbids. | No POSIX shell primitive detaches a process portably (03 § 1), and dash redirects only single-digit descriptors. | Fail closed without a keeper: a behaviour change for every such caller, against R7. `setsid(1)`: absent on macOS. `set -m`: no new group under dash. `python3`: a Command Line Tools stub on a bare Mac, 32 ms. |
-| **D6 — The suite gains a module** (`tests/test_sandbox_keeper.py`, `integration` rows plus `unit` controls), about 5–8 s per era on a development host (projected; P1 measures it), in each era's fourth command. | The GOAL needs the fix on Linux, and no phase may wait on a hosted run: rows in the suite are what the landing CI run, on `ubuntu-24.04` with dash, checks. | The frozen gate alone: macOS evidence only, and nothing guards the keeper after landing. |
+| **D1 — One run directory for every harness, set once in the session's environment**, rather than a `TMPDIR` each harness passes. Q4 names the mechanism ("each harness … points the sandbox's `TMPDIR` into a directory it owns"); here the directory is owned by the run, and every harness gets it by inheriting `os.environ`. The three sites that already pass `tmp_path` keep it. | Every harness of items 1–5 and every `env=` the suite builds start from `os.environ` (surveyed, § 2), so one fixture covers ~45 launch sites and any site added later; a harness edited one by one is a carve-out waiting to be missed (the gate's additive mutant `ssh-drops-tmpdir` is exactly that). | Passing `TMPDIR` at each of the eight harness kinds and ~25 `subprocess.run` sites: three times the diff, each new site must remember it, and the session sweep is needed anyway for `tmp_path` and for the sites' own leftovers. |
+| **D2 — R1/R4 reading (needs the sign-off): "still running" is what the host shows the account.** A directory is in use while some process has its working directory in it or the directory's path in its environment, as `/proc` (Linux, every process of the account) or `lsof` and `ps -E` (macOS) show them; in use, it is kept, and R1 is read as covering a sandbox none of whose processes is seen using its directory at the session's end. macOS shows no environment for a system binary (`/bin/sh`, `/bin/sleep`, `/usr/bin/git`; measured 2026-11-09), and `env -i` commands carry none of the sandbox's variables. So one case is not seen: a sandbox whose wrapper was SIGKILLed **alone**, whose command still runs at the session's end (or, in the runner, at the case's end), outside the sandbox's directory, as such a process. Its directory is removed while it runs. A sandbox still running at the session's end is kept and removes its own directory when its command ends (its trap): `test_launch`'s split-end-record row does that on purpose, leaving `sleep 8` running past its test, so each era's third command ends with one running (the gate's `suite` mode lets such sandboxes end, up to 30 s, before it judges R1). A wrapper dies alone on a `subprocess.run` timeout (which fails its test; `need_git` skips instead, but its `git` keeps its working directory in the sandbox and is seen), on a loopback `signal` request the command ignores (QUIT, USR1, USR2), and under the delegate stand-in, which runs the command in a session of its own; the harness kills each of these before the session ends (`close()`, the pid-file teardowns). | Without changing `bin/sandbox.sh` (R5), nothing ties a process to a sandbox but its working directory and its environment; the wrapper itself always has its working directory there, and a command started there keeps it unless it changes directory. The gap needs a test that has already failed by timeout and a command that both left the directory and hides its environment, still running when the whole session ends. | (a) Keep every leftover while any process with an unreadable environment exists: on macOS that is always (every system daemon), so R1 would never hold there. (b) Wait at the session's end for orphans to finish: there is no way to tell which orphans are a sandbox's, and it is a timing figure for an unbounded wait. (c) A marker or lock inside the wrapper: R5. |
+| **D3 — R3 reading (needs the sign-off): a directory the run made for its own processes' `TMPDIR` goes whole.** The suite's run directory and the runner's case scratch are each given only to this run's processes; each is removed with whatever those processes left in it, sandbox directories or not, unless a sandbox directory in it is still in use (`own_tmp`, `case_scratch`). R3's "anything that is not a sandbox directory" is read as anything this run did not make for itself; in the basetemp (tests' `tmp_path`, which the developer may inspect) and everywhere else, only sandbox directories are removed. | `uv` keeps a lock file (`uv-<hash>.lock`) in `TMPDIR`: under the strict reading a run directory holding one could never go, and the prototype's first full run, with `rmdir` only, left 4 of its 8 run directories behind, two holding that lock (a new leftover per session, where today one shared lock sits in `$T`). Q4 names "the mutation runner's own scratch"; a stopped child never runs its own sweep (constraint 3); and today a child's basetemp lands in the developer's `$T/pytest-of-<user>/`, where its rotation deletes the developer's older basetemps. | The strict reading: `rmdir` only; a `cluster-mcp-run.*` directory left per session that ran `uv`, and on the runner side a leftover per case (the child's basetemp). |
+| **D4 — Timing figures for the maintainer** (before → after, measured 2026-11-09 on this host; § 5 names the runs). **Session sweep:** none → 0.15–0.23 s in six of each `verify`'s eight sessions, 1.46–2.19 s in the two catch-all sessions (each era's fourth command), whose basetemp holds a built environment (a walk of ~92,000 entries takes about 1.1 s); synthetic: 10 ms with no leftover, about 0.23 s with 60 (the `cost` mode). **Whole `verify`:** 1,637.8 s (develop) → 1,592 s (the prototype's second run); the sweeps add up to about 4.3 s of that run, and the difference between the runs is noise. The `suite` mode itself waited up to 6 s after a command for a sandbox still running to end. **Mutation child session:** none → 0.4–2.3 ms (9 children of an 8-case sample); `case_scratch` reads the process table only when a sandbox directory is left in the scratch (about 0.2 s: a timed-out case or a stray). **New rows** (`tests/test_sandbox_dirs.py`, each era's fourth command): about 1.5 s per era. **Leftovers per `verify`** (develop, the same run): legacy 11 + 42 + 18 + 8, modern 14 + 44 + 17 + 17, 171 in all → 0. | The sweep walks the run directory and the basetemp and, only when it finds a leftover, reads the process table once. | Not sweeping: R1. A walk of the basetemp limited to `tmp_path` and one level below (the depth every site uses today) would bring the catch-all sessions to the others' ~0.2 s, but misses a sandbox put deeper (the gate's `group-kill-nested` row; the additive mutant `top-level-only`): the maintainer's call. |
+| **D5 — Landing order (needs the foreman): P2 builds on `mutant-child-outlives-timeout`'s stop.** Build rebases onto `develop` once the sibling has landed and before P2; until then P2's `runner-timeout` mode is red by design ("no LIMIT"). The text merges cleanly in either order (`rebase` mode). | R2 on the timeout path holds only with the sibling's stop (GOAL constraint 3): today's runner kills the wrapper alone and the child runs on. R4 holds in either order (`case_scratch` keeps a scratch a running child still uses), but the timeout row that shows R2 needs the sibling's patchable `LIMIT`; at 300 s it would cost five minutes per run. | Landing first with P2's timeout row deferred: the row is R2's only evidence on the path the GOAL names ("a case whose child run passes its time limit included"). |
+| **D6 — R6 for the mutation runner is shown by a 22-case sample and the three `--self-check` controls**, against develop's runner on this host (`verify/sample.expected`), not a sweep of all 1,165 cases. Same sample and reading as the sibling's D7 (settled there at its PLAN/TECH gate, 2026-11-09). | The runner's change is one environment variable for the child; the sample covers every family of child (executors, loopback SSH, launcher, startup, probes, timeout stop, repository plants), and its deeper paths. A full sweep is 49–97 minutes, twice. | The full sweep per phase: past the 10-minute command cap, for a `small` appetite. |
+| **D7 — On macOS the sweep launches `lsof` and `ps` through `bin/sandbox.sh`**, only when it found a leftover: about 0.1 s for the two, plus each wrapper (measured 2026-11-09). | The rail requires every launch in `tests/*.py` to go through the sandbox; Linux needs no launch (`/proc`). | Exempting `tests/sandbox_dirs.py` from the rail loosens a gate for every later change. |
+
+Each row was read against R1–R6's wording. D2 and D3 read an R-ID in a way its words do not settle
+(R4's "still running", R1's "however … ended"; R3's "anything that is not a sandbox directory" on the
+runner side): both go to the sign-off as GOAL clarifications. D5 is a sequencing question for the
+foreman. D4 holds figures for the maintainer.
 
 ## 4. Rabbit holes (resolved)
 
-- **How to detach on macOS and under dash** → perl builtins: a double fork and `setpgrp(0, 0)`;
-  `setsid(1)`, `set -m`, `python3` and `POSIX` rejected with measurements
-  ([`03`](research/03-detach-primitives.md) § 1–2).
-- **What the sibling's stop reaches** → parent and group links from the wrapper, never sessions; a
-  keeper re-parented and in its own group is not found; its integration row asserts nothing on
-  sandbox homes ([`02`](research/02-sibling-stops.md)).
-- **Every caller's contract** → six caller groups, the EOF waiters, `group_alive` rows, stdin and
-  group membership as load-bearing, `test_cli`'s byte-identical stderr, `SANDBOX_NEEDS`
-  ([`01`](research/01-callers-and-contract.md)).
-- **The start-up window** → the keeper makes the directory after it has left the wrapper's group and
-  parent, and only after a `ready`/`go` exchange with the running wrapper, so neither a group kill
-  nor a freeze-walk-kill at any moment leaks one (gate `race`: 64 kills at 0–80 ms and 24
-  freeze-walk-kills at 0–20 ms, none left, both shells, 12 repetitions; develop leaves 12 of 24).
-  Without the exchange, a freeze-walk-kill that saw the keeper inside the run and killed it by pid
-  after it had left left one directory in about 400 kills; without ignoring SIGPIPE before it
-  reports, a keeper whose wrapper had died at once left 26 in 150 (prototype).
-- **FIFOs vs pipes** → the re-run under perl opens anonymous pipes before the shell runs: nothing in
-  HOME, no blocking open ([`00`](research/00-digest.md) 4).
-- **The shim's shape** → a few lines of perl that report the pid, close the pipes and `exec` the
-  command, falling back to `/bin/sh -c '"$@"'` when that fails (D3). Three earlier forms failed on the
-  prototype: a `/bin/sh` shim running the command without `exec` held the caller's descriptors for
-  the command's life (gate pipes scenario); a `/bin/sh` shim with `exec` changed bash-as-sh's status
-  for a missing interpreter (126 → 1); pre-checking the `#!` line cost dash ~6 ms a start. Bash-as-sh's
-  `exec` with redirections and a command also leaks saved descriptors 10–12 into the command, which
-  a perl shim never meets. In perl, `open(my $h, …) and close $h` acts on a global `$h`, not the new
-  lexical (the prototype's pid report was silently lost so); the shim and keeper use `if (open(my
-  $h, …)) { … }`.
-- **A deadlock on bash-as-sh** → its `EXIT` trap runs at once on an untrapped fatal signal, with the
-  command not yet reaped; a keeper waiting on that zombie and a wrapper waiting on the keeper hung.
-  The trap now writes `now` first when the command may be running, so the keeper removes at once, as
-  develop's trap did (§ 2.5; R3 as worded).
-- **The prototype** the gate was dry-run against is kept as
-  [`research/04-prototype.sh`](research/04-prototype.sh), for the build to read; the build writes
-  `bin/sandbox.sh` from this section, with comments of its own.
-- **Adversarial review** → see § 7.
+The lean path (`kind: fix`, `appetite: small`, root cause known): no fan-out. Trigger 2 does not fire
+(no high-blast-radius path is touched; R5); trigger 3 fires (the deliverable is test infrastructure),
+so the adversarial review ran (below). `research/01` (callers at `0bfacae`) still holds; the other
+briefs are the rejected design's record.
+
+- **Does every harness inherit the session's environment?** Yes: every launch site of items 1–5 passes
+  no `env` or one built from `os.environ` at call time; only three set `TMPDIR`, to `tmp_path`.
+  The planner's prototype (a detached worktree, removed before the report; its diff is
+  [`verify/prototype.diff`](verify/prototype.diff)) proved it per kind: the
+  gate's `kinds` mode passed on it, every row's directory made in the run directory (or `tmp_path`, or
+  a directory nested in it) and left by its kill; on develop the same mode fails every kind (a
+  control run).
+- **What does macOS show of another process?** `lsof -a -d cwd` lists every working directory of the
+  account's processes (`/private/var/…` spellings; about 0.1 s for ~870 processes); `ps -E` shows the
+  environment of the account's processes except system binaries (D2). Linux's `/proc` shows both.
+- **Path lengths** → no socket under `TMPDIR` or a sandbox's `HOME` anywhere (§ 2); the full prototype
+  run passed in both eras, and the mutation sample with its deeper child paths printed exactly what
+  develop printed.
+- **Does a run leave anything else in its run directory?** Yes: `uv`'s lock file (two of eight run
+  directories in the prototype's first full run), and in each era's third command one sandbox still
+  running at the session's end (`test_launch`'s split-end-record row, by design), whose own trap
+  removes it seconds later. Hence D3's reading and the `suite` mode's settle window.
+- **Merging with the sibling** → three touch points, each at least one unchanged line from the
+  sibling's planned hunks (git conflicts on adjacent changes; checked with `git merge-file`).
+- **Adversarial review** (one reviewer, appetite small, 2026-11-09; it ran the gate's quick modes on
+  the prototype and on planted copies). Nine findings, all folded:
+  1. HIGH: a child that ends normally leaving a sandbox running had its directory removed with the
+     scratch (R4), a path D5 did not cover → `case_scratch` checks before removing, and the `runner`
+     mode gained the row (§ 2).
+  2. An additive mutant, "remove only skeleton-only leftovers", passed every quick mode (no row's
+     leftover held a file) → the group-kill rows, the run-timeout row and the suite row write under
+     `HOME` first; plant `skeleton-only`.
+  3. An R3 mutant, "also sweep the given `TMPDIR` for directories made since the run began", passed →
+     `guards` has an ad hoc caller's leftover made top level during the run; plant `sweep-since`.
+  4. No mode exercised the Linux `/proc` branch → the env-kept row moved into the suite, which CI
+     runs on Linux.
+  5. The `suite` mode could not see a launch that drops `TMPDIR` (it falls to `/tmp`) → it now fails
+     on a new sandbox directory in `/tmp` during a command.
+  6. D2 named only one way a wrapper dies alone → reworded (three ways).
+  7. No mode ran with `TMPDIR` unset, as CI does → `units` runs twice, set and unset.
+  8. A probe timeout would leak the probe's own sandbox into the host's `TMPDIR` → the sweep runs
+     before `TMPDIR` is put back; `lsof -b`.
+  9. `runner` drove only a case on the package → it also drives one planting a repository copy.
+  Refuted by the reviewer: the socket-path limit, an `env=` not built from `os.environ`, launches at
+  collection, a session fixture outliving the sweep, anchor drift, threads racing `os.environ`.
 
 ## 5. Risks & open questions
 
-- **For the maintainer (D1, D2):** the 2.0 s bound, the 5 ms → 0.1 s poll, and the per-start cost
-  (+12.6–16.3 ms; about +42–55 s serial projection per full pytest run). The profile's whole
-  `verify` under a fresh `TMPDIR`, gate mode `verify`, the planner's macOS host, 2026-11-09, run back
-  to back with other worktrees' gates on the host: develop **1,542 s, 219 `cluster-mcp-sandbox.*`
-  directories left** (counted anywhere under the `TMPDIR`, pytest's `tmp_path` trees included);
-  the final prototype **1,610 s (+68 s, +4.4%), none left** (an earlier prototype: 1,617 s, none
-  left). TECH P2 measures the final tree again and records its figure here.
-- **The planner's figures are one host's.** The suite's per-command times moved by up to 14 s
-  between the two runs above (the fourth command 196 → 216 s in the handshake era), so the +68 s
-  carries that noise.
-- **Linux is checked only by CI at landing.** Re-parenting to a subreaper, `/proc` zombie reads and
-  dash's redirections are exercised by the new rows on `ubuntu-24.04`, not by any phase gate (no
-  phase waits on a hosted run). A Linux subreaper inside a run would adopt the keeper and expose it to
-  a run-wide stop; nothing in the repo sets one (03 § 2).
-- **PID reuse.** After the wrapper dies the keeper waits on the command's bare pid; a recycled pid makes
-  it wait for that process instead. Within the 5 ms–0.1 s poll this needs the kernel to cycle through
-  the pid space; accepted.
-- **Zombies on macOS** are read only by `kill 0`: an orphan is reaped by launchd within ~1 ms
-  (03 § 4). A non-reaping parent would hold the directory until it reaps.
-- **Stops that reach the keeper on purpose** (`pkill -f cluster-mcp-sandbox-keeper`, a cgroup or
-  scope kill, the CI runner's orphan cleanup at job end) leave the directory, as today's SIGKILL does.
-- **The sibling cycles.** `mutant-child-outlives-timeout`'s PLAN (lines 95–98, 300–301, 388, D4) and
-  TECH (115–117) say the sandbox home stays after its stop; once this lands that is no longer true,
-  and its seed sentence edit conflicts with the GOAL's Clarification (research 02 § 5). Its frozen
-  gate pins `BASE = 71a3a49` and fails any path outside its list, so landing it first is simpler; this
-  cycle's `files` mode diffs against the merge base with `origin/develop`, so it rebases either way.
-  The seed's "last three" referent is fixed at the second landing (GOAL Clarifications). Overlap with
-  `tests/test_hygiene.py` (skip-check-fence-gaps): none; this cycle does not edit it.
-- **A process the command starts that leaves the group and outlives it** is not waited for (GOAL
-  non-goal); its own leftovers are [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md).
+- **Questions for the sign-off:** D2 and D3 (readings of R1/R4 and R3), D5 (landing order), D4 (the
+  figures). And whether the GOAL's known limitation (callers outside the repository's runs) wants a
+  record beyond `AGENTS.md`'s sentence: the seed `issues/sandbox-dirs-left-on-kill.md` is retired
+  when this lands, and this plan files no new one.
+- **The seed's "last three" referent** (GOAL Clarifications): fixed by whichever of this cycle and
+  the sibling lands second, at its landing; P3 carries the item.
+- **An empty run directory per era.** Each era's third command ends with `test_launch`'s
+  split-end-record sandbox still running, so its run directory is kept (D3) and, once that sandbox's
+  trap has removed its own directory, stays empty: two empty `cluster-mcp-run.*` directories in `$T`
+  per `verify` (the prototype's second run), where develop leaves 171 sandbox directories.
+- **A session killed outright** keeps its run directory and what is in it (GOAL non-goal). It is one
+  `cluster-mcp-run.*` directory per killed session in `$T`, where today it is the sandbox
+  directories themselves.
+- **pytest-xdist or another plugin that runs tests in other processes** would give each worker its own
+  session and run directory; none is installed.
+- **Figures named by run.** Before: develop at `4ea17e0` (`0bfacae` plus `spec/`), the profile's
+  eight suite commands under a fresh `TMPDIR`, 2026-11-09 17:41. After: the planner's prototype of
+  this design at the same base, the gate's `suite` mode: a first run (18:08, part of the design
+  still changing during it: the source of D3 and the settle window) and a second on the final
+  prototype (2026-11-09 evening), whose figures D4 quotes. P3's `suite` mode prints each
+  command's time and leftover count again.
 
 ## 6. Verification strategy
 
-The frozen gate is [`verify/keeper.py`](verify/keeper.py) (its docstring lists the modes), run with
-the repo's interpreter (`uv run python -I`). It installs `bin/sandbox.sh` from the **index** and
-develop's from `0bfacae` into a scratch lab, never the working copy; `SDLK_SH=/bin/dash` runs both
-under dash (Ubuntu's `/bin/sh`). Every process it starts carries a token in its argv and each mode
-ends by asserting none is left.
+The frozen gate is [`verify/cleanup.py`](verify/cleanup.py); its docstring lists the modes. Every
+planted mode runs in a copy of the index (what the phase staged), under a gate-owned `TMPDIR`, with a
+planted test module that drives the repository's own harnesses; it never edits the worktree.
 
-- `kill`: group SIGKILL; the wrapper alone, the command outliving it with its directory, then the
-  command (1 s later, and 6 s later); SIGSTOP of the group, a walk by parent and group (the
-  sibling's rule) that must not reach the keeper, SIGSTOP and SIGKILL of every group found; the
-  wrapper in the caller's group; a group USR1 the command survives, held to develop's outcome in the
-  same shell; the caller's stdout, stderr and a passed pipe reaching end of file while the command
-  (which closed its own) still runs; a background job outliving both; a nested sandbox. Each: the
-  directory gone within `BOUND` of both having ended, the keeper found while it ran (polled), its
-  command line free of a planted variable and the gate's argv token, and gone after (R1, R6, the
-  reach constraint).
-- `race`: 64 group kills at 0–80 ms after start, and 24 freeze-walk-kills at 0–20 ms; a command a
-  fork carried past its kill is killed as a harness's re-walk would; none left (R1).
-- `exit`: the command's exit, and HUP, INT, TERM while it runs, five times each, and a builtin that
-  ends the wrapper (`eval '… exit 5'`): removed before the wrapper exits, status 5 passed, the keeper
-  gone at the instant the wrapper is reaped (R3, R6).
-- `share`: a kill and an exit beside a running sandbox, in one `TMPDIR` and in two, and the older of
-  two killed beside the newer (R4).
-- `decoys`: old-named directories, a file and a symlink of the sandbox pattern, and another directory,
-  byte-identical after four exit paths (R5).
-- `same`: develop's wrapper and the tree's on a probe of HOME, cwd, XDG, the markers, stdin, HOME's
-  listing, descriptors, parent and group, signal dispositions and the sorted environment, and on the
-  statuses and stderr of exit 0, exit 3, a killed command, a missing one, a directory, `exit`, a
-  missing interpreter, a directory as interpreter, a shebang-less script, `eval` and `command` (D3's
-  parent allowed for those two), perl's variables set, a broken locale, a newline `TMPDIR` (with a
-  planted directory that must survive) and a relative one (line numbers, pids and sandbox names
-  normalised); TERM not forwarded; a group TERM to a command that ignores it waited for (R7, R5).
-- `controls`: develop's wrapper installed in the tree's place must fail `kill` and `race`.
-- `rows`: the new module's ids, its planted controls, `tests/test_hygiene.py`, the `tests/test_cli.py`
-  sandbox row, `tests/test_transports.py` and `tests/test_registry.py`'s `SANDBOX_NEEDS` row.
-- `suite`, `mutants`, `verify`: R2 for a pytest run of the rows that SIGKILL sandboxes, for
-  `tests/mutants.py` over one case within its limit and past a patched 1 s limit (the runner
-  imported, only its child run's `subprocess.run` given the limit, or the sibling's `LIMIT` set;
-  the timeout asserted; the file not edited), and for the profile's whole `verify`; each under a
-  fresh `TMPDIR`, with no `cluster-mcp-sandbox.*` directory anywhere under it `BOUND` after the last
-  keeper of the run has gone.
-- `files`, `ledger`: the cycle's paths against the merge base with `origin/develop`; every deferral
-  phrase in PLAN, TECH and the branch's commit bodies names an `issues/` seed indexed in `ROADMAP.md`.
+- **P1** `files units kinds guards`, then the narrowed suite: `tests/test_sandbox_dirs.py`,
+  `tests/test_transports.py` (constraint 1), `tests/test_hygiene.py` (the rail, the unset anchors),
+  `tests/test_suite_parts.py` (the partition).
+- **P2** `files rebase runner runner-timeout sample`, then `tests/test_mutations.py`.
+- **P3** `files ledger mutants`, then `suite` (the whole `verify`, both eras, about 26 minutes, in the
+  background).
 
-**The mutant sweep** (P1 writes it, as code-build Step 4 says; the planner's spot check of the same
-list on the prototype is § 7): plant each into a scratch copy of the staged `bin/sandbox.sh` and run
-the mode named, in both shells; each must go red.
+**The mutant sweep** (P3 writes `verify/mutants.json`; the `mutants` mode applies each plant to a
+staged copy and requires the named mode to fail with the named message). Decisions it must cover
+(the gate's `DECISIONS`), each with at least one plant; the planner's draft against the prototype,
+[`verify/mutants.draft.json`](verify/mutants.draft.json), was dry-run against the final prototype ([`verify/prototype.diff`](verify/prototype.diff)): all 24 plants killed, each by its named mode and message:
 
-| Mutant | Mode |
-|---|---|
-| the keeper keeps the wrapper's group (no `setpgrp`) | `kill` |
-| `setpgrp` after `mktemp` | `race` (freeze-walk-kill) |
-| the middle child becomes the keeper (no second fork; the starter does not wait) | `kill` (the walk) |
-| the keeper does not ignore SIGPIPE before it reports the directory | `race` |
-| the keeper keeps the caller's argv (no clean re-exec) | every mode (the planted check) |
-| the keeper keeps the caller's environment | every mode on Linux (`/proc/<pid>/environ`); macOS shows no process's environment to `ps`, so there it survives |
-| the keeper keeps the caller's stdout, or other inherited descriptors | `kill` (pipes) |
-| the shim keeps the keeper's pipes open for the command | `same` (descriptors) |
-| the shim's pid report dropped | `kill` (wrapper alone) |
-| the keeper removes on end of file without waiting for the pids | `kill` (wrapper alone) |
-| the poll's ceiling 0.1 → 5 s, or the back-off uncapped (values, not nodes) | `kill` (6 s case) |
-| `EXIT` does not wait for the keeper's end of file | `exit` (kqueue exit order); survived the planner's spot check, where the keeper still exited first: both remove the same two thousand files at once |
-| `EXIT` does not write `now` while the command runs | `kill` (USR1, bash-as-sh) |
-| `HUP INT TERM` not deferred | `exit` |
-| builtins run in the wrapper, not in a reporting subshell | `same` (eval, command: descriptors) |
-| the keeper does not wait for `go` | `race`; the window it opens showed once in ~400 freeze-walk-kills, so a single run can pass it |
-| the shim's `/bin/sh` fallback dropped | `same` (a directory, a missing interpreter) |
-| `command -v` dropped (every command through the shim) | `same` (a builtin) |
-| perl's variables not neutralised, or not put back | `same` (perl variables, broken locale) |
-| the template's absolute-and-one-line check dropped | `same` (newline and relative `TMPDIR`) |
-| `read` without `IFS=` | `same` (newline `TMPDIR`) |
-| the keeper removes `<dir>/..` | `decoys` |
-| the variable is not unset before the command | `same` |
-
-A mutant that every mode passes is recorded as a survivor with its reason. The planner's spot check on
-the final prototype (bash-as-sh; § 7) went red on every row but four: `EXIT` not waiting, the
-environment kept (macOS), `go` not awaited, and the shim's closes (red only in `same`, as listed).
-
-## 7. Adversarial review
-
-One fresh reviewer (2026-11-09) read GOAL, this design, the prototype and the drafted gate, and probed
-the prototype in a lab on macOS. Every finding was folded in, and the gate re-run on the new
-prototype in both shells (§ 6, the planner's run in the report).
-
-- **HIGH — the keeper's command line.** The prototype renamed its `$0` in place; the keeper now
-  re-executes perl with its own argv and an environment of `PATH` alone, before it waits (§ 2.3), and
-  every gate `Box` asserts a planted variable and the gate's argv token are absent from it.
-- **A newline or a relative `TMPDIR`** made the prototype read the wrong directory (and remove one it
-  did not make) or remove a relative path from `/`. Such a template now takes develop's path (D5),
-  the wrapper reads with `IFS= read -r`, and gate `same` compares both against develop with a planted
-  directory.
-- **Builtins as the command** (`eval '… exit 3'`, `command sh …`): R3 failed (the trap returned
-  early), the pipes leaked to the builtin's programs, and a background job of theirs held the
-  directory. Builtins now run in a subshell that reports its pid and closes the pipes; `exec` runs as
-  on develop; the trap is inline. Gate: `exit` (eval), `same` (eval, command).
-- **Perl's own environment** (`PERL5OPT` stopped the command; a broken locale printed a warning on
-  every start): neutral values for every perl here, the caller's restored before any `exec`
-  (§ 2.1). Gate `same`: both cases.
-- **R3 on bash-as-sh's untrapped signals.** The prototype deferred removal to the command's end;
-  R3 says every path that removed the directory on develop still does. The trap now tells the keeper
-  `now` (§ 2.5); gate `kill` compares the USR1 path with develop's in each shell.
-- **A start-up race the review's new gate case exposed**: the freeze-walk-kill at 0–20 ms left a
-  directory about once in 400 kills (a keeper seen in the run, killed by pid after it left) and, before
-  that, a keeper killed by SIGPIPE writing to a dead wrapper. The `ready`/`go` exchange and an early
-  SIGPIPE ignore closed both (§ 2.3, § 4).
-- **Gate blind spots**: an over-long poll (new 6 s case), the keeper found by one `ps` snapshot (now
-  polled), start-up only by `killpg` (a freeze-walk-kill race added), the newest sandbox always the
-  one killed (the older of two now), `settle_lab` waiting on argv (now on keepers), the mutation
-  runner's limit patched on every `subprocess.run` (now only the child run's, and the timeout
-  asserted), and no negative control (mode `controls`: develop's wrapper fails `kill` and `race`).
-  The test module gains `[pipes]` and `[background]` rows, where Linux differs most.
-- **LOW, folded**: `kill 0`'s EPERM read as alive; the `/proc` state read after the last `)`; the
-  trap's read retried; the keeper closes descriptors 3–255 instead of reading `/dev/fd`; a caller
-  that ignores SIGCHLD; `/usr/bin/perl` when `PATH` lacks perl.
-- **Deviation rows**: D4 (an untrapped signal) was a bend of R3 and is gone; D3, D4 (R6 as one
-  act) and D5 (R1 where no keeper starts) go to the sign-off as readings or rulings.
-- **Accepted, not changed**: a keeper without `chdir "/"`, without ignoring HUP, or a wrapper not
-  holding up's read end would pass every mode (each is hygiene against a stop that never comes: a
-  cwd held on a mount, a hangup to a group that is not in the foreground, a keeper killed from
-  outside); PID reuse; a caller running the script under another shell explicitly (no caller does).
+| Decision | A plant | Killed by |
+|---|---|---|
+| `redirect-set` | `own_tmp` never sets `TMPDIR`; the fixture not autouse | `kinds` |
+| `redirect-pinned` | `tempfile.tempdir = None` after the redirect | `units` |
+| `redirect-restored` | `TMPDIR` not put back | `units` |
+| `sweep-run-dir`, `sweep-basetemp` | the sweep skips one location (additive) | `guards` (skipped, the run directory would go with a sandbox in it still in use), `kinds` |
+| `sweep-nested` | the walk stops below a depth (additive) | `kinds` (`group-kill-nested`) |
+| `name-exact` | any length after the dot; a prefix match | `guards` |
+| `name-dir-only`, `no-links` | links taken; files taken; links followed | `guards` |
+| `live-cwd`, `live-env`, `live-realpath` | each half of `in_use` dropped; the literal path only; no probe | `guards` |
+| `run-dir-rmdir`, `run-dir-kept` | the run directory never removed; removed even while a sandbox in it is in use | `kinds`, `guards` |
+| `runner-tmpdir`, `runner-restored`, `runner-live` | `case_scratch` sets no `TMPDIR`; never puts it back; removes a scratch still in use | `runner` |
+| `sweep-content` | only leftovers holding no file are removed (additive) | `kinds` |
+| `no-outside-sweep` | an extra sweep of the given `TMPDIR` for directories made during the run | `guards` |
+| `harness-not-redirected` | the loopback server's launch drops `TMPDIR` (additive) | `kinds` |
 
 ---
 
-*Backing research: [`research/00-digest.md`](research/00-digest.md).*
+*Backing research: [`research/01-callers-and-contract.md`](research/01-callers-and-contract.md)
+(callers at `0bfacae`). `research/00`, `02`–`04` and `verify/keeper.py` are the rejected design's
+record (`8520d9c`).*

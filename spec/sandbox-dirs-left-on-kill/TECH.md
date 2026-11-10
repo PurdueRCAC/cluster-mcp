@@ -1,6 +1,6 @@
 ---
 slug: sandbox-dirs-left-on-kill
-title: A sandbox killed with SIGKILL leaves no directory behind
+title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
 status: in_progress
@@ -10,7 +10,7 @@ current_phase: P1
 last_updated: '2026-11-09'
 phases:
 - id: P1
-  name: The keeper removes a killed sandbox's directory, and nothing else changes
+  name: A suite run sweeps what its killed sandboxes left, and nothing else
   status: pending
   satisfies:
   - R1
@@ -18,23 +18,37 @@ phases:
   - R4
   - R5
   - R6
-  - R7
   depends_on: []
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/keeper.py kill race exit share decoys same && SDLK_SH=/bin/dash uv run python -I spec/sandbox-dirs-left-on-kill/verify/keeper.py kill race exit share decoys same && uv run python -I spec/sandbox-dirs-left-on-kill/verify/keeper.py controls rows suite
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files units kinds guards && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
 - id: P2
-  name: No directory left by the mutation runner or the whole gate, and the ledger
+  name: A mutation case's scratch is its child run's TMPDIR
   status: pending
   satisfies:
   - R2
+  - R6
   depends_on:
   - P1
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/keeper.py files ledger mutants verify
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files rebase runner runner-timeout sample && uv run pytest -q tests/test_mutations.py
+- id: P3
+  name: The mutant sweep, the ledger and the whole verify
+  status: pending
+  satisfies:
+  - R1
+  - R3
+  - R4
+  - R6
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files ledger mutants suite
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -42,7 +56,7 @@ review:
   cycle: 0
 ---
 
-# TECH.md — A sandbox killed with SIGKILL leaves no directory behind
+# TECH.md — The suite and the mutation runner leave no sandbox directory behind
 
 The **context engine and finite-state machine** for building this cycle. The YAML frontmatter above
 is the resume ground-truth (read it from the cycle worktree with
@@ -53,12 +67,16 @@ and makes one atomic code+state commit.
 
 - **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
 - **Authoritative design:** [`PLAN.md`](PLAN.md) (§ 2 the design, § 3 the deviations and the
-  maintainer's figures, § 6 the gate's modes and the mutant list).
-- **Backing research:** [`research/00-digest.md`](research/00-digest.md) + briefs.
-- **The frozen gate:** [`verify/keeper.py`](verify/keeper.py), one mode per requirement (its
-  docstring lists them). Never edit it to make a phase pass: a gate that is wrong is a stop and a
-  question for the foreman. Its `BOUND` changes only with the maintainer's ruling on PLAN § 3 D1,
-  together with the test module's.
+  maintainer's figures, § 6 the gate's modes and the mutant sweep's decisions).
+- **Backing research:** [`research/01-callers-and-contract.md`](research/01-callers-and-contract.md)
+  (callers at `0bfacae`); the rest of `research/` and `verify/keeper.py` are the rejected keeper
+  design's record (`8520d9c`), never built.
+- **The frozen gate:** [`verify/cleanup.py`](verify/cleanup.py), one mode per requirement (its
+  docstring lists them), with `verify/sample.expected` and `verify/develop-skips.txt` (develop's
+  output at `0bfacae` on the planner's host). Never edit them to make a phase pass: a gate that is
+  wrong is a stop and a question for the foreman. P3 adds `verify/mutants.json` (the plants); the
+  planner's draft, `verify/mutants.draft.json`, was dry-run against the prototype
+  ([`verify/prototype.diff`](verify/prototype.diff), a reference, never applied by a gate).
 
 ## Conventions (apply to every phase)
 
@@ -76,83 +94,100 @@ and makes one atomic code+state commit.
   harness, model, and variant.
 - A CLI/feature change obeys the profile's `same-commit rules` (§ Conventions in `AGENTS.md`): the
   help text, docs, or generated files it names change **in the same commit**. Here: `AGENTS.md`
-  § Factory → Throwaway environment and the script's own header change with the script, in P1.
+  § Factory → Throwaway environment and § Testing change with the fixture in P1, and § Testing's
+  mutation-runner bullet with `case_scratch` in P2.
 - Export `UV_PYTHON=3.14` before every `verify:` on this host. Stage before running a `verify:`: the
-  gate installs `bin/sandbox.sh` from the index and reads `files` from it. A gate near or over the
-  Bash tool's 10-minute cap (P2's, about 30 minutes) runs through `run_in_background`; never a
+  gate's planted modes run in a copy of the index, never the working tree. P3's gate (about 35
+  minutes: the mutant sweep, then the whole `verify`) runs through `run_in_background`; never a
   disowned launch.
-- `bin/sandbox.sh` is a high-blast-radius path: a CONFIRMED review finding in it needs the
-  maintainer's sign-off before landing. Only `bin/sandbox.sh`, `AGENTS.md` (the Throwaway environment
-  section), the new `tests/test_sandbox_keeper.py` and this cycle's `spec/` change (the `files` mode).
-  `tests/mutants.py` and `tests/test_hygiene.py` are not edited (sibling cycles own them). No phase
-  waits on a hosted CI run or a workflow dispatch.
+- Only the paths the `files` mode allows change: `tests/sandbox_dirs.py`, `tests/conftest.py`,
+  `tests/mutants.py`, `tests/test_sandbox_dirs.py`, `AGENTS.md`, `issues/sandbox-dirs-left-on-kill.md`,
+  `ROADMAP.md` and this cycle's `spec/`. `bin/sandbox.sh` is byte-identical to `0bfacae` (R5). No
+  phase waits on a hosted CI run or a workflow dispatch.
 
 ---
 
-## Phase P1 — The keeper removes a killed sandbox's directory, and nothing else changes
-**Satisfies:** R1, R3, R4, R5, R6, R7 · **Depends on:** —
-**Goal:** a sandbox whose wrapper is SIGKILLed, alone or with its group, frozen or not, leaves no
-directory once the wrapper and its command have both ended; every exit path that removed it on
-develop still removes it before the wrapper exits; nothing else of the wrapper is observably
-different, in bash-as-sh and in dash.
+## Phase P1 — A suite run sweeps what its killed sandboxes left, and nothing else
+**Satisfies:** R1, R3, R4, R5, R6 · **Depends on:** —
+**Goal:** a pytest run points every sandbox it starts at a directory of its own (or keeps the
+`tmp_path` a test gives it), and at the session's end removes each sandbox directory left there that
+no process uses; another run's, an earlier one's, a running sandbox's and anything not named as a
+sandbox directory stay; every harness kind of the GOAL's Problem items 1–5 is covered.
 
-- [ ] `bin/sandbox.sh`, as PLAN § 2 specifies (the planner's prototype,
-      [`research/04-prototype.sh`](research/04-prototype.sh), passed every process mode), in order: the variable read and unset first, the
-      re-run under perl when a perl is found and the template is absolute and one line (perl's
-      variables neutral and put back; the starter, the middle child, the keeper,
-      perl builtins only, every fallback to develop's path; a handle opened with `my` is tested
-      with `if (open(my $h, …))`, never `open(my $h, …) and …`, which acts on a global; the keeper's
-      clean re-exec), the second run's `ready`/`go` exchange and read of the directory (`IFS= read
-      -r`, retried on an interrupted `read`), the inline `EXIT` trap with its `now` line while
-      `running`, `trap : HUP INT TERM`, the perl shim for a command `command -v` finds as a file
-      (its `/bin/sh -c '"$@"'` fallback when `exec` fails), the reporting subshell for any other
-      builtin, `exec` as on develop, and `status=0; running=yes`, the command, `|| status=$?;
-      running=; exit "$status"`. Develop's environment,
-      unset and `cd` lines stay byte-identical (the four `test_hygiene` anchors each exactly once).
-      The poll is 5 ms doubling to 0.1 s (PLAN § 3 D1; the figure stands until the maintainer rules).
-- [ ] The script's header: the keeper paragraph in place of "removed on exit (any path)" (PLAN § 2,
-      the contract text). `AGENTS.md` § Factory → Throwaway environment: the "removed by a trap"
-      sentence as PLAN § 2 words it, naming `tests/test_sandbox_keeper.py` as the pin.
-- [ ] `tests/test_sandbox_keeper.py`: `BOUND = 2.0`, `keeper_violations`, the `integration` rows and
-      the `unit` controls PLAN § 2 lists, with exactly the ids the gate's `ROWS` freezes and at least
-      four planted records under `test_keeper_violations_rejects`. Every launch is
-      `[str(SANDBOX), …]`, `ps` included; `TMPDIR` under `tmp_path`; every process it starts carries
-      a marker in its argv and its teardown kills each one; no R/P/Q/F ids.
-- [ ] Mutant pass (code-build Step 4): plant each mutant of PLAN § 6's table into a scratch copy of
-      the staged script, run the mode it names in both shells; each must go red (`EXIT` without
-      `now` goes red under bash-as-sh only, since dash never runs the trap on an untrapped signal). Record the table (mutant, shell, first failing line, or survivor and why) in the
-      commit body.
-- [ ] Measure, and put in the commit body: the per-start median of `bin/sandbox.sh true` and
-      `bin/sandbox.sh sh -c 'exit 0'`, develop's script against the tree's, in bash-as-sh and dash
-      (30 runs, three rounds); and the new module's time in each era (`pytest --durations=0`).
-      PLAN § 3 D2 and D6 hold the planner's figures until then.
-- **Verify:** the frontmatter `verify:`: the process modes as is and under dash (R1, R3–R7; about
-  80–100 s each on the planner's host), then `controls` (develop's wrapper fails `kill` and `race`),
-  `rows` (the new module, its controls, and the rows that pin the wrapper today) and `suite` (R2's
-  pytest slice, about 15 s): about 5 minutes in all.
-- **Touches:** `bin/sandbox.sh`, `AGENTS.md`, `tests/test_sandbox_keeper.py`.
+- [ ] `tests/sandbox_dirs.py` as PLAN § 2 specifies: `SANDBOX_NAME`, `RUN_PREFIX`, `leftovers`,
+      `in_use` (pure; both path spellings), `processes` (`/proc` on Linux; `lsof` and `ps -E`
+      through `[str(SANDBOX), …]` elsewhere, `lsof -b`; raises when the probe cannot run), `sweep`
+      (no probe when nothing is found), `own_tmp` (sweeps before it puts `TMPDIR` back, then
+      removes the run directory whole unless a sandbox directory in it is still in use). The planner's prototype,
+      [`verify/prototype.diff`](verify/prototype.diff), is the reference shape.
+- [ ] `tests/conftest.py`: the session `autouse` fixture `sandbox_tmp(tmp_path_factory)` entering
+      `own_tmp(tmp_path_factory.getbasetemp())`, and the module docstring naming it. No timing
+      instrumentation.
+- [ ] `tests/test_sandbox_dirs.py`: the six rows PLAN § 2 lists (two `unit`, four `integration`;
+      the `in_use` row parametrised with the seven ids PLAN names). No skips; every launch through
+      `[str(SANDBOX), …]`.
+- [ ] `AGENTS.md`: the Throwaway environment sentence, the § Testing fixture bullet and module bullet,
+      as PLAN § 2 words them.
+- [ ] Measure and put in the commit body: the new module's time in each era
+      (`pytest --durations=0 tests/test_sandbox_dirs.py`, both eras), for PLAN § 3 row D4.
+- **Verify:** the frontmatter `verify:`: `files` (R5), `units`, `kinds` (R1, one row per harness
+  kind) and `guards` (R3/R4), about a minute in all; then the narrowed suite (the new module,
+  `test_transports`' own check of its `tmp_path`, the rail and anchors in `test_hygiene`, the
+  partition in `test_suite_parts`), about 10 s.
+- **Touches:** `tests/sandbox_dirs.py`, `tests/conftest.py`, `tests/test_sandbox_dirs.py`, `AGENTS.md`.
 
-## Phase P2 — No directory left by the mutation runner or the whole gate, and the ledger
-**Satisfies:** R2 (and R1, R3–R7 on the final tree, through the whole suite in both eras) ·
-**Depends on:** P1
-**Goal:** `tests/mutants.py` over a case, within its limit and past a patched one, and the profile's
-whole `verify` each leave no `cluster-mcp-sandbox.*` directory in the `TMPDIR` they ran under; the
-cycle's changes stay in its paths; the ledger is clean.
+## Phase P2 — A mutation case's scratch is its child run's TMPDIR
+**Satisfies:** R2, R6 · **Depends on:** P1, and `mutant-child-outlives-timeout` landed on `develop`
+(PLAN § 3 row D5)
+**Goal:** whatever ends a case's child run, a normal exit, a SIGKILL before its session ends or the
+runner's own stop past its limit, nothing any of its sandboxes made is left once the case is
+reported, and every sample case and control prints what develop printed.
 
-- [ ] The ledger (`code-plan` Step 6.8): walk P1's and P2's bodies, PLAN.md and the branch's commit
-      bodies for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the
-      `ledger` mode checks it). This plan files no new seed: a command's processes that leave its
-      group are [`issues/local-command-outlives-server.md`](../../issues/local-command-outlives-server.md),
-      already seeded and indexed.
-- [ ] Put the full `verify` wall time before and after into PLAN § 5 (D2), naming the runs: the
-      planner's prototype run and develop's (2026-11-09, the plan's report), and this phase's `verify`
-      mode, which prints `verify: exit N in S s`. Put P1's measured per-start and module figures into
-      D2 and D6.
+- [ ] Before the phase: rebase the branch onto `develop` holding `mutant-child-outlives-timeout`
+      (`git merge-base --is-ancestor` of its landing commit; `tests/mutants.py` defines `LIMIT`). If
+      it has not landed, stop and report: the `runner-timeout` mode is red by design until it has.
+- [ ] `tests/mutants.py`, the four touch points of PLAN § 2 and nothing else: `import contextlib`;
+      `Iterator` in the `typing` import; `import sandbox_dirs` after `import cluster_mcp.slurm`;
+      `run_case`'s first line `with case_scratch(case.id) as scratch:`; `case_scratch` (mkdtemp, the
+      `TMPDIR` set and put back, the scratch kept and named on stderr while a sandbox directory in it
+      is in use, else removed) between `run_case` and `self_check`.
+- [ ] `AGENTS.md` § Testing's mutation-runner bullet: one clause, a case's scratch is its child's
+      `TMPDIR` (PLAN § 2).
+- [ ] Measure and put in the commit body: the sample's wall time before (develop's runner) and after,
+      from the `sample` mode's run and `verify/sample.expected`'s recording run (PLAN § 3 row D4).
+- **Verify:** the frontmatter `verify:`: `files`; `rebase` (the text merges with the sibling's in
+  either order); `runner` (a child killed before its session ends, for a case on the package and one
+  planting a repository copy: no sandbox directory, no scratch, `TMPDIR` put back; a child that ends
+  normally leaving a sandbox running: that directory kept); `runner-timeout` (the same through the runner's stop at `LIMIT = 8`); `sample`
+  (R6: 22 cases and the controls, about 110 s); then `tests/test_mutations.py` (about 17 s).
+- **Touches:** `tests/mutants.py`, `AGENTS.md`.
+
+## Phase P3 — The mutant sweep, the ledger and the whole verify
+**Satisfies:** R1, R3, R4, R6 (on the final tree, through the whole suite in both eras) ·
+**Depends on:** P2
+**Goal:** every decision of the cleanup is pinned by a gate row that kills its mutant, additive ones
+included; the profile's whole `verify` leaves no sandbox directory under the `TMPDIR` it ran under and
+skips exactly what develop skips; the ledger is clean.
+
+- [ ] `verify/mutants.json`: at least one plant per decision in PLAN § 6's table (the gate's
+      `DECISIONS`), each `{id, decision, file, old, new, mode, why}` against the built code, `why` a
+      fragment of the `FAIL` line the named mode prints. Start from `verify/mutants.draft.json` and
+      re-anchor each plant to the built text; add a plant for any decision the build added. Record
+      the sweep's result (each plant, killed by which mode, or survived and why) in the commit body.
+- [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
+      for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the `ledger` mode
+      checks this file). This plan files no new seed.
+- [ ] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
+      `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications).
+- [ ] Put the `suite` mode's figures into PLAN § 3 row D4 beside the planner's, naming this run: each
+      command's time and leftover count.
 - [ ] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
-      `mutants` (one case within its limit and past a patched 1 s limit), then `verify` (the
-      profile's whole `verify`, both eras, under a fresh `TMPDIR`, then the leftover check).
+      `mutants` (about 24 plants, one planted mode each: about 7 minutes), then `suite` (the profile's
+      eight suite commands and its last, both eras, under a fresh `TMPDIR`: about 26 minutes).
 - **Verify:** the frontmatter `verify:`.
-- **Touches:** `spec/sandbox-dirs-left-on-kill/PLAN.md`, `spec/sandbox-dirs-left-on-kill/TECH.md`.
+- **Touches:** `spec/sandbox-dirs-left-on-kill/verify/mutants.json`, `spec/sandbox-dirs-left-on-kill/PLAN.md`,
+  `spec/sandbox-dirs-left-on-kill/TECH.md`, and `issues/sandbox-dirs-left-on-kill.md` when the item
+  above applies.
 
 ---
 
