@@ -24,8 +24,8 @@ A check that every `integration` test does need what `unit` forbids has to class
 
 1. a drive of the installed CLI;
 2. another program run through `bin/sandbox.sh` (git, a login shell, a script run for real);
-3. a child Python interpreter run through `bin/sandbox.sh` (`annotation-check`'s
-   `tests/test_annotations.py`);
+3. a child Python interpreter run through `bin/sandbox.sh` (a sibling cycle's planned annotation
+   check, which launches a child interpreter through the sandbox);
 4. a stand-in program launched in place of a host tool (`full-volume-fixture-leaks-hdiutil`'s
    `hdiutil` stand-in);
 5. the `local` and `delegate` backends run for real under the `executes` fixture;

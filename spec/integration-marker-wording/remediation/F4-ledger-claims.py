@@ -10,8 +10,8 @@ the merge base with `origin/develop`. On them:
 
 - every commit a line cites (seven or more hex digits in backticks) is one HEAD reaches;
 - every repository path a line cites in backticks (`tests/…`, `spec/…`, `issues/…`, `bin/…`, an
-  optional `:line` after it) exists in the index, or is another cycle's planned file: on the branch
-  of a cycle the same ledger file names;
+  optional `:line` after it) exists in the index (a file only on another cycle's branch does not
+  count);
 - every `<path>`'s `<name>` pair names a top-level function, class or assignment in that file;
 - every fixture a line calls session- or module-scoped (`… -scoped fixture (`<name>`, …`) is a
   fixture of that scope in `tests/`, and it launches through `SANDBOX`.
@@ -74,17 +74,6 @@ def wider_fixtures() -> dict[str, tuple[str, bool]]:
     return found
 
 
-def planned(path: str, text: str) -> bool:
-    """Whether `path` is another cycle's planned file: on a branch `<kind>/<slug>` (local or origin)
-    whose slug the ledger file names in backticks."""
-    refs = git('for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/origin/').stdout.split()
-    for ref in refs:
-        slug = ref.rsplit('/', 1)[-1]
-        if f'`{slug}`' in text and git('cat-file', '-e', f'{ref}:{path}', check=False).returncode == 0:
-            return True
-    return False
-
-
 def main() -> int:
     bad = []
     lines = added_lines()
@@ -99,8 +88,8 @@ def main() -> int:
         for path in re.findall(r'`((?:tests|spec|issues|bin)/[\w./-]+?)(?::[\d-]+)?`', line):
             present = (git('ls-files', '--', path).stdout.strip() if path.endswith('/')
                        else git('cat-file', '-e', f':{path}', check=False).returncode == 0)
-            if not present and not planned(path, staged(name)):
-                bad.append(f'{name}: cites {path}, which is not in the index or on a cycle branch the file names')
+            if not present:
+                bad.append(f'{name}: cites {path}, which is not in the index')
         for path, ident in re.findall(r"`((?:tests|bin)/[\w./-]+\.py)`'s `(\w+)`", line):
             if ident not in top_level(staged(path)):
                 bad.append(f'{name}: says {path} has {ident}, which it does not define at top level')
