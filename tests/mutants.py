@@ -18,12 +18,18 @@ repository's `bin/sandbox.sh`. A case is caught only when every target fails (a 
 message that names the broken contract. A mutant that merely breaks an import fails for the wrong
 reason and counts as surviving.
 
-A child run that passes `LIMIT` (300 s) is stopped whole, every process it started included, and its
-case is reported `FAILED` with the timeout named; the sweep goes on to the next case.
+Each child runs in a session of its own. One that passes `LIMIT` (300 s) is stopped whole (`stop_run`):
+frozen, every process reachable from it through a live parent or a process group of the run found
+(`run_members`) and SIGKILLed, and waited for until none is running (`_wait_gone`, up to `GONE_WITHIN`).
+Its case is then reported `FAILED` with the timeout named, plus the pids of any process of the run
+still running, and the sweep goes on. A SIGTERM or SIGHUP to the runner (`stop_on_signals`), or a
+Ctrl-C, stops the run in progress the same way, and the runner then ends by that signal (`die_by`
+for TERM and HUP).
 
 This module is not collected: a child takes seconds, so the phase gates run it and its report is
-recorded with the change. `test_mutations.py` keeps the fast parts in the suite: every anchor still
-applies, and `mutation_violations` rejects each way a child can fail to prove a kill.
+recorded with the change. `test_mutations.py` keeps the suite's part: every anchor still applies,
+`mutation_violations` rejects each way a child can fail to prove a kill, and the stop is pinned,
+each decision on fakes and the whole by one real child hung past a patched limit.
 
 `--self-check` also runs the runner's own controls: a docstring-only edit must be reported as
 surviving, and a child that does not import the mutated copy, or imports one member from outside
