@@ -3,10 +3,10 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-10'
 phases:
 - id: P1
@@ -39,7 +39,7 @@ phases:
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2
 - id: P3
   name: The mutant sweep, the docs, the ledger and the full gate
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -53,7 +53,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh all
+  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -192,6 +192,17 @@ Cycle-specific, every phase:
   `verify:` is retuned through `set_phase.py` to `sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2`,
   which runs the frozen `verify/rows.sh p2` unchanged with the leftover checks scoped as above. P3's
   `pre` (`rows.sh all`) takes `… scoped-leftovers.sh all` when P3's build starts, recorded then.
+- **2026-11-10, P3's gate (foreman ruling, at P3's build).** `verify/p3.sh` is frozen, and its `pre`
+  runs `rows.sh all` itself, so the wrapper gained an `--around CMD…` form that runs a whole gate
+  under the same scoping and checks. P3's `verify:` is retuned through `set_phase.py` to `p3.sh all`'s
+  four modes in its order, with `pre` alone under the wrapper:
+  `scoped-leftovers.sh --around sh verify/p3.sh pre && sh verify/p3.sh sweep-a && sh verify/p3.sh
+  sweep-b && sh verify/p3.sh full`. In `all` mode a hygiene pytest reuses the base directory after the
+  leftover step, so the wrapper's proof that the rows ran under its base directory moved into the
+  `ps` shim, taken at the moment the leftover step reads it (shown red when the base directory is
+  not the rows': see P3's report). The sweep's `bound-constant` case sits in mode `a`, the smaller
+  half by count; PLAN §6's `figures` case is planted as two (`figures-bound`, `figures-wait`), so
+  the sweep has 40 cases, 26 decisions and 14 carve-outs.
 
 ---
 
@@ -263,7 +274,7 @@ survivor; the success path is today's; the stand-in exists and the rows that nee
 **Goal:** every decision the fixture makes, and every carve-out it must not have, is shown pinned
 by a row; the docs say what the fixture does; the full gate is green.
 
-- [ ] Write `spec/full-volume-fixture-leaks-hdiutil/verify/mutants.py`, the sweep PLAN §6
+- [x] Write `spec/full-volume-fixture-leaks-hdiutil/verify/mutants.py`, the sweep PLAN §6
       specifies: every case in PLAN §6's two tables (existing decisions and additive carve-outs), each
       an exact edit that applies once to a pristine copy of `tests/` (or it is red), run on its named
       rows in a fresh `mktemp -d` copy of `tests/` and the top-level files, one case at a time, one
@@ -274,17 +285,17 @@ by a row; the docs say what the fixture does; the full gate is green.
       so each mode's measured run is under ten minutes (`bound-constant`, about 2 min alone, goes in
       the smaller half). A header comment states the footprint (one pytest at a time, about 6
       processes, under 500 MB) and the measured time of each mode.
-- [ ] Record the sweep in `spec/full-volume-fixture-leaks-hdiutil/verify/mutant-sweep.md`: each
+- [x] Record the sweep in `spec/full-volume-fixture-leaks-hdiutil/verify/mutant-sweep.md`: each
       case, its rows, killed or not, and each mode's measured time (the run named).
-- [ ] `AGENTS.md` § Testing, the `test_ssh_exec.py` bullet, after the
+- [x] `AGENTS.md` § Testing, the `test_ssh_exec.py` bullet, after the
       `test_a_write_that_runs_out_of_room_keeps_the_file[…]` sentence: the clause PLAN §2 "Docs"
       gives, naming `test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running` and
       `test_a_stopped_step_still_running_is_named`. Nothing else in `AGENTS.md`.
-- [ ] `tests/test_ssh_exec.py` module docstring: one paragraph for the stand-in rows.
-- [ ] Deferral ledger: walk P1–P3's bodies and PLAN for every deferral phrase `p3.sh`'s `ledger`
+- [x] `tests/test_ssh_exec.py` module docstring: one paragraph for the stand-in rows.
+- [x] Deferral ledger: walk P1–P3's bodies and PLAN for every deferral phrase `p3.sh`'s `ledger`
       lists; each must name an `issues/` seed with a `ROADMAP.md` entry (none is planned).
       `p3.sh pre` checks it, reading prose and list items, never headings.
-- [ ] Note in the phase's report: the rows' first Linux run is the cycle branch's CI (PLAN §5).
+- [x] Note in the phase's report: the rows' first Linux run is the cycle branch's CI (PLAN §5).
 - **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh all` (about 40 min: run it in
   the background): `pre` (`rows.sh all`, the docs name both tests, the change stays in
   `tests/test_ssh_exec.py`, `tests/hdiutil_standin.py`, `AGENTS.md` and `spec/…`, graded from the

@@ -15,11 +15,16 @@
 # unique token. Two shims go first on PATH: `hdiutil info` (exactly that argv) drops each line naming
 # `pytest-of-` without the token, and `ps -A -ww -o stat= -o args=` (exactly rows.sh's argv) drops
 # each stand-in line without the token; every other call of either tool runs the real one, unchanged.
-# After a green rows.sh, the script asserts the rows ran under the base directory and the leftover
-# step went through both shims (the `hdiutil` one only where `hdiutil` exists), so the scoping is
-# never vacuous.
+# After a green run, the script asserts the leftover step went through both shims (the `hdiutil` one
+# only where `hdiutil` exists) and that, when it read `ps`, the rows had run under the base directory
+# (a later pytest in the same mode, the hygiene run of `all`, reuses that directory), so the scoping
+# is never vacuous.
 #
-# Usage, from the cycle worktree root:  sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p1|p2|all
+# Usage, from the cycle worktree root:
+#   sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p1|p2|all
+#   sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around CMD...
+# The second form runs CMD (a gate that runs rows.sh itself, such as `verify/p3.sh pre`) under the
+# same scoping and the same checks.
 # SCOPED_GATE_WORK may name an existing empty directory to use instead of a fresh one (the planted
 # red and green runs that showed this wrapper's checks use it to plant under, or beside, the base).
 #
@@ -41,6 +46,7 @@ cat > "$work/shims/ps" <<EOF
 #!/bin/sh
 if [ "\$*" = '-A -ww -o stat= -o args=' ]; then
     echo ps >> '$work/used'
+    ls -d '$basetemp'/test_a_disk_image_step_tha* >/dev/null 2>&1 && echo rows-under-base >> '$work/used'
     '$real_ps' "\$@" | awk -v t='$token' 'index(\$0, "tests/hdiutil_standin.py") == 0 || index(\$0, t) > 0'
 else
     exec '$real_ps' "\$@"
@@ -60,15 +66,22 @@ EOF
     chmod +x "$work/shims/hdiutil"
 fi
 
-PATH="$work/shims:$PATH" PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+$PYTEST_ADDOPTS }--basetemp=$basetemp" sh "$rows" "$@"
+if [ "${1:-}" = --around ]; then
+    shift
+    what=$*
+    PATH="$work/shims:$PATH" PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+$PYTEST_ADDOPTS }--basetemp=$basetemp" "$@"
+else
+    what=$1
+    PATH="$work/shims:$PATH" PYTEST_ADDOPTS="${PYTEST_ADDOPTS:+$PYTEST_ADDOPTS }--basetemp=$basetemp" sh "$rows" "$@"
+fi
 status=$?
 [ "$status" -eq 0 ] || exit "$status"
 
-ls -d "$basetemp"/test_a_disk_image_step_tha* >/dev/null 2>&1 \
-    || { echo "scoped-leftovers.sh: the rows did not run under $basetemp" >&2; exit 1; }
 grep -qx ps "$work/used" || { echo 'scoped-leftovers.sh: the leftover check did not read ps through the shim' >&2; exit 1; }
+grep -qx rows-under-base "$work/used" \
+    || { echo "scoped-leftovers.sh: the rows did not run under $basetemp" >&2; exit 1; }
 if [ -n "$real_hdiutil" ]; then
     grep -qx hdiutil "$work/used" \
         || { echo 'scoped-leftovers.sh: the leftover check did not read hdiutil info through the shim' >&2; exit 1; }
 fi
-echo "scoped-leftovers.sh: leftovers scoped to $token; $1 ok"
+echo "scoped-leftovers.sh: leftovers scoped to $token; $what ok"

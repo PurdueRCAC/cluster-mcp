@@ -1155,7 +1155,16 @@ import has no effect.
     with ENOSPC injected at that size (the runner cannot attach a filesystem without root), and
     EDQUOT injected at 32 KiB everywhere; a 36,027-byte write and an `sbatch` job script leave the
     old file byte-identical and submit nothing
-    (`test_a_write_that_runs_out_of_room_keeps_the_file[8k-free|32k-free|edquot]`). A staged file
+    (`test_a_write_that_runs_out_of_room_keeps_the_file[8k-free|32k-free|edquot]`). Each `hdiutil`
+    step of that image runs under a 120 s bound as the leader of a process group of its own; a step
+    that hangs or fails is KILLed with everything it started, waited on for 5 s, and named with how
+    it ended (the bound, or its exit status and the tail of its standard error) and anything still
+    running. A failed `create` or `attach` detaches every device `hdiutil info` lists for the image
+    and removes it; a failed `detach` is never retried, and keeps the volume and the image and names
+    both, after the test's own failure when the test failed first. A stand-in for `hdiutil`, run
+    through `bin/sandbox.sh`, pins this on every platform
+    (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running[…]`,
+    `test_a_stopped_step_still_running_is_named`). A staged file
     that falls short with no error, changes on its way to disk, or whose close fails is never
     placed (`test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short|changed|close-fails]`),
     and `ssh.cksum` matches POSIX `cksum` and the host's. A connection lost after the command ran,

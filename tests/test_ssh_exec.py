@@ -70,6 +70,12 @@ the link is silent gives a quiet command or an upload beside it its own verdict,
 when the link answers within it and are cut past it; and an idle connection, a quiet command, one
 trickling its output through a slow hop, and one through a silent spell shorter than a background
 verdict are never cut.
+
+The macOS full-volume rows attach a disk image with `hdiutil`, each step under a bound, in a process
+group of its own: a step that hangs or fails is KILLed with what it started and named, and a failed
+`create` or `attach` is cleaned up, while a failed `detach` keeps and names what it left. A stand-in
+for `hdiutil` (`hdiutil_standin.py`, through `bin/sandbox.sh`) pins every way a step can end, on
+every platform, with no disk image (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running`).
 """
 
 from __future__ import annotations
