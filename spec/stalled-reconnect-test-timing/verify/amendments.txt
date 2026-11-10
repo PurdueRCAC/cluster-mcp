@@ -6,3 +6,9 @@ fragment ('the collector pausing it'), and FAULTS[4] gains `collects-slowly-in-t
 collection planted inside the start, which the row must fail naming it). Nothing was removed or
 reworded; the three planned row-4 faults and every other row's entries are as signed. Every sweep
 part runs under this gate in P5.
+
+2026-11-10 · timing-gate.py · P6 · The branch was rebased onto `origin/develop` before P6. BASE, the
+GOAL's sign-off commit, was a literal SHA that the rebase left off the branch. It is now found at run
+time by its subject on the branch (`goal_signoff()`), so it moves with any rebase. Its rows, and the
+product under them, are unchanged from the signed base. Every sweep part runs again under this
+gate on the rebased tree before P6's verify.

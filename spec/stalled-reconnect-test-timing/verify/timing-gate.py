@@ -52,8 +52,20 @@ from pathlib import Path
 SLUG = 'stalled-reconnect-test-timing'
 SPEC = Path('spec') / SLUG
 HERE = Path(__file__).resolve().parent
-# The GOAL's sign-off commit, the tree the cycle starts from: its rows are the "before".
-BASE = 'abe12e3'
+# The GOAL's sign-off commit, the tree the cycle starts from: its rows are the "before". Found by its
+# subject on the branch at run time, so a rebase of the branch moves it with the branch.
+GOAL_SUBJECT = f'[test] Record the GOAL-gate clarifications for {SLUG}'
+
+
+def goal_signoff() -> str:
+    log = subprocess.run(['git', 'log', '--format=%h %s', 'HEAD'], check=True, capture_output=True, text=True).stdout
+    found = [line.split(' ', 1)[0] for line in log.splitlines() if line.split(' ', 1)[1:] == [GOAL_SUBJECT]]
+    if len(found) != 1:
+        raise SystemExit(f'{len(found)} commits on the branch carry the subject {GOAL_SUBJECT!r}, not one')
+    return found[0]
+
+
+BASE = goal_signoff()
 ERAS = ({}, {'CLUSTER_MCP_TEST_ERA': 'modern'})
 
 SSH = 'tests/test_ssh_exec.py'

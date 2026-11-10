@@ -84,6 +84,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/load-protocol.py check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py profile check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py sweep-check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py scope && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py ledger
 review:
   last_reviewed_commit: ''
@@ -168,6 +169,14 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
   a fault added to the gate, `4/collects-slowly-in-the-start` (a 0.6 s collection planted inside the
   start; fragment `the collector pausing it 0.6`), and by `MESSAGES[4]`; named in
   `verify/amendments.txt`. PLAN § 2 (row 4) and § 6 follow.
+- **2026-11-10, P6: rebased onto `origin/develop`.** The branch moved from `0bfacae` to `146cbc6`
+  (no change under `packages/` or to the four rows; `tests/test_hygiene.py` changed), with one
+  ROADMAP conflict resolved by keeping both sides (29 Part I entries). The GOAL sign-off is now
+  `af1012e` and the plan commit `64137f6`. `timing-gate.py` finds BASE by its subject at run time
+  (`verify/amendments.txt`). The re-run sweep on the rebased tree went red at part 4:
+  `4/collects-slowly-in-the-start` was killed for the wrong reason, its fragment
+  `the collector pausing it 0.6` against a reported pause of 0.67-0.71 s (the planted 0.6 s plus
+  the explicit full collection itself). Recorded as an attempt; P6 waits on the fix to that fault.
 
 ---
 
