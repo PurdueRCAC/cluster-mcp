@@ -136,6 +136,23 @@ that kills a sandbox outright still leaves its directory (a known limitation).
   mutation runner); an ad hoc caller that SIGKILLs a sandbox still leaks, recorded as a known
   limitation. A timing figure the sweep adds comes back to the maintainer (2026-11-09, maintainer
   at the PLAN/TECH gate: (b) re-shape).
+- **Q:** What does R4's "still running" mean, and so which sandbox does R1's "however that sandbox
+  ended" cover, when nothing but a process's working directory and environment ties it to a sandbox
+  (R5)? — **A:** What the host shows the account. A sandbox directory is in use while some process
+  has its working directory in it or the directory's path in its environment, as `/proc` (Linux)
+  or `lsof` and `ps -E` (macOS) show them; in use, it is kept. R1 covers a sandbox none of whose
+  processes is seen using its directory at the run's end. The one case not seen: a sandbox whose
+  wrapper was SIGKILLed alone and whose command still runs at the run's end, outside the sandbox's
+  directory, as a process whose environment the host does not show (on macOS, a system binary, or
+  an `env -i` command); its directory is removed while it runs (2026-11-09, foreman ruling at the
+  PLAN/TECH gate; PLAN § 3 row D2).
+- **Q:** Does R3's "anything that is not a sandbox directory" cover the directory a run makes to be
+  its own processes' `TMPDIR`? — **A:** No. A directory the run made for its own processes'
+  `TMPDIR` (the suite's run directory, the mutation runner's case scratch) is given only to this
+  run's processes, and is removed whole with whatever they left in it, sandbox directories or not,
+  unless a sandbox directory in it is still in use. Everywhere else (the run's pytest temporary
+  directories included) the cleanup removes only sandbox directories (2026-11-09, foreman ruling at
+  the PLAN/TECH gate; PLAN § 3 row D3).
 
 ## Related materials
 
