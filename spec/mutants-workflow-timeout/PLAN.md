@@ -1,6 +1,6 @@
 # PLAN — A dispatched mutation run finishes and reports every case
 
-> **Status:** Draft for review · **Last updated:** 2026-11-09
+> **Status:** Amended to the maintainer's 15-minute envelope (GOAL Q6) · **Last updated:** 2026-11-09
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). There is no research fan-out: this is the
 > lean path (`appetite: small`, root cause known, no high-blast-radius path). The timing sample it
@@ -19,6 +19,13 @@ passed, and it names each case without one (R2). The selection and the ledger li
 `tests/mutants.py` as pure functions behind three flags. They are pinned by rows in a new
 `tests/test_mutant_shards.py`, each of which kills a named mutant. Three dispatched runs measure the
 jobs. `AGENTS.md` gains the `mutants budget` row (R4) and the corrected dispatch sentences (R5).
+
+The maintainer's envelope (GOAL Q6) binds the shape:
+- each job's timeout is 15 minutes, and the cases' step is capped at 12;
+- the whole run, from dispatch to its last job, finishes within 15 minutes, queueing included;
+- each job stays within 10 minutes with one hung case, which gives about 15 cases a shard;
+- P3's first run measures the run's wall time and the jobs it ran at once. If the waves push the run
+  past 15 minutes, the size is refitted from those figures (§ 2.5).
 
 ## 2. Design
 
@@ -116,18 +123,18 @@ re-runs its P1–P2 gates after the rebase.
 - `on: workflow_dispatch` only. `permissions: contents: read`. `defaults.run.shell: bash` and no
   step-level `shell:`, so GitHub runs every step as `bash -e -o pipefail`: a runner that exits 1
   fails its step through `tee`.
-- **`plan`** (`ubuntu-24.04`, `timeout-minutes: 20`):
+- **`plan`** (`ubuntu-24.04`, `timeout-minutes: 15`):
   - checkout, setup-uv and `uv sync --locked`, as ci.yml's suite jobs carry them;
   - then `shards=$(uv run python tests/mutants.py --matrix)` into `$GITHUB_OUTPUT`.
 
   A failure there (no case) fails the run before any shard: R2's "no case found".
-- **`mutants`** (`needs: plan`, `ubuntu-24.04`, `timeout-minutes: 20`, name `mutants (N of S)`):
+- **`mutants`** (`needs: plan`, `ubuntu-24.04`, `timeout-minutes: 15`, name `mutants (N of S)`):
   - `strategy.fail-fast: false`: one failing shard must not cancel the others' verdicts.
   - `matrix.shard: ${{ fromJSON(needs.plan.outputs.shards) }}`, with no `exclude`/`include`.
   - `env.SHARD: N/S`, from `matrix.shard` and `strategy.job-total`.
   - Steps: checkout, setup-uv, **then the login-shell provisioning step and `uv sync --locked`,
     verbatim as ci.yml's suite jobs carry them**. Then:
-    - **`run`** (`timeout-minutes: 15`): `uv run python -u tests/mutants.py --self-check --shard
+    - **`run`** (`timeout-minutes: 12`): `uv run python -u tests/mutants.py --self-check --shard
       "$SHARD" | tee mutants-report.txt`. It is unbuffered, so a step killed at its cap leaves every
       line it printed.
     - **`ledger`** (`if: always()`): `uv run python tests/mutants.py --ledger mutants-report.txt
@@ -151,18 +158,19 @@ re-runs its P1–P2 gates after the rebase.
 - **§ Factory profile, a new `mutants budget` row after `ci budget`** (R4). It states:
   - every job of `mutants.yml` finishes within 10 minutes of wall time, start to completion as
     `gh run view --json jobs` reports it, on the hosted `ubuntu-24.04` runner, with
-    `timeout-minutes` at 20;
+    `timeout-minutes` at 15, and the whole run within 15 minutes from its dispatch to its last job's
+    completion, queueing included;
   - a shard holds at most 15 cases (`SHARD_SIZE`), so that a job with one case stopped at the
     runner's 300 s per-case limit (about 310 s) still fits;
   - a case added makes more shards, not a longer job, so the run keeps fitting while the worst job
     plus 310 s stays within 600 s;
-  - `Baseline: pending` until P4. Then the `runs` gate's sentence: the case count, the shard count,
-    the slowest job and its seconds per case over its own case count, the commit, the three runs,
-    and each job's worst time.
+  - `Baseline: pending` until P5. Then the `runs` gate's sentence: the case count, the shard count,
+    the run's worst wall from dispatch, the slowest job and its seconds per case over its own case
+    count, the commit, the three runs, and each job's worst time.
 - **§ Testing's module list** gains `tests/test_mutant_shards.py` (P1).
 - **§ Testing, the mutation-runner bullet:**
   - "A child takes about 2 s, all cases about 3 minutes" becomes the measured cost. P2 points to the
-    row, with "pending". P4 writes "N cases in S shards, slowest job M:SS".
+    row, with "pending". P5 writes "N cases in S shards, the run M:SS from dispatch, slowest job M:SS".
   - The usage block gains `--matrix`, `--shard` and `--ledger`.
   - The closing sentences describe the sharded run and state the dispatch state (R5).
 - **R3's "tell, without dispatching, whether the full run still fits".** The row states the rule
@@ -199,20 +207,69 @@ for the same command. So on the runner:
   of 1,165 also makes 78.
 - The slow-runner job: 135 + 90 = 225 s. With one hung case: 535 s ≤ 600 s.
 
-**The cases' step cap of 15 minutes** (900 s, § 3 row D2):
-- It holds the controls, the cases and two hung cases on a slow runner: 27 + 135 + 2 × 310 = 782 s
-  ≤ 900 s.
-- The job then ends inside its 20-minute timeout: slow setup 57 s + 900 s + ledger 7 s + teardown
-  ~5 s ≈ 16.2 min.
+**The cases' step cap: 12 minutes** (720 s, § 3 row D2). The job's timeout is 15 minutes (900 s,
+GOAL Q6), and the step must leave room after it for the ledger to run.
+- After the step come the ledger (≈ 7 s) and teardown (≈ 5 s). Before it, setup takes up to 57 s on a
+  slow runner. That leaves at most 900 − 69 = 831 s for the step.
+- 13 minutes (780 s) would end the job at ≈ 849 s, a 51 s margin. 12 minutes ends it at ≈ 789 s
+  (13.2 min), a margin of 111 s. That covers an apt mirror or a setup-uv download twice as slow as
+  any seen. So the cap is 12.
+- Hung cases the step still reports with every verdict:
+  - one on a slow runner: 27 + 135 + 310 = 472 s ≤ 720 s; two would take 782 s;
+  - two on a typical one: 10 + 74 + 2 × 310 = 704 s ≤ 720 s.
+
+  Beyond that, the ledger names what is left.
+
+### 2.5 The run's wall, waves and the refit
+
+- **Concurrency.** The organisation is on GitHub's Free plan (read with `gh api`, 2026-11-09). It has
+  20 concurrent hosted jobs, shared with every workflow of every repository in the organisation.
+  78 shards therefore run in at least 4 waves (⌈78/20⌉).
+- **The model.** run wall ≈ plan span + waves × job. The plan span is the time from dispatch until
+  `plan` is done: about 45 s typical, 60 s slow. A job is the overhead (setup, ledger, teardown:
+  about 24 s typical, 64 s slow) plus (cases + 3 controls) × the child cost (4.9 s typical, 9.0 s
+  slow).
+- **Projections** at 1,164 cases and 20 free slots, from the `runs` gate's own `refit` table:
+
+  | size | shards | waves | job typ./slow | run typ./slow | run + one hang, typ./slow | fits (slow) |
+  |---|---|---|---|---|---|---|
+  | **15** | 78 | 4 | 112 / 226 s | **494 / 964 s** | 804 / 1,274 s | envelope missed |
+  | 20 | 59 | 3 | 137 / 271 s | 455 / 873 s | 765 / 1,183 s | both bounds |
+  | 30 | 39 | 2 | 186 / 361 s | 416 / 782 s | 726 / 1,092 s | envelope only (one hang takes a job to 671 s) |
+  | 50 | 24 | 2 | 284 / 541 s | 612 / 1,142 s | 922 / 1,452 s | neither |
+
+  - At 15 a shard, the run fits the envelope on a typical runner (≈ 8.2 min, ≈ 13.4 min with one
+    hung case in the last wave). It misses on a slow one (≈ 16 min).
+  - 20 a shard drops a wave. On a slow runner it is projected to keep both bounds: 14.6 min, and a
+    job with one hung case at 9.7 min.
+  - With another workflow holding 9 of the 20 slots (a cycle's ci.yml push run), no size keeps the
+    envelope on a slow runner: the best is 53 a shard at ≈ 20 min.
+- **P3 decides the size.** Run 1 runs at 15, the maintainer's (B). The `runs` gate measures:
+  - the run's wall from dispatch, queueing included;
+  - the most jobs it ran at once;
+  - the plan span;
+  - each shard's overhead and seconds per child.
+
+  It refits from those figures. Each size's projection uses the slowest child, the largest overhead,
+  the fewest jobs at once and the longest plan span. The proposal is the size that keeps both bounds
+  (each job within 600 s with one hung case, the run within 900 s) at the lowest projected run wall.
+  If none keeps both, the envelope wins (Q6: "pick the shard size that fits"). If no size keeps even
+  the envelope, it says so.
+  - **Run 1 within both bounds:** the size stays. P4 and P5 make runs 2 and 3, one at a time, since two
+    runs at once would share the 20 slots and both miss the envelope.
+  - **Run 1 outside either bound:** P3 Run B stops and hands the foreman run 1's figures and the
+    refit table. The foreman brings them to the maintainer (Q6: "bring the measured run back"), with
+    the dispatch question that follows: two dispatches remain, and R4 counts the worst of the runs
+    at the landed size.
 
 ### Requirement → design map
 
 | R-ID | Design element(s) that satisfy it |
 |------|-----------------------------------|
-| R1   | Every platform case exactly once: `shard_count` + `shard_ids` (sorted, round-robin, ≤ 15 a shard), `parse_shard`'s count check, the `plan` job and the `fromJSON` matrix, `fail-fast: false`. A report before the timeout: `timeout-minutes: 20` on both jobs, the 15-minute cap on the cases' step, the always-run ledger. Within 10 minutes: shard sizing with one hung case (§ 2.4, row D1). The shells provisioned. Proven on the hosted runner by the three runs (P3, P4): each job ≤ 600 − 310 s, each case reported once, every control passed. |
+| R1   | Every platform case exactly once: `shard_count` + `shard_ids` (sorted, round-robin, ≤ 15 a shard), `parse_shard`'s count check, the `plan` job and the `fromJSON` matrix, `fail-fast: false`. A report before the timeout: `timeout-minutes: 15` on both jobs, the 12-minute cap on the cases' step, the always-run ledger. Within 10 minutes: shard sizing with one hung case (§ 2.4, row D1). The run within 15 minutes from dispatch: the waves, measured and refitted in P3 (§ 2.5). The shells provisioned. Proven on the hosted runner by the three runs (P3, P4, P5): each job ≤ 600 − 310 s, the run ≤ 900 s from dispatch, each case reported once, every control passed. |
 | R2   | `report_violations` via `--ledger` in every shard: survived, wrong reason, no verdict, doubled, foreign id, controls. Its `FAILED` lines name each case. The job, and so the run, fails. `--matrix` fails the run when no case is found. `--self-check` runs in every shard. |
 | R3   | ⌈N/15⌉ shards, computed at run time from `mutants.CASES`, so adding cases needs no workflow edit. The row's fitting rule and per-case figure (§ 2.3). |
-| R4   | The `mutants budget` row: the bound, the shard size, then the measured baseline (cases, shards, slowest job and per case, commit, runs, each job's worst of three). § Testing's cost sentence and pointer. Filled from `mutants-gate.py runs --final` output (P4). |
+| R4   | The `mutants budget` row: the bound, the shard size, then the measured baseline (cases, shards, slowest job and per case, commit, runs, each job's worst of three). § Testing's cost sentence and pointer. Filled from `mutants-gate.py runs --final` output (P5). |
 | R5   | The workflow header and § Testing's dispatch sentences (P2). |
 
 ## 3. Invariant gate (AGENTS.md constitution check)
@@ -262,16 +319,15 @@ The § Conventions and other sections the change touches:
 
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
-| **D1 — R1 read with one hung case inside the 10 minutes; `SHARD_SIZE = 15`.** A timing figure for the maintainer. R1 says each job "finishes within 10 minutes" whenever the workflow is dispatched, and Q1 says sizing assumes a hung case costs up to ~310 s of its job. This plan sizes a shard so that a job with **one** hung case, on a slow runner, still finishes within 600 s (§ 2.4: ⌊(540 − 90 − 310)/9.0⌋ = 15). **Before:** one job, `timeout-minutes: 30`, 49–97 min serial projected, cancelled with no report. **After** (1,164 cases): **78 jobs of 14–15 cases**. Per job: ~1.8 min typical, ~3.8 min on a slow runner, ~8.9 min with one hung case on a slow runner. ~140 runner-minutes. Run wall ~8 min plus queueing at the 20-job concurrency of a Free-plan account (4 waves), less on Team/Enterprise. The cases' step holds two hung cases. **Landing order:** the hang allowance assumes the sibling cycle's stop. Until it lands, a hung case's `TimeoutExpired` escapes `main`, and the rest of that shard reports no verdict. The ledger names them (R2 holds), but R1's "verdict for every case" does not hold in that shard. | The literal R1 holds in a dispatch where one case hangs, and the R4 baseline is measured against the rule the row states. | **Reading A**: 10 minutes for a run with no hung case. A hung case may take its job past 10 minutes but stays under 20. `SHARD_SIZE = 50` (⌊(540 − 90)/9.0⌋), **24 jobs** of 48–49 cases. Per job: ~4.6 min typical, ~8.9 min on a slow runner, ~14.0 min with one hung case: over the 10-minute bound, under the 15-minute step cap, which then holds only one hung case. ~110 runner-minutes. Run wall ~10 min (2 waves at 20). It is closer to the maintainer's "about 6–13 jobs", but a dispatch with one hung case breaks R1's 10 minutes. **Switching**, before P3, changes `SHARD_SIZE` in `tests/mutants.py`, the gate's `HANG` (310 → 0) and its plan-time `SHARD_SIZE`, the row's "15 cases" and its hang sentence, and this table. The `runs` gate reads the size from the measured commit. The maintainer chooses at sign-off. |
-| **D2 — the cases' step capped at 15 minutes** (`timeout-minutes: 15` on the `run` step), a new bound inside the job's 20. | R1's second clause: "a reported verdict for every case before any of its jobs reaches its timeout". A shard with more hung cases than its size allows is stopped at 15 minutes. The always-run ledger then names every case the runner never reported, at ≤ ~16.2 min, before the 20-minute timeout (§ 2.4). Without the cap, a job timeout cancels the job and its report is lost. | **No step cap**, relying on the job's timeout and an `if: always()` ledger: GitHub's cancellation re-evaluates `always()` and runs the step, but the job is then already past its timeout, and the server may force-stop it 5 minutes later. The step cap reaches the ledger without a cancellation. **A cap in the runner itself** (a wall-clock deadline in `main`) gives the same guarantee with more code in the file the sibling cycle edits. |
-| **D3 — the counted runs may sit on two commits.** The runs are dispatches of the branch head. Run 1 (P3) is at the measured commit T1. Runs 2 and 3 (P4) are at P3's closing commit, which differs from T1 only in `spec/`, and, if run 1 found survivors, in `issues/` and `ROADMAP.md`. R4 records "the commit", so the row names T1. | Dispatching all three at T1 would burn every dispatch at once if run 1 showed the shape wrong (a mis-sized shard, a workflow error), leaving none to measure the fix (Q4 allows three). The `runs` gate accepts a later commit only if this clone holds it and `git diff --name-only T1 <sha>` lists nothing outside `spec/`, `issues/` and `ROADMAP.md`. So the code and workflow measured are T1's. `--final` also refuses a landing tree that changed anything but those records and `AGENTS.md` since T1. | **Three dispatches at once at T1**: one fewer foreman round trip, but all three lost to one error. **Re-running run 1's attempts** (`gh run rerun`) keeps one commit, but a re-run is not one of the three dispatches Q4 names. |
+| **D1 — R1 read with one hung case inside the 10 minutes; `SHARD_SIZE = 15`, refitted in P3 if the waves miss the envelope.** The maintainer's answer (GOAL Q6, 2026-11-09) settles the reading as (B), about 15 cases a shard. A shard is sized so that a job with **one** hung case, on a slow runner, still finishes within 600 s (§ 2.4: ⌊(540 − 90 − 310)/9.0⌋ = 15). **Before:** one job, `timeout-minutes: 30`, 49–97 min serial projected, cancelled with no report. **After** (1,164 cases): **78 jobs of 14–15 cases**. Per job: ~1.9 min typical, ~3.8 min on a slow runner, ~8.9 min with one hung case on a slow runner. Run: 4 waves at the organisation's 20-job Free-plan limit; ≈ 8.2 min from dispatch typical, ≈ 13.4 min with one hung case; **≈ 16 min on a slow runner, over the 15-minute envelope** (§ 2.5). ~145 runner-minutes. **Landing order:** the hang allowance assumes the sibling cycle's stop. Until it lands, a hung case's `TimeoutExpired` escapes `main`, and the rest of that shard reports no verdict. The ledger names them (R2 holds), but R1's "verdict for every case" does not hold in that shard. | R1 as reworded by Q6: each job within 10 minutes even with one hung case, and the run within 15 minutes of dispatch. | **Reading A** (50 a shard, 24 jobs, 2 waves; a hung case takes its job to ~14 min) was declined by the maintainer (Q6). **A size fitted to the waves now** (20 a shard, 59 jobs, 3 waves: projected 14.6 min slow, a hung case's job 9.7 min) is the refit's likely answer on a slow runner, but Q6 sets (B)'s ~15 and asks for the measured run first. P3's run 1 measures it, and the `runs` gate's refit proposes the size that fits (§ 2.5). **Switching** changes `SHARD_SIZE` in `tests/mutants.py`, the gate's plan-time `SHARD_SIZE`, the row's "15 cases", and this table. The `runs` gate reads the size from the measured commit. |
+| **D2 — the cases' step capped at 12 minutes** (`timeout-minutes: 12` on the `run` step), inside the job's 15 (GOAL Q6). | R1's second clause: "a reported verdict for every case before any of its jobs reaches its timeout". A shard with more hung cases than its size allows is stopped at 12 minutes. The always-run ledger then names every case the runner never reported, at ≤ ~13.2 min, before the 15-minute timeout (§ 2.4). Without the cap, a job timeout cancels the job and its report is lost. The cap holds one hung case on a slow runner and two on a typical one. | **13 minutes** leaves a 51 s margin over a slow setup, the ledger and teardown, against 111 s at 12. **No step cap**, relying on the job's timeout and an `if: always()` ledger: GitHub's cancellation re-evaluates `always()` and runs the step, but the job is then already past its timeout, and the server may force-stop it 5 minutes later. **A cap in the runner itself** (a wall-clock deadline in `main`) gives the same guarantee with more code in the file the sibling cycle edits. |
+| **D3 — the counted runs may sit on three commits.** The runs are dispatches of the branch head. Run 1 (P3) is at the measured commit T1. Run 2 (P4) is at P3's closing commit, and run 3 (P5) at P4's. Both differ from T1 only in `spec/`, and, if a run found survivors, in `issues/` and `ROADMAP.md`. The runs go one at a time: two at once would share the organisation's 20 job slots and miss the envelope (§ 2.5). R4 records "the commit", so the row names T1. | Dispatching all three at T1 would burn every dispatch at once if run 1 showed the shape wrong (a mis-sized shard, a workflow error), leaving none to measure the fix (Q4 allows three). The `runs` gate accepts a later commit only if this clone holds it and `git diff --name-only T1 <sha>` lists nothing outside `spec/`, `issues/` and `ROADMAP.md`. So the code and workflow measured are T1's. `--final` also refuses a landing tree that changed anything but those records and `AGENTS.md` since T1. | **Three dispatches at once at T1**: one fewer foreman round trip, but all three lost to one error. **Re-running run 1's attempts** (`gh run rerun`) keeps one commit, but a re-run is not one of the three dispatches Q4 names. |
 | **D4 — a job output carries the matrix** (`plan` → `fromJSON`). | R3: the shard count must follow the case count with no workflow edit. | **A fixed matrix** (`shard: [1 … 78]`) needs an edit whenever ⌈N/15⌉ changes, or runs empty shards. **A fixed generous count** wastes jobs and still caps growth. The output is run metadata under a read-only token, not a write outside the runner (§ 3, workflows). |
 
 Each row was read against R1–R5 as `GOAL.md` words them:
-- **D1** is the reading of R1's 10 minutes, and it needs the maintainer's choice. It narrows nothing
-  in R1; reading A would leave R1 unmet in a hung-case dispatch. It also names the landing-order
-  dependency on the sibling.
-- **D2** serves R1's second clause.
+- **D1** is the reading of R1's 10 minutes that the maintainer chose (Q6). It names the
+  landing-order dependency on the sibling, and the refit that keeps R1's 15-minute envelope.
+- **D2** serves R1's second clause, inside Q6's 15-minute timeout.
 - **D3** serves R4's "the commit … the runs counted … the worst of the counted runs", and is shown at
   sign-off.
 - **D4** serves R3.
@@ -323,11 +379,15 @@ adversarial review found the first draft had left them out (§ 7).
 
 ## 5. Risks & open questions
 
-- **D1 is the maintainer's choice** (78 jobs or 24), and so is D2's 15-minute cap. Either size is a
-  short, listed change before P3 (row D1).
-- **A mis-sized shard costs dispatches.** If run 1 shows a job over 600 − 310 s, P3 stops. There is
-  no resize and re-dispatch without the foreman, since only two dispatches would remain to count
-  (Q4).
+- **The envelope on a slow runner.** The 15-a-shard run is projected to miss the 15-minute envelope
+  on a slow runner (≈ 16 min, § 2.5). P3 measures it, and refits on a miss.
+- **A refit costs dispatches.** If run 1 misses either bound, P3 stops with the refit table (§ 2.5).
+  Two dispatches then remain, and R4's "worst of the counted runs" would count runs at the landed
+  size: a question for the maintainer then, not before.
+- **Shared concurrency.** The Free plan's 20 jobs are shared by the whole organisation. A cycle's
+  ci.yml push run (9 jobs) during a mutants run leaves 11 slots, and then no size keeps the envelope
+  on a slow runner (§ 2.5). Dispatches should go when no other run is queued. The `runs` gate
+  measures the jobs a run actually ran at once.
 - **First hosted run survivors** (Q3). Each case not killed is seeded in P3 as its own `issues/`
   entry with a `ROADMAP.md` line, and the cycle lands with the run reporting it. More than three go
   back to the foreman before P4. Expected sources:
@@ -338,12 +398,13 @@ adversarial review found the first draft had left them out (§ 7).
 
   Children stay serial within a job, so this design adds no concurrency hazard; jobs run on separate
   runners.
-- **Queueing and the measure.** With 78 jobs and a 20-job account limit, shards queue in waves. A
-  job's `startedAt` is taken to be when a runner took it. If it is the job's creation instead, later
-  waves would carry queue time. The `runs` gate refuses a job whose first step started 60 s or more
+- **Queueing and the measure.** With 78 jobs and a 20-job account limit, shards queue in waves. The
+  run's wall is measured from its dispatch (`createdAt`) to its last job's completion, so queueing
+  counts there, as Q6 asks. A job's own `startedAt` is taken to be when a runner took it. If it is the
+  job's creation instead, later waves would carry queue time in the per-job 10-minute measure. The `runs` gate refuses a job whose first step started 60 s or more
   after the job's `startedAt`, so a queue wait inside the measure stops P3. It is never counted, and
-  never silently subtracted; amending the row's definition would be the foreman's call. Queueing also
-  stretches the run's wall time, and other workflows of the account queue behind the run.
+  never silently subtracted; amending the row's definition would be the foreman's call. Other
+  workflows of the organisation queue behind the run while it holds the slots.
 - **The step cap and the ledger on the hosted runner** are exercised only if a case hangs, and no
   hang is planted in a counted run.
   - The local `drive` gate exercises the ledger's missing-report path.
@@ -377,16 +438,17 @@ All gates are modes of the frozen [`verify/mutants-gate.py`](verify/mutants-gate
   - each phase changes only its own files, graded from the plan commit.
 - **`workflow`**: § 2.2, statically. Each step is compared line for line. The shared steps are
   compared with ci.yml's. It also checks the default shell, forbids `|| true`, `exclude`/`include`
-  and a token, and pins the cap at 15.
-- **`docs [--final]`**: the R4 and R5 text. `--final` compares the row and § Testing with the `runs`
-  baseline: cases, shards and the slowest job.
+  and a token, and pins both job timeouts at 15 and the cap at 12.
+- **`docs [--final]`**: the R4 and R5 text, including the 15-minute timeout and envelope. `--final`
+  compares the row and § Testing with the `runs` baseline: cases, shards, the run from dispatch and
+  the slowest job.
 - **`drive`**: the last shard of the index's tree, run as the workflow runs it, in a fresh export with
   its own venv. Its ledger must be green. Then the same report, with one `killed` line dropped, must
   be red and name that case.
 - **`prepush`**: a clean tree, a site-private scan of the added lines, and the deferral ledger.
 - **`runs --runs-file spec/mutants-workflow-timeout/runs.txt [--final]`**: the hosted evidence
   (§ 6.3).
-- **`controls`**: each data-deciding check run on planted data. All 58 plants are refused for their
+- **`controls`**: each data-deciding check run on planted data. All 60 plants are refused for their
   reason, and the sound data accepted, on the prototype.
 
 ### 6.2 The mutant sweep (written by P1, extended by P2)
@@ -426,7 +488,7 @@ mutant must turn its row red. On the prototype, every entry was killed by the ro
 `SHARD_SIZE`'s value is not pinned by a suite row. The `docs` mode pins it (the row states the
 runner's value), and the runs measure it. The sweep runs one pytest at a time, each under a second.
 
-### 6.3 The hosted runs (P3, P4)
+### 6.3 The hosted runs (P3, P4, P5)
 
 `runs.txt` holds `sha <T1>` and one `run <id>` per dispatch. For each run, the gate reads (with
 `gh`, reads only) the run, its jobs and their logs. It checks:
@@ -436,12 +498,14 @@ runner's value), and the runs measure it. The sweep runs one pytest at a time, e
   ⌈N/size⌉ shards, with the size read from T1's runner;
 - the jobs are `plan` and `mutants (1..S of S)`, each completed as success or failure (never
   cancelled), each with no queue wait inside its measure, and each within 600 − 310 s;
+- the run took at most 900 s from its dispatch (`createdAt`) to its last job's completion;
 - every shard reached its ledger, reported one verdict per planned case, and logged all three
   controls passed;
 - every shard either passed with its `ledger` line or failed with `FAILED` lines, and no ledger line
   reports a failed control.
 
-It prints the baseline sentence for the row, the headroom and the cases not killed. `--final`
+It prints the baseline sentence for the row, the headroom and the cases not killed. It also prints
+each run's wall and the most jobs it ran at once, and the refit table and proposal (§ 2.5). `--final`
 requires exactly three runs. It also requires each case not killed to be named in an `issues/` seed
 (matched as a whole id), and the landing tree to differ from T1 only in the records and `AGENTS.md`.
 
@@ -490,7 +554,46 @@ and how each was folded:
     pins the literal sorted order. The mutant was added to § 6.2 and is killed.
 
 After the fold, on the revised prototype:
-- `controls` passes with 58 plants;
+- `controls` passes with 58 plants (60 after the amendment below);
 - the 33-entry sweep kills every mutant;
 - `rows`, `untouched`, `workflow`, `docs`, `prepush` and `drive` pass together on the P2 tree;
 - `rows 1` and `untouched 1` pass on a P1-cut tree.
+
+### Amendment, 2026-11-09: the maintainer's 15-minute envelope (GOAL Q6)
+
+**The answer.** The maintainer answered rows D1 and D2:
+- (B), about 15 cases a shard;
+- each job's timeout is 15 minutes;
+- the cases' step is capped below that;
+- the whole run finishes in under 15 minutes from dispatch, queueing included;
+- if the waves push the run past 15 minutes, pick the size that fits and bring the measured run back.
+
+**Before the amendment,** the branch was rebased onto `origin/develop` `146cbc6` with no conflict.
+Develop touched none of `tests/mutants.py`, `tests/test_mutations.py`, `AGENTS.md`, `conftest.py` or
+the workflows.
+
+**What changed:**
+- GOAL: Q6 was recorded, and R1 and R4 were reworded to the 15-minute timeout and the envelope.
+- The design: both jobs' timeouts are 15, and the step cap is 12 (§ 2.4).
+- The waves were modelled against the organisation's Free-plan 20 jobs, and P3's refit rule was
+  added (§ 2.5).
+- The gate:
+  - pins the timeouts at 15 (`JOB_TIMEOUT`) and the cap at 12 (`STEP_CAP`);
+  - checks each run's wall from dispatch against `ENVELOPE = 900`;
+  - measures the most jobs a run ran at once, the plan span and the per-shard costs;
+  - prints the refit table;
+  - puts the run's wall into the baseline sentence and § Testing's check.
+- The phases: the two later runs are now one at a time, P4 and P5 (five phases), since two runs
+  dispatched together would share the 20 slots and both miss the envelope. Each dispatch waits until
+  no other run of the organisation is queued or in progress.
+
+  Three plants were added (the run over the envelope, the run's shape, § Testing without the run's
+  wall).
+- The dry run also found that the deferral ledger's phrase list matched the plan's own seeding steps.
+  "deferral" and "seeded" now count as procedure, not as deferrals.
+
+**Re-checked on a re-made prototype** (the rebased plan head, with the folded files and the
+amendment):
+- `controls` passes with 60 plants;
+- `rows 2`, `untouched 2`, `workflow`, `docs`, `prepush` and `drive` pass together;
+- `tests/test_mutant_shards.py`, `tests/test_mutations.py` and `tests/test_hygiene.py` pass.

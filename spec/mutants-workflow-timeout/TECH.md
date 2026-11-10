@@ -38,7 +38,7 @@ phases:
 - id: P3
   name: The first hosted run (Run A dispatches, Run B reads)
   status: pending
-  satisfies:
+  satisfies: &id001
   - R1
   - R2
   depends_on:
@@ -48,7 +48,17 @@ phases:
   hill: uphill
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 3 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
 - id: P4
-  name: Two more hosted runs, the budget row and the ledger (Run A dispatches, Run B records)
+  name: The second hosted run (Run A dispatches, Run B reads)
+  status: pending
+  satisfies: *id001
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 4 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
+- id: P5
+  name: The third hosted run, the budget row and the ledger (Run A dispatches, Run B records)
   status: pending
   satisfies:
   - R4
@@ -56,11 +66,11 @@ phases:
   - R1
   - R2
   depends_on:
-  - P3
+  - P4
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 4 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py controls && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py controls && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -99,13 +109,18 @@ and makes one atomic code+state commit.
 - A CLI/feature change obeys the profile's `same-commit rules` (§ Conventions in `AGENTS.md`): the
   help text, docs, or generated files it names change **in the same commit**.
 - **Dispatches.** Up to three `workflow_dispatch` runs of `mutants.yml` on
-  `ci/mutants-workflow-timeout` are approved (GOAL Q4): one in P3, two in P4, and no other. Never
-  `gh run rerun`. P3 and P4 wait on the hosted runner, so each is two runs (the foreman's "external
+  `ci/mutants-workflow-timeout` are approved (GOAL Q4): one each in P3, P4 and P5, never two at
+  once, and no other. Never
+  `gh run rerun`. P3, P4 and P5 wait on the hosted runner, so each is two runs (the foreman's "external
   waits split the run"): Run A ends with the dispatch and hands back the run ids; the foreman holds
   the wait; Run B reads the runs and closes the phase.
-- **The shard size is a figure for the maintainer** (PLAN § 3 row D1: 15, reading B; 50 under
-  reading A). If the sign-off picks reading A, the plan is revised before P1 builds: every place
-  row D1 lists changes together.
+- **The envelope** (GOAL Q6, the maintainer's answer):
+  - each job's `timeout-minutes` is 15, and the cases' step is capped at 12;
+  - the whole run is within 15 minutes from dispatch, queueing included;
+  - about 15 cases a shard, reading (B).
+
+  P3's run 1 decides whether the size stays (PLAN § 2.5). A refit changes every place row D1 lists,
+  together.
 - **The sibling cycle** `mutant-child-outlives-timeout` edits `tests/mutants.py`'s import block, its
   run-child block, `run_child`, `run_case` and the `__main__` block. This cycle touches only the
   docstring's Usage lines, the `typing` import line, the block between `self_check` and `main`, and
@@ -115,7 +130,7 @@ and makes one atomic code+state commit.
 ---
 
 ## Phase P1 — The runner splits the cases into shards and checks a shard report
-**Satisfies:** R1, R2, R3 (the selection and the ledger; the hosted proof is P3–P4) · **Depends on:** —
+**Satisfies:** R1, R2, R3 (the selection and the ledger; the hosted proof is P3–P5) · **Depends on:** —
 **Goal:** `tests/mutants.py` can name the run's shards, run one, and check one's report, every case of
 the platform exactly once, each decision pinned by a row that kills a named mutant.
 
@@ -149,10 +164,10 @@ the platform exactly once, each decision pinned by a row that kills a named muta
 
 - [ ] Rewrite `.github/workflows/mutants.yml` per PLAN § 2.2: header comment (dispatch state, the
       shape, least privilege), `workflow_dispatch` only, `contents: read`, `plan` and `mutants`, both
-      `timeout-minutes: 20` on `ubuntu-24.04`, `fail-fast: false`, the matrix from `plan`'s output,
+      `timeout-minutes: 15` on `ubuntu-24.04`, `fail-fast: false`, the matrix from `plan`'s output,
       `SHARD` from `matrix.shard` and `strategy.job-total`, the shared steps verbatim as ci.yml's
       `suite-legacy-1` carries them (checkout, setup-uv, the shells, `uv sync --locked`), the `run`
-      step (`timeout-minutes: 15`) and the always-run `ledger` step. No new `uses:`.
+      step (`timeout-minutes: 12`) and the always-run `ledger` step. No new `uses:`.
 - [ ] Append the workflow row (`test_the_mutants_workflow_runs_each_shard_to_a_ledger`, matching each
       step line for line, as PLAN § 7 finding 4 has it) to `tests/test_mutant_shards.py`.
 - [ ] Extend `verify/shard-mutants.py` with mode `workflow`: PLAN § 6.2's nine workflow mutants,
@@ -170,24 +185,37 @@ the platform exactly once, each decision pinned by a row that kills a named muta
 ## Phase P3 — The first hosted run
 **Satisfies:** R1, R2 (on the hosted runner) · **Depends on:** P2
 **Goal:** one dispatched run of the branch's workflow, read whole: every case reported once, every job
-within 600 − 310 s; any case not killed seeded. This phase waits on the hosted runner, so it is two
-runs.
+within 600 − 310 s, the run within 900 s of its dispatch; any case not killed seeded. The run also
+decides whether the shard size stays (PLAN § 2.5). This phase waits on the hosted runner, so it is
+two runs.
 
 **Run A (the brief authorises the push and one dispatch):**
 - [ ] `mutants-gate.py prepush`, `untouched 3` and `workflow` on the head; mark P3 `in_progress` with
       the note "Run A: dispatched" in the TECH body below, commit, and note the head: it is the
       measured commit `T1`.
-- [ ] Push the branch; dispatch once: `gh workflow run mutants.yml --ref ci/mutants-workflow-timeout`;
+- [ ] Push the branch. Before dispatching, check that no other run of the organisation is queued or
+      in progress (`gh run list --status in_progress` and `--status queued` on this repository), since
+      the Free plan's 20 jobs are shared (PLAN § 5); wait for it if one is. Then dispatch once:
+      `gh workflow run mutants.yml --ref ci/mutants-workflow-timeout`;
       find the run (`gh run list --workflow mutants.yml --branch ci/mutants-workflow-timeout -e
       workflow_dispatch --json databaseId,headSha -L 1`, whose `headSha` must be `T1`). Hand back
       `T1` and the run id. Never dispatch again in this run.
 
 **Run B:**
 - [ ] Write `spec/mutants-workflow-timeout/runs.txt`: `sha <T1 full>`, `run <id>`.
-- [ ] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints the
-      cases not killed. If a job ran over 600 − 310 s, a job was cancelled, or a case was reported
-      twice or never: **stop** and report the run, the job and the figure to the foreman; do not
-      resize, fix or re-dispatch inside this phase (two dispatches remain, both for P4).
+- [ ] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints:
+      - the run's wall from dispatch and the most jobs it ran at once;
+      - the cases not killed;
+      - the refit table and its proposed size (PLAN § 2.5).
+
+      **Stop**, and report the run, the job and the figure to the foreman with the refit table, if:
+      - the run took more than 900 s from dispatch (the envelope);
+      - a job ran over 600 − 310 s;
+      - a job was cancelled;
+      - a case was reported twice or never.
+
+      Do not resize, fix or re-dispatch inside this phase: the maintainer asked for the measured run
+      back (GOAL Q6), and the remaining two dispatches are his to place.
 - [ ] Cases not killed (GOAL Q3): more than three, **stop** and hand the list to the foreman before
       seeding. Three or fewer: each gets `issues/<slug>.md`, pre-shaped from the KB's `ISSUE.md`
       template (`status: unshaped`, naming the run id, the case id, its `FAILED` reason and that it
@@ -198,33 +226,62 @@ runs.
 - **Touches:** `spec/mutants-workflow-timeout/runs.txt`; `issues/*.md` and `ROADMAP.md` only for
   seeds.
 
-## Phase P4 — Two more hosted runs, the budget row and the ledger
-**Satisfies:** R4, R3, R1, R2 · **Depends on:** P3
-**Goal:** three counted runs (worst of three), the `mutants budget` baseline and § Testing's measured
-cost written from them, the deferral ledger walked. Two runs: Run A dispatches, Run B records.
+## Phase P4 — The second hosted run
+**Satisfies:** R1, R2 (on the hosted runner) · **Depends on:** P3
+**Goal:** the second counted run, read whole as P3 reads the first. The runs go one at a time: two
+runs dispatched together would share the organisation's 20 job slots, and each would miss the
+15-minute envelope (PLAN § 2.5). Two runs: Run A dispatches, Run B reads.
 
-**Run A (the brief authorises the push and two dispatches):**
-- [ ] `mutants-gate.py prepush` and `untouched 4` on the head (P3's closing commit, which differs from
-      `T1` only in `spec/`, `issues/` and `ROADMAP.md`: PLAN § 3 row D3). Mark P4 `in_progress` with
-      the note "Run A: dispatched", commit, push.
-- [ ] Dispatch twice (`gh workflow run mutants.yml --ref ci/mutants-workflow-timeout`, one after the
-      other); find both run ids as in P3. Hand them back. Never dispatch again.
+**Run A (the brief authorises the push and one dispatch):**
+- [ ] `mutants-gate.py prepush` and `untouched 4` on the head. The head is P3's closing commit, which
+      differs from `T1` only in `spec/`, `issues/` and `ROADMAP.md` (PLAN § 3 row D3). Mark P4
+      `in_progress` with the note "Run A: dispatched", commit, push.
+- [ ] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
+      the run id as P3 does. Hand it back. Never dispatch again in this run.
 
 **Run B:**
-- [ ] Append `run <id>` for both to `runs.txt`. Run `mutants-gate.py runs --runs-file
+- [ ] Append `run <id>` to `runs.txt`, and run `mutants-gate.py runs --runs-file
+      spec/mutants-workflow-timeout/runs.txt`. Its stops are P3's. Seed any new case not killed as P3
+      does: the same three-case limit counts across the runs.
+- [ ] Stage, run the frontmatter `verify:`, mark P4 done, commit.
+- **Verify:** the frontmatter `verify:` (Run B).
+- **Touches:** `runs.txt`; seeds.
+
+## Phase P5 — The third hosted run, the budget row and the ledger
+**Satisfies:** R4, R3, R1, R2 · **Depends on:** P4
+**Goal:** the third counted run, then:
+- the `mutants budget` baseline and § Testing's measured cost, written from the three runs (the worst
+  of three);
+- the deferral ledger walked.
+
+Two runs: Run A dispatches, Run B records.
+
+**Run A (the brief authorises the push and one dispatch):**
+- [ ] `mutants-gate.py prepush` and `untouched 5` on the head, P4's closing commit, which still
+      differs from `T1` only in the records. Mark P5 `in_progress` with the note "Run A: dispatched",
+      commit, push.
+- [ ] With no other run of the organisation queued or in progress, dispatch once and find the run id
+      as P3 does. Hand it back. This is the last dispatch Q4 allows.
+
+**Run B:**
+- [ ] Append `run <id>` to `runs.txt`. Run `mutants-gate.py runs --runs-file
       spec/mutants-workflow-timeout/runs.txt --final`; a red result is a **stop**, as in P3. Seed any
-      new case not killed as P3 does (the same three-case limit counts across the three runs).
-- [ ] Put the printed baseline sentence in the `mutants budget` row in place of `Baseline: pending`,
-      add the measured mean per case on the worst job the gate prints, and in § Testing replace
-      "(… § Factory: pending)" with the cost the row holds ("N cases in S shards", the slowest job's
-      time) and the pointer. Nothing else in `AGENTS.md` changes.
-- [ ] **The deferral ledger** (`code-plan` Step 6.8): walk P1–P4's bodies here, PLAN § 5 and every
-      branch commit body for "do not fix here", "known limitation", "follow-up", "deferred",
-      "deferral", "not fixed" or "seeded"; each such item names an `issues/` seed with a `ROADMAP.md`
-      entry (the `prepush` mode checks it). This plan files no new seed of its own.
-- [ ] Stage, run the frontmatter `verify:`, mark P4 done, commit. The head differs from the measured
-      runs' commits only in `AGENTS.md`'s row and § Testing sentence, `runs.txt`, TECH state and seeds.
-- **Verify:** the frontmatter `verify:` (Run B). Run A runs only `prepush` and `untouched 4`.
+      new case not killed as P3 does.
+- [ ] Put the printed baseline sentence in the `mutants budget` row, in place of `Baseline: pending`,
+      and add the measured mean per case on the worst job that the gate prints.
+- [ ] In § Testing, replace "(… § Factory: pending)" with the cost the row holds ("N cases in S
+      shards, the run M:SS from dispatch, slowest job M:SS") and the pointer.
+- [ ] Nothing else in `AGENTS.md` changes.
+- [ ] **The deferral ledger** (`code-plan` Step 6.8): walk P1–P5's bodies here, PLAN § 5 and every
+      branch commit body for "do not fix here", "known limitation", "follow-up", "deferred" or
+      "not fixed". Each such item must name an `issues/` seed with a `ROADMAP.md` entry; the `prepush`
+      mode checks it. This plan files no new seed of its own.
+- [ ] Stage, run the frontmatter `verify:`, mark P5 done, commit. The head differs from the measured
+      runs' commits only in:
+      - `AGENTS.md`'s row and § Testing sentence;
+      - `runs.txt` and the TECH state;
+      - seeds.
+- **Verify:** the frontmatter `verify:` (Run B). Run A runs only `prepush` and `untouched 5`.
 - **Touches:** `AGENTS.md` (the row's baseline, § Testing's cost sentence), `runs.txt`; seeds.
 
 ---

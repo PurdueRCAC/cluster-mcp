@@ -54,7 +54,8 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
 
 - **R1** — WHEN the mutation workflow is dispatched, it SHALL run every case `tests/mutants.py`
   defines on the runner's platform, each exactly once, split across jobs each of which finishes
-  within 10 minutes of wall time and carries `timeout-minutes: 20`, and SHALL finish with a reported
+  within 10 minutes of wall time and carries `timeout-minutes: 15`, the whole run finishing within
+  15 minutes of wall time from its dispatch, queueing included (Q6), and SHALL finish with a reported
   verdict for every case before any of its jobs reaches its timeout.
 - **R2** — WHEN a dispatched run finishes, the run SHALL fail IF any case survived, was killed for
   the wrong reason, or has no reported verdict, or IF no case was found; and its log SHALL name
@@ -64,7 +65,8 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
   edit to it. The recorded figures (R4) SHALL let a cycle that adds cases tell, without dispatching
   a run, whether the full run still fits the `mutants budget` bound.
 - **R4** — `AGENTS.md` § Factory's profile SHALL gain a `mutants budget` row holding the bound (each
-  job ≤ 10 minutes of wall time, `timeout-minutes: 20`) and the run's cost as measured at landing:
+  job ≤ 10 minutes of wall time, `timeout-minutes: 15`, the whole run ≤ 15 minutes from dispatch,
+  queueing included) and the run's cost as measured at landing:
   the case count, the commit, the runs counted, and each job's wall time, the worst of the counted
   runs. `AGENTS.md` § Testing SHALL state that measured cost, replacing "a child takes about 2 s,
   all cases about 3 minutes", and point to the row.
@@ -116,6 +118,15 @@ hosted runner, so the next cycle that adds cases can tell whether it still fits.
   worst of the 3 counted; no other dispatches. (Resolved 2026-11-09, maintainer.)
 - **Q5 — R5's scope.** R5 (the stale dispatch-state sentence) was added in shaping, beyond the
   seed. — **A:** R5 stays. (Resolved 2026-11-09, foreman ruling at the GOAL gate.)
+- **Q6 — the hung-case reading of R1's 10 minutes, the step cap, and the run's envelope** (raised by
+  the plan, PLAN § 3 rows D1 and D2). — **A:** every CI run, gate or mutants, finishes in under 15
+  minutes of wall time, queueing included; parallel sharded jobs are how. Reading (B): about 15 cases
+  a shard, so that one hung case still fits a job's 10 minutes. Each job's `timeout-minutes` is 15,
+  replacing the 20 of Q1 and R1. The cases' step is capped below 15 minutes, so the always-run ledger
+  still names every unreported case. If (B)'s jobs come in waves that push the run past 15 minutes,
+  the plan picks the shard size that fits and brings the measured run back; still up to 3 dispatches
+  (Q4). R1 and R4 are reworded to the 15-minute timeout and envelope. (Resolved 2026-11-09,
+  maintainer, board answer `2026/11-09-mutants-shard-size-answer`.)
 
 ## Related materials
 

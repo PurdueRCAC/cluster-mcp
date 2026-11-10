@@ -16,9 +16,9 @@ Modes, each one requirement's proof:
                     `main` is unchanged, in order; `main` gains only the six sharding lines; the
                     imports gain only `Iterable`; the only new statements are the named sharding
                     block; tests/test_mutations.py is unchanged; and since the plan commit the cycle
-                    changes only the files PHASE (1, 2, 3 or 4) may change.
+                    changes only the files PHASE (1 to 5) may change.
   workflow          R1, R2, R5 and the Non-goals: .github/workflows/mutants.yml is dispatch-only,
-                    read-only, holds a plan job and one matrix job, every job's timeout 20, its
+                    read-only, holds a plan job and one matrix job, every job's timeout 15, its
                     shared steps verbatim as ci.yml's suite jobs carry them, the cases' step
                     capped below the job's, the ledger always run, and its header states the
                     dispatch state.
@@ -67,6 +67,12 @@ RUNNER = 'tests/mutants.py'
 ROWS_FILE = 'tests/test_mutant_shards.py'
 OLD_ROWS = 'tests/test_mutations.py'
 BUDGET = 600
+# The maintainer's envelope (GOAL Q6): every job's timeout, and the whole run from its dispatch to its last
+# job's completion, queueing included, in seconds.
+JOB_TIMEOUT = 15
+ENVELOPE = 900
+# The cases' step cap, in minutes: below the job's timeout by enough for a slow setup, the ledger and teardown.
+STEP_CAP = 12
 # The hang allowance under the plan's reading of R1 (PLAN § 3, row D1): a job holds one case stopped at
 # the runner's 300 s limit, about 310 s, and still finishes within BUDGET.
 HANG = 310
@@ -87,6 +93,7 @@ PHASE_FILES = {
     2: {RUNNER, ROWS_FILE, WORKFLOW, 'AGENTS.md'},
     3: {RUNNER, ROWS_FILE, WORKFLOW, 'AGENTS.md', 'ROADMAP.md'},
     4: {RUNNER, ROWS_FILE, WORKFLOW, 'AGENTS.md', 'ROADMAP.md'},
+    5: {RUNNER, ROWS_FILE, WORKFLOW, 'AGENTS.md', 'ROADMAP.md'},
 }
 STALE = ('A child\n  takes about 2 s', 'about 2 s, all cases about 3 minutes', 'all cases about 3 minutes',
          'becomes dispatchable', 'it becomes\n  dispatchable', 'the release that first carries it')
@@ -258,8 +265,8 @@ def workflow_violations(text: str, ci_text: str) -> list[str]:
     if jobs != ['plan', 'mutants']:
         found.append(f'the jobs are {jobs}, not plan and mutants')
     timeouts = re.findall(r'^    timeout-minutes: (\d+)$', text, re.M)
-    if timeouts != ['20'] * len(jobs):
-        found.append(f'a job timeout is not 20: {timeouts}')
+    if timeouts != [str(JOB_TIMEOUT)] * len(jobs):
+        found.append(f'a job timeout is not {JOB_TIMEOUT}: {timeouts}')
     if text.count('runs-on: ubuntu-24.04') != len(jobs) or text.count('runs-on:') != len(jobs):
         found.append('a job runs elsewhere than ubuntu-24.04')
     uses = set(re.findall(r'uses: (\S+)', text))
@@ -286,8 +293,8 @@ def workflow_violations(text: str, ci_text: str) -> list[str]:
     rest = mine[len(shared):]
     run = rest[0] if rest else ''
     ledger = rest[1] if len(rest) > 1 else ''
-    if run.splitlines()[:2] != ['      - name: run', '        timeout-minutes: 15']:
-        found.append('the cases\' step is not capped at 15 minutes (PLAN § 3 row D2)')
+    if run.splitlines()[:2] != ['      - name: run', f'        timeout-minutes: {STEP_CAP}']:
+        found.append(f'the cases\' step is not capped at {STEP_CAP} minutes (PLAN § 3 row D2)')
     if run.splitlines()[2:] != ['        run: uv run python -u tests/mutants.py --self-check --shard "$SHARD" | tee mutants-report.txt']:
         found.append('the cases\' step is not the runner on its shard, with its controls, unbuffered, into the report')
     if ledger.splitlines() != ['      - name: ledger', '        if: always()',
@@ -333,7 +340,8 @@ def docs_violations(agents: str, runner: str, final: bool, baseline: str | None)
         found.append('§ Testing does not state the dispatch state')
     if not row:
         return found + ['§ Factory: no `mutants budget` row']
-    for part in ('10 minutes of wall time', '`timeout-minutes` at 20', 'ubuntu-24.04', 'gh run view --json jobs'):
+    for part in ('10 minutes of wall time', f'`timeout-minutes` at {JOB_TIMEOUT}', 'ubuntu-24.04', 'gh run view --json jobs',
+                 'the whole run within 15 minutes', 'queueing included'):
         if part not in row:
             found.append(f'the `mutants budget` row lacks {part!r}')
     size = re.search(r'^SHARD_SIZE = (\d+)$', runner, re.M)
@@ -347,10 +355,11 @@ def docs_violations(agents: str, runner: str, final: bool, baseline: str | None)
         found.append(f'the row\'s baseline is not the measured one: {baseline!r}')
     if 'pending' in row:
         found.append('the row\'s baseline is still pending')
-    cost = re.search(r'(\d[\d,]*) cases in (\d+) shards, slowest job (\d+:\d\d)', baseline or '')
+    cost = re.search(r'(\d[\d,]*) cases in (\d+) shards, the run (\d+:\d\d) from dispatch, slowest job (\d+:\d\d)',
+                     baseline or '')
     if not cost or f'{cost.group(1)} cases in {cost.group(2)} shards' not in norm(bullet) \
-            or f'slowest job {cost.group(3)}' not in norm(bullet):
-        found.append('§ Testing does not state the measured cost the row holds (cases, shards, slowest job)')
+            or f'the run {cost.group(3)} from dispatch' not in norm(bullet) or f'slowest job {cost.group(4)}' not in norm(bullet):
+        found.append('§ Testing does not state the measured cost the row holds (cases, shards, the run, slowest job)')
     return found
 
 
@@ -409,8 +418,8 @@ PRIVATE = [(r'\b(?!127\.0\.0\.1\b)(?!0\.0\.0\.0\b)\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{
            (r'/(private/tmp|var/folders)/', 'a host temporary path'), (r'~/K' r'B\b', "the operator's KB path"),
            (r'/scratch/\w', 'a cluster scratch path')]
 SPEC_ID = r'(?<![A-Za-z0-9])([RPQF]\d{1,2}|F-[A-Z])(?![A-Za-z0-9])'
-PHRASES = ('do not fix here', 'known limitation', 'left as a follow-up', 'follow-up', 'deferred', 'deferral',
-           'not fixed', 'seeded')
+# The words of a deferral. Not "deferral" or "seeded": the plan's own steps that file and walk seeds use them.
+PHRASES = ('do not fix here', 'known limitation', 'left as a follow-up', 'follow-up', 'deferred', 'not fixed')
 
 
 def added_lines(rev: str) -> list[tuple[str, str]]:
@@ -519,8 +528,10 @@ def same_code(measured: str, other: str) -> bool:
 
 
 def run_violations(run: dict, plan_log: list[str], shard_logs: dict[str, list[str]], expected: set[str],
-                   sha_ok, size: int = SHARD_SIZE) -> tuple[list[str], dict[str, float], list[str], dict[str, int]]:
-    """One run's violations, each job's seconds and each shard's case count by name, and the cases not killed."""
+                   sha_ok, size: int = SHARD_SIZE) -> tuple[list[str], dict[str, float], list[str], dict[str, int], dict]:
+    """One run's violations, each job's seconds and each shard's case count by name, the cases not killed, and the
+    run's shape: its wall from dispatch, the most jobs it ran at once, the plan's span, each shard's overhead and
+    seconds per child."""
     found: list[str] = []
     rid = run.get('databaseId')
     if run.get('event') != 'workflow_dispatch' or run.get('workflowName') != 'Mutants' or run.get('headBranch') != BRANCH:
@@ -597,7 +608,74 @@ def run_violations(run: dict, plan_log: list[str], shard_logs: dict[str, list[st
             found.append(f'run {rid}: {name} failed and its ledger names no case')
     if sorted(reported) != sorted(named):
         found.append(f'run {rid}: the shards\' reports do not hold each planned case once')
-    return found, times, not_killed, sizes
+    shape = run_shape(run, sizes)
+    if shape['wall'] > ENVELOPE:
+        found.append(f'run {rid}: {shape["wall"]:.0f} s from dispatch to its last job, over the {ENVELOPE} s envelope')
+    return found, times, not_killed, sizes, shape
+
+
+def stamp(text: str) -> float:
+    from datetime import datetime
+    return datetime.fromisoformat(text.replace('Z', '+00:00')).timestamp()
+
+
+def run_shape(run: dict, sizes: dict[str, int]) -> dict:
+    """The run's wall from dispatch (queueing included), the most jobs at once, the plan's span from dispatch, and
+    per shard its overhead (all but the cases' step) and seconds per child (its cases and the three controls)."""
+    jobs = [j for j in run.get('jobs', []) if j.get('startedAt') and j.get('completedAt')]
+    created = stamp(run['createdAt']) if run.get('createdAt') else min((stamp(j['startedAt']) for j in jobs), default=0)
+    wall = max((stamp(j['completedAt']) for j in jobs), default=created) - created
+    edges = sorted([(stamp(j['startedAt']), 1) for j in jobs] + [(stamp(j['completedAt']), -1) for j in jobs])
+    level = most = 0
+    for _, step in edges:
+        level += step
+        most = max(most, level)
+    plan = next((stamp(j['completedAt']) - created for j in jobs if j['name'] == 'plan'), 0.0)
+    overhead, per_child = {}, {}
+    for j in jobs:
+        step = next((s for s in j.get('steps', []) if s.get('name') == 'run' and s.get('startedAt') and s.get('completedAt')), None)
+        if j['name'] == 'plan' or step is None or j['name'] not in sizes:
+            continue
+        spent = stamp(step['completedAt']) - stamp(step['startedAt'])
+        overhead[j['name']] = seconds(j) - spent
+        per_child[j['name']] = spent / (sizes[j['name']] + len(CONTROL_TEXTS))
+    return {'wall': wall, 'concurrency': most, 'plan': plan, 'overhead': overhead, 'per_child': per_child}
+
+
+def refit(n_cases: int, shapes: list[dict]) -> list[str]:
+    """The shard sizes the measured runs project, against both bounds: each job within BUDGET with one hung case
+    (GOAL Q6, reading B), and the run within ENVELOPE from dispatch. Projection: the slowest child and largest
+    overhead seen, the fewest jobs seen at once, the longest plan span; waves of that many jobs."""
+    children = [c for s in shapes for c in s['per_child'].values()]
+    overheads = [o for s in shapes for o in s['overhead'].values()]
+    if not children or not overheads:
+        return ['refit: no shard measured']
+    child, over = max(children), max(overheads)
+    at_once = max(1, min(s['concurrency'] for s in shapes))
+    plan = max(s['plan'] for s in shapes)
+    lines = [f'refit: {child:.1f} s a child (slowest), {over:.0f} s overhead (largest), {at_once} jobs at once (fewest), '
+             f'plan done {plan:.0f} s after dispatch (longest)',
+             'refit: size shards waves  job  job+hang  run  run+hang  fits']
+    best = None
+    for size in range(5, 81):
+        shards = -(-n_cases // size)
+        waves = -(-shards // at_once)
+        job = over + (size + len(CONTROL_TEXTS)) * child
+        run = plan + waves * job
+        both = job + HANG <= BUDGET and run <= ENVELOPE
+        envelope = run <= ENVELOPE
+        if size in (10, 15, 20, 25, 30, 40, 50, 60):
+            lines.append(f'refit: {size:4d} {shards:6d} {waves:5d} {job:4.0f} {job + HANG:8.0f} {run:4.0f} '
+                         f'{run + HANG:8.0f}  {"both" if both else "envelope" if envelope else "neither"}')
+        key = (both, envelope, -run)
+        best = max(best or (key, size), (key, size))
+    (both, envelope, _), size = best
+    shards = -(-n_cases // size)
+    job = over + (size + len(CONTROL_TEXTS)) * child
+    lines.append(f'refit: proposed size {size} ({shards} shards, {-(-shards // at_once)} waves, job {job:.0f} s, '
+                 f'run {plan + -(-shards // at_once) * job:.0f} s): ' + ('both bounds hold' if both else
+                 'the envelope holds, a hung case would take its job past the budget' if envelope else 'no size holds the envelope'))
+    return lines
 
 
 def fmt(s: float) -> str:
@@ -613,11 +691,12 @@ def expected_cases(sha: str) -> set[str]:
     return set(out) - (DARWIN_ONLY if sys.platform == 'darwin' else set())
 
 
-def baseline_sentence(n_cases: int, ids: list[str], sha: str, worst: dict[str, float], sizes: dict[str, int]) -> str:
+def baseline_sentence(n_cases: int, ids: list[str], sha: str, worst: dict[str, float], sizes: dict[str, int],
+                      wall: float) -> str:
     shards = sorted((n for n in worst if n != 'plan'), key=lambda n: int(re.match(r'mutants \((\d+)', n).group(1)))
     slowest = max(shards, key=lambda n: worst[n]) if shards else ''
     per_case = worst[slowest] / sizes[slowest] if slowest and sizes.get(slowest) else 0.0
-    return (f'{n_cases:,} cases in {len(shards)} shards, slowest job {fmt(worst.get(slowest, 0))} '
+    return (f'{n_cases:,} cases in {len(shards)} shards, the run {fmt(wall)} from dispatch, slowest job {fmt(worst.get(slowest, 0))} '
             f'({per_case:.1f} s a case with its setup, over its {sizes.get(slowest, 0)} cases); worst of each job over the '
             f'{len(ids)} runs counted at landing, commit `{sha[:7]}`, runs {", ".join(ids)}: plan {fmt(worst.get("plan", 0))}, '
             f'shards ' + ' '.join(fmt(worst[n]) for n in shards))
@@ -642,16 +721,19 @@ def read_runs(path: Path, final: bool, fetch=None) -> tuple[dict, list[str]]:
     worst: dict[str, float] = {}
     sizes: dict[str, int] = {}
     not_killed: set[str] = set()
+    shapes: list[dict] = []
     for rid in ids:
         run, plan_log, shard_logs = fetch(rid)
-        v, times, nk, sz = run_violations(run, plan_log, shard_logs, expected, lambda other: same_code(sha, other),
-                                          int(size.group(1)))
+        v, times, nk, sz, shape = run_violations(run, plan_log, shard_logs, expected, lambda other: same_code(sha, other),
+                                                 int(size.group(1)))
+        shapes.append(shape)
+        print(f'run {rid}: {shape["wall"]:.0f} s from dispatch to its last job, {shape["concurrency"]} jobs at once at most')
         found += v
         not_killed |= set(nk)
         sizes.update(sz)
         for name, s in times.items():
             worst[name] = max(worst.get(name, 0), s)
-    baseline = baseline_sentence(len(expected), ids, sha, worst, sizes)
+    baseline = baseline_sentence(len(expected), ids, sha, worst, sizes, max((s['wall'] for s in shapes), default=0.0))
     print(f'baseline: {baseline}')
     shard_times = [s for n, s in worst.items() if n != 'plan']
     if shard_times:
@@ -659,6 +741,8 @@ def read_runs(path: Path, final: bool, fetch=None) -> tuple[dict, list[str]]:
               f'{BUDGET - HANG - max(shard_times):.0f} s after one hung case')
     for case_id in sorted(not_killed):
         print(f'not killed: {case_id}')
+    for line in refit(len(expected), shapes):
+        print(line)
     if final:
         # What lands is what was measured: after the measured commit only the records and the row's documents change.
         drift = [n for n in git('diff', '--cached', '--name-only', sha).split()
@@ -673,7 +757,7 @@ def read_runs(path: Path, final: bool, fetch=None) -> tuple[dict, list[str]]:
 
 def gh_fetch(rid: str) -> tuple[dict, list[str], dict[str, list[str]]]:
     run = json.loads(subprocess.run(['gh', 'run', 'view', rid, '--json',
-                                     'databaseId,event,workflowName,headBranch,headSha,status,conclusion,attempt,jobs'],
+                                     'databaseId,event,workflowName,headBranch,headSha,status,conclusion,attempt,createdAt,jobs'],
                                     capture_output=True, text=True, check=True).stdout)
     logs: dict[str, list[str]] = {}
     for job in run['jobs']:
@@ -704,8 +788,8 @@ def mode_controls() -> list[str]:
         ('push', 'on:\n  workflow_dispatch:\n', 'on:\n  workflow_dispatch:\n  push:\n', 'other than a dispatch'),
         ('write token', '  contents: read\n', '  contents: write\n', 'not read-only'),
         ('fail-fast', 'fail-fast: false', 'fail-fast: true', 'fail-fast'),
-        ('job timeout', '    timeout-minutes: 20\n    strategy:', '    timeout-minutes: 30\n    strategy:', 'not 20'),
-        ('step timeout', '        timeout-minutes: 15\n', '        timeout-minutes: 19\n', 'not capped'),
+        ('job timeout', '    timeout-minutes: 15\n    strategy:', '    timeout-minutes: 20\n    strategy:', 'not 15'),
+        ('step timeout', '        timeout-minutes: 12\n', '        timeout-minutes: 14\n', 'not capped'),
         ('no shells', '      - run: sudo apt-get', '      - run: sudo true || sudo apt-get', 'verbatim'),
         ('matrix fixed', '${{ fromJSON(needs.plan.outputs.shards) }}', '[1, 2]', 'not the plan'),
         ('ledger skipped', '        if: always()\n', '', 'always run'),
@@ -716,10 +800,10 @@ def mode_controls() -> list[str]:
         ('ledger or true', '--shard "$SHARD"\n', '--shard "$SHARD" || true\n', 'fail unseen'),
         ('runner or true', '| tee mutants-report.txt', '| tee mutants-report.txt || true', 'fail unseen'),
         ('no pipefail', 'defaults:\n  run:\n    shell: bash\n\n', '', 'default bash'),
-        ('step shell', '        timeout-minutes: 15\n', '        timeout-minutes: 15\n        shell: bash {0}\n', 'default bash'),
+        ('step shell', '        timeout-minutes: 12\n', '        timeout-minutes: 12\n        shell: bash {0}\n', 'default bash'),
         ('shard excluded', '      fail-fast: false\n', '      fail-fast: false\n      matrix-exclude: x\n        exclude: [{shard: 1}]\n',
          'drops a shard'),
-        ('cap zero', '        timeout-minutes: 15\n', '        timeout-minutes: 0\n', 'capped at 15'),
+        ('cap zero', '        timeout-minutes: 12\n', '        timeout-minutes: 0\n', 'capped at 12'),
         ('token', '    env:\n', '    env:\n      GH_TOKEN: ${{ github.token }}\n', 'the token'),
     ]:
         expect(f'workflow {label}', workflow_violations(wf.replace(old, new, 1) if old in wf else wf + '\nPLANT-MISSED', ci_text), why)
@@ -734,12 +818,14 @@ def mode_controls() -> list[str]:
     expect('docs no pointer', docs_violations(agents.replace(bullet, bullet.replace('`mutants budget`', '`budget`')), runner, False, None),
            'point to')
     row = budget_row(agents)
-    sentence = '1,164 cases in 78 shards, slowest job 3:41 (14.7 s a case with its setup, over its 15 cases); worst'
+    sentence = ('1,164 cases in 78 shards, the run 8:30 from dispatch, slowest job 3:41 (14.7 s a case with its setup, '
+                'over its 15 cases); worst')
     filled = agents.replace(row, row.replace('pending', sentence))
-    expect('docs final sound', docs_violations(filled.replace(bullet, bullet + ' 1,164 cases in 78 shards, slowest job 3:41 '),
+    expect('docs final sound', docs_violations(filled.replace(bullet, bullet + ' 1,164 cases in 78 shards, the run 8:30 from '
+                                                                  'dispatch, slowest job 3:41 '),
                                                runner, True, sentence), None)
-    expect('docs final no time', docs_violations(filled.replace(bullet, bullet + ' 1,164 cases in 78 shards '),
-                                                 runner, True, sentence), 'slowest job')
+    expect('docs final no time', docs_violations(filled.replace(bullet, bullet + ' 1,164 cases in 78 shards, slowest job 3:41 '),
+                                                 runner, True, sentence), 'the run, slowest job')
     expect('docs final pending', docs_violations(agents, runner, True, sentence), 'pending')
 
     b = base()
@@ -784,6 +870,7 @@ def mode_controls() -> list[str]:
 
     def sound() -> tuple[dict, list[str], dict[str, list[str]]]:
         run = {'databaseId': 1, 'event': 'workflow_dispatch', 'workflowName': 'Mutants', 'headBranch': BRANCH,
+               'createdAt': '2026-11-10T00:59:50Z',
                'headSha': 'a' * 40, 'status': 'completed', 'conclusion': 'success', 'attempt': 1,
                'jobs': [job('plan', 30)] + [job(f'mutants ({n} of {count})', 200) for n in shards]}
         plan_log = [f'plan\tshards\t{stamp}shard {n} of {count}: {" ".join(s)}' for n, s in shards.items()]
@@ -819,7 +906,7 @@ def mode_controls() -> list[str]:
     failed_logs[first] = [line for line in failed_logs[first] if '\tledger\t' not in line] + \
         [f'x\tledger\t{stamp}FAILED  {shards[1][0]}: not killed (its FAILED line says why)']
     failed_run = {**run, 'jobs': [job('plan', 30), job(first, 200, 'failure', 'failure')] + run['jobs'][2:]}
-    v, _, nk, _ = run_violations(failed_run, plan_log, failed_logs, set(ids), ok)
+    v, _, nk, _, _ = run_violations(failed_run, plan_log, failed_logs, set(ids), ok)
     expect('runs a survivor is reported, not refused', v, None)
     if nk != [shards[1][0]]:
         found.append(f'control runs survivor: not-killed list {nk}')
@@ -832,6 +919,13 @@ def mode_controls() -> list[str]:
     expect('runs queue inside the measure', run_violations(queued, plan_log, logs, set(ids), ok)[0], 'holds a wait')
     expect('runs size from the measured commit', run_violations(run, plan_log, logs, set(ids), ok, size=50)[0],
            'at 50 a shard')
+    late = {**run, 'createdAt': '2026-11-10T00:40:00Z'}
+    expect('runs over the envelope', run_violations(late, plan_log, logs, set(ids), ok)[0], 'over the 900 s envelope')
+    shape = run_violations(run, plan_log, logs, set(ids), ok)[4]
+    if shape['concurrency'] != len(run['jobs']) or round(shape['wall']) != 210:
+        found.append(f'control run shape: {shape}')
+    print(f'{"ok " if not found or "control run shape" not in found[-1] else "BAD"} run shape: {shape["wall"]:.0f} s, '
+          f'{shape["concurrency"]} at once')
     head = git('rev-parse', 'HEAD').strip()
     expect('same code: the commit itself', [] if same_code(head, head) else ['refused'], None)
     expect('same code: an unknown commit', ['unknown'] if not same_code(head, 'f' * 40) else [], 'unknown')
@@ -847,7 +941,7 @@ def main() -> int:
     parser.add_argument('--runs-file', type=Path, default=Path(f'spec/{SLUG}/runs.txt'))
     args = parser.parse_args()
     if args.mode in ('untouched', 'rows') and args.phase not in PHASE_FILES:
-        parser.error(f'{args.mode} takes the phase: 1, 2, 3 or 4')
+        parser.error(f'{args.mode} takes the phase: 1 to 5')
     if args.mode == 'untouched':
         found = mode_untouched(args.phase)
     elif args.mode == 'rows':
