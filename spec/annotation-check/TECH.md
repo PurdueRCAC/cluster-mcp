@@ -3,11 +3,11 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_progress
+status: in_review
 branch: ci/annotation-check
 base: develop
-current_phase: P2
-last_updated: '2026-11-09'
+current_phase: done
+last_updated: '2026-11-10'
 phases:
 - id: P1
   name: The annotation check and its controls, seen red in each kind of position
@@ -26,7 +26,7 @@ phases:
   verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R7
