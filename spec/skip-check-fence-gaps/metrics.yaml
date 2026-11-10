@@ -1,0 +1,35 @@
+# Written only by $KB/bin/factory/metrics.py. Observation, never state: nothing routes on it.
+slug: skip-check-fence-gaps
+escaped_from: null
+planned: {date: '2026-11-09', phases: 2}
+landed: null
+open: null
+runs:
+- {step: feature, start: '2026-11-09T11:39:52-05:00', stop: '2026-11-09T11:41:57-05:00', seconds: 125, end: gate, agent: claude-opus-5-5}
+- {step: feature, start: '2026-11-09T11:41:57-05:00', stop: '2026-11-09T11:42:30-05:00', seconds: 33, end: gate, agent: claude-opus-5-5}
+- {step: plan, start: '2026-11-09T11:42:31-05:00', stop: '2026-11-09T12:17:15-05:00', seconds: 2084, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P1', start: '2026-11-09T12:17:30-05:00', stop: '2026-11-09T12:22:13-05:00', seconds: 283, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-09T12:22:13-05:00', stop: '2026-11-09T12:55:21-05:00', seconds: 1988, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T12:55:49-05:00', stop: '2026-11-09T13:14:23-05:00', seconds: 1114, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-09T13:14:23-05:00', stop: '2026-11-09T13:57:40-05:00', seconds: 2597, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T13:57:42-05:00', stop: '2026-11-09T14:19:13-05:00', seconds: 1291, end: gate, agent: claude-opus-5-5}
+- {step: 'build:P2', start: '2026-11-09T14:19:13-05:00', stop: '2026-11-09T15:11:04-05:00', seconds: 3111, end: gate, agent: claude-opus-5-5}
+- {step: review, start: '2026-11-09T15:11:06-05:00', stop: '2026-11-09T15:40:36-05:00', seconds: 1770, end: question, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-09T17:18:10-05:00', stop: '2026-11-09T17:26:04-05:00', seconds: 474, end: done, agent: claude-opus-5-5}
+- {step: publish, start: '2026-11-09T17:26:04-05:00', stop: '2026-11-09T17:55:48-05:00', seconds: 1784, end: done, agent: claude-opus-5-5}
+reviews:
+- cycle: 1
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 3}
+  plausible: 0
+- cycle: 2
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 3}
+  plausible: 0
+- cycle: 3
+  date: '2026-11-09'
+  verdict: changes-requested
+  confirmed: {critical: 0, high: 0, medium: 0, low: 3}
+  plausible: 0
