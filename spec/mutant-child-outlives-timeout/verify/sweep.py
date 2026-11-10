@@ -30,6 +30,8 @@ WAITS = M + 'test_stop_run_waits_for_every_process_it_found'
 def reports(p): return M + 'test_run_child_reports_a_stop_that_could_not_finish[' + p + ']'
 SWEEP_ON = M + 'test_a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on'
 FAILED_PS = M + 'test_a_failed_ps_is_an_error_not_an_empty_table'
+def launch(p): return M + 'test_a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[' + p + ']'
+LAUNCHES = [launch('process-limit'), launch('subprocess-error')]
 
 MUTANTS = [
  ('new-session-dropped', R, [("text=True, start_new_session=True)", "text=True)")], [RETURNS, INTEG]),
@@ -112,6 +114,17 @@ MUTANTS = [
   [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
  ('add-f4-left-claimed-empty', R, [("        raise ChildTimeout(LIMIT, left, unfinished) from None\n", "        raise ChildTimeout(LIMIT, left, unfinished if left else unfinished and None) from None\n")],
   [reports('ps-cannot-start'), reports('ps-fails-mid-walk'), SWEEP_ON]),
+ # Review cycle 2, the gate's ruling (b): a child that cannot launch is its case's own FAILED line.
+ ('launch-no-catch', R, [("    except (OSError, subprocess.SubprocessError) as exc:\n        raise ChildNotStarted(",
+                          "    except ZeroDivisionError as exc:\n        raise ChildNotStarted(")], LAUNCHES),
+ ('launch-catch-oserror-only', R, [("    except (OSError, subprocess.SubprocessError) as exc:\n        raise ChildNotStarted(",
+                                    "    except OSError as exc:\n        raise ChildNotStarted(")], [launch('subprocess-error')]),
+ ('launch-case-no-catch', R, [("        except ChildNotStarted as exc:\n", "        except ZeroDivisionError as exc:\n")], LAUNCHES),
+ ('launch-cause-dropped', R, [("            return [f'could not start: {exc.cause}']\n", "            return ['could not start']\n")], LAUNCHES),
+ ('add-launch-swallowed-as-killed', R, [("            return [f'could not start: {exc.cause}']\n",
+                                         "            return []\n            return [f'could not start: {exc.cause}']\n")], LAUNCHES),
+ ('add-launch-sweep-halts', R, [("        raise ChildNotStarted(f'{type(exc).__name__}: {exc}') from None\n",
+                                 "        raise\n        raise ChildNotStarted(f'{type(exc).__name__}: {exc}') from None\n")], LAUNCHES),
  ('orphan-not-waited', T, [("while os.getppid() == spawner and time.monotonic() < end:", "while False:")], [INTEG]),
 ]
 

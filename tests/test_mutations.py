@@ -361,8 +361,12 @@ class FakePopen:
     first: Any = None
     # What each next instance's communicate does, in turn, before `first` applies.
     plan: list[Any] = []
+    # What each next launch raises instead of starting a child, in turn.
+    refuse: list[BaseException] = []
 
     def __init__(self, args: list[str], **kwargs: Any) -> None:
+        if FakePopen.refuse:
+            raise FakePopen.refuse.pop(0)
         self.args, self.kwargs, self.pid, self.returncode = args, kwargs, 4100, None
         self.calls: list[tuple[Any, ...]] = []
         self.stdout, self.stderr = Pipe(self.calls, 'stdout'), Pipe(self.calls, 'stderr')
@@ -385,7 +389,7 @@ class FakePopen:
 def fake_popen(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
     """Patch in `FakePopen`, `LIMIT` = 7, and a recording `stop_run` that reports pid 4242 still running."""
     stops: list[tuple[Any, ...]] = []
-    FakePopen.made, FakePopen.first, FakePopen.plan = [], None, []
+    FakePopen.made, FakePopen.first, FakePopen.plan, FakePopen.refuse = [], None, [], []
     monkeypatch.setattr(subprocess, 'Popen', FakePopen)
     monkeypatch.setattr(mutants, 'LIMIT', 7)
 
@@ -483,6 +487,30 @@ def test_a_stop_that_could_not_finish_is_reported_and_the_sweep_goes_on(fake_pop
                         'process group and every process it had found, and others of the run may still be running')
     assert len(lines) == 2 and lines[1].startswith('FAILED  next: '), lines
     assert len(FakePopen.made) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(('error', 'cause'), [
+    pytest.param(BlockingIOError(35, 'Resource temporarily unavailable'),
+                 'BlockingIOError: [Errno 35] Resource temporarily unavailable', id='process-limit'),
+    pytest.param(subprocess.SubprocessError('Exception occurred in preexec_fn.'),
+                 'SubprocessError: Exception occurred in preexec_fn.', id='subprocess-error'),
+])
+def test_a_child_that_cannot_start_is_reported_and_the_sweep_goes_on(error: BaseException, cause: str,
+                                                                       fake_popen: list[tuple[Any, ...]],
+                                                                       monkeypatch: pytest.MonkeyPatch,
+                                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    FakePopen.refuse = [error]
+    control = SURVIVOR_CONTROL
+    monkeypatch.setattr(mutants, 'CASES', (Case('first', control.file, control.edits, ('test_x.py::test_y',), 'why'),
+                                           Case('next', control.file, control.edits, ('test_x.py::test_y',), 'why')))
+    assert mutants.main(['first', 'next']) == 1
+    lines = capsys.readouterr().out.splitlines()
+    # The case that could not start is its own FAILED line naming the cause, never a kill; the next one runs.
+    assert lines[0] == f'FAILED  first: could not start: {cause}', lines
+    assert len(lines) == 2 and lines[1].startswith('FAILED  next: ') and 'could not start' not in lines[1], lines
+    assert len(FakePopen.made) == 1 and FakePopen.made[0].calls == [('communicate', 7)]
+    assert fake_popen == []
 
 
 @pytest.mark.unit

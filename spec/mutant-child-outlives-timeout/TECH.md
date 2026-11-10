@@ -227,6 +227,8 @@ files, and the ledger is clean.
         tells `child_timeout_violations` apart from `test_executors.py`'s helper.
         [`remediation/names.py`](remediation/names.py) checks it mechanically.
   - [x] `wg-end-absolute`: `gone_waits_until_every_process_ends[clock-not-at-zero]`.
+  - [x] Launch failure reported (amendment R2-3): `ChildNotStarted`, its row, its sweep mutants, the
+        manual and docstring; the probe re-run; the retuned `verify:` re-run in the background.
   - [x] Sweep extended ([`verify/sweep.md`](verify/sweep.md)); the retuned frontmatter `verify:`
         run in the background.
 - **Amendments (2026-11-10, review cycle 2 remediation):**
@@ -244,6 +246,19 @@ files, and the ledger is clean.
     filler the stop could not reach (a new-session child of the frozen pytest, found by no look)
     still holds the budget; the probe then killed the 51 run processes left. The line names that
     others may be running.
+  - R2-3. **The gate's ruling on R2-2's gap (2026-11-10, option (b)):** R3 says the sweep goes on to
+    run every case named after it, so a case whose child cannot be launched (its `Popen` raising
+    `OSError`, `BlockingIOError` among them, or `SubprocessError`) is reported as that case's own
+    `FAILED  <id>: could not start: <error>`, never as killed, and the sweep goes on; `main` still
+    exits non-zero. R4 is untouched: it covers a child that ends within its limit, and a launch that
+    succeeds is read as before (the R4 rows, `within-limit` and the `untouched` mode unchanged; a
+    sandbox that starts and then fails is a child that ended, read by `mutation_violations` as
+    before). `run_child` raises `ChildNotStarted`, which `run_case` catches beside `ChildTimeout` in
+    its one `try`. Row: `a_child_that_cannot_start_is_reported_and_the_sweep_goes_on[process-limit|
+    subprocess-error]`. The probe, re-run: `FAILED  hang: … the stop could not finish (BlockingIOError
+    …)`, then `FAILED  quick: could not start: BlockingIOError: [Errno 35] Resource temporarily
+    unavailable`, exit 1, nothing raised out of `main`; 48 run processes of the filler were left for
+    the probe to kill, as the first line says may happen.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/mutant-child-outlives-timeout/PLAN.md`, `spec/mutant-child-outlives-timeout/TECH.md`;
   in the remediation, `AGENTS.md`, `tests/mutants.py`, `tests/test_mutations.py`,
