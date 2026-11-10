@@ -110,7 +110,7 @@ MESSAGES = {
     1: ('reconnect workers started during the call, not one', 'still running'),
     2: ("on the row's clock", 'from entering its reconnect to giving up', 'waited on an attempt'),
     3: ('decided only at the deadline', "did not take its deadline and its wait on the row's clock"),
-    4: ('the start took',),
+    4: ('the start took', 'the collector pausing it'),
 }
 FORBIDDEN_MARKS = ('skip', 'skipif', 'xfail', 'flaky')
 FORBIDDEN_CALLS = ('skip', 'xfail', 'importorskip', 'SkipTest', 'Exception')
@@ -404,6 +404,17 @@ FAULTS = {
          (('        for verdict in pending.verdicts():\n',
            "        __import__('time').sleep(0.6)\n        for verdict in pending.verdicts():\n"),),
          R4_ANY, 'the start took'),
+        # A collection inside the start that takes 0.6 s: the row still fails, and says the collector took it.
+        ('collects-slowly-in-the-start', INIT_FILE,
+         (('        for verdict in pending.verdicts():\n',
+           '        def _slow(phase, info):\n'
+           "            if phase == 'start':\n"
+           "                __import__('time').sleep(0.6)\n"
+           "        __import__('gc').callbacks.append(_slow)\n"
+           "        __import__('gc').collect()\n"
+           "        __import__('gc').callbacks.remove(_slow)\n"
+           '        for verdict in pending.verdicts():\n'),),
+         R4_ANY, 'the collector pausing it 0.6'),
     ],
 }
 

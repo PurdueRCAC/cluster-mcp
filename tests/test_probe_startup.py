@@ -38,6 +38,8 @@ real 10 s bound: `spec/capability-probe/verify/drives.py` does.
 
 from __future__ import annotations
 
+import contextlib
+import gc
 import logging
 import os
 import re
@@ -48,7 +50,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 import pytest
 from cmdkit.app import exit_status
@@ -405,6 +407,39 @@ def test_the_probe_follows_the_site_read_and_is_bounded(names: tuple[str, ...], 
     assert guard.refused == []
 
 
+@dataclass
+class Paused:
+    """The seconds the cyclic collector held the process during a `collector_paused()` block."""
+
+    seconds: float = 0.0
+
+
+@contextlib.contextmanager
+def collector_paused() -> Iterator[Paused]:
+    """The cyclic collector off for the block, as `timeit` times its runs, and back on after only if it
+    was on. A collection that still runs inside the block (an explicit one) is timed into the record,
+    first among the collector's callbacks, so a timed interval that missed its bound says how much of
+    it the collector took."""
+    paused = Paused()
+    began: list[float] = []
+
+    def timed(phase: str, info: dict[str, Any]) -> None:
+        if phase == 'start':
+            began.append(time.monotonic())
+        elif began:
+            paused.seconds += time.monotonic() - began.pop()
+
+    enabled = gc.isenabled()
+    gc.disable()
+    gc.callbacks.insert(0, timed)
+    try:
+        yield paused
+    finally:
+        gc.callbacks.remove(timed)
+        if enabled:
+            gc.enable()
+
+
 @dataclass(frozen=True)
 class Ending:
     """How a lookup ends without an answer, and the reason the start logs for it."""
@@ -458,7 +493,10 @@ def test_every_ending_without_an_answer_serves_every_capability(ending: str, mod
     monkeypatch.setattr(probes, 'PROBE_TIMEOUT', 0.3)
     capabilities = capability_set(names)
     case = ENDINGS[ending]
-    observed = start(mode_argv(mode, transport), capabilities, case.responder, monkeypatch, caplog)
+    # The start is timed with the collector paused: a collection the rest of the suite's heap makes
+    # slow is no wait of the start's.
+    with collector_paused() as paused:
+        observed = start(mode_argv(mode, transport), capabilities, case.responder, monkeypatch, caplog)
     lines = [unanswered_line(c, case.reason) for c in capabilities if c.capability.commands]
     problems = [] if observed.status == 0 else [f'exit {observed.status}: {observed.critical}']
     if observed.events != ORDER:
@@ -468,7 +506,9 @@ def test_every_ending_without_an_answer_serves_every_capability(ending: str, mod
     if observed.lines != lines:
         problems.append(f'logged {observed.lines}, expected {lines}')
     if observed.seconds >= (0.3 if ending in ('hang', 'timeout-code') else 0) + 0.5:
-        problems.append(f'the start took {observed.seconds:.2f} s')
+        own = 0.3 if ending in ('hang', 'timeout-code') else 0
+        problems.append(f"the start took {observed.seconds:.2f} s, past its {own + 0.5:g} s bound (the probe's own wait, "
+                        f'{own:g} s, and 0.5 s of slack), the collector pausing it {paused.seconds:.2f} s of that')
     assert problems == [], 'an ending without an answer did not serve every capability: ' + '; '.join(problems)
     assert guard.refused == []
 

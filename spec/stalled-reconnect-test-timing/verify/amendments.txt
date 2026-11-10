@@ -1,0 +1,8 @@
+Gate scripts changed since the plan commit, each with its reason (timing-gate.py `scope` reads this file).
+
+2026-11-09 · timing-gate.py · P4 · The maintainer, ruling D1 at the PLAN/TECH gate, added a requirement:
+a row-4 failure reports the collector's pause time in its message. MESSAGES[4] gains that message's
+fragment ('the collector pausing it'), and FAULTS[4] gains `collects-slowly-in-the-start` (a 0.6 s
+collection planted inside the start, which the row must fail naming it). Nothing was removed or
+reworded; the three planned row-4 faults and every other row's entries are as signed. Every sweep
+part runs under this gate in P5.

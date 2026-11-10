@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-09'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py row 3
 - id: P4
   name: Row 4 times the start with the collector paused (D1, or (c) as signed)
-  status: pending
+  status: done
   satisfies:
   - R4
   - R7
@@ -159,6 +159,15 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
 - **2026-11-09, P2 (accepted at its gate).** `ensured` is the sum of every span from an entry to
   `SSHExecutor._ensure_connected` to its return during the first call (`math.inf` when there is
   none): should the call enter its reconnect more than once, each entry counts toward the 0.1 s.
+- **2026-11-09, the maintainer at the PLAN/TECH gate: D1 approved.** Row 4 times its start with the
+  cyclic collector paused; its bounds stay 0.8 s (`hang`, `timeout-code`) and 0.5 s. He added one
+  requirement: a row-4 failure reports the collector's pause time in its message, so a later red
+  can be attributed. `collector_paused()` yields a record of the seconds any collection still took
+  inside the block (an explicit one; the automatic collector is off), timed first among
+  `gc.callbacks`, and the row's message ends `the collector pausing it {p:.2f} s of that`. Pinned by
+  a fault added to the gate, `4/collects-slowly-in-the-start` (a 0.6 s collection planted inside the
+  start; fragment `the collector pausing it 0.6`), and by `MESSAGES[4]`; named in
+  `verify/amendments.txt`. PLAN § 2 (row 4) and § 6 follow.
 
 ---
 
@@ -237,12 +246,14 @@ and the row proves the probe read it.
 **Goal:** a timed start is charged no collector pause, and still fails on any wait past the probe's
 bound and its slack. (As signed: D1 assumed; see Conventions.)
 
-- [ ] Add `collector_paused()` (a context manager: `gc.disable()`, re-enabled after only if it was on)
-  to `tests/test_probe_startup.py`, and wrap the row's `start(...)` call in it.
-- [ ] Keep the comparison `observed.seconds >= (0.3 if ending in ('hang', 'timeout-code') else 0) + 0.5`;
+- [x] Add `collector_paused()` (a context manager: `gc.disable()`, re-enabled after only if it was on)
+  to `tests/test_probe_startup.py`, and wrap the row's `start(...)` call in it. It yields the
+  seconds any collection still took inside the block (Amendments, the maintainer's requirement).
+- [x] Keep the comparison `observed.seconds >= (0.3 if ending in ('hang', 'timeout-code') else 0) + 0.5`;
   the message becomes `"the start took {s:.2f} s, past its {b + 0.5:g} s bound (the probe's own wait,
-  {b:g} s, and 0.5 s of slack)"`.
-- **Verify:** `timing-gate.py row 4`: values, scope, the 192 tests in both eras, faults 4/* (three),
+  {b:g} s, and 0.5 s of slack), the collector pausing it {p:.2f} s of that"`.
+- **Verify:** `timing-gate.py row 4`: values, scope, the 192 tests in both eras, faults 4/* (four, with
+  `collects-slowly-in-the-start`),
   control 4 (the base fails with `the start took`; ~2 min, the base's 192 starts each taking a 0.6 s
   collection, in each era). Prototype: about 4.5 min (the base's controls about 3.5 min of it).
 - **Touches:** `tests/test_probe_startup.py`.

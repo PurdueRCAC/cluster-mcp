@@ -120,6 +120,10 @@ for row 4.** Two ways forward, for the maintainer at the PLAN/TECH sign-off:
   with `"the start took {s:.2f} s, past its {b + 0.5} s bound (the probe's own wait, {b} s, and 0.5 s
   of slack)"`. It is neither
   a reference-point change nor the named fallback, so it needs a ruling.
+  *Ruled 2026-11-09: the maintainer approved D1, bounds unchanged, and added that a row-4 failure
+  reports the collector's pause time: `collector_paused()` yields the seconds any collection still
+  took inside the block, and the message ends `, the collector pausing it {p:.2f} s of that`
+  (TECH Amendments; fault 4/`collects-slowly-in-the-start` in § 6).*
 - **(c), the named fallback: widen the slack.** Figures in § 5.
 
 TECH's P4 builds D1. If the sign-off picks (c) instead, P4 drops `collector_paused()` and sets the
@@ -264,6 +268,7 @@ One gate script, `verify/timing-gate.py`, offers its parts as modes (code-plan 6
   | 4 | `waits-past-the-bound`: the wait runs to 3× the bound | a start never waits past the bound + slack | `the start took` |
   | 4 | `joins-the-hung-worker`: joins the probe's worker for 1.0 s | the same, outside the probe | `the start took` |
   | 4 | `waits-after-the-answer`: 0.6 s sleep after the verdicts | the same, anywhere in the start | `the start took` |
+  | 4 | `collects-slowly-in-the-start` (added at the D1 ruling): an explicit collection inside the start that takes 0.6 s | the same, and the failure names the collector's share | `the collector pausing it 0.6` |
 
 - **`controls <n>`** (the other direction: does not fail when bounded): `verify/srtt_stall.py` stalls
   the row inside its own interval: row 1, 0.3 s on the main thread after the call's time is taken and
