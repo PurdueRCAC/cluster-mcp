@@ -182,3 +182,213 @@ build with it:
 
 - **Not triggered.** No CONFIRMED finding touches a path on § Invariants' high-blast-radius list,
   and none violates a section tagged `[human gate]`. The diff touches no § Invariants section.
+
+## Review cycle 2 — changes-requested (2026-11-10)
+
+- **Reviewed commit:** 89f34b8e70093011ceef5e4bc43f6a6950f7e3c4 · **Base:** develop (merge base `e378c33`;
+  `origin/develop` is now `146cbc6`) · **Date:** 2026-11-10
+- **Verdict:** changes-requested · **Cycle:** 2 of ≤3
+- **Contract:** `GOAL.md` at HEAD, as in cycle 1 (the only post-shape commit is `2258691`, the
+  GOAL-gate clarifications).
+- **Mode:** a fresh blind pass over the full spec-excluded diff, by one reviewer at effort xhigh,
+  which also checked cycle 1's findings 1–4 as properties. The reviewer's evidence is in the gitignored
+  `.local/review2/reviewer/`, and the orchestrator's gate log is in `.local/review2/orchestrator/`.
+
+### Verification run
+
+- **The orchestrator's spec-held gates** ran before the reviewer started (`gates.log`). Both exited 0:
+  - `verify/gate.sh prepush`: wording, slice (213 passed per era), ids, sweep (51 drift rows, 4
+    accept rows, 74 mutants, 0 not killed), scope P3 and ledger;
+  - `remediation/checks.sh F1 F2 F4`: 66 drift rows, 4 accept rows, 0 survivors, ledger 209 lines.
+
+  The reviewer's own sweep then found 69 surviving mutants (finding 4). These gates grade only the
+  mutants their author listed, so they did not observe the classes below. Their green result is
+  not evidence that R5's carve-out property holds.
+- **The profile's full `verify`, both eras** (`verify.log`): every command exited 0.
+  - Each era: 44 + 154 + 507 + 4440 passed, 14 skipped. Every skip is a pre-existing
+    `need_shell` row (`skips.log`).
+  - `uv sync --locked`, `uv lock --check` and `bin/sandbox.sh uv run cluster-mcp --help`: ok.
+- **The new tests ran:** 73 passed under a `-k` filter that names them (`focused-marker-tests.log`).
+- **Guard probe:** a throwaway `unit` test was copied into `tests/`, run, and removed, along with its
+  bytecode (`guard_probe.json`, `guard_probe.log`).
+- **Static probe of `sandbox_violations`:** `static_probe.log`.
+- **CommonMark probe of the R5 check:** markdown-it-py (`markdown_probe.log`).
+- **Mutant sweep of the R5 check:** decision mutants plus additive ones (`mutants.py`,
+  `mutants.log`). Each survivor named below has a concrete wrong pass in `witness.log`.
+- **Spec ids:** none in the added `tests/`, `pyproject.toml` or `AGENTS.md` lines (`spec-id-grep.log`).
+- **Tree:** `git status --porcelain` was empty on hand-back, and `git diff --quiet HEAD` passed. No
+  ignored build state was mutated beyond the probe's bytecode, which was removed and asserted gone.
+
+### Requirement → evidence matrix
+
+No R-ID's deliverable is a `spec/` artifact. The blind reviewer verified every row, and the
+orchestrator re-read the cited logs.
+
+| R-ID | Status | Verified how (by the reviewer) |
+|------|--------|--------------------------------|
+| R1 | ✅ | `pyproject.toml:51` has no "fast" and names process, connection (name lookup included) and real HOME. Its "except on the open routes AGENTS.md § Testing names" holds: every route § Testing names reproduced, and every refused route was refused (`guard_probe.json`). |
+| R2 | ✅ | `pyproject.toml:52`: "needs what a unit test is refused", keeps the sandbox rule, no CLI. |
+| R3 | ✅ | The nine kinds each need a process or a connection, "itself or through a fixture or helper". A test needing none falls to `unit`. |
+| R4 | ⚠️ finding 1 | § Testing, § Conventions and the commands block are restated, and the "drives no CLI" note is gone. `AGENTS.md:1650` (§ Testing) still defines integration tests as driving the installed CLI. |
+| R5 | ⚠️ findings 2, 4 | The test is `unit`, passing, and has every planted row R5 names. The broad carve-outs are killed. A whitespace-form bug and narrower carve-outs survive. |
+
+### Cycle-1 findings
+
+| Cycle 1 | Status at `89f34b8` | Evidence |
+|---|---|---|
+| 1. The `unit` description overclaims the guard | **Open as a property** (finding 3). Every guard claim now made holds under the probe, including the `XDG_*` note. The diff's statements about the static launch check still name one gap where many exist, and the tab form of the cycle-1 "exception after a blank" note survives (finding 2). | `guard_probe.json`, `static_probe.log`, `markdown_probe.log` |
+| 2. The "not an item" branch has no row | **Closed.** The `continue` and keep-items mutants are killed by named rows. The `break` variant is equivalent. | `mutants.log` |
+| 3. Narrower carve-outs survive | **Open as a property** (finding 4) | `mutants.log`, `witness.log` |
+| 4. The seed misstates a fixture's scope | **Closed.** The fixture-scope claim is now true, and `c7da4dd` is an ancestor of HEAD. The `ROADMAP.md` counts, statuses and links hold. | reviewer report. The timing line's load figure cites `spec/` and was not verifiable blind. |
+
+### Findings
+
+#### 1. [MEDIUM/CONFIRMED] `AGENTS.md` § Testing still defines integration tests as driving the installed CLI
+- **Where:** `AGENTS.md:1650`, in § Testing (lines 298–1657). The diff does not touch it.
+- **Failure scenario.** The line reads "Integration tests drive the installed CLI, and each one
+  wraps its own drives in `bin/sandbox.sh`". This is the definition R2 removed from
+  `pyproject.toml`. R4 requires the new terms wherever § Testing says what a marker means, so a
+  reader choosing a marker meets two contradictory definitions in one section. Counterexample:
+  `test_docs_modules_absent` (`tests/test_registry.py:366`) is `integration` and drives no CLI.
+- **Evidence:** `r4-counterexample.log`. The orchestrator also confirmed the line with
+  `git grep -n 'drive the installed CLI' -- . ':(exclude)spec/'`.
+- **Touches:** R4.
+
+#### 2. [MEDIUM/CONFIRMED] The R5 check misreads tab and no-break-space indentation, so a clause Markdown renders inside the last description passes
+- **Where:** `tests/test_hygiene.py`, `statement_end_problems`, the indentation computed as
+  `len(line) - len(line.lstrip())`. That counts a tab as one column, where CommonMark counts four,
+  and it counts a no-break space as indentation, which CommonMark does not.
+- **Failure scenario.** On the real `AGENTS.md` § Testing, the check passes each of these, and
+  CommonMark places the added text inside the `integration` item:
+  - a tab-indented `- except a test that needs nothing…` directly after the item;
+  - a blank line, then a tab-indented exception paragraph.
+
+  Planted forms also pass: a tab-indented third marker, a no-break space before `- except a gate`
+  (a lazy continuation), and a ten-digit "ordered item" (also lazy). The controls behave correctly
+  with spaces: a two-space paragraph after a blank line stays outside the item, and a four-space one
+  is refused.
+
+  So R5's "a clause … at the end" has a reachable form no row pins, and the hygiene entry's "the
+  statement ends only where Markdown ends it" is false for these inputs.
+- **Evidence:** `markdown_probe.log` (markdown-it-py renders, check verdicts).
+- **Touches:** R5. This is the same property as cycle 1's "exception paragraph after a blank" note,
+  fixed for spaces only.
+
+#### 3. [MEDIUM/CONFIRMED] The diff's statements about the static launch check name one gap where many exist (cycle 1 finding 1, as a property)
+- **Where:** three statements, each true only for the one gap it names:
+  - `AGENTS.md:120-122` (the commands block): "its static check does not read a launch through
+    conftest.REAL_POPEN";
+  - `AGENTS.md:963-966` (the hygiene entry): it "does not read a call through `conftest.REAL_POPEN`";
+  - `issues/marker-rule-gaps.md:36-40` (item 4): `sandbox_violations` "reads `subprocess`, `os`
+    and `asyncio` calls and bare names imported from them".
+- **Failure scenario.** Outside a `unit` function, `sandbox_violations` reads none of these launch
+  forms:
+  - `conftest.REAL_POPEN`;
+  - a launcher bound by assignment, `getattr(subprocess, 'run')`, or a `Popen` subclass;
+  - `pty.spawn` or `pty.fork`;
+  - `os.fork` or `os.forkpty`, which falsifies the seed's "`os` … calls";
+  - `multiprocessing.Process`, `posix.system`, or `_posixsubprocess.fork_exec`;
+  - `loop.subprocess_exec`, which falsifies its "`asyncio` calls".
+
+  All of these are latent: no `tests/*.py` uses one outside a `unit` function.
+
+  On the guard side, every claim now made holds. `posix.system`, `posix.posix_spawn`, a ctypes
+  `system` and `_socket.getaddrinfo` go through, but § Testing's general "what was bound before the
+  test or sits below them is not refused" covers them. Two further routes reproduced and are not
+  named where the seed lists the guard's gaps:
+  - `site.USER_BASE` and `site.getuserbase()` return the real `~/.local`;
+  - an exported non-XDG variable naming a real-home path (`GNUPGHOME`) reaches the test unchanged.
+
+  The seed is the home that cycle 1 asked to "name every gap the wording now qualifies".
+- **Evidence:** `static_probe.log`, `guard_probe.json`.
+- **Touches:** R1/R4 through the wording that qualifies the rules. This is the ledger accuracy of
+  `issues/marker-rule-gaps.md`.
+
+#### 4. [LOW/CONFIRMED] Narrower carve-outs still survive the R5 rows (cycle 1 finding 3, as a property)
+- **Where:** `tests/test_hygiene.py`, the R5 check (`described_markers`, `stated_markers`,
+  `statement_end_problems`, the comparison) and its planted rows.
+- **Failure scenario.** The reviewer's sweep left 69 survivors. Each one below has a concrete drift
+  that the unmutated check refuses and the mutant passes (`witness.log`):
+  - **Single punctuation ignored.** Any one of `; : ( ) ' " ’ ‘ “ ” _ ! ? [ ] § & — – < > # = + @ ~
+    | \ {} $ % ^`. Of these, `;`, a lone `(` or `)`, and `§` appear in the real descriptions. The
+    classes the rows do kill are the `()` pair, `/`, `-`, `,`, `.`, all quotes together, and the
+    curly-quote fold.
+  - **Folds and strips:** the double-quote class; folding en and em dashes to a hyphen; parentheses
+    turned into commas; dropping zero-width or format characters; stripping Markdown links or HTML
+    comments.
+  - **Clause drops:** a trailing or leading parenthetical; text after an em dash, after ` -- `, or
+    after a last `: `; a trailing `, except …`; a sentence in the middle.
+  - **Structural:**
+    - `entry.split(': ')` without maxsplit in `described_markers`, so pyproject can add
+      `: except a gate`;
+    - an entry with no `': '` read as `(entry, entry)`;
+    - a statement repeated with the last one winning;
+    - over-indented and whitespace-only continuation lines;
+    - after a blank line, a line one column deeper than the items;
+    - `LIST_ITEM` variants: no space after the marker, digits without a delimiter, `\s` after the
+      marker, and a shallower line starting with a code span.
+
+  R5 requires every carve-out "ignoring case, punctuation, whitespace beyond line wrapping, or a
+  trailing clause" to be killed by a named row. These are reachable carve-outs of those kinds.
+- **Evidence:** `mutants.log` (SURVIVED rows), `witness.log`.
+- **Touches:** R5.
+
+### Coverage observations and equivalent mutants (not findings)
+
+- **Survivors with no wrong pass:**
+  - `sm-rstrip`: its row refuses through the indentation shift, not the carve-out;
+  - `sm-indent-fixed2` and `sm-cont-tab`: lenient, but consistent with Markdown;
+  - stricter mutants with no accept row: `se-blank-following-none`, `se-blank-lt-needs-nonitem`,
+    `re-list-only-dash`, `re-list-no-ordered`;
+  - `re-list-hash`: correct for CommonMark;
+  - `se-blank-tabs-as-1`: subsumed by finding 2.
+- **Equivalent on every input:**
+  - `sm-notitem-break`: the following line always starts a `- ` item at the statement's indent, so
+    `statement_end_problems` flags it either way;
+  - `re-item-search`: `.match` and `.fullmatch` agree, because `(.*)` ends the pattern and lines
+    hold no newline;
+  - `sm-cont-no-items-guard`: it raises instead of returning a violation, so the check fails
+    either way.
+
+### Unmapped changes
+
+- The line added to `issues/stalled-reconnect-test-timing.md`.
+- The `issues/marker-rule-gaps.md` seed and its `ROADMAP.md` entry. This is filing only, within
+  the non-goals.
+
+### Routing (to `code build`)
+
+- **Finding 1 (property).** Every place in `AGENTS.md` that says what a marker means, or what an
+  `integration` test is or does, states it in `pyproject.toml`'s terms. That includes prose outside
+  the three named blocks. Find each by a search over the whole file, not by a list of locations.
+- **Finding 2 (property).** The R5 check ends the statement exactly where CommonMark ends the last
+  list item, for every whitespace form a line can start with: spaces, tabs, mixed, and Unicode
+  spaces that Markdown does not count as indentation. Pin both sides:
+  - a clause rendered inside the item is refused;
+  - text that CommonMark places outside the item is accepted, with an accept row for each
+    whitespace form.
+- **Finding 3 (property).** Every statement the diff makes about what a hygiene check or the guard
+  reads or refuses is true of the code over its whole domain. Where a statement names gaps, it
+  either names them all or says it is not exhaustive and points at the seed. The seed's account of
+  `sandbox_violations` and of the guard's open routes must survive an executed probe of every launch
+  and every lookup form. Wording and ledger only, within the non-goals.
+- **Finding 4 (surviving mutants).**
+  - Run a mutant sweep over every decision of the R5 check, plus the additive carve-outs, each
+    survivor killed by a named row or recorded as equivalent with the reason.
+  - The single-character class is open-ended. The property is that the comparison ignores no
+    character at all, so pin it over the whole domain rather than one character at a time.
+  - The skill's structural rule applies: one decision, made once.
+
+### Human-gate triggers
+
+- **Not triggered.** No CONFIRMED finding touches a path on § Invariants' high-blast-radius list,
+  and none violates a section tagged `[human gate]`.
+
+### Escalation
+
+- Cycle 2 has not converged. Cycle 1's findings 1 and 3 are open again as properties. The spec-held
+  gates were green on classes the blind sweep then broke.
+- Per the skill, this goes to the maintainer before a third build round. In particular, finding 4's
+  open-ended character class asks whether R5's "every such carve-out is killed by a named row"
+  should be met by one whole-domain property rather than per-carve-out rows. That is a contract
+  reading, so it is his call.
