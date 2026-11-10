@@ -3,11 +3,11 @@ slug: mutant-child-outlives-timeout
 title: A mutant whose child run hangs is reported, and leaves nothing running
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/mutant-child-outlives-timeout
 base: develop
 current_phase: done
-last_updated: '2026-11-09'
+last_updated: '2026-11-10'
 phases:
 - id: P1
   name: A child run past its limit is stopped whole, reported, and the sweep goes on
@@ -37,10 +37,10 @@ phases:
   hill: uphill
   verify: uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py prepush && uv run python -I spec/mutant-child-outlives-timeout/remediation/untouched.py && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
-  last_reviewed_commit: 6c0396a7fd176a597bbbaa5b5a1a5229792fd1fb
+  last_reviewed_commit: 3f5bdf991876e499651fd9efe896810d936a2f1c
   verdict: changes-requested
-  blocked_reason: 'review 1: AGENTS.md/docstring drift (F1), seed misstates the stop (F2), untouched gate BASE stale after rebase (F3)'
-  cycle: 1
+  blocked_reason: 'review 2: a failed look in the stop leaves the case unreported and the run running (F4); timeout_violations undescribed (F5)'
+  cycle: 2
 ---
 
 # TECH.md — A mutant whose child run hangs is reported, and leaves nothing running
