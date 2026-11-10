@@ -159,3 +159,156 @@ hard-code either figure are killed.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run (not requested).
+
+## Review cycle 2 — changes-requested (2026-11-10)
+
+- **Reviewed commit:** 3f5bdf991876e499651fd9efe896810d936a2f1c  ·  **Base:** develop (merge base `e378c33`; `origin/develop` now `146cbc6`)  ·  **Date:** 2026-11-10
+- **Verdict:** changes-requested
+- **Cycle:** 2 of ≤3 — mirrors `review.cycle` in `TECH.md`
+- **Mode:** a fresh blind pass over the full spec-excluded diff, which also checked cycle 1's findings
+  closed as properties (not a remediation-only pass).
+
+One fresh blind reviewer (a subagent, effort xhigh, no sequential fallback) graded
+`git diff origin/develop...HEAD -- . ':(exclude)spec/'` and the log, with `GOAL.md` and the rubric
+inline, `AGENTS.md` by path, and cycle 1's finding text. A usage limit cut the reviewer off mid-pass;
+it was resumed with HEAD unmoved and re-ran its whole pass (nothing from the cut-off run was saved or
+reused). The orchestrator graded F3 and the spec-held part of R4's evidence. Contract drift: as in
+cycle 1, `GOAL.md` moved after shaping only by the dated gate Clarifications (`d15317a`); graded
+against `GOAL.md` at the reviewed commit. CI on `3f5bdf9` is green (reported by the foreman, not
+observed here).
+
+Evidence: the reviewer's probes, sweep and logs in the gitignored `.local/review2/`, the
+orchestrator's in `.local/review2-orch/`. The reviewer's report came back as text; the harness refused
+the orchestrator's copy of it as `.local/review2/REPORT.md`, so this section is its record.
+
+### Verification run
+
+- `uv sync --locked`, `uv lock --check` → exit 0 (`setup.log`).
+- `tests/test_mutations.py`, legacy and modern eras → 1205 passed per era (`baseline-legacy.log`,
+  `baseline-modern.log`); the integration row passed, not skipped, in both, 9.43 s and 9.45 s alone
+  (`integration-duration-*.log`).
+- `tests/test_hygiene.py tests/test_suite_parts.py`, both eras → 179 passed per era
+  (`static-*.log`), `test_no_spec_ids_in_the_package_or_the_suite` included; a grep of every added
+  line for spec ids → no match.
+- R4 behavioural sample: 22 cases (seeded draw weighted to session- and group-sensitive targets,
+  `r4-sample.txt`), branch runner vs develop's runner, both through `bin/sandbox.sh` (`r4_run.sh`,
+  `r4/`): planted byte-identical, 22/22 killed with their `why`, exit 0; unmutated byte-identical,
+  every target passes; `--self-check` byte-identical, three controls OK. Repeated under a controlling
+  terminal for the 12 session-sensitive cases (`r4_pty.sh`, `r4pty/`) → identical.
+- Timeout drive (`probe_timeout.py`, `probe-a/out.log`, limit patched to 6 s; a run tree with
+  same-group, new-group, new-session, signal-ignoring fork-churning, zombie-holding and orphaned
+  descendants; sentinels outside the run in three placements) → at each hang's report no run process
+  left, all sentinels alive and not stopped, scratch empty;
+  `FAILED  hang: timeout: the child ran past its 6 s limit and was stopped`; later cases ran; exit 1.
+- Signal drive (`probe-sig-{TERM,HUP,INT}/out.log`) → the whole run stopped, sentinels alive, scratch
+  empty; the runner died by the signal (143, 129, 130).
+- Fork-failure drives (`probe_psfail.py`, `psfail/`; `probe_psfail2.py`, `psfail2/`) → F4 below.
+- Mutant sweep, 105 mutants of the new code (46 deletions, 31 flips, **25 additive**, 3 reorders),
+  each a preloaded copy under `.local/review2/mutants/` (the runner was never edited in place), against
+  the 40 non-anchor rows, integration row included (`sweep-legacy.*`, `sweep-modern-survivors.*`) →
+  85 killed, 3 killed by hang, 17 survived (the same 17 in the modern era); none CONFIRMED (table
+  below).
+- Orchestrator, `remediation/untouched.py` (the frozen `untouched` mode with the one § Testing entry
+  F1 needed also cut; accepted at the build gate) → its two controls `ok`, then `ok  untouched`
+  (`.local/review2-orch/untouched-remediation.log`).
+- Orchestrator, `gate.py controls` → `ok  controls` (`.local/review2-orch/controls.log`).
+- Orchestrator, `gate.py within-limit` → `ok  within-limit` in 179 s: the 22-case sample and the three
+  `--self-check` controls print exactly `within-limit.expected`, the unmutated pass exactly
+  `unmutated.expected` (`.local/review2-orch/within-limit.log`).
+- Clean-up: `git status --porcelain` empty at hand-back and after; `tests/mutants.py` and
+  `tests/test_mutations.py` hash-match HEAD; no probe process left; no build state mutated (the
+  rlimit squeezes applied only to probe processes that have exited).
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how (who) | Status |
+|------|----------------|--------------------|--------|
+| R1 | `run_child` (`start_new_session`), `stop_run`, `run_members`, `_wait_gone` | Reviewer: timeout drive, integration row both eras, R1 mutants killed; fork-failure drives (F4) | ❌ edge path (F4); ✅ main path |
+| R2 | `_wait_gone` before return; scratch removed before the report | Reviewer: timeout drive (no run process, scratch empty at report), integration row | ✅ |
+| R3 | `ChildTimeout` → `timeout_violations` → `FAILED` line; `main` goes on, exits 1 | Reviewer: timeout drive (exact line, later cases ran, exit 1), integration row; fork-failure drives (F4) | ❌ edge path (F4); ✅ main path |
+| R4 | `Popen` + `communicate(timeout=LIMIT)`; every other statement unchanged | Reviewer: 22-case planted and unmutated sample + `--self-check` vs develop's runner, with and without a terminal. Orchestrator (spec-held): `gate.py within-limit` green; `untouched` green through `remediation/untouched.py` | ✅ |
+
+Unmapped changes: the runner's own signal handling (`HELD`, the `except BaseException` stop,
+`RunnerSignal`, `stop_on_signals`, `die_by`, the `__main__` wrapper), as in cycle 1; it follows from
+the child's own session. Reported, not blocking. Seed and `ROADMAP.md` status lines are bookkeeping.
+
+### Cycle-1 findings
+
+| Finding | Status at `3f5bdf9` | Verified by |
+|---|---|---|
+| F1 (AGENTS/docstring drift) | **Not closed as a property**: every new name and behaviour is described except the new public `timeout_violations` (F5) | Reviewer |
+| F2 (seed misstates the stop) | Closed: `issues/sandbox-dirs-left-on-kill.md:25-28` true at HEAD (freeze then SIGKILL, no `TMPDIR` set, homes in the runner's `TMPDIR`, seen in `probe-a`); the "last three" referent intact; seed `status:` and `ROADMAP.md` pointer correct | Reviewer |
+| F3 (`untouched` gate red after rebase) | Closed: `BASE` is now found by the shape commit's subject on HEAD's history; the gate is green through `remediation/untouched.py` | Orchestrator |
+| P1 (stop waits only for the wrapper's) | Closed for reachable input: `sr-wait-gone-wrapper-only` killed by `test_stop_run_waits_for_every_process_it_found` | Reviewer |
+| Coverage observations | `rm-pid1-included`, `rm-single-pass`, `rm-own-group-seeded`, `wg-gone-not-filtered`, `wg-groups-not-pruned` now killed; `wg-strict-end` survives, equivalent | Reviewer |
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] F4 — when the stop's own process-table look fails, the case goes unreported, the sweep stops and the run is left running
+- **Where:** `tests/mutants.py:5892-5897` (`run_child`'s `except subprocess.TimeoutExpired`): an
+  exception from `stop_run` escapes. `stop_run` forks `ps` for every look (`_processes`,
+  `tests/mutants.py:5735`, `check=True`); `run_case` (`tests/mutants.py:5962`) catches only
+  `ChildTimeout`. The row `test_stop_run_kills_what_it_found_when_it_is_cut_short[table-fails]` pins
+  the re-raise; nothing turns it into a reported case.
+- **Failure scenario:** a hung mutant whose run has used up the user's process budget (a fork loop
+  that retries on `EAGAIN`, one of the ways mutated code can hang). At the limit the runner cannot
+  fork `ps`: `BlockingIOError` leaves `main`, the case gets no `FAILED` line, no later case runs, and
+  only the wrapper's group was frozen and killed. That is the GOAL's own defect again on this path:
+  R3 unmet, and R1 unmet for the run's processes outside the wrapper's group.
+- **Evidence:** `.local/review2/psfail2/out.log`: the probe lowered only its own `RLIMIT_NPROC` soft
+  limit (user count + 40; no runner code patched); the run's new-session filler forked 50 sleepers to
+  `EAGAIN`; at the stop `BlockingIOError: [Errno 35]` out of `main`, case `quick` never ran, 52 run
+  processes still running (`S`/`Ss`, not frozen). `.local/review2/psfail/out.log` and
+  `leftover-after-crash.txt`: the same crash with the limit squeezed after the run was ready.
+- **Reachability:** reachable input class (a mutant that fork-loops while hanging); no existing case
+  is known to do it. The reviewer did not exhaust the host's real per-user budget, for host safety.
+- **Route as the property, both ways:** a case whose run passes its limit is always reported as not
+  killed with the timeout named, and the sweep goes on, whatever the stop meets (a failed look
+  included); and the stop never reports a run as fully stopped when it could not look, so the
+  report names what may be left. Pin the completeness side (the report and the next case) and the
+  liveness side (the run's processes outside the wrapper's group are still reached when a later
+  look succeeds, or are named as possibly left).
+
+#### [MEDIUM/CONFIRMED] F5 — residual operating-manual drift, F1's class: `timeout_violations` in the runner is described nowhere
+- **Where:** `tests/mutants.py:5846` adds a public `timeout_violations(exc)` with its own row
+  (`test_a_timeout_reason_names_the_limit`, `tests/test_mutations.py:331`). Neither `AGENTS.md` nor
+  either module docstring names it, and `AGENTS.md`'s only mention of the name (`AGENTS.md:852`) is
+  `tests/test_executors.py:197`'s different `timeout_violations(result, elapsed, bound)`, so a reader
+  who looks it up lands on the wrong module.
+- **Evidence:** `grep -n timeout_violations AGENTS.md` → line 852 only;
+  `git grep -n 'def timeout_violations' -- . ':(exclude)spec/'` → two definitions; the reviewer's
+  scripted check: all 89 other public `*_violations` in `tests/` are named in `AGENTS.md`.
+- **Touches:** rubric Scope 5, drift outside § Invariants (MEDIUM). Route as F1's property: every
+  symbol, behaviour and on-disk effect the diff introduces is described, checked mechanically.
+
+### Mutant sweep: survivors (none CONFIRMED)
+
+| Mutant | Class | Why |
+|---|---|---|
+| `rm-group1-seeded`, `rm-unsorted`, `rm-add-parent-of-found` (additive), `wg-strict-end`, `wg-own-dropped`, `sr-wait-gone-pids-wrapper-only`, `sr-extra-kill-found-groups-in-wait` (additive), `tv-figure-literal`, `rs-exception-base`, `die-exit-code`, `ps-min-fields` | equivalent | seeds are real pids > 1; same fixpoint set; a found process's parent is the run, the runner or init; deadline boundary; `own` never passed; every found pid's group is in the set; group ids are leaders' pids; the literal equals the constant; no `except Exception` where `RunnerSignal` lands; the process dies by the signal first; `ps` prints four fields |
+| `wg-end-absolute` | coverage observation | the fakes start their clock at 0, so `end = GONE_WITHIN` is indistinguishable from `clock() + GONE_WITHIN`; in production it would skip every re-kill and wait after the first look. A 3 GiB-heap run process was already gone at the first look (`slow-*`), so it is not shown to break R2 |
+| `sr-wait-gone-groups-wrapper-only` | coverage observation | matters only for a fork racing SIGSTOP into a non-wrapper group |
+| `sos-valueerror-propagates` | coverage observation | reached only off the main thread, which never happens |
+| `main-extra-sigint-ignore` (additive) | coverage observation | no R-ID; the documented Ctrl-C behaviour is not pinned against extra statements |
+| `ps-check-false` | coverage observation | only when `ps` itself fails (F4's path) |
+| `send-no-swallow-perm` | coverage observation | EPERM needs another real uid, which an unprivileged run cannot start |
+
+The rubric's home for coverage observations is an `issues/` seed. The module goes back to build for
+F4 and F5, and F4's fix runs through `ps-check-false`'s path, so the recommendation is to fold the
+`wg-end-absolute` pin (a fake clock that does not start at 0) into that build and seed the rest only
+if the gate prefers; the routing is the gate's call.
+
+Timing figures (`LIMIT`, `GONE_WITHIN`, `GONE_POLL`, the integration row's run time) were not graded:
+maintainer-approved. Their use was checked: the integration row runs 9.4 s per era, as `AGENTS.md`
+states.
+
+### Human-gate triggers
+
+- Not triggered. F4 and F5 are in `tests/mutants.py` and `AGENTS.md` § Testing; neither is on
+  § Invariants' high-blast-radius list nor in a section marked *[human gate]*. No earlier cycle
+  recorded a trigger.
+
+### Loop bound
+
+Cycle 2 has not converged (cycle 1's F1 class recurs as F5, and F4 is new). Per the bounded loop,
+escalated to Geoffrey before a third build↔review round.
