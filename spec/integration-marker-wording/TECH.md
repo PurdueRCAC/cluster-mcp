@@ -3,7 +3,7 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/integration-marker-wording
 base: develop
 current_phase: done
@@ -51,10 +51,10 @@ phases:
   attempts: 1
   verify: sh spec/integration-marker-wording/verify/gate.sh P3
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 0efe6bf35805b5536979513defed75d214e7832f
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: unit description overclaims the guard (F1); R5 check survivors (F2, F3); seed scope claim (F4)'
+  cycle: 1
 ---
 
 # TECH.md — The test markers say what the unit guard enforces
