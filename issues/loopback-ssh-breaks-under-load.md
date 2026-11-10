@@ -40,7 +40,7 @@ escaping `chan.close()`, for instance), a user on a flaky link sees it too.
 
 ## Why it was deferred
 
-Recorded first in `issues/stalled-reconnect-test-timing.md` as part of one load-sensitivity class.
+Recorded first in the seed of `stalled-reconnect-test-timing` (retired; its account is `spec/stalled-reconnect-test-timing/`) as part of one load-sensitivity class.
 Shaping that cycle on 2026-11-09 split it out: those rows miss wall-clock bounds, these break a
 link, by a mechanism nobody has found, possibly outside the tests. The maintainer ruled it a `fix`
 seed of its own.
@@ -64,7 +64,7 @@ raw exception; where it is in the test server, the server no longer drops a link
 
 ## Notes
 
-- Related: `issues/stalled-reconnect-test-timing.md` (adopted; the wall-clock rows),
+- Related: `spec/stalled-reconnect-test-timing/` (landed on `develop` 2026-11-10; the wall-clock rows),
   `issues/ssh-open-session-reset-raises.md` (a reset while a call opens its channel raises).
 - Sources: `tests/ssh_server.py` (`LoopbackSSH`), `tests/test_ssh_exec.py`
   (`test_startup_output_is_separated`), `tests/test_timeout_stop.py`,

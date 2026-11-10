@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 30 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,10 +45,10 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
-Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
+Since 0.1.5, eight cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
 the uv-workspace restructure landed on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
@@ -67,14 +67,18 @@ The skip check's fence closed on 2026-11-09
 ([`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/)): it admits a skip only inside the
 single top-level `need_shell` and `need_git` in `tests/conftest.py`, and reports a skipper reached
 through an attribute or an outcome raised directly.
+The real-time rows were fixed on 2026-11-10
+([`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/)): the stalled reconnect,
+the worker that cannot start, the probe's raised endings and the bounded start now fail on
+behaviour, not on a busy host, with their bounds unchanged.
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (thirteen entries), because every later gate rests on them: the mutation run and
-  its children, the two gaps the skip check still leaves and the pins it still lacks, the
-  timing-sensitive reconnect test and the waits its timing rows still miss, an annotation check,
-  the test harnesses' leftovers, the marker wording, the image's init, and the surface fixture,
-  which must land before the first cycle that changes the served surface.
+- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
+  its children, the two gaps the skip check still leaves and the pins it still lacks, the waits
+  the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
+  wording, the image's init, and the surface fixture, which must land before the first cycle that
+  changes the served surface.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
@@ -138,28 +142,6 @@ landing ruling, 2026-11-09.
 
 *Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
 **Seed:** [`issues/skip-check-pin-completeness.md`](issues/skip-check-pin-completeness.md) · *status: unshaped*
-
-## A real-time reconnect test fails under full-suite load
-
-The stalled-reconnect test checks the call gives up within its window plus 0.5 s, by wall clock. It
-failed once in a full local run and passed alone and on re-run, so it measures load as well as
-behaviour. Seen in `resource-reads-without-executor`'s final gate, 2026-10-28.
-
-- 2026-10-29: a second loopback test (`test_startup_output_is_separated[tcsh]`, `EOFError`) failed
-  once on CI and passed on re-run; the seed records it.
-- 2026-11-02: a third, `test_timeout_stop.py`'s signal-death survival row over an `sh` login shell
-  (every-login-shell runs only), failed once locally under load and passed on re-runs; the seed
-  records it.
-- 2026-11-05: the reconnect row failed once more with "0 reconnect workers ran" in a local full run
-  during `spec/ssh-half-open-link/` P2, and passed three times alone; the seed records it.
-- 2026-11-05: `test_a_reconnect_worker_that_cannot_start_frees_the_attempt` failed on CI a second time
-  (0.3 s against a 0.1 s bound); under the same load it fails as often on `develop` as on
-  `spec/ssh-half-open-link/`'s branch; the seed records both rates.
-- 2026-11-09: shaping split the loopback SSH breaks (the `EOFError` and socket-error rows) into
-  their own seed, under the executor group below.
-
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/); `tests/test_ssh_exec.py`*
-**Seed:** [`issues/stalled-reconnect-test-timing.md`](issues/stalled-reconnect-test-timing.md) · *status: adopted:stalled-reconnect-test-timing*
 
 ## Two timing rows miss a wait made outside the clock they control
 
