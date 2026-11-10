@@ -426,9 +426,28 @@ FAULTS = {
            "        __import__('gc').collect()\n"
            "        __import__('gc').callbacks.remove(_slow)\n"
            '        for verdict in pending.verdicts():\n'),),
-         R4_ANY, 'the collector pausing it 0.6'),
+         R4_ANY, 'the collector pausing it'),
     ],
 }
+
+# The collection the fault above plants holds the start at least this long.
+PLANTED_PAUSE = 0.6
+START_LINE = re.compile(r'the start took (\d+\.\d+) s, past its .*?, the collector pausing it (\d+\.\d+) s of that')
+
+
+def planted_pause_reported(failure: str) -> str | None:
+    """Why `failure` does not report the planted collection: it must carry the start-took line, and the
+    collector pause it names must be at least the planted sleep (a lower bound, never a digit match)."""
+    found = START_LINE.search(failure)
+    if found is None:
+        return 'no start-took line naming the collector pause'
+    if float(found.group(2)) < PLANTED_PAUSE:
+        return f'the collector pause reported is {found.group(2)} s, under the planted {PLANTED_PAUSE} s'
+    return None
+
+
+# Faults killed on a predicate over each target's failure text, beside the runner's own fragment check.
+PREDICATES = {(4, 'collects-slowly-in-the-start'): planted_pause_reported}
 
 
 def mutants_module():
@@ -437,19 +456,46 @@ def mutants_module():
     return mutants
 
 
+def run_with_predicate(mutants, case, predicate) -> list[str]:
+    """`mutants.run_case`, step for step through the runner's own functions, then `predicate` on each
+    target's failure text: the runner keeps its JUnit report in a scratch dir it removes."""
+    with tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-') as scratch:
+        dest = Path(scratch)
+        src_root = mutants.apply(case, dest)
+        repo = mutants.apply_repo(case, dest)
+        junit = dest / 'junit.xml'
+        child = mutants.run_child(src_root, case.targets, junit, repo)
+        report = junit.read_text() if junit.exists() else None
+    violations = mutants.mutation_violations(child.returncode, report, case.targets, case.why)
+    if violations and child.returncode not in (0, 1):
+        violations.append(f'child stderr: {child.stderr.strip()[-400:]!r}')
+    if report is not None:
+        failures = {}
+        for testcase in ET.fromstring(report).iter('testcase'):
+            failures.setdefault(mutants._node_id(testcase), []).extend(
+                c.get('message', '') + (c.text or '') for c in testcase if c.tag == 'failure')
+        for target in case.targets:
+            reasons = [predicate(text) for text in failures.get(target, [])]
+            if not reasons or all(reasons):
+                violations.append(f'{target}: {(reasons or ["no failure"])[0]}')
+    return violations
+
+
 def faults(row: int) -> list[str]:
     mutants = mutants_module()
     problems = []
     for case_id, file, edits, targets, why in FAULTS[row]:
         began = time.monotonic()
         case = mutants.Case(f'srtt-{row}-{case_id}', file, edits, tuple(targets), why)
-        violations = mutants.run_case(case)
+        predicate = PREDICATES.get((row, case_id))
+        violations = run_with_predicate(mutants, case, predicate) if predicate else mutants.run_case(case)
         took = time.monotonic() - began
         if violations:
             problems += [f'fault {row}/{case_id}: {v}' for v in violations]
             print(f'fault {row}/{case_id}: SURVIVED or wrong reason ({took:.0f} s)')
         else:
-            print(f'fault {row}/{case_id}: killed, {len(targets)} targets with {why!r} ({took:.0f} s)')
+            named = f' and {predicate.__name__}' if predicate else ''
+            print(f'fault {row}/{case_id}: killed, {len(targets)} targets with {why!r}{named} ({took:.0f} s)')
     return problems
 
 

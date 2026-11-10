@@ -3,10 +3,10 @@ slug: stalled-reconnect-test-timing
 title: Real-time tests fail on behaviour, not on a busy host
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/stalled-reconnect-test-timing
 base: develop
-current_phase: P6
+current_phase: done
 last_updated: '2026-11-10'
 phases:
 - id: P1
@@ -75,7 +75,7 @@ phases:
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py sweep-check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py values 1 2 3 4 && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py scope
 - id: P6
   name: R5's load protocol, the profile's verify, and the deferral ledger
-  status: pending
+  status: done
   satisfies:
   - R5
   - R8
@@ -84,7 +84,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 1
+  attempts: 2
   verify: UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/load-protocol.py check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py profile check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py sweep-check && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py scope && UV_PYTHON=3.14 uv run -q python -I spec/stalled-reconnect-test-timing/verify/timing-gate.py ledger
 review:
   last_reviewed_commit: ''
@@ -177,6 +177,12 @@ As the template: `status`, `appetite`, `branch`/`base`, phase `status`, `satisfi
   `4/collects-slowly-in-the-start` was killed for the wrong reason, its fragment
   `the collector pausing it 0.6` against a reported pause of 0.67-0.71 s (the planted 0.6 s plus
   the explicit full collection itself). Recorded as an attempt; P6 waits on the fix to that fault.
+- **2026-11-10, P6: the fault's fix, as ruled.** `4/collects-slowly-in-the-start` keeps its 0.6 s plant
+  and is killed on a predicate, not a digit prefix: each target's failure carries the start-took line
+  and a reported collector pause of at least 0.6 s (`planted_pause_reported`, `verify/amendments.txt`).
+  The predicate's first draft missed the message (a comma inside its parentheses), caught when shown
+  both ways before any run, recorded as an attempt, and fixed. The frozen records citing `abe12e3`
+  and `758e7d1` stand; on the rebased branch they are `af1012e` and `64137f6`.
 
 ---
 
@@ -289,18 +295,18 @@ touched module's local time before and after.
 **Satisfies:** R5, R8 · **Depends on:** P5
 **Goal:** R5's protocol on the final tree, recorded; the full gate green once; every deferral seeded.
 
-- [ ] With the tree committed and nothing else of this cycle running, run
+- [x] With the tree committed and nothing else of this cycle running, run
   `verify/load-protocol.py run` with `run_in_background` (about 20 min: 20 runs alone per row, then
   four spinners and the profile's suite commands beside 20 loaded runs per row). The load comes from
   the four spinners (four cores) and the beside suite; record the host's load averages as the script
   does. If a row fails a run, stop: it is a finding for the gate, not a re-run.
-- [ ] Then, alone, `timing-gate.py profile run` with `run_in_background` (the profile's `verify`,
+- [x] Then, alone, `timing-gate.py profile run` with `run_in_background` (the profile's `verify`,
   about 25 min), recorded in `verify/profile-verify.txt`.
-- [ ] Deferral ledger: walk P1–P6 and this cycle's commit bodies for "do not fix here", "known
+- [x] Deferral ledger: walk P1–P6 and this cycle's commit bodies for "do not fix here", "known
   limitation", "left as a follow-up", "deferred" and "not fixed"; each needs an `issues/` seed and a
   ROADMAP entry (`timing-gate.py ledger`). The plan defers nothing; a deferral a phase adds files its
   seed in that phase's commit.
-- [ ] Standing last-phase items: the ledger, as `suite-ci-time-budget`'s last phase carried.
+- [x] Standing last-phase items: the ledger, as `suite-ci-time-budget`'s last phase carried.
 - **Verify:** `load-protocol.py check`, `profile check`, `sweep-check`, `scope`, `ledger`. R5 is
   graded from `verify/load-runs.txt` by the orchestrator.
 - **Touches:** `spec/stalled-reconnect-test-timing/verify/load-runs.txt`,

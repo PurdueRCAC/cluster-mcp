@@ -16,3 +16,17 @@ times · HEAD · tests/test_probe_startup.py · 405 tests · 0 not passed · 22.
 2026-11-10 05:28 · part 2 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate ffd0d3dfea+b2d822f751 · green · 18 s
 2026-11-10 05:29 · part 3 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate ffd0d3dfea+b2d822f751 · green · 68 s
 2026-11-10 05:33 · part 4 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate ffd0d3dfea+b2d822f751 · red · 259 s
+2026-11-10 05:38 · part 1 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 45 s
+2026-11-10 05:38 · part 2 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 18 s
+2026-11-10 05:39 · part 3 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 68 s
+2026-11-10 05:43 · part 4 · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 258 s
+2026-11-10 05:46 · part cases · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 183 s
+times · af1012e · tests/test_ssh_exec.py::test_a_stalled_reconnect_is_abandoned_against_a_real_handshake · 1 tests · 0 not passed · 4.1-4.3 s · load 13.2
+times · af1012e · tests/test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt · 1 tests · 0 not passed · 1.1-1.3 s · load 12.4
+times · af1012e · tests/test_probes.py · 167 tests · 0 not passed · 7.8-7.8 s · load 9.8
+times · af1012e · tests/test_probe_startup.py · 405 tests · 0 not passed · 21.0-21.3 s · load 5.5
+times · HEAD · tests/test_ssh_exec.py::test_a_stalled_reconnect_is_abandoned_against_a_real_handshake · 1 tests · 0 not passed · 4.4-4.5 s · load 4.7
+times · HEAD · tests/test_ssh_exec.py::test_a_reconnect_worker_that_cannot_start_frees_the_attempt · 1 tests · 0 not passed · 1.1-1.2 s · load 4.7
+times · HEAD · tests/test_probes.py · 167 tests · 0 not passed · 7.8-7.9 s · load 3.9
+times · HEAD · tests/test_probe_startup.py · 405 tests · 0 not passed · 21.0-21.1 s · load 2.8
+2026-11-10 05:50 · part times · tests tree 9d82fd2c9ae0d7d4d07b8956b66945604866c127 · gate 72c2ab5596+b2d822f751 · green · 207 s

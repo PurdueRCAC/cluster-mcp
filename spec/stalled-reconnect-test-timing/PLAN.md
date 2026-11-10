@@ -268,7 +268,7 @@ One gate script, `verify/timing-gate.py`, offers its parts as modes (code-plan 6
   | 4 | `waits-past-the-bound`: the wait runs to 3× the bound | a start never waits past the bound + slack | `the start took` |
   | 4 | `joins-the-hung-worker`: joins the probe's worker for 1.0 s | the same, outside the probe | `the start took` |
   | 4 | `waits-after-the-answer`: 0.6 s sleep after the verdicts | the same, anywhere in the start | `the start took` |
-  | 4 | `collects-slowly-in-the-start` (added at the D1 ruling): an explicit collection inside the start that takes 0.6 s | the same, and the failure names the collector's share | `the collector pausing it 0.6` |
+  | 4 | `collects-slowly-in-the-start` (added at the D1 ruling): an explicit collection inside the start that takes 0.6 s | the same, and the failure names the collector's share | `the collector pausing it`, and a pause of at least the planted 0.6 s (a predicate, TECH Amendments) |
 
 - **`controls <n>`** (the other direction: does not fail when bounded): `verify/srtt_stall.py` stalls
   the row inside its own interval: row 1, 0.3 s on the main thread after the call's time is taken and
