@@ -1637,8 +1637,14 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   first (`stop_on_signals` installs `_raise_runner_signal`, which turns TERM and HUP into
   `RunnerSignal`), then dies by the signal it got (`die_by` for TERM and HUP, Python's own exit for
   Ctrl-C). A SIGKILL to the runner's process group ends the runner alone and leaves its current run
-  to finish by itself. The killed `bin/sandbox.sh` leaves its home in the runner's `TMPDIR`
-  ([`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md)).
+  to finish by itself. A case's scratch directory is its child's `TMPDIR` (`case_scratch`), so every
+  sandbox the run starts, the runner's own `bin/sandbox.sh` and those the child's tests start, makes
+  its directory there, and so does the child pytest's temporary directory: once the case is
+  reported the scratch is removed with them, however the run ended (its own exit, the stop past
+  `LIMIT`, or the stop on SIGTERM, SIGHUP or Ctrl-C). A scratch holding a sandbox directory some
+  process still uses (`tests/sandbox_dirs.py`'s `in_use`), or whose processes cannot be listed, is
+  kept and named on stderr (`kept <path>: <why>`); a SIGKILL to the runner leaves its scratch in the
+  runner's `TMPDIR`.
 
   A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget
@@ -1978,8 +1984,10 @@ each name exported by `tests/test_cli.py::test_sandbox_fails_closed_with_either_
 A SIGKILL skips the trap and leaves the state directory behind, and the suite's harnesses stop
 sandboxes that way, so a pytest run points `TMPDIR` at a directory of the run's own and sweeps it,
 with the session's pytest temporary directory, when the session ends (`tests/sandbox_dirs.py`, the
-`sandbox_tmp` fixture, § Testing); a caller outside the repository's own runs that kills a sandbox
-outright still leaves its directory (a known limitation).
+`sandbox_tmp` fixture, § Testing), and the mutation runner makes each case's scratch directory its
+child run's `TMPDIR` and removes it once the case is reported (`case_scratch`, § Testing); a caller
+outside the repository's own runs that kills a sandbox outright still leaves its directory (a known
+limitation).
 
 ### Where deferred work goes
 

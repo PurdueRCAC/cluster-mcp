@@ -6,8 +6,8 @@ appetite: small
 status: in_progress
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
-current_phase: P2
-last_updated: '2026-11-09'
+current_phase: P3
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: A suite run sweeps what its killed sandboxes left, and nothing else
@@ -26,7 +26,7 @@ phases:
   verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files units kinds guards && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
 - id: P2
   name: A mutation case's scratch is its child run's TMPDIR
-  status: pending
+  status: done
   satisfies:
   - R2
   - R6
@@ -35,7 +35,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files rebase runner runner-timeout sample && uv run pytest -q tests/test_mutations.py
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files rebase runner runner-timeout sample && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py && uv run pytest -q tests/test_mutations.py
 - id: P3
   name: The mutant sweep, the ledger and the whole verify
   status: pending
@@ -144,25 +144,31 @@ sandbox directory stay; every harness kind of the GOAL's Problem items 1–5 is 
 runner's own stop past its limit, nothing any of its sandboxes made is left once the case is
 reported, and every sample case and control prints what develop printed.
 
-- [ ] Before the phase: rebase the branch onto `develop` holding `mutant-child-outlives-timeout`
+- [x] Before the phase: rebase the branch onto `develop` holding `mutant-child-outlives-timeout`
       (`git merge-base --is-ancestor` of its landing commit; `tests/mutants.py` defines `LIMIT`). If
       it has not landed, stop and report: the `runner-timeout` mode is red by design until it has.
-- [ ] `tests/mutants.py`, the four touch points of PLAN § 2 and nothing else: `import contextlib`;
+- [x] `tests/mutants.py`, the four touch points of PLAN § 2 and nothing else: `import contextlib`;
       `Iterator` in the `typing` import; `import sandbox_dirs` after `import cluster_mcp.slurm`;
       `run_case`'s first line `with case_scratch(case.id) as scratch:`; `case_scratch` (mkdtemp, the
       `TMPDIR` set and put back, the scratch kept and named on stderr while a sandbox directory in it
-      is in use, else removed) between `run_case` and `self_check`.
-- [ ] `AGENTS.md` § Testing's mutation-runner bullet: one clause, a case's scratch is its child's
+      is in use, else removed) between `run_case` and `self_check`. Two additions, amended below:
+      the process listing runs before `TMPDIR` is put back, and a listing that fails keeps the
+      scratch, named, rather than raising out of `run_case`. The module docstring names `case_scratch`.
+- [x] `AGENTS.md` § Testing's mutation-runner bullet: one clause, a case's scratch is its child's
       `TMPDIR` (PLAN § 2); and § Factory → Throwaway environment's sentence (written in P1 for the
-      suite only) gains the same clause for the mutation runner.
-- [ ] Measure and put in the commit body: the sample's wall time before (develop's runner) and after,
+      suite only) gains the same clause for the mutation runner. The bullet's last sentence, "the
+      killed `bin/sandbox.sh` leaves its home in the runner's `TMPDIR`", false once this lands, is
+      replaced (a live product fact, code-build Step 2.3).
+- [x] Measure and put in the commit body: the sample's wall time before (develop's runner) and after,
       from the `sample` mode's run and `verify/sample.expected`'s recording run (PLAN § 3 row D4).
 - **Verify:** the frontmatter `verify:`: `files`; `rebase` (the text merges with the sibling's in
   either order); `runner` (a child killed before its session ends, for a case on the package and one
   planting a repository copy: no sandbox directory, no scratch, `TMPDIR` put back; a child that ends
   normally leaving a sandbox running: that directory kept); `runner-timeout` (the same through the runner's stop at `LIMIT = 8`); `sample`
-  (R6: 22 cases and the controls, about 110 s); then `tests/test_mutations.py` (about 17 s).
-- **Touches:** `tests/mutants.py`, `AGENTS.md`.
+  (R6: 22 cases and the controls, about 110 s); `remediation/runner-signals.py` (the same through the
+  stop a SIGTERM, SIGHUP or SIGINT to the runner makes, about 10 s); then `tests/test_mutations.py`
+  (about 26 s). `files` runs under `remediation/fork-base.py`, as P1's did.
+- **Touches:** `tests/mutants.py`, `AGENTS.md`, `spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py`.
 
 ## Phase P3 — The mutant sweep, the ledger and the whole verify
 **Satisfies:** R1, R3, R4, R6 (on the final tree, through the whole suite in both eras) ·
@@ -179,18 +185,23 @@ skips exactly what develop skips; the ledger is clean.
 - [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
       for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the `ledger` mode
       checks this file). This plan files no new seed.
-- [ ] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
-      `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications).
-- [ ] The seed's other facts, in `issues/sandbox-dirs-left-on-kill.md`: its sentence on the mutation
-      runner's timeout path (this cycle's own text, not on `develop`, so corrected in place) is
-      replaced by `mutant-child-outlives-timeout`'s corrected wording once that cycle lands; and
-      "the last three point the drive's `TMPDIR` at the test's own directory" is false for
-      `spec/capability-probe/verify/drives.py`, which sets no `TMPDIR` and starts no sandbox of its
-      own (it SIGKILLs a bare `uv run` inside a gate's outer sandbox, GOAL § Problem), and for
-      `tests/mutants.py`: the sites that point a sandbox's `TMPDIR` at `tmp_path` are
-      `tests/test_transports.py`, `tests/test_probe_startup.py` (`drive_env`) and one
-      `tests/test_audit.py` site. That sentence is on `develop` since before this cycle, so it takes
-      a dated correction beneath it (append-only), unless the seed is retired at landing (PLAN § 5).
+- [x] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
+      `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications). Done at P2's rebase (2026-11-12):
+      the branch's own sentence on the runner, which stood before "The last three", was dropped for
+      `develop`'s, which follows that sentence, so the referent is again the three harnesses before it.
+- [ ] The seed's other facts, in `issues/sandbox-dirs-left-on-kill.md`, both on `develop` and so each a
+      dated correction beneath it (append-only), unless the seed is retired at landing (PLAN § 5).
+      (The sentence on the mutation runner's timeout path took `develop`'s wording at P2's rebase.)
+      1. "The last three point the drive's `TMPDIR` at the test's own directory" is false for
+         `spec/capability-probe/verify/drives.py`, which sets no `TMPDIR` and starts no sandbox of
+         its own (it SIGKILLs a bare `uv run` inside a gate's outer sandbox, GOAL § Problem); the
+         sites that point a sandbox's `TMPDIR` at `tmp_path` are `tests/test_transports.py`,
+         `tests/test_probe_startup.py` (`drive_env`) and one `tests/test_audit.py` site.
+      2. "The runner sets no `TMPDIR` of its own" is false once P2 lands: each case's scratch is its
+         child run's `TMPDIR` (`case_scratch`), removed once the case is reported on each end the
+         runner's stop covers, named: the stop past `LIMIT`, and SIGTERM, SIGHUP and SIGINT (Ctrl-C)
+         to the runner (the gate's `runner-timeout` and P2's `remediation/runner-signals.py`); a
+         SIGKILL to the runner still leaves its scratch (GOAL non-goal).
 - [ ] Put the `suite` mode's figures into PLAN § 3 row D4 beside the planner's, naming this run: each
       command's time and leftover count.
 - [ ] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
@@ -228,6 +239,34 @@ skips exactly what develop skips; the ledger is clean.
   cleanup and the known limitation only; the mutation runner's clause joins it in P2, with
   `case_scratch` (§ Conventions, docs in the same commit). The seed's facts the foreman flagged are
   P3's (a new checklist item there): P1 has no ledger work.
+
+- **2026-11-12, P2 build: rebased onto the landed sibling, and the gate retuned.** Before P2 the
+  branch was rebased onto `origin/develop` at `2719b7a`, which holds `mutant-child-outlives-timeout`
+  (`32a85c3`); the branch had never been pushed. One conflict, `ROADMAP.md`'s entry for this seed
+  (`develop` renamed its horizon to "Part I, gates"; the branch had set its status to `adopted`):
+  both kept. In the seed, `develop`'s sentence on the runner's stop was taken and the branch's own
+  sentence on it dropped (GOAL Clarifications: the sibling's wording). The re-check against the
+  landed runner: PLAN § 2's approach still fits. `run_child` builds its child's environment from
+  `os.environ` at call time, so the child's `TMPDIR` is the case scratch, and `stop_run` kills the
+  whole run, waits until none of it runs (`_wait_gone`) and reaps the wrapper before `run_child`
+  returns or raises; `case_scratch`'s exit then runs on every end of a case, because each one leaves
+  `run_case` through it: the child's own exit, the stop past `LIMIT` (`ChildTimeout`), and the stop on
+  SIGTERM or SIGHUP (`RunnerSignal`) or SIGINT (`KeyboardInterrupt`), which `run_child` makes before
+  it re-raises. The frozen gate pins the first two (`runner`, `runner-timeout`); P2's `verify:` adds
+  [`remediation/runner-signals.py`](remediation/runner-signals.py), one row per signal (the runner
+  ends by it, no process the child recorded runs on, no sandbox directory or scratch is left under
+  the runner's `TMPDIR`); its control, `--runner-from origin/develop`, is red on every signal. The
+  `files` mode runs under `remediation/fork-base.py`, as P1's did. The `rebase` mode now compares
+  with `origin/develop`, which already holds the sibling, so it passes trivially; the rebase itself
+  was the real merge.
+- **2026-11-12, P2 build: two changes to `case_scratch` beyond PLAN § 2.** (1) The process listing
+  runs before `TMPDIR` is put back, as `own_tmp`'s sweep does (the adversarial review's finding 8): a
+  listing whose own sandbox is killed on its timeout leaves its directory in the scratch, not in the
+  runner's `TMPDIR`. (2) A listing that fails (`processes()` raises, as it does when `ps` cannot run:
+  the same state in which `stop_run` reports a stop that could not finish) keeps the scratch and
+  names it on stderr with the error, instead of raising out of `run_case` and ending the sweep with
+  no verdict for the case (R6). No suite row pins (2): `tests/test_mutations.py` is outside the
+  `files` mode's allowed paths. P3's mutant sweep can plant it.
 
 ## How `code-build` drives this
 
