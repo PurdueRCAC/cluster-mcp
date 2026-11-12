@@ -5,20 +5,20 @@ seed holds the evidence and the draft criteria, this file holds the order and th
 order. Nothing here is a contract — the factory's feature step promotes a seed into a `spec/{slug}/GOAL.md`, and
 that promotion is where appetite, non-goals and the R-IDs get negotiated with a human.
 
-The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
-the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
-robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
-extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
-cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
-logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
-are not yet ordered. A release ships when everything in its Part has landed: scope is never cut for
-pace.
+The project is on a three-release arc. **Part 0** is released: the 0.1.x releases made the server
+safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
+rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
+**Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
+29 entries, each of which ships in the first release after it lands. **Part II** ships as
+**0.3.0**: the capabilities behind package extras, each tool family defined so another
+implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
+once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
+the rest of Part I. **Part III** ships as **0.4.0**: records of every call, audit logging, and
+lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and are not yet
+ordered. Within a Part, scope is never cut for pace.
 
-The order was revised on 2026-11-09. Every cycle starts from and lands on `develop`; a release
+The order was revised on 2026-11-12. Every cycle starts from and lands on `develop`; a release
 fast-forwards `main` to a released `develop` commit, so nothing reaches users between releases.
-Users install `main` directly, so the fixes in Part I reach them under the new name before any
-installed surface changes shape.
 
 A seed that another cycle **absorbs** keeps a short entry under that cycle, so every file in
 `issues/` stays indexed until the absorbing cycle retires it.
@@ -29,7 +29,7 @@ seeds; its method lives in the operator's KB.
 
 ---
 
-# Part 0 — Safe and useful as it stands
+# Part 0 — Released
 
 Done; it holds no entries. **0.1.1** (2026-10-18) carried the dependency-stack upgrade to FastMCP 4
 and the MCP SDK 2, the docs strip, the test suite and the both-era gates. **0.1.2** (2026-10-22)
@@ -39,17 +39,9 @@ shell's semantics — with clear connection errors, a call that fails rather tha
 connection drops, job scripts that never overwrite each other, and the site's rules from
 `/etc/agents.d` in the instructions. **0.1.4** (2026-10-29) made a read of `rcac://storage` return
 the user's storage paths. **0.1.5** (2026-10-30) carried a lock past a further dependency advisory.
-Each cycle's account is its `spec/{slug}/`.
 
----
-
-# Part I — 0.2.0: hardening, and the rename finished
-
-Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
-docs. No capability is reshaped here; that is Part II.
-
-Since 0.1.5, eight cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
-the uv-workspace restructure landed on 2026-10-30
+**0.2.0** (2026-11-12) shipped the eight cycles that had landed on `develop` since 0.1.5. The rename
+to `cluster-mcp` and the uv-workspace restructure landed on 2026-10-30
 ([`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)), keeping the old names through a
 deprecation window. The capability extras landed on 2026-11-01
 ([`spec/capability-extras/`](spec/capability-extras/)): a bare `cluster-mcp` is the core alone,
@@ -71,22 +63,81 @@ The real-time rows were fixed on 2026-11-10
 ([`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/)): the stalled reconnect,
 the worker that cannot start, the probe's raised endings and the bounded start now fail on
 behaviour, not on a busy host, with their bounds unchanged.
+The legacy `RCAC_*` variables, `rcac://` URIs and the `rcac-mcp` command keep working through the
+deprecation window. A bare install still serves the shell and the file tools; Part II narrows it.
 
-What remains comes in five groups, in this order:
+Each cycle's account is its `spec/{slug}/`.
 
-- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
-  its children, the two gaps the skip check still leaves and the pins it still lacks, the waits
-  the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
-  wording, the image's init, and the surface fixture, which must land before the first cycle that
-  changes the served surface.
+---
+
+# Part I — hardening, and the rename finished
+
+Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
+release after it lands.
+
+They come in six groups, in this order:
+
+- **Before Part II** (four entries), because Part II rests on them: the surface fixture, which must
+  land before the first cycle that changes the served surface, the two gaps in the capability load
+  every family registers through, and the mutation run's hung child. Part II starts once all four
+  have landed. The mutation run's own job (the first gate below) lands before core extraction's
+  review.
+- **Gates** (ten), because every later gate rests on them: the mutation run, the two gaps the skip
+  check still leaves and the pins it still lacks, the waits the timing rows still miss, an
+  annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (five): the capability load, the site files' size, the startup update check, and the
-  floors a git install resolves against.
+- **Safety** (three): the site files' size, the startup update check, and the floors a git install
+  resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
 - **The rename finished** (two): the identity strings a client or a token sees, and the docs.
+
+## The surface pin cannot follow a deliberate surface change
+
+`tests/fixtures/served_surface.json` is the surface `3d010ec` served, taken on FastMCP 2, and
+`tests/test_surface.py` rejects a fixture re-taken on FastMCP 4 because it carries the new stack's
+schema metadata. After a deliberate change to a tool, an argument or the instructions there is no
+FastMCP 2 build of the new surface to snapshot, so the only way to update the pin is to hand-edit
+it, unchecked. A maintained snapshot command on the current stack, with a one-time re-baseline that
+retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 2026-10-17.
+
+*Horizon: before Part II, the last gate before the first cycle that changes the served surface · Depends on: — · Refs: `AGENTS.md` § Invariants §9 says the question is open; `safe-execution` changed the surface first and hand-edited its deltas into the fixture (`AGENTS.md` § Testing); every Part II family changes the surface*
+**Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: unshaped*
+
+## A capability's registered tool objects can run its code when they are read
+
+The load takes each tool a capability registers by `isinstance(entry, FunctionTool)`, so a subclass, or
+a field the capability sets after construction to a value of a type of its own, runs the capability's
+code whenever the core or FastMCP reads it: at the load's scratch registration, again when the server
+is built, and on every listing. The capability record itself is exact since `capability-probe`; its tools are the one part
+still taken by `isinstance`. The outcome: every tool exactly a `FunctionTool` with exact field values,
+decided at load, the handler excepted. Pre-existing; no code changes until its cycle.
+
+*Horizon: before Part II, safety · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
+
+## A retried capability load after a failure registers nothing and blames the wrong distribution
+
+A failed load cuts the tool registry back but leaves the imported tools modules cached, so a second
+load in the same process registers nothing for a capability that had loaded cleanly, and the error
+names it instead of the broken one. The command line never retries, so only a library caller sees it.
+
+*Horizon: before Part II, safety · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
+**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
+
+## A mutant's child run outlives its timeout
+
+`tests/mutants.py` runs each case's targets through `subprocess.run(timeout=300)`, which kills the
+sandbox wrapper and not the pytest below it: a case whose target hangs leaves that pytest running,
+reparented to init, and the runner raises out of the sweep instead of reporting the case. Seen on
+2026-11-05. Pre-existing. The fix starts the child in a session of its own and kills its process
+group.
+
+*Horizon: before Part II, gates · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
+**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
 
 ## The on-demand mutation run no longer fits its 30-minute job
 
@@ -97,19 +148,8 @@ it gates nothing yet, and every later mutation gate rests on it.
 
 - 2026-11-02: `timeout-process-cleanup` adds 101 more (1,032 in all), about 11 minutes per era.
 
-*Horizon: 0.2.0, gates first · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
+*Horizon: Part I, gates first; before core extraction's review · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
 **Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
-
-## A mutant's child run outlives its timeout
-
-`tests/mutants.py` runs each case's targets through `subprocess.run(timeout=300)`, which kills the
-sandbox wrapper and not the pytest below it: a case whose target hangs leaves that pytest running,
-reparented to init, and the runner raises out of the sweep instead of reporting the case. Seen on
-2026-11-05. Pre-existing. The fix starts the child in a session of its own and kills its process
-group.
-
-*Horizon: 0.2.0, gates · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
-**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: unshaped*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
@@ -118,7 +158,7 @@ then `go("x")` passes it, and so does a class that subclasses `pytest.skip.Excep
 are statically visible, and both pass the check before and after `skip-check-fence-gaps`. None
 exists today. Found while planning that cycle, 2026-11-09.
 
-*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §5, Q1)*
+*Horizon: Part I, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §5, Q1)*
 **Seed:** [`issues/skip-check-import-aliases.md`](issues/skip-check-import-aliases.md) · *status: unshaped*
 
 ## A conftest can drop rows from a CI run without skipping them
@@ -128,7 +168,7 @@ exists today. Found while planning that cycle, 2026-11-09.
 skip check does not look for them (`pytest.exit` with its default return code fails the run). None
 does so today. Raised by the adversarial review of `skip-check-fence-gaps`'s plan, 2026-11-09.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §4a, §5, Q2); `tests/conftest.py`*
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (PLAN §4a, §5, Q2); `tests/conftest.py`*
 **Seed:** [`issues/skip-check-deselection.md`](issues/skip-check-deselection.md) · *status: unshaped*
 
 ## The static skip check's behaviour is pinned for some forms and positions, not all
@@ -140,7 +180,7 @@ change it and pass every row. The fix is one planted row per binding form, raise
 and admitted value position, and a mutant sweep with additive mutants. Seeded by the maintainer's
 landing ruling, 2026-11-09.
 
-*Horizon: 0.2.0, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
+*Horizon: Part I, gates · Depends on: skip-check-fence-gaps (cleared: landed on `develop` 2026-11-09) · Refs: [`spec/skip-check-fence-gaps/`](spec/skip-check-fence-gaps/) (REVIEW cycle 3, G1–G3)*
 **Seed:** [`issues/skip-check-pin-completeness.md`](issues/skip-check-pin-completeness.md) · *status: unshaped*
 
 ## Two timing rows miss a wait made outside the clock they control
@@ -151,7 +191,7 @@ controls. Each misses a wait its clock does not route: a probe that sleeps out i
 through `_await`. Both are deeper variants of faults the rows already catch. Found by a blind
 review's hand-planted faults, 2026-11-10; introduced with those clocks.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `tests/test_probes.py`; `tests/test_ssh_exec.py`*
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `tests/test_probes.py`; `tests/test_ssh_exec.py`*
 **Seed:** [`issues/timing-rows-unrouted-waits.md`](issues/timing-rows-unrouted-waits.md) · *status: unshaped*
 
 ## Nothing would catch the next silently wrong annotation
@@ -164,7 +204,7 @@ the gate checks any other annotation. A gate step or standing test that type-che
 it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement,
 2026-10-17.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
+*Horizon: Part I, gates · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
 **Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*
 
 ## A sandbox killed with SIGKILL leaves its directory behind
@@ -175,7 +215,7 @@ harnesses stop a sandbox's process group with SIGKILL. Each such stop leaves a b
 per mutation sweep, and 18,061 on one developer Mac. Pre-existing; `capability-probe`'s own drives
 add one or two per run, through the shared SSH test server.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
 **Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: unshaped*
 
 ## A disk-image step that hangs outlives its test
@@ -185,7 +225,7 @@ On macOS the full-filesystem write test builds a real 4 MB volume with `hdiutil`
 `hdiutil create` and its formatter stayed with a half-made device for about a day on a developer
 Mac. Pre-existing; macOS only, since the CI runner never calls `hdiutil`.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: `tests/test_ssh_exec.py` (`_host`, `full_volume`); [`spec/safe-execution/`](spec/safe-execution/)*
+*Horizon: Part I, gates · Depends on: — · Refs: `tests/test_ssh_exec.py` (`_host`, `full_volume`); [`spec/safe-execution/`](spec/safe-execution/)*
 **Seed:** [`issues/full-volume-fixture-leaks-hdiutil.md`](issues/full-volume-fixture-leaks-hdiutil.md) · *status: unshaped*
 
 ## The `integration` marker says it drives the CLI, and not every integration test does
@@ -197,7 +237,7 @@ because they start git, which the unit guard forbids in a `unit` test. In practi
 instead of fixing it. Rewording both markers to the line the unit guard draws settles it. Found by
 the `absence-check-leftover-classification` plan, 2026-10-19.
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
 **Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: unshaped*
 
 ## The image's init is pinned by its recipe, not by what it reaps
@@ -207,20 +247,8 @@ reaped, but only a text check of the `Dockerfile` pins it. A CI job that builds 
 zombies after many calls would pin the behaviour. Not measured (no container runtime on the
 development host).
 
-*Horizon: 0.2.0, gates · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (REVIEW cycle 3, B6); `Dockerfile`; `tests/test_packaging.py`*
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (REVIEW cycle 3, B6); `Dockerfile`; `tests/test_packaging.py`*
 **Seed:** [`issues/image-init-reaping.md`](issues/image-init-reaping.md) · *status: unshaped*
-
-## The surface pin cannot follow a deliberate surface change
-
-`tests/fixtures/served_surface.json` is the surface `3d010ec` served, taken on FastMCP 2, and
-`tests/test_surface.py` rejects a fixture re-taken on FastMCP 4 because it carries the new stack's
-schema metadata. After a deliberate change to a tool, an argument or the instructions there is no
-FastMCP 2 build of the new surface to snapshot, so the only way to update the pin is to hand-edit
-it, unchecked. A maintained snapshot command on the current stack, with a one-time re-baseline that
-retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 2026-10-17.
-
-*Horizon: 0.2.0, the last gate, before the first cycle that changes the served surface · Depends on: — · Refs: `AGENTS.md` § Invariants §9 says the question is open; `safe-execution` changed the surface first and hand-edited its deltas into the fixture (`AGENTS.md` § Testing); every Part II family changes the surface*
-**Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: unshaped*
 
 ## A write whose host is lost after staging leaves its staging directory behind
 
@@ -233,7 +261,7 @@ cleanup.
 
 - 2026-11-05: `spec/ssh-half-open-link/` P2: such a write now raises `TransferLost` naming the staging directory left; the cleanup is still this seed's.
 
-*Horizon: 0.2.0, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
+*Horizon: Part I, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 1; `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md) · *status: unshaped*
 
 ## A reconnect stuck in DNS or the SSH agent blocks fresh reconnects until it returns
@@ -248,7 +276,7 @@ its one-attempt rule.
 - 2026-10-26: corrected. As first filed, the SSH-agent query was listed among the steps with nothing
   to close; the abort closes its transport, and the worker's late outcome is discarded.
 
-*Horizon: 0.2.0, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) PLAN §5*
+*Horizon: Part I, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) PLAN §5*
 **Seed:** [`issues/ssh-reconnect-stuck-step.md`](issues/ssh-reconnect-stuck-step.md) · *status: unshaped*
 
 ## Nothing pins that a reconnect's abort and release reach every ProxyJump hop
@@ -260,7 +288,7 @@ passes. The bound still holds; a hop could be left running unnoticed. Found by
 
 - 2026-11-05: `spec/ssh-half-open-link/`'s liveness close goes outermost hop first, pinned on a fake chain only; the seed records it.
 
-*Horizon: 0.2.0, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
+*Horizon: Part I, executor · Depends on: ssh-reconnect-loop (cleared: landed on `develop` 2026-10-27) · Refs: [`spec/ssh-reconnect-loop/`](spec/ssh-reconnect-loop/) REVIEW.md cycle 3*
 **Seed:** [`issues/ssh-gateway-hops-unpinned.md`](issues/ssh-gateway-hops-unpinned.md) · *status: unshaped*
 
 ## A connection reset while a call opens its channel escapes as a raw exception
@@ -272,7 +300,7 @@ connection, 2026-11-02. Pre-existing; the SFTP paths were not checked.
 
 - 2026-11-05: `spec/ssh-half-open-link/` now reconnects a channel or SFTP-session open that a lost connection cut short; a reset at that instant is still unpinned; the seed records it.
 
-*Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
+*Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P2 remediation); `core/executor/ssh.py` (`_exec`)*
 **Seed:** [`issues/ssh-open-session-reset-raises.md`](issues/ssh-open-session-reset-raises.md) · *status: unshaped*
 
 ## Loopback SSH rows break under load, with no time bound missed
@@ -284,7 +312,7 @@ locally, 2026-10-29 to 2026-11-02. None checks a time bound; the link itself bro
 nobody has found, in the test server, Paramiko or the executor. Pre-existing; split out of
 `stalled-reconnect-test-timing` at its GOAL gate, 2026-11-09.
 
-*Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `issues/ssh-open-session-reset-raises.md`; `tests/ssh_server.py`*
+*Horizon: Part I, executor · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `issues/ssh-open-session-reset-raises.md`; `tests/ssh_server.py`*
 **Seed:** [`issues/loopback-ssh-breaks-under-load.md`](issues/loopback-ssh-breaks-under-load.md) · *status: unshaped*
 
 ## A local command in flight can outlive the server that launched it
@@ -300,7 +328,7 @@ probe adds both instances. Pre-existing.
   stops the group once the program dies with its command unreported. Both cases remain (a killed
   server's program has not died; the probe's hang comes before the watchdog exists).
 
-*Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5, REVIEW); `AGENTS.md` § Invariants §2, §3*
+*Horizon: Part I, executor · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (PLAN §5, REVIEW); `AGENTS.md` § Invariants §2, §3*
 **Seed:** [`issues/local-command-outlives-server.md`](issues/local-command-outlives-server.md) · *status: unshaped*
 
 ## A profile's sub-second `TMOUT` may drop the functions a script inherits
@@ -310,29 +338,8 @@ bounds that `read`. bash 4 and later accept a fractional `TMOUT`, so a sub-secon
 loop before `module` is exported. Read from bash's source, not measured (the development host has
 bash 3.2 only). Pre-existing.
 
-*Horizon: 0.2.0, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
+*Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
-
-## A capability's registered tool objects can run its code when they are read
-
-The load takes each tool a capability registers by `isinstance(entry, FunctionTool)`, so a subclass, or
-a field the capability sets after construction to a value of a type of its own, runs the capability's
-code whenever the core or FastMCP reads it: at the load's scratch registration, again when the server
-is built, and on every listing. The capability record itself is exact since `capability-probe`; its tools are the one part
-still taken by `isinstance`. The outcome: every tool exactly a `FunctionTool` with exact field values,
-decided at load, the handler excepted. Pre-existing; no code changes until its cycle.
-
-*Horizon: 0.2.0, safety · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
-**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
-
-## A retried capability load after a failure registers nothing and blames the wrong distribution
-
-A failed load cuts the tool registry back but leaves the imported tools modules cached, so a second
-load in the same process registers nothing for a capability that had loaded cleanly, and the error
-names it instead of the broken one. The command line never retries, so only a library caller sees it.
-
-*Horizon: 0.2.0, safety · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
-**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 
@@ -343,7 +350,7 @@ leaves an oversize file out and names it, as the budget does, fixes it. Found by
 `agents-d-instructions`' planning, 2026-10-19. The convention's files are a few kilobytes, so it
 takes a mistake in the directory to show.
 
-*Horizon: 0.2.0, safety · Depends on: agents-d-instructions (the startup read it bounds; cleared: shipped in 0.1.3) · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5; `AGENTS.md` § Invariants §8*
+*Horizon: Part I, safety · Depends on: agents-d-instructions (the startup read it bounds; cleared: shipped in 0.1.3) · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5; `AGENTS.md` § Invariants §8*
 **Seed:** [`issues/site-file-size-cap.md`](issues/site-file-size-cap.md) · *status: unshaped*
 
 ## Every start asks the package index for FastMCP's latest version
@@ -354,7 +361,7 @@ for and can advise upgrading a dependency `uv.lock` pins. Turning the check off 
 startup fixes it. Pre-existing. Noted by `agents-d-instructions`' planning, 2026-10-19. The request
 is bounded at 2 s and fails silently.
 
-*Horizon: 0.2.0, safety · Depends on: — · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5*
+*Horizon: Part I, safety · Depends on: — · Refs: [`spec/agents-d-instructions/`](spec/agents-d-instructions/) PLAN § 5*
 **Seed:** [`issues/fastmcp-update-check.md`](issues/fastmcp-update-check.md) · *status: unshaped*
 
 ## A version the lock lifts never reaches a user who installs from git
@@ -366,7 +373,7 @@ the newer version matters, the declared requirement needs a floor. Pre-existing.
 `capability-extras` P4, whose install probe resolved a newer dependency than the lock pins,
 2026-10-31.
 
-*Horizon: 0.2.0, safety · Depends on: — · Refs: [`spec/capability-extras/`](spec/capability-extras/) (TECH P4, PLAN §5); `AGENTS.md` § Packaging*
+*Horizon: Part I, safety · Depends on: — · Refs: [`spec/capability-extras/`](spec/capability-extras/) (TECH P4, PLAN §5); `AGENTS.md` § Packaging*
 **Seed:** [`issues/unlocked-install-floors.md`](issues/unlocked-install-floors.md) · *status: unshaped*
 
 ## What a timeout still cannot stop
@@ -381,7 +388,7 @@ a step of the server's wall clock while a startup file runs can refuse a command
 one start, which under a non-root `delegate` server runs on. Found by `timeout-process-cleanup`'s
 planning research, 2026-11-01, and its reviews, 2026-11-02 and 2026-11-04.
 
-*Horizon: 0.2.0, redesign · Depends on: timeout-process-cleanup (cleared: landed on `develop` 2026-11-04) · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5; a case that can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
+*Horizon: Part I, redesign · Depends on: timeout-process-cleanup (cleared: landed on `develop` 2026-11-04) · Refs: `AGENTS.md` § Invariants §3; [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) PLAN §5; a case that can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md) · *status: unshaped*
 
 ## A live link that answers nothing for longer than its liveness verdict reads as dead
@@ -395,7 +402,7 @@ whose peer answers nothing for 29 s (an outage of about 25 s), or an SFTP upload
 that call's 15 s verdict. The floor is the price of a verdict inside the reconnect bound;
 a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 
-*Horizon: 0.2.0, trade-off · Depends on: ssh-half-open-link (cleared: landed on `develop` 2026-11-06) · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5; what can't be lifted becomes `accepted-behaviour` only on the maintainer's ruling*
+*Horizon: Part I, trade-off · Depends on: ssh-half-open-link (cleared: landed on `develop` 2026-11-06) · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5; what can't be lifted becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
 
 ## A startup file's background job can delay a result, or reach it over SSH
@@ -416,7 +423,7 @@ Neither case shows with the clusters' default startup files (`safe-execution` re
 likely needs a different launch, a PTY or a session the server owns, which makes it the largest
 cycle in this Part.
 
-*Horizon: 0.2.0, redesign · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5; what can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
+*Horizon: Part I, redesign · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5; what can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md) · *status: unshaped*
 
 ## The rename left two identity strings a client or a token sees
@@ -427,7 +434,7 @@ breaks. `serverInfo.version` reports FastMCP's version rather than this server's
 server's. The third string the rename left, the Purdue favicon, waits for member routes and moved to
 `[rcac]` in Part II.
 
-*Horizon: 0.2.0, rename · Depends on: the rename (landed names; cleared: landed on `develop` 2026-10-30) · Refs: `issues/rename-in-docs.md` (`SECURITY.md`'s claims move with it); the favicon in `issues/site-extras.md`*
+*Horizon: Part I, rename · Depends on: the rename (landed names; cleared: landed on `develop` 2026-10-30) · Refs: `issues/rename-in-docs.md` (`SECURITY.md`'s claims move with it); the favicon in `issues/site-extras.md`*
 **Seed:** [`issues/rename-leftover-identity-strings.md`](issues/rename-leftover-identity-strings.md) · *status: unshaped*
 
 ## Every in-repo doc says cluster-mcp
@@ -439,14 +446,12 @@ describes the deprecation window or the compat distribution, and Purdue only whe
 `[rcac]` or labels a Purdue example. The legacy-name window stands: deprecated in 0.2.0, removed no
 earlier than 0.4.0.
 
-*Horizon: 0.2.0, rename · Depends on: — · Refs: `issues/rename-leftover-identity-strings.md` (the token claims in `SECURITY.md`); [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)*
+*Horizon: Part I, rename · Depends on: — · Refs: `issues/rename-leftover-identity-strings.md` (the token claims in `SECURITY.md`); [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/)*
 **Seed:** [`issues/rename-in-docs.md`](issues/rename-in-docs.md) · *status: unshaped*
 
-**Release 0.2.0.** When every entry above has landed, `main` fast-forwards to the released `develop`
-commit, carrying the new names, the capability extras and probe, the timeout stop, the silent-link
-check and every fix in this Part. Legacy `RCAC_*` variables, `rcac://` URIs and the `rcac-mcp`
-command keep working through the deprecation window. A bare install still serves the shell and the
-file tools; Part II narrows it, and the 0.2.0 notes say so.
+**Releases.** Every entry here ships in the first release after it lands, whichever Part that
+release closes. The legacy names keep their window: deprecated in 0.2.0, removed no earlier than
+0.4.0.
 
 ---
 
@@ -464,10 +469,15 @@ Environment Modules; another center's extra) is a contribution, not a redesign. 
 documented for other centers; second implementations are not built here.
 
 **The rules.** Every family follows `issues/tool-surface.md`: names a client can allow-list by
-pattern, honest annotations, response budgets, and `--profile read-only`. Whether today's tool names
-survive as aliases is an open question for the maintainer.
+pattern, honest annotations, response budgets, and `--profile read-only`. Today's tool names don't
+survive 0.3.0 as aliases: it is a clean break, and the 0.3.0 notes give each new name and the new
+install line.
 
-**Compat.** The `rcac-mcp` distribution keeps installing what today's users have.
+**Compat.** The `rcac-mcp` distribution and command keep installing what today's users have
+through their window: deprecated in 0.2.0, removed no earlier than 0.4.0.
+
+**When it starts.** Once the four entries Part I puts before it have landed: the surface fixture,
+the two capability-load fixes and the mutation run's hung child.
 
 The suggested order is the one below: core extraction with `[shell]` and `[files]`, then jobs and
 `[slurm]`, then modules and `[lmod]`, then `[files-xdu]`, then the site interfaces and `[rcac]`.
@@ -481,7 +491,7 @@ family rather than defining what is served. The core becomes the executor and it
 `/etc/agents.d` in them. It keeps `cluster_context` and serves no tool family of its own: a bare
 install serves no command tool.
 
-*Horizon: 0.3.0, first · Depends on: release 0.2.0; capability-extras and capability-probe (cleared: landed on `develop` 2026-11-01) · Refs: shaped with `issues/shell-extra.md` and `issues/files-extra.md`, or just ahead of them*
+*Horizon: 0.3.0, first · Depends on: release 0.2.0 (cleared: released 2026-11-12); the four entries Part I puts before Part II; mutants-workflow-timeout, before this cycle's review; capability-extras and capability-probe (cleared: landed on `develop` 2026-11-01) · Refs: shaped with `issues/shell-extra.md` and `issues/files-extra.md`, or just ahead of them*
 **Seed:** [`issues/core-extraction.md`](issues/core-extraction.md) · *status: unshaped*
 
 ## Every tool family follows one set of rules
@@ -493,7 +503,7 @@ honest annotations, response budgets, `--profile read-only` — are set by the `
 cycles, which split this seed between them, and every later family follows them. The file family
 first sketched here moved to `[files]`, and `run_command`'s steering to Part III.
 
-*Horizon: 0.3.0, with `[shell]` and `[files]` · Depends on: core-extraction; safe-execution (the argv executor; cleared: landed on `develop` 2026-10-23) · Refs: split across `issues/shell-extra.md` and `issues/files-extra.md`; aliases versus a clean break is the maintainer's question*
+*Horizon: 0.3.0, with `[shell]` and `[files]` · Depends on: core-extraction; safe-execution (the argv executor; cleared: landed on `develop` 2026-10-23) · Refs: split across `issues/shell-extra.md` and `issues/files-extra.md`; a clean break, no aliases (decided 2026-11-12)*
 **Seed:** [`issues/tool-surface.md`](issues/tool-surface.md) · *status: unshaped*
 
 ## `[shell]`: a remote shell, and nothing about HPC
