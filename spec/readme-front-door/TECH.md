@@ -3,10 +3,10 @@ slug: readme-front-door
 title: The README is a front door
 kind: docs
 appetite: small
-status: in_progress
+status: in_review
 branch: docs/readme-front-door
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -29,7 +29,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q --with pyyaml python -I spec/readme-front-door/verify/docs-gate.py controls readme pages facts packages paths && uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py
 - id: P2
   name: AGENTS.md § Documentation and its pointers, the ledger, and the full gate
-  status: in_progress
+  status: done
   satisfies:
   - R8
   - R9
@@ -170,7 +170,7 @@ at its new home; the final tree passes every gate mode and the profile's full `v
       bodies for a deferral; each names an `issues/` seed with a `ROADMAP.md` entry (`prepush`
       checks it). This plan files no seed; the one overlapping seed, `issues/rename-in-docs.md`,
       stays as it is (Q4).
-- [ ] Stage everything, then run the frontmatter `verify:` through `run_in_background`: `controls`,
+- [x] Stage everything, then run the frontmatter `verify:` through `run_in_background`: `controls`,
       `all`, `prepush`, then the profile's full `verify`, both eras.
 - **Verify:** the gate's `controls all prepush`, then the profile's `verify` verbatim.
 - **Touches:** `AGENTS.md`.
