@@ -167,3 +167,123 @@ on, so build retunes P2's gate as well.
 ## Optional completeness sub-pass (separate reviewer; may see TECH.md)
 
 - Not run this cycle.
+
+## Review cycle 2 — changes-requested (2026-11-12)
+
+- **Reviewed commit:** `697dc8f` (the remediation `4b04dad` plus a `TECH.md`-only commit) · **Base:** develop
+  (the branch is 6 commits behind `origin/develop`, a merge-readiness fact for publish)
+- **Mode:** a fresh blind pass over the full spec-excluded diff, all seven R-IDs, plus cycle 1's F1–F3
+  checked closed as properties, both ways. One reviewer, no debate, no sequential fallback. The
+  mutation sweep covers what cycle 1's remediation changed, which is test code only (`AGENTS.md`,
+  `tests/mutants.py`, `tests/test_capabilities.py`; no package source changed since `95ff350`).
+- **Contract:** `GOAL.md` at HEAD, as amended by `680c843`, which still awaits the maintainer's
+  confirmation (`code-review` Step 1.4).
+
+### Verification run
+
+Evidence lives in the worktree's gitignored `.local/review2/` (`gates/`, `reviewer/`, `orchestrator/`).
+
+- The cycle's gates at `697dc8f`, one at a time (orchestrator, `gates/summary.txt`), all exit 0:
+  `verify/p1.sh` `phase` (2074 passed an era), `cli-legacy` and `cli-modern` (312 passed each),
+  `replanted-legacy` and `replanted-modern` (148 killed each, 0 failed, the runner's controls firing),
+  `mutants-legacy` and `mutants-modern` (34 of 34 killed each); `remediation/F1-gate.sh` `pins` (2010
+  passed an era), `control` (the unmutated rewrite passes in both eras), `report` (453 mutants, 449
+  killed and 4 equivalent an era, read from the sweep's logs; the 85-minute shards were not re-run, no
+  package source having changed since they ran); `verify/p2.sh` `phase` (706 passed an era) and
+  `ledger` (ok).
+- The profile's full `verify`, both eras, at `697dc8f` (reviewer, `reviewer/verify.log`): every step
+  exit 0 (44, 154, 513, and 4947 passed with 14 skipped an era; `uv lock --check`; the sandboxed
+  `--help`). It was also green on `4b04dad` at build.
+- Mutation (reviewer): the 40 cases `tests/mutants.py` gained since `95ff350` (`reviewer/new_cases.txt`),
+  one worker, in both eras: 40 of 40 killed for the right reason each, the runner's three controls
+  firing (`reviewer/mutants_legacy.log`, `reviewer/mutants_modern.log`). 21 hand-planted mutants of
+  guards with no case of their own, through the repo's `run_case`: 21 of 21 killed
+  (`reviewer/hand_mutants.log`).
+- Reach probes (reviewer; N1's re-run by the orchestrator beside each of the four member sets,
+  identical output, `orchestrator/probe_r3_mro_module-rerun.log`).
+- CLI drive in the throwaway environment (reviewer): N1's plant, `-e local`, initialize and
+  `tools/list` (`reviewer/cli_drive.*`), against a control drive without it (`reviewer/cli_control.out`).
+- Tree clean on hand-back (`git status --porcelain` empty); the reviewer mutated no ignored build state
+  (plants under `$TMPDIR`).
+
+### Cycle 1's findings
+
+- **F1 — closed, both ways.** Refuse: every depth refusal cycle 1 named has a mutation case killed in
+  both eras, and the hand-planted guards are killed by their rows beside each member set. Accept: the
+  members load, `test_served_surface_matches_baseline` and the inert-shapes test pass, and the
+  cyclic-alias liveness test passes with its mutant killed.
+- **F2 — closed, both ways.** Dropping the default branch, accepting no JSON-like value, refusing, or
+  dropping the version from the warning are each killed; the warning's drop or repeat stays covered.
+- **F3 — closed, both ways.** Each named refusal has a killed mutant (the set compared by type only,
+  the key order and names, the key type, the `Literal` argument, the alias origin and kind, the class
+  `__module__` type, the compared values walked).
+
+### Requirement → evidence matrix
+
+No R-ID is an artifact deliverable; the blind reviewer graded all seven.
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 | `tool-subclass-*` rows beside each member set; CLI `tool-subclass-reads-name` on three transports | ✅ |
+| R2 | 352 `tool-*` rows; mutation evidence under F1 and F3 | ❌ a return type's class is decided by its own namespace, not by what FastMCP reads (N1) |
+| R3 | the served test passes, but N1's probe runs capability code on every server built | ❌ (N1) |
+| R4 | fields from the installed `FunctionTool.model_fields`; one warning per field naming the version; `test_every_function_tool_field_has_a_rule`; F2's pins | ✅ |
+| R5 | members load; `test_served_surface_matches_baseline` with no fixture edit; full verify green | ✅ |
+| R6 | rows beside each member set, the registry cut back; two CLI kinds driven | ✅ (the newer-model state refusals sit in sibling tests of the same shape; a note, not a finding) |
+| R7 | §7's refusal bullet, the "No read …" paragraph, the at-load scope and the served-copy seed, landed with the check | ✅ as text; its claim is contradicted by N1 |
+
+Unmapped changes: the two plan-time seeds and the F4 seed (their prose matches the code,
+`reviewer/probe_seed_shapes.log`); the timing helpers, the `plant` fixture's restores and the
+`tool-without-a-module` cause, all following from R1/R2. None is scope creep.
+
+### Findings
+
+#### N1 [CRITICAL/CONFIRMED] A return type's class is decided by its own namespace; FastMCP reads its `__module__` through the class, so a server build runs capability code
+- **Where:** `packages/cluster-mcp/src/cluster_mcp/core/capabilities.py:398-406`
+  (`_return_type_violation`, the class branch: `namespace.get('__module__', '')`).
+- **Failure scenario:** a tool's return type is a class whose metaclass is exactly `abc.ABCMeta` or
+  pydantic's `ModelMetaclass` (both accepted), with its own `__module__` deleted and a base whose
+  `__module__` is a `str` of a type of the capability's own. The rule finds no `__module__` in the
+  namespace, takes `''`, and accepts. FastMCP's `add_tool` reads `getattr(cls, '__module__', '')`,
+  which on those metaclasses resolves along the MRO to the base's value, and compares it
+  (`_could_be_prefab`), so the capability's `__eq__` and `startswith` run in the load's scratch build
+  and again on every server built from the loaded capabilities. An `__eq__` that exits on its second
+  call ends a server build after a successful load with `SystemExit(0)`, and the CLI under
+  `bin/sandbox.sh` then exits 0 with empty stdout, answering nothing. A class of metaclass `type`
+  cannot lose its own `__module__`, and `_TypedDictMeta` is unaffected.
+- **Breaks:** § Invariants §7 ("No read of a loaded record runs capability code", as this cycle extends
+  it to the tool objects); R2 (a value accepted whose read runs the capability's code) and R3.
+- **Evidence:** `reviewer/probe_r3_mro_module.log`, beside each of the four member sets: loaded,
+  `_tool_violation` returns `None`, two servers built and listed each run `__eq__('prefab_ui')` and
+  `startswith`. Re-run by the orchestrator with identical output
+  (`orchestrator/probe_r3_mro_module-rerun.log`). `reviewer/probe_r3_metaclasses.log` (per
+  metaclass); `reviewer/probe_r3_mro_module_exits.log` (the `SystemExit`); `reviewer/cli_drive.log`,
+  `.out`, `.err` against `reviewer/cli_control.out` (the CLI drive).
+- **Why the suite misses it:** the R3 test's planted tool returns `str`, so no return type of the
+  capability's own is ever built or listed.
+- Not a mutation finding (no guard a mutant removes): an input the rules never refuse, so the
+  rubric's sweep bound does not apply to it.
+
+### Routing (to the maintainer, not to build)
+
+A CRITICAL on cycle 2, on a high-blast-radius path, after cycle 1's remediation: the review has not
+converged, so it stops here for the maintainer (`code-review` Step 6) instead of looping to build.
+The fix, if ruled in, would go as one property, both ways:
+
+- **Every attribute FastMCP or the core reads from a class a tool's return type holds, at any depth,
+  is decided as that reader resolves it, before it is read.** Refuse: a class whose `__module__` (or
+  any other attribute read while a tool is added, built or listed), resolved through its metaclass and
+  MRO the way `getattr` resolves it, is not exactly a built-in value the rule accepts is refused,
+  naming the distribution and the field, running none of its code, the registry cut back, beside each
+  member set, for every accepted metaclass. Accept: every return type the members and the inert-shapes
+  test use still loads and serves unchanged, and the served surface is byte-for-byte. The decision and
+  FastMCP's read are two computations of one value today (the namespace against the resolved
+  attribute); the structural fix comes first, deciding it once as the reader resolves it, and the R3
+  test gains a return type of the capability's own beside the `str` one. Whether the rule instead
+  requires a class's own `__module__` is the maintainer's call; it must still accept every member.
+
+### Human-gate triggers
+
+- **Triggered,** and it holds until publish whatever a later cycle finds: N1 is CONFIRMED on
+  `core/capabilities.py`, a path on § Invariants' high-blast-radius list (cycle 1's F1–F3 already
+  triggered it). The maintainer's explicit sign-off is required before any further step.

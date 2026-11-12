@@ -3,7 +3,7 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/capability-tool-objects-inert
 base: develop
 current_phase: done
@@ -38,10 +38,10 @@ phases:
   hill: uphill
   verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
 review:
-  last_reviewed_commit: dfff3e848011a077c3a8bf0aeae2883b5205daa9
+  last_reviewed_commit: 697dc8f572f7e7e22b37dbad09ec87ad0eacf6c3
   verdict: changes-requested
-  blocked_reason: 'F1-F3: refusals of the tool rules at depth and R4''s default branch unpinned by the suite (module sweep + rows); human gate on core/capabilities.py'
-  cycle: 1
+  blocked_reason: 'N1 (CRITICAL): a return type''s class decided by its own namespace while FastMCP reads __module__ through the MRO; server builds run capability code (R2, R3, §7). Escalated to the maintainer at cycle 2; human gate on core/capabilities.py'
+  cycle: 2
 ---
 
 # TECH.md — A capability's registered tool objects run none of its code when they are read
