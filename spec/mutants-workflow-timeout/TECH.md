@@ -201,9 +201,9 @@ two runs.
       workflow_dispatch --json databaseId,headSha -L 1`, whose `headSha` must be `T1`). Hand back
       `T1` and the run id. Never dispatch again in this run.
 
-**Run B:**
-- [ ] Write `spec/mutants-workflow-timeout/runs.txt`: `sha <T1 full>`, `run <id>`.
-- [ ] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints:
+**Run B:** Run B: stopped at the cases not killed (seven; see Amendments, 2026-11-12, P3 run 1).
+- [x] Write `spec/mutants-workflow-timeout/runs.txt`: `sha <T1 full>`, `run <id>`.
+- [x] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints:
       - the run's wall from dispatch and the most jobs it ran at once;
       - the cases not killed;
       - the refit table and its proposed size (PLAN § 2.5).
@@ -346,6 +346,29 @@ Two runs: Run A dispatches, Run B records.
     (`communicate(timeout=LIMIT)` → `600`, wanting "run_child changed"; `LIMIT = 300` → `600`,
     wanting "LIMIT changed"). P2's and P5's `verify:` run the wrapper in place of `controls`;
     `verify/` is not edited.
+- **2026-11-12, P3 run 1 read (Run B): stopped, seven cases not killed.**
+  - Run `43255195424`, a `workflow_dispatch` at T1 `aff08bd`, attempt 1, conclusion failure. The
+    `runs` gate is green (`runs: ok`): every case of the 1,164 reported once, in 78 shards; no job
+    cancelled; every shard reached its ledger with its three controls passed.
+  - Figures: the run 513 s (8:33) from dispatch to its last job, within 900 s; 20 jobs at once at
+    most; `plan` done 18 s after dispatch (job 0:13). Slowest shards 37 (2:44), 2 (2:35), 6 (2:34),
+    3 and 4 (2:19); median 1:53; fastest 45 (1:11). Worst job 164 s, within 600 − 310 = 290 s
+    (headroom 436 s under 600 s, 126 s after one hung case). The refit measured 7.2 s a child
+    (slowest) and 46 s overhead (largest); at 15 a shard it projects 176 s a job and 722 s a run,
+    both bounds held, and proposes 30 (39 shards, 2 waves, run 587 s). Run 1 is within both bounds,
+    so the size stays at 15 (PLAN § 2.5).
+  - The run failed on seven shards, each with one case not killed and nothing else: 14
+    `script-reads-bashrc`, 17 `tpc-fd-59`, 39 `tpc-paths-not-functions`, 41
+    `tpc-paths-unset-in-posix-mode`, 47 `tpc-posix-kept`, 57 `fixed-script-reads-bashrc`, 60
+    `transfer-cause-unnamed`. Six survived with every target passing; `tpc-fd-59` had one target
+    pass (`[delegate-tree]`) and one fail for the wrong reason (`[ssh-bash-ignores-holding]`, no
+    "still running"). No timeout or step cap, no case reported twice or never, no setup error.
+  - Each of the seven, run alone on macOS at T1 (`tests/mutants.py CASE`), is killed with its
+    `why`: they survive only on the hosted Linux runner, whose `/bin/bash` and platform differ
+    from the development host's. They are Linux-only survivors, not runner faults.
+  - Seven is more than GOAL Q3's three: P3 stops before seeding and hands the list to the
+    foreman. The `runs` gate is green, so no attempt is recorded. P3 stays `in_progress`; no
+    seed, case, workflow or runner change is made here, and nothing is re-dispatched.
 
 ---
 
