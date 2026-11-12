@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-32 entries, each of which ships in the first release after it lands. **Part II** ships as
+33 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-three entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,10 +84,11 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (fifteen), because every later gate rests on them: the mutation run, the four kinds of
-  case only its hosted Linux run lets survive, the pins its stop path still lacks, the two gaps the
-  skip check still leaves and the pins it still lacks, the waits the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
-  wording, and the image's init.
+- **Gates** (sixteen), because every later gate rests on them: the mutation run, the four kinds of
+  case only its hosted Linux run lets survive, its one flaky case, the pins its stop path still
+  lacks, the two gaps the skip check still leaves and the pins it still lacks, the waits the timing
+  rows still miss, an annotation check, the test harnesses' leftovers, the marker wording, and the
+  image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (three): the site files' size, the startup update check, and the floors a git install
@@ -182,6 +183,17 @@ hosted run, 2026-11-12.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_ssh_exec.py` (`test_a_write_that_runs_out_of_room_keeps_the_file`); `core/executor/ssh.py`*
 **Seed:** [`issues/mutants-linux-transfer-cause.md`](issues/mutants-linux-transfer-cause.md) · *status: unshaped*
+
+## `ssh-returns-at-exit-status` is killed for its reason in one hosted run and not the next
+
+The case was killed on all six of its targets in the first hosted run and on macOS. In the second
+run, five were killed with its `why`, but `test_a_late_sentinel_still_counts_as_started[bashrc]`
+failed for another reason. The rows catch the mutant every time, but one row's reason varies with
+timing on a loaded runner (unverified). Found by `mutants-workflow-timeout`'s second hosted run,
+2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P4 run 2); `tests/test_ssh_exec.py` (`test_a_late_sentinel_still_counts_as_started`); the hosted-runner timing misses' seed on `develop`, a related cause*
+**Seed:** [`issues/mutants-flaky-ssh-returns-at-exit-status.md`](issues/mutants-flaky-ssh-returns-at-exit-status.md) · *status: unshaped*
 
 ## The mutation runner's stop path is pinned for its main layer, not its deeper ones
 

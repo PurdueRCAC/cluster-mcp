@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: ci/mutants-workflow-timeout
 base: develop
-current_phase: P4
+current_phase: P5
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -49,7 +49,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 3 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
 - id: P4
   name: The second hosted run (Run A dispatches, Run B reads)
-  status: in_progress
+  status: done
   satisfies: *id001
   depends_on:
   - P3
@@ -237,14 +237,15 @@ runs dispatched together would share the organisation's 20 job slots, and each w
 - [x] `mutants-gate.py prepush` and `untouched 4` on the head. The head is P3's closing commit, which
       differs from `T1` only in `spec/`, `issues/` and `ROADMAP.md` (PLAN § 3 row D3). Mark P4
       `in_progress` with the note "Run A: dispatched", commit, push.
-- [ ] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
+- [x] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
       the run id as P3 does. Hand it back. Never dispatch again in this run.
 
-**Run B:** Run B: read; held at the flaky case (see Amendments, 2026-11-12, P4 run 2).
+**Run B:** Run B: read; held at the flaky case (see Amendments, 2026-11-12, P4 run 2), then closed
+with its seed.
 - [x] Append `run <id>` to `runs.txt`, and run `mutants-gate.py runs --runs-file
       spec/mutants-workflow-timeout/runs.txt`. Its stops are P3's. Seed any new case not killed as P3
       does: the same three-case limit counts across the runs.
-- [ ] Stage, run the frontmatter `verify:`, mark P4 done, commit.
+- [x] Stage, run the frontmatter `verify:`, mark P4 done, commit.
 - **Verify:** the frontmatter `verify:` (Run B).
 - **Touches:** `runs.txt`; seeds.
 
@@ -406,6 +407,9 @@ Two runs: Run A dispatches, Run B records.
   - No stop fires. `runs --final` will require the flaky case named in an `issues/` seed, as every
     case not killed in any run is; whether it gets one is the foreman's. P4 stays `in_progress`
     until then; nothing is seeded, changed or dispatched here.
+  - 2026-11-12 · foreman ruling: the flaky case gets a seed of its own,
+    `issues/mutants-flaky-ssh-returns-at-exit-status.md`, with its `ROADMAP.md` entry in Part I's
+    Gates group after the four `mutants-linux-*` entries. P4 closes.
 
 ---
 
