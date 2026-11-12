@@ -398,7 +398,12 @@ import has no effect.
     types (`PLANTED_TYPES`, adding `list`, `set`, `float`, `timedelta`, a metaclass and a plain object)
     live in the capability module, which the tools module imports. Each is refused in one line naming its distribution, and a failed load leaves
     `TOOL_REGISTRY` as it was. A tool registered before the load began is decided too, the first
-    capability loaded refused for it (`test_a_tool_registered_before_the_load_is_decided_too`); a tool
+    capability loaded refused for it (`test_a_tool_registered_before_the_load_is_decided_too`); a
+    planted capability that loads, beside each member set, runs none of its code when two servers are
+    built from what loaded and their tools listed through the harness client, and only its function,
+    once, when its tool is called (`test_a_served_capability_runs_none_of_its_code_but_its_handler`: a
+    `sys.monitoring` `PY_START` callback on a free tool id records every function of the planted package
+    that starts, on any thread, from the load's end); a tool
     of every accepted shape loads (`test_an_inert_tool_of_every_accepted_shape_loads`: each return type
     `Tool.from_function` gives for a class, a dataclass, a pydantic model, an enum, a `TypedDict`, a
     `NamedTuple`, `Literal`, `Annotated`, a generic, a union and `Any`, every JSON-like scalar and
@@ -2920,7 +2925,8 @@ What each mode means:
   and `tool-changed-*` rows, each beside each member set;
   `test_a_distribution_name_of_a_type_of_its_own_is_no_name`;
   `test_a_tool_registered_before_the_load_is_decided_too`;
-  `test_a_field_no_rule_names_is_checked_by_the_generic_rule`; and `subclass-reads-commands`,
+  `test_a_field_no_rule_names_is_checked_by_the_generic_rule`;
+  `test_a_served_capability_runs_none_of_its_code_but_its_handler`; and `subclass-reads-commands`,
   `exact-order`, `tool-subclass-reads-name` and `tool-exact-parameters-value` driven through the CLI
   over each transport in `test_a_capability_that_cannot_load_stops_startup`, every kind with
   `CLUSTER_MCP_TEST_EVERY_KIND=1`).

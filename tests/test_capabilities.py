@@ -58,7 +58,8 @@ import pytest
 import cluster_mcp
 import cluster_mcp.core
 import cluster_mcp.core.capabilities
-from harness import SITE, FastMCP, served_instructions, served_surface, served_tools
+from harness import (SITE, FastMCP, Outcome, call, drive, in_memory, served_instructions, served_surface, served_tools,
+                     tool_names)
 from cluster_mcp.core.capabilities import (GROUP, TOOL_RULES, Capability, CapabilityLoadError, Loaded, _default_violation,
                                            _tool_violation, composed, installed, load)
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
@@ -1785,6 +1786,52 @@ def test_an_inert_tool_of_every_accepted_shape_loads(names: tuple[str, ...], pla
         pytest.fail(f'an inert tool of a shape the load accepts was refused: {exc}')
     assert [tool.name for tool in loaded[-1].tools] == [f'planted_shape_{name}' for name in RETURNS], \
         f'an inert tool of a shape the load accepts was refused: {loaded[-1].tools}'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_served_capability_runs_none_of_its_code_but_its_handler(names: tuple[str, ...], tmp_path: Path,
+                                                                  plant: Callable[..., EntryPoint]) -> None:
+    # Its tools decided at load, a capability's code runs on no later read of them: two servers built
+    # from what loaded, and their tools listed, run none of it, and a call runs its function alone, once.
+    # From the load's end, every function of the planted package that starts, on any thread, is recorded.
+    why = 'serving a capability that loaded ran its code'
+    module = 'planted_served'
+    ep = plant('planted-served', f'served = {module}.capability:CAPABILITY', package(module))
+    loaded = load([*members(names), ep])
+    handler = sys.modules[f'{module}.tools'].planted_echo.fn.__wrapped__.__code__
+    where = str(tmp_path / module) + '/'
+    ran: list[object] = []
+
+    def started(code: object, offset: int) -> None:
+        if code.co_filename.startswith(where):
+            ran.append(code)
+
+    async def serve() -> tuple[list[tuple[str, ...]], list[object], Outcome]:
+        served = []
+        for _ in range(2):
+            async with in_memory(create_mcp_server('none', site=SITE, capabilities=loaded)) as client:
+                served.append(await tool_names(client))
+        listed = list(ran)
+        async with in_memory(create_mcp_server('none', site=SITE, capabilities=loaded)) as client:
+            outcome = await call(client, 'planted_echo', {'text': 'planted'})
+        return served, listed, outcome
+
+    monitoring = sys.monitoring
+    tool = next(i for i in range(6) if monitoring.get_tool(i) is None)
+    monitoring.use_tool_id(tool, 'planted-served')
+    try:
+        monitoring.register_callback(tool, monitoring.events.PY_START, started)
+        monitoring.set_events(tool, monitoring.events.PY_START)
+        served, listed, outcome = drive(serve())
+    finally:
+        monitoring.set_events(tool, monitoring.events.NO_EVENTS)
+        monitoring.register_callback(tool, monitoring.events.PY_START, None)
+        monitoring.free_tool_id(tool)
+    assert all('planted_echo' in tools for tools in served), f'the planted tool was not served: {served}'
+    assert listed == [], f'{why}: building and listing ran {[c.co_qualname for c in listed]}'
+    assert outcome == Outcome(False, 'planted'), f'the planted tool did not answer its call: {outcome}'
+    assert ran == [handler], f'{why}: a call ran {[c.co_qualname for c in ran]}, expected its function alone, once'
 
 
 # A keyboard interrupt raised, and one raised while the load reads the text of what a capability raised.

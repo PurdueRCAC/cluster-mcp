@@ -27,7 +27,7 @@ phases:
   verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: pending
+  status: in_progress
   satisfies:
   - R3
   - R5
@@ -175,15 +175,27 @@ same commit.
 **Goal:** R3 shown by a test; the whole cycle's checks on the finished tree; every deferral seeded;
 the profile's full verify green once.
 
-- [ ] `test_a_served_capability_runs_none_of_its_code_but_its_handler` (`@mark.unit`): a
+- [x] `test_a_served_capability_runs_none_of_its_code_but_its_handler` (`@mark.unit`): a
   `sys.monitoring` `PY_START` callback on a free tool id records code objects whose file lies in the
   planted package; two servers built from the loaded capabilities and their tools listed through the
   harness client in the selected era record nothing; one call of the planted tool records only its
   function, once. Its return type is `str` (`PLAN.md` § 5, Q-C).
-- [ ] Deferral ledger: walk P1 and P2, this cycle's commit bodies, `PLAN.md` and `REVIEW.md` for
+- [x] Deferral ledger: walk P1 and P2, this cycle's commit bodies, `PLAN.md` and `REVIEW.md` for
   "defer", "out of scope", "known limitation", "not fixed here", "left for" and "follow-up"; each
   needs an `issues/` seed and a `ROADMAP.md` entry (`verify/ledger.py`). The plan puts nothing off; a
   phase that puts work off files its seed and entry in its own commit.
+- **Build notes (2026-11-12).** The R3 test runs beside each member set (`MEMBER_SETS`), a third
+  server built for the call, and asserts the planted tool listed by both servers before it asserts
+  nothing ran. It cannot be red on P1's commit (a planted capability that passes R1 and R2 serves
+  inertly there too, `PLAN.md` § 3 row 3), so its teeth were shown with two mutants of the code it
+  protects, each landed, red in the named assertion and reverted (`cmp`): `serve()` evaluating each
+  registered function's annotations at registration (red: building and listing ran `__annotate__`
+  twice), and `@mcp_tool`'s wrapper calling the function twice (red: a call ran `planted_echo`
+  twice). `AGENTS.md` names the test in § Testing and in §7's evidence list, where the claim it
+  proves sits. The ledger walk found no deferral beyond the two seeds the plan filed
+  (`issues/capability-tool-objects-served-copy.md`, `issues/capability-record-checks-metaclass-code.md`),
+  both present with ROADMAP entries; no commit body of the cycle defers anything. P2's gate has no
+  re-planted mode, so `replanted.py`'s selection is not run here.
 - [ ] Then, with nothing else of this cycle running, the full verify's modes one at a time
   (`full-legacy-1` to `-4`, `full-modern-1` to `-4`, `full-ends`; the heavy runs the foreman
   schedules).
