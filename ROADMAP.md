@@ -9,11 +9,12 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+28 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
-once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
-the rest of Part I. **Part III** ships as **0.4.0**: records of every call, audit logging, and
+once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
+on `develop` 2026-11-12), and 0.3.0 ships when Part II has landed, without waiting for the rest of
+Part I. **Part III** ships as **0.4.0**: records of every call, audit logging, and
 lexing and steering on the shell; two entries. Four more entries come after 0.3.0 and are not yet
 ordered. Within a Part, scope is never cut for pace.
 
@@ -72,17 +73,17 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Twenty-eight entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
 They come in six groups, in this order:
 
-- **Before Part II** (four entries), because Part II rests on them: the surface fixture, which must
-  land before the first cycle that changes the served surface, the two gaps in the capability load
-  every family registers through, and the mutation run's hung child. Part II starts once all four
-  have landed. The mutation run's own job (the first gate below) lands before core extraction's
-  review.
+- **Before Part II** (three entries), because Part II rests on them: the surface fixture, which must
+  land before the first cycle that changes the served surface, and the two gaps in the capability
+  load every family registers through. Part II starts once all three have landed; the fourth it
+  waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
+  mutation run's own job (the first gate below) lands before core extraction's review.
 - **Gates** (eleven), because every later gate rests on them: the mutation run and the pins its
   stop path still lacks, the two gaps the skip check still leaves and the pins it still lacks, the
   waits the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
@@ -127,17 +128,6 @@ names it instead of the broken one. The command line never retries, so only a li
 
 *Horizon: before Part II, safety · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
 **Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
-
-## A mutant's child run outlives its timeout
-
-`tests/mutants.py` runs each case's targets through `subprocess.run(timeout=300)`, which kills the
-sandbox wrapper and not the pytest below it: a case whose target hangs leaves that pytest running,
-reparented to init, and the runner raises out of the sweep instead of reporting the case. Seen on
-2026-11-05. Pre-existing. The fix starts the child in a session of its own and kills its process
-group.
-
-*Horizon: before Part II, gates · Depends on: — · Refs: `tests/mutants.py` (`run_child`); [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/)*
-**Seed:** [`issues/mutant-child-outlives-timeout.md`](issues/mutant-child-outlives-timeout.md) · *status: adopted:mutant-child-outlives-timeout*
 
 ## The on-demand mutation run no longer fits its 30-minute job
 
@@ -467,8 +457,9 @@ install line.
 **Compat.** The `rcac-mcp` distribution and command keep installing what today's users have
 through their window: deprecated in 0.2.0, removed no earlier than 0.4.0.
 
-**When it starts.** Once the four entries Part I puts before it have landed: the surface fixture,
-the two capability-load fixes and the mutation run's hung child.
+**When it starts.** Once the three entries Part I puts before it have landed: the surface fixture
+and the two capability-load fixes. The fourth, the mutation run's hung child, is cleared (landed on
+`develop` 2026-11-12).
 
 The suggested order is the one below: core extraction with `[shell]` and `[files]`, then jobs and
 `[slurm]`, then modules and `[lmod]`, then `[files-xdu]`, then the site interfaces and `[rcac]`.
@@ -482,7 +473,7 @@ family rather than defining what is served. The core becomes the executor and it
 `/etc/agents.d` in them. It keeps `cluster_context` and serves no tool family of its own: a bare
 install serves no command tool.
 
-*Horizon: 0.3.0, first · Depends on: release 0.2.0 (cleared: released 2026-11-12); the four entries Part I puts before Part II; mutants-workflow-timeout, before this cycle's review; capability-extras and capability-probe (cleared: landed on `develop` 2026-11-01) · Refs: shaped with `issues/shell-extra.md` and `issues/files-extra.md`, or just ahead of them*
+*Horizon: 0.3.0, first · Depends on: release 0.2.0 (cleared: released 2026-11-12); the three entries Part I puts before Part II; mutant-child-outlives-timeout (cleared: landed on `develop` 2026-11-12); mutants-workflow-timeout, before this cycle's review; capability-extras and capability-probe (cleared: landed on `develop` 2026-11-01) · Refs: shaped with `issues/shell-extra.md` and `issues/files-extra.md`, or just ahead of them*
 **Seed:** [`issues/core-extraction.md`](issues/core-extraction.md) · *status: unshaped*
 
 ## Every tool family follows one set of rules
