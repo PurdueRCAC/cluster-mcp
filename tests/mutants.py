@@ -18,9 +18,22 @@ repository's `bin/sandbox.sh`. A case is caught only when every target fails (a 
 message that names the broken contract. A mutant that merely breaks an import fails for the wrong
 reason and counts as surviving.
 
+Each child runs in a session of its own. One that passes `LIMIT` (300 s) is stopped whole (`stop_run`):
+frozen, every process reachable from it through a live parent or a process group of the run found
+(`run_members`) and SIGKILLed, and waited for until none is running (`_wait_gone`, up to `GONE_WITHIN`).
+Its case is then reported `FAILED` with the timeout named (`ChildTimeout`, `child_timeout_violations`),
+plus the pids of any process of the run still running, and the sweep goes on. A stop that cannot look
+at the run (its `ps`, `_processes`, fails or cannot start) still kills the wrapper's group and what it
+had found, and the case's line says the stop could not finish rather than that the run was stopped.
+A case whose child cannot be launched at all (`ChildNotStarted`) is reported `FAILED` with
+`could not start:` and the error, and the sweep goes on. A SIGTERM or SIGHUP to the runner
+(`stop_on_signals`), or a Ctrl-C, stops the run in progress the same
+way, and the runner then ends by that signal (`die_by` for TERM and HUP).
+
 This module is not collected: a child takes seconds, so the phase gates run it and its report is
-recorded with the change. `test_mutations.py` keeps the fast parts in the suite: every anchor still
-applies, and `mutation_violations` rejects each way a child can fail to prove a kill.
+recorded with the change. `test_mutations.py` keeps the suite's part: every anchor still applies,
+`mutation_violations` rejects each way a child can fail to prove a kill, and the stop is pinned,
+each decision on fakes and the whole by one real child hung past a patched limit.
 
 `--self-check` also runs the runner's own controls: a docstring-only edit must be reported as
 surviving, and a child that does not import the mutated copy, or imports one member from outside
@@ -32,9 +45,11 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -5689,14 +5704,234 @@ def apply_repo(case: Case, dest: Path) -> Path | None:
     return repo
 
 
+# How long one case's child run may take; past it the run is stopped whole and the case is reported.
+LIMIT = 300
+# After the stop, how long the runner waits for every process of the run to be gone, and how often it looks.
+GONE_WITHIN = 10
+GONE_POLL = 0.1
+
+# The signals held while a run is being stopped, so a stop is never left half-way.
+HELD_SIGNALS = frozenset({signal.SIGINT, signal.SIGTERM, signal.SIGHUP})
+
+# One process table: pid -> (parent pid, process group, `ps` state letters).
+Table = dict[int, tuple[int, int, str]]
+
+
+class ChildTimeout(Exception):
+    """A child run passed its limit and the runner stopped it.
+
+    `left` holds the pids of the run still running after the stop. `unfinished` is None when the stop
+    looked at the run to the end; otherwise it names what cut the stop short (a `ps` that failed or
+    could not start), and the stop killed only the wrapper's group and what it had found by then.
+    """
+
+    def __init__(self, limit: float, left: Sequence[int], unfinished: str | None = None) -> None:
+        super().__init__(f'the child ran past its {limit} s limit')
+        self.limit = limit
+        self.left = list(left)
+        self.unfinished = unfinished
+
+
+class ChildNotStarted(Exception):
+    """A case's child run could not be launched at all; `cause` names the error (at the user's process limit, say)."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
+        self.cause = cause
+
+
+class RunnerSignal(BaseException):
+    """A SIGTERM or SIGHUP the runner got, raised where it lands so the run in progress is stopped first."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+def _processes() -> Table:
+    """Every process on the host, read from one `ps` table."""
+    ran = subprocess.run([str(SANDBOX), 'ps', '-A', '-o', 'pid=,ppid=,pgid=,stat='],
+                         capture_output=True, text=True, check=True)
+    table: Table = {}
+    for line in ran.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 3:
+            table[int(fields[0])] = (int(fields[1]), int(fields[2]), fields[3] if len(fields) > 3 else '')
+    return table
+
+
+def run_members(table: Table, pids: Sequence[int], groups: Sequence[int],
+                own: tuple[int, int] | None = None) -> tuple[list[int], list[int]]:
+    """Extend a run's known `pids` and `groups` from `table`, in discovery order, until nothing is added.
+
+    A process belongs to the run when its parent is a known pid or its group is a known group; its
+    group then belongs to the run too. The runner's own pid and process group (`own`, read at call
+    time when not given), pid 0 and 1, and groups 0 and 1 are never added.
+    """
+    own_pid, own_group = own if own is not None else (os.getpid(), os.getpgrp())
+    found = list(dict.fromkeys(pids))
+    known = list(dict.fromkeys(g for g in groups if g > 1 and g != own_group))
+    seen, gset = set(found), set(known)
+    added = True
+    while added:
+        added = False
+        for pid in sorted(table):
+            ppid, pgid, _ = table[pid]
+            if pid in seen or pid <= 1 or pid == own_pid or not (ppid in seen or pgid in gset):
+                continue
+            found.append(pid)
+            seen.add(pid)
+            added = True
+            if pgid > 1 and pgid != own_group and pgid not in gset:
+                known.append(pgid)
+                gset.add(pgid)
+    return found, known
+
+
+def _send(send, target: int, signum: int) -> None:
+    try:
+        send(target, signum)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _wait_gone(pids: Sequence[int], groups: Sequence[int], *, processes, kill, clock, sleep,
+               own: tuple[int, int] | None = None) -> list[int]:
+    """Wait, up to `GONE_WITHIN`, until no process of the run is running; return the pids still running.
+
+    Each look extends the run from a fresh table (a process forked as its parent stopped, or one
+    left in a group of the run), drops for good every member that is absent or a zombie, so a number
+    handed out again is never signalled, and SIGKILLs every member still running.
+    """
+    members, known, gone = list(pids), list(groups), set()
+    end = clock() + GONE_WITHIN
+    while True:
+        table = {pid: row for pid, row in processes().items() if pid not in gone}
+        members, known = run_members(table, members, known, own)
+        gone.update(pid for pid in members if pid not in table or 'Z' in table[pid][2])
+        members = [pid for pid in members if pid not in gone]
+        live = {table[pid][1] for pid in members}
+        known = [group for group in known if group in live]
+        if not members:
+            return []
+        if clock() >= end:
+            return sorted(members)
+        for pid in members:
+            _send(kill, pid, signal.SIGKILL)
+        sleep(GONE_POLL)
+
+
+def stop_run(proc: subprocess.Popen, *, processes=_processes, kill=os.kill, killpg=os.killpg,
+             mask=signal.pthread_sigmask, clock=time.monotonic, sleep=time.sleep) -> list[int]:
+    """Stop every process of the run `proc` leads, SIGKILLed, and return the pids still running afterwards.
+
+    The run's own process group is frozen (SIGSTOP), then each process reachable from it through a
+    live parent or a process group of the run is found and frozen as it is found, so none can fork
+    or exit while the walk goes on. Every group and pid found is then SIGKILLed, last found first and
+    the wrapper's group last, even when the walk is cut short. The wrapper is reaped only once the
+    rest of the run is gone, so its pid and group stay reserved meanwhile.
+    """
+    mask(signal.SIG_BLOCK, HELD_SIGNALS)
+    try:
+        pids, groups = [proc.pid], [proc.pid]
+        order = [(killpg, proc.pid)]
+        try:
+            _send(killpg, proc.pid, signal.SIGSTOP)
+            while True:
+                table = processes()
+                more_pids, more_groups = run_members(table, pids, groups)
+                fresh = [pid for pid in more_pids if pid not in pids]
+                if not fresh:
+                    break
+                for pid in fresh:
+                    group = table[pid][1]
+                    if group in more_groups and group not in groups:
+                        groups.append(group)
+                        order.append((killpg, group))
+                        _send(killpg, group, signal.SIGSTOP)
+                    pids.append(pid)
+                    order.append((kill, pid))
+                    _send(kill, pid, signal.SIGSTOP)
+        finally:
+            for send, target in reversed(order):
+                _send(send, target, signal.SIGKILL)
+        return _wait_gone(pids, groups, processes=processes, kill=kill, clock=clock, sleep=sleep)
+    finally:
+        proc.wait()
+        mask(signal.SIG_UNBLOCK, HELD_SIGNALS)
+
+
+def child_timeout_violations(exc: ChildTimeout) -> list[str]:
+    """The violations a case whose child run passed its limit reports; "stopped" only when the stop finished."""
+    if exc.unfinished is not None:
+        return [f'timeout: the child ran past its {exc.limit} s limit',
+                f'the stop could not finish ({exc.unfinished}): it killed the wrapper\'s process group and every '
+                f'process it had found, and others of the run may still be running']
+    violations = [f'timeout: the child ran past its {exc.limit} s limit and was stopped']
+    if exc.left:
+        violations.append(f'still running {GONE_WITHIN} s after the stop: pids {", ".join(map(str, exc.left))}')
+    return violations
+
+
+def _raise_runner_signal(signum: int, frame: object) -> None:
+    raise RunnerSignal(signum)
+
+
+def stop_on_signals() -> None:
+    """Turn a SIGTERM or SIGHUP to the runner into `RunnerSignal`, so the run in progress is stopped first.
+
+    The run is in a session of its own, so a signal to the runner's process group no longer reaches it.
+    Only the main thread can install a handler; anywhere else this installs nothing.
+    """
+    try:
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(signum, _raise_runner_signal)
+    except ValueError:
+        return
+
+
+def die_by(signum: int) -> None:
+    """End the runner by `signum`, as it would have ended had no handler caught it."""
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    raise SystemExit(128 + signum)
+
+
 def run_child(src_root: Path, targets: Sequence[str], junit: Path,
               repo: Path | None = None) -> subprocess.CompletedProcess[str]:
-    """Run `targets` against the package under `src_root` in a sandboxed child pytest, in `repo` (default: this one)."""
+    """Run `targets` against the package under `src_root` in a sandboxed child pytest, in `repo` (default: this one).
+
+    A run past `LIMIT` is stopped whole (`stop_run`) and raises `ChildTimeout`; a child that cannot be
+    launched raises `ChildNotStarted`.
+    """
     env = {**os.environ, 'PYTHONPATH': str(src_root), 'PYTHONDONTWRITEBYTECODE': '1'}
-    return subprocess.run(
-        [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit), str(repo or TESTS.parent),
-         *[f'tests/{target}' for target in targets]],
-        env=env, capture_output=True, text=True, timeout=300)
+    # A session of its own: the run can then be stopped whole without reaching the runner or its caller.
+    try:
+        proc = subprocess.Popen(
+            [str(SANDBOX), 'sh', '-c', CHILD, 'sh', sys.executable, str(src_root), str(junit),
+             str(repo or TESTS.parent), *[f'tests/{target}' for target in targets]],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ChildNotStarted(f'{type(exc).__name__}: {exc}') from None
+    try:
+        out, err = proc.communicate(timeout=LIMIT)
+    except subprocess.TimeoutExpired:
+        left, unfinished = [], None
+        try:
+            left = stop_run(proc)
+        except Exception as exc:
+            # The stop could not look (a `ps` that failed or could not start); it has killed what it could.
+            unfinished = f'{type(exc).__name__}: {exc}'
+        # Closed unread: a process the stop could not reach may still hold the write end.
+        proc.stdout.close()
+        proc.stderr.close()
+        raise ChildTimeout(LIMIT, left, unfinished) from None
+    except BaseException:
+        stop_run(proc)
+        proc.stdout.close()
+        proc.stderr.close()
+        raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
 def _node_id(case: ET.Element) -> str:
@@ -5753,7 +5988,12 @@ def run_case(case: Case, src_override: Path | None = None, omit: str | None = No
         src_root = apply(case, dest, omit)
         repo = apply_repo(case, dest)
         junit = dest / 'junit.xml'
-        child = run_child(src_override or src_root, case.targets, junit, repo)
+        try:
+            child = run_child(src_override or src_root, case.targets, junit, repo)
+        except ChildTimeout as exc:
+            return child_timeout_violations(exc)
+        except ChildNotStarted as exc:
+            return [f'could not start: {exc.cause}']
         report = junit.read_text() if junit.exists() else None
         violations = mutation_violations(child.returncode, report, case.targets, case.why)
         if violations and child.returncode not in (0, 1):
@@ -5807,4 +6047,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    stop_on_signals()
+    try:
+        sys.exit(main())
+    except RunnerSignal as caught:
+        die_by(caught.signum)

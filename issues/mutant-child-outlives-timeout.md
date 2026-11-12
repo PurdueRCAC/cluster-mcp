@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:mutant-child-outlives-timeout
 kind: fix
 appetite: small
 lane: public
