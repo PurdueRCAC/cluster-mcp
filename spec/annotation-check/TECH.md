@@ -3,15 +3,15 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_progress
+status: in_review
 branch: ci/annotation-check
 base: develop
-current_phase: P1
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The annotation check and its controls, seen red in each kind of position
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -26,7 +26,7 @@ phases:
   verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py && .venv/bin/python -I spec/annotation-check/remediation/F6-F8-review2.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R7
@@ -175,6 +175,11 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
   - Runs: the build commit holds P1 and P2 `in_progress`. `gate.sh P1` ran green on a dangling
     candidate of the same tree (`SEEN_RED_REV`); `verify/sweep.py`, the checker on the commit, and
     P2's full `verify` run when the foreman releases the host, and close both phases.
+  - Run B (2026-11-12, at `8baa949`): `verify/sweep.py`, baseline 268 passed per era, 102 mutants,
+    100 killed in both eras, 2 recorded equivalent; `remediation/F6-F8-review2.py` on `0cd4628`, 68
+    expectations held (the seed-only commit after it touches no file the checker reads);
+    `gate.sh P2`, static, docs and ledger ok, then the profile's full `verify` green in both eras
+    (fourth command 4,637 passed and 14 `need_shell` skipped per era), 1,565 s wall.
 
 ---
 
@@ -231,7 +236,7 @@ profile's full `verify` passes with the check in its fourth command of each era.
       phrases `code-plan` Step 6.7 names, which `gate.sh` → `ledger` greps for); each needs an
       `issues/` seed, pre-shaped from the KB's `ISSUE.md`, and a `ROADMAP.md` entry. The plan
       files none; review cycle 2's remediation files `issues/annotation-check-pin-gaps.md`.
-- [ ] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
+- [x] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
       background (the profile's `verify`, about 26 min).
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P2` (static, docs, ledger, then the profile's
   full `verify`, read from AGENTS.md § Factory at run time). R6's CI-budget clause is graded at
