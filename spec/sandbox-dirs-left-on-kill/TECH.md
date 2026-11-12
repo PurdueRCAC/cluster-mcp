@@ -49,7 +49,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/verify/cleanup.py files ledger mutants suite
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files ledger mutants suite
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -182,14 +182,28 @@ skips exactly what develop skips; the ledger is clean.
       fragment of the `FAIL` line the named mode prints. Start from `verify/mutants.draft.json` and
       re-anchor each plant to the built text; add a plant for any decision the build added. Record
       the sweep's result (each plant, killed by which mode, or survived and why) in the commit body.
+      Written 2026-11-12, before the heavy gate: the draft's 24 plants (one, `runner-not-restored`,
+      re-anchored to `case_scratch` as built), plus two for the decision P2 added, `runner-unlisted`
+      (`runner-unlisted-raises`, `runner-unlisted-removes`), killed by `units` through the row below.
+      Checked alone: the re-anchored plant killed by `runner`, the two new ones by `units`; both new
+      ones survive at `39399ab`, before the row. The full sweep's result is still to record.
+- [x] `tests/test_sandbox_dirs.py`: a `unit` row, `test_a_case_scratch_whose_processes_cannot_be_listed_is_kept`
+      (the foreman's ruling at the P2 gate, 2026-11-12): with the process listing made to fail,
+      `case_scratch` keeps the scratch and its sandbox directory, puts `TMPDIR` back, and names the
+      scratch and the error on stderr. `AGENTS.md`'s module bullet for the file names it. The row
+      lives here, not in `tests/test_mutations.py`, because the `files` mode allows this file and the
+      `units` mode runs it, so the plants are graded by a gate mode.
 - [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
       for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the `ledger` mode
-      checks this file). This plan files no new seed.
+      checks this file). One seed is filed, on the foreman's ruling at the P2 gate (2026-11-12): a
+      second signal during a case's cleanup is deferred to `issues/mutant-case-cleanup-interrupted.md`
+      (pre-existing; its `ROADMAP.md` entry follows `mutant-runner-stop-pins` in Part I's Gates, and the
+      Gates count and both Part I totals moved with it; the seed/ROADMAP pairing check is empty).
 - [x] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
       `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications). Done at P2's rebase (2026-11-12):
       the branch's own sentence on the runner, which stood before "The last three", was dropped for
       `develop`'s, which follows that sentence, so the referent is again the three harnesses before it.
-- [ ] The seed's other facts, in `issues/sandbox-dirs-left-on-kill.md`, both on `develop` and so each a
+- [x] The seed's other facts, in `issues/sandbox-dirs-left-on-kill.md`, both on `develop` and so each a
       dated correction beneath it (append-only), unless the seed is retired at landing (PLAN § 5).
       (The sentence on the mutation runner's timeout path took `develop`'s wording at P2's rebase.)
       1. "The last three point the drive's `TMPDIR` at the test's own directory" is false for
@@ -209,8 +223,9 @@ skips exactly what develop skips; the ledger is clean.
       eight suite commands and its last, both eras, under a fresh `TMPDIR`: about 26 minutes).
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/sandbox-dirs-left-on-kill/verify/mutants.json`, `spec/sandbox-dirs-left-on-kill/PLAN.md`,
-  `spec/sandbox-dirs-left-on-kill/TECH.md`, and `issues/sandbox-dirs-left-on-kill.md` when the item
-  above applies.
+  `spec/sandbox-dirs-left-on-kill/TECH.md`, `spec/sandbox-dirs-left-on-kill/remediation/fork-base.py`,
+  `issues/sandbox-dirs-left-on-kill.md`, `issues/mutant-case-cleanup-interrupted.md`, `ROADMAP.md`,
+  `tests/test_sandbox_dirs.py`, `AGENTS.md`.
 
 ---
 
@@ -267,6 +282,15 @@ skips exactly what develop skips; the ledger is clean.
   names it on stderr with the error, instead of raising out of `run_case` and ending the sweep with
   no verdict for the case (R6). No suite row pins (2): `tests/test_mutations.py` is outside the
   `files` mode's allowed paths. P3's mutant sweep can plant it.
+
+- **2026-11-12, P3's light work, on the foreman's rulings at the P2 gate.** (1) The failed-listing
+  branch of `case_scratch` gets a plant and a killing row: the row is in `tests/test_sandbox_dirs.py`
+  (allowed by the `files` mode, run by `units`), so no allowed path widens for it. (2) The second
+  signal during a case's cleanup is filed as `issues/mutant-case-cleanup-interrupted.md` with its
+  `ROADMAP.md` entry; that seed is outside the frozen gate's `ALLOWED`, so
+  `remediation/fork-base.py` widens the `files` mode by exactly that path (`ALSO_ALLOWED`), and
+  P3's `verify:` runs the frozen gate under the wrapper, as P1's and P2's do. (3) The seed's two
+  corrections went in as dated lines. The heavy gate (`mutants`, then `suite`) waits for a slot.
 
 ## How `code-build` drives this
 

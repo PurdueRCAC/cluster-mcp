@@ -119,3 +119,26 @@ def test_the_sweep_keeps_a_sandbox_whose_command_runs_on_elsewhere(tmp_path: Pat
     finally:
         os.killpg(proc.pid, signal.SIGKILL)
     assert all(path.is_dir() for path in made)
+
+
+@pytest.mark.unit
+def test_a_case_scratch_whose_processes_cannot_be_listed_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    # The mutation runner never guesses that a sandbox directory is free: a failed listing keeps the case's scratch.
+    import tempfile
+
+    import mutants
+
+    def unlisted() -> list[tuple[str, str]]:
+        raise RuntimeError('cannot list the processes using sandbox directories')
+
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+    monkeypatch.setattr(sandbox_dirs, 'processes', unlisted)
+    with mutants.case_scratch('unlisted') as scratch:
+        assert os.environ['TMPDIR'] == scratch and Path(scratch).parent == tmp_path
+        left = sandbox_like(Path(scratch), 'cluster-mcp-sandbox.Ab12Cd')
+    assert os.environ['TMPDIR'] == str(tmp_path)
+    assert left.is_dir(), 'the scratch was removed although its processes could not be listed'
+    assert capsys.readouterr().err == (f'kept {scratch}: its processes could not be listed '
+                                       '(RuntimeError: cannot list the processes using sandbox directories)\n')

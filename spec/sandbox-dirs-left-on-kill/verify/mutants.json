@@ -1,0 +1,236 @@
+[
+ {
+  "id": "no-redirect",
+  "decision": "redirect-set",
+  "file": "tests/sandbox_dirs.py",
+  "old": "    os.environ['TMPDIR'] = str(run)\n",
+  "new": "",
+  "mode": "kinds",
+  "why": "the session's TMPDIR was"
+ },
+ {
+  "id": "tempdir-reset",
+  "decision": "redirect-pinned",
+  "file": "tests/sandbox_dirs.py",
+  "old": "    os.environ['TMPDIR'] = str(run)\n",
+  "new": "    os.environ['TMPDIR'] = str(run)\n    tempfile.tempdir = None\n",
+  "mode": "units",
+  "why": "a row of tests/test_sandbox_dirs.py failed"
+ },
+ {
+  "id": "not-restored",
+  "decision": "redirect-restored",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        finally:\n            if saved is None:\n                os.environ.pop('TMPDIR', None)\n            else:\n                os.environ['TMPDIR'] = saved\n        if not any(",
+  "new": "        finally:\n            pass\n        if not any(",
+  "mode": "units",
+  "why": "a row of tests/test_sandbox_dirs.py failed"
+ },
+ {
+  "id": "skip-run-dir",
+  "decision": "sweep-run-dir",
+  "file": "tests/sandbox_dirs.py",
+  "old": "            kept = sweep([run, basetemp])",
+  "new": "            kept = sweep([basetemp])",
+  "mode": "guards",
+  "why": "R4 live-wrapper"
+ },
+ {
+  "id": "skip-basetemp",
+  "decision": "sweep-basetemp",
+  "file": "tests/sandbox_dirs.py",
+  "old": "            kept = sweep([run, basetemp])",
+  "new": "            kept = sweep([run])",
+  "mode": "kinds",
+  "why": "R1 group-kill-tmp_path"
+ },
+ {
+  "id": "top-level-only",
+  "decision": "sweep-nested",
+  "file": "tests/sandbox_dirs.py",
+  "old": "                    dirs.remove(name)\n",
+  "new": "                    dirs.remove(name)\n            if Path(parent) != Path(root):\n                dirs.clear()\n",
+  "mode": "kinds",
+  "why": "R1 group-kill-nested"
+ },
+ {
+  "id": "name-any-length",
+  "decision": "name-exact",
+  "file": "tests/sandbox_dirs.py",
+  "old": "[A-Za-z0-9]{6}')",
+  "new": "[A-Za-z0-9]+')",
+  "mode": "guards",
+  "why": "R3: something that is not a sandbox directory was removed"
+ },
+ {
+  "id": "name-prefix",
+  "decision": "name-exact",
+  "file": "tests/sandbox_dirs.py",
+  "old": "if SANDBOX_NAME.fullmatch(name) and",
+  "new": "if name.startswith('cluster-mcp-sandbox.') and",
+  "mode": "guards",
+  "why": "R3: something that is not a sandbox directory was removed"
+ },
+ {
+  "id": "links-taken",
+  "decision": "name-dir-only",
+  "file": "tests/sandbox_dirs.py",
+  "old": "if SANDBOX_NAME.fullmatch(name) and not path.is_symlink():",
+  "new": "if SANDBOX_NAME.fullmatch(name):",
+  "mode": "guards",
+  "why": "a planted row failed"
+ },
+ {
+  "id": "links-followed",
+  "decision": "no-links",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        for parent, dirs, _ in os.walk(root):",
+  "new": "        for parent, dirs, _ in os.walk(root, followlinks=True):",
+  "mode": "guards",
+  "why": "R3: something that is not a sandbox directory was removed"
+ },
+ {
+  "id": "files-taken",
+  "decision": "name-dir-only",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        for parent, dirs, _ in os.walk(root):\n            for name in list(dirs):",
+  "new": "        for parent, dirs, files in os.walk(root):\n            for name in list(dirs) + [f for f in files if SANDBOX_NAME.fullmatch(f)]:",
+  "mode": "guards",
+  "why": "a planted row failed"
+ },
+ {
+  "id": "cwd-ignored",
+  "decision": "live-cwd",
+  "file": "tests/sandbox_dirs.py",
+  "old": "if any(cwd == name or cwd.startswith(name + os.sep) or name in environment for name in names)",
+  "new": "if any(name in environment for name in names)",
+  "mode": "guards",
+  "why": "R4 live-wrapper"
+ },
+ {
+  "id": "env-ignored",
+  "decision": "live-env",
+  "file": "tests/sandbox_dirs.py",
+  "old": "if any(cwd == name or cwd.startswith(name + os.sep) or name in environment for name in names)",
+  "new": "if any(cwd == name or cwd.startswith(name + os.sep) for name in names)",
+  "mode": "guards",
+  "why": "R4 live-command"
+ },
+ {
+  "id": "literal-path-only",
+  "decision": "live-realpath",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        names = {str(candidate), os.path.realpath(candidate)}",
+  "new": "        names = {str(candidate)}",
+  "mode": "guards",
+  "why": "R4 live-wrapper"
+ },
+ {
+  "id": "no-probe",
+  "decision": "live-cwd",
+  "file": "tests/sandbox_dirs.py",
+  "old": "    busy = in_use(found, processes())",
+  "new": "    busy = set()",
+  "mode": "guards",
+  "why": "R4 live-"
+ },
+ {
+  "id": "rmdir-dropped",
+  "decision": "run-dir-rmdir",
+  "file": "tests/sandbox_dirs.py",
+  "old": "            shutil.rmtree(run, ignore_errors=True)",
+  "new": "            pass",
+  "mode": "kinds",
+  "why": "the run's directory is still there"
+ },
+ {
+  "id": "run-dir-always-removed",
+  "decision": "run-dir-kept",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        if not any(run in path.parents for path in kept):\n",
+  "new": "        if True:\n",
+  "mode": "guards",
+  "why": "R4 live-wrapper"
+ },
+ {
+  "id": "runner-no-tmpdir",
+  "decision": "runner-tmpdir",
+  "file": "tests/mutants.py",
+  "old": "    os.environ['TMPDIR'] = scratch\n",
+  "new": "",
+  "mode": "runner",
+  "why": "R2: sandbox directories left under TMPDIR"
+ },
+ {
+  "id": "runner-not-restored",
+  "decision": "runner-restored",
+  "file": "tests/mutants.py",
+  "old": "        finally:\n            if saved is None:\n                os.environ.pop('TMPDIR', None)\n            else:\n                os.environ['TMPDIR'] = saved\n        if reason is None:",
+  "new": "        finally:\n            pass\n        if reason is None:",
+  "mode": "runner",
+  "why": "the runner's TMPDIR is"
+ },
+ {
+  "id": "ssh-drops-tmpdir",
+  "decision": "harness-not-redirected",
+  "file": "tests/ssh_server.py",
+  "old": "                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n                                start_new_session=True)\n        self.processes.append(proc)\n        if channel",
+  "new": "                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,\n                                start_new_session=True, env={k: v for k, v in os.environ.items() if k != 'TMPDIR'})\n        self.processes.append(proc)\n        if channel",
+  "mode": "kinds",
+  "why": "a planted row failed"
+ },
+ {
+  "id": "fixture-dropped",
+  "decision": "redirect-set",
+  "file": "tests/conftest.py",
+  "old": "@pytest.fixture(scope='session', autouse=True)\ndef sandbox_tmp(",
+  "new": "@pytest.fixture(scope='session')\ndef sandbox_tmp(",
+  "mode": "kinds",
+  "why": "the session's TMPDIR was"
+ },
+ {
+  "id": "runner-no-liveness",
+  "decision": "runner-live",
+  "file": "tests/mutants.py",
+  "old": "        if left and sandbox_dirs.in_use(left, sandbox_dirs.processes()):",
+  "new": "        if False:",
+  "mode": "runner",
+  "why": "R4: the case removed the directory of a sandbox the child left running"
+ },
+ {
+  "id": "skeleton-only",
+  "decision": "sweep-content",
+  "file": "tests/sandbox_dirs.py",
+  "old": "        if path not in busy:\n            shutil.rmtree(path)",
+  "new": "        if path not in busy and not any(f for _, _, f in os.walk(path)):\n            shutil.rmtree(path)",
+  "mode": "kinds",
+  "why": "R1 group-kill-tmp_path"
+ },
+ {
+  "id": "sweep-since",
+  "decision": "no-outside-sweep",
+  "file": "tests/sandbox_dirs.py",
+  "old": "            kept = sweep([run, basetemp])\n",
+  "new": "            kept = sweep([run, basetemp])\n            for extra in Path(run.parent).glob('cluster-mcp-sandbox.*'):\n                if extra.stat().st_birthtime >= run.stat().st_birthtime and not in_use([extra], processes()):\n                    shutil.rmtree(extra)\n",
+  "mode": "guards",
+  "why": "R3: this run's sweep removed another caller's leftover made during the run"
+ },
+ {
+  "id": "runner-unlisted-raises",
+  "decision": "runner-unlisted",
+  "file": "tests/mutants.py",
+  "old": "        except Exception as exc:\n            reason = f'its processes could not be listed",
+  "new": "        except Exception as exc:\n            raise\n            reason = f'its processes could not be listed",
+  "mode": "units",
+  "why": "a row of tests/test_sandbox_dirs.py failed"
+ },
+ {
+  "id": "runner-unlisted-removes",
+  "decision": "runner-unlisted",
+  "file": "tests/mutants.py",
+  "old": "            reason = f'its processes could not be listed ({type(exc).__name__}: {exc})'\n",
+  "new": "            reason = None\n",
+  "mode": "units",
+  "why": "a row of tests/test_sandbox_dirs.py failed"
+ }
+]

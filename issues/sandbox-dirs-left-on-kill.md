@@ -28,6 +28,16 @@ child run passes its 300 s limit, or when the runner itself gets SIGTERM, SIGHUP
 runner started included. The runner sets no `TMPDIR` of its own, so that sandbox's home is left in
 the `TMPDIR` the runner was started with.
 
+- 2026-11-12: `spec/capability-probe/verify/drives.py` sets no `TMPDIR` and starts no sandbox of its
+  own (it SIGKILLs a bare `uv run` inside a gate's outer sandbox), so of "the last three" only
+  `tests/test_transports.py` and `tests/test_probe_startup.py` (`drive_env`) point a sandbox's
+  `TMPDIR` at the test's own directory; one `tests/test_audit.py` site does too.
+- 2026-11-12: with `sandbox-dirs-left-on-kill`, the runner makes each case's scratch directory its
+  child run's `TMPDIR` (`case_scratch`), so every sandbox of the run, the runner's own
+  `bin/sandbox.sh` and those the child's tests start, makes its directory there, and the scratch is
+  removed once the case is reported on each end the stop covers: past the 300 s limit, and on
+  SIGTERM, SIGHUP or SIGINT (Ctrl-C) to the runner. A SIGKILL to the runner still leaves its scratch.
+
 Observed on a developer Mac, 2026-11-01:
 
 - The host's `TMPDIR` held 18,061 `cluster-mcp-sandbox.*` directories, the oldest from 2026-10-17;

@@ -1488,8 +1488,9 @@ import has no effect.
     only its parent named; this run's `TMPDIR` is a `cluster-mcp-run.*` directory and a sandbox makes
     its directory in it; a real sandbox is kept while it runs and removed by the next sweep once a
     group SIGKILL left it; a sandbox whose wrapper was SIGKILLed alone while its command runs on
-    outside its directory is kept by the command's environment (on Linux, through `/proc`); and
-    `own_tmp` redirects children only and puts `TMPDIR` back.
+    outside its directory is kept by the command's environment (on Linux, through `/proc`);
+    `own_tmp` redirects children only and puts `TMPDIR` back; and the mutation runner's
+    `case_scratch` keeps a case's scratch, named on stderr, when the processes cannot be listed.
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
   - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point

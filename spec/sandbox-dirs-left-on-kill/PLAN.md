@@ -254,7 +254,9 @@ briefs are the rejected design's record.
 - **Questions for the sign-off:** D2 and D3 (readings of R1/R4 and R3), D5 (landing order), D4 (the
   figures). And whether the GOAL's known limitation (callers outside the repository's runs) wants a
   record beyond `AGENTS.md`'s sentence: the seed `issues/sandbox-dirs-left-on-kill.md` is retired
-  when this lands, and this plan files no new one.
+  when this lands. The plan filed no new seed; the build filed one,
+  `issues/mutant-case-cleanup-interrupted.md` (a second signal during a mutation case's cleanup,
+  pre-existing; the foreman's ruling at the P2 gate, 2026-11-12).
 - **The seed's "last three" referent** (GOAL Clarifications): fixed by whichever of this cycle and
   the sibling lands second, at its landing; P3 carries the item.
 - **An empty run directory per era.** Each era's third command ends with `test_launch`'s
@@ -306,6 +308,7 @@ staged copy and requires the named mode to fail with the named message). Decisio
 | `sweep-content` | only leftovers holding no file are removed (additive) | `kinds` |
 | `no-outside-sweep` | an extra sweep of the given `TMPDIR` for directories made during the run | `guards` |
 | `harness-not-redirected` | the loopback server's launch drops `TMPDIR` (additive) | `kinds` |
+| `runner-unlisted` (added at P2's build) | `case_scratch` raises, or removes the scratch, when the process listing fails | `units` |
 
 ---
 
