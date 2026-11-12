@@ -303,13 +303,20 @@ def upgrading_sentence(text: str) -> tuple[tuple[str, str, str], ...]:
     return readme(UPGRADING_END, f'{UPGRADING_END[:-1]} {text}\n')
 
 
-# The capability load's one exit for a failure: the registry cut back, then a refusal or an interrupt
-# raised as it is, anything else refused naming the capability.
-ROLLBACK = ('    except BaseException as exc:\n'
-            '        del TOOL_REGISTRY[start:]\n'
-            '        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
-            '            raise\n'
-            '        raise CapabilityLoadError(distribution, _cause(exc)) from exc\n')
+# The capability load's one exit for a failure: a refusal or an interrupt raised as it is, anything
+# else refused naming the capability, then the modules the load imported forgotten and, last, the
+# registry cut back.
+ROLLBACK = ('        try:\n'
+            '            if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+            '                raise\n'
+            '            raise CapabilityLoadError(distribution, _cause(exc)) from exc\n'
+            '        finally:\n'
+            '            try:\n'
+            '                _unimport(known, _roots(ordered, loaded, capability))\n'
+            '            finally:\n'
+            '                del TOOL_REGISTRY[start:]\n')
+# The registry cut, the last step of that exit.
+CUT = '                del TOOL_REGISTRY[start:]\n'
 
 # The member sets the capability loader's rows run beside, as `test_capabilities.MEMBER_SETS` names them.
 MEMBER_SETS = ('core-only', 'slurm', 'rcac', 'both')
@@ -2511,7 +2518,9 @@ CASES: tuple[Case, ...] = (
          every_set(REFUSED_AT_LOAD, 'resource-uri-collides-with-the-core'),
          'a contribution the server would refuse loaded'),
     Case('capability-scratch-per-capability', 'core/capabilities.py',
-         (('    scratch = _scratch()\n    try:\n        for distribution, nameless, ep in ordered:\n',
+         (('    scratch = _scratch()\n    known = set(sys.modules)\n    capability: Capability | None = None\n'
+           '    try:\n        for distribution, nameless, ep in ordered:\n',
+           '    known = set(sys.modules)\n    capability: Capability | None = None\n'
            '    try:\n        for distribution, nameless, ep in ordered:\n            scratch = _scratch()\n'),),
          every_set(f'{CAPABILITIES}::test_a_uri_colliding_with_an_earlier_capability_is_refused'),
          'as FastMCP keys it, loaded'),
@@ -2608,16 +2617,16 @@ CASES: tuple[Case, ...] = (
          (('            uri_owners.update((uri, distribution) for uri in uris)\n', ''),),
          every_set(URI_TAKEN, 'earlier'), 'a duplicate resource URI loaded'),
     Case('capability-refusal-keeps-registry', 'core/capabilities.py',
-         ((ROLLBACK, ROLLBACK.replace('        del TOOL_REGISTRY[start:]\n', '').replace(
-             '            raise\n', '            raise\n        del TOOL_REGISTRY[start:]\n')),),
+         ((ROLLBACK, ROLLBACK.replace(CUT, '                if not isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+                                           '    ' + CUT)),),
          every_set(REFUSED_AT_LOAD, 'resource-not-a-url'), 'a refused load left'),
     Case('capability-other-exception-escapes', 'core/capabilities.py',
          (('        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n',
            '        if True:\n'),),
          every_set(REFUSED_AT_LOAD, 'tool-without-a-module'), 'not a CapabilityLoadError'),
     Case('capability-other-exception-keeps-registry', 'core/capabilities.py',
-         ((ROLLBACK, ROLLBACK.replace('        del TOOL_REGISTRY[start:]\n', '').replace(
-             '            raise\n', '            del TOOL_REGISTRY[start:]\n            raise\n')),),
+         ((ROLLBACK, ROLLBACK.replace(CUT, '                if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+                                           '    ' + CUT)),),
          every_set(REFUSED_AT_LOAD, 'tool-without-a-module'), 'a refused load left'),
     Case('capability-composition-tie-unbroken', 'core/capabilities.py',
          (('    return tuple(sorted(capabilities, key=lambda c: (c.capability.order, c.distribution)))\n',
@@ -2949,13 +2958,7 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'the load raised SystemExit, not a CapabilityLoadError naming a capability'),
     alternative('capability-load-failure-passes-re-raises', LOADER,
-                (('    except BaseException as exc:\n'
-                  '        del TOOL_REGISTRY[start:]\n'
-                  '        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
-                  '            raise\n'
-                  '        raise CapabilityLoadError(distribution, _cause(exc)) from exc\n',
-                  '    except BaseException as exc:\n'
-                  '        raise\n'),),
+                ((ROLLBACK, '        raise\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'the load raised SystemExit, not a CapabilityLoadError naming a capability'),
     alternative('capability-named-isinstance-strip-getattr-dist-path-without-operand-1', LOADER,

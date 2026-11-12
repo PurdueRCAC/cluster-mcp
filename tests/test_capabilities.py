@@ -9,7 +9,8 @@ the core's tools and exactly theirs, listed in load order with the site context 
 base of the core's text and theirs in composition order that lists exactly the tools it serves.
 
 A capability that cannot be loaded is refused with one line naming its distribution, and the tool
-registry is left as it was. The failures are planted as distributions in a scratch directory (a
+registry is left as it was, the modules the load imported forgotten, so a load retried after it in the
+same process is a first load. The failures are planted as distributions in a scratch directory (a
 `*.dist-info` beside its package, read with `Distribution.at`), so no test edits the tree; a planted
 capability with a tool and a resource is served beside the members with no core edit. The core's
 modules name no member.
@@ -1587,6 +1588,163 @@ def test_a_failed_load_is_not_cached(names: tuple[str, ...], monkeypatch: pytest
     assert [c.capability.name for c in loaded] == sorted(names), f'a failed load was cached: {loaded}'
     assert installed() is loaded and len(discoveries) == 3, \
         f'a load that succeeded was not cached: {len(discoveries)} discoveries for 4 calls'
+
+
+# A load is retried after a failure through each library entry point: `load()` itself, `installed()`,
+# which never caches a failure, and `create_mcp_server()` given no capabilities, which reads it.
+RETRY_ENTRIES = ('load', 'installed', 'server')
+
+# The failing capabilities a load is retried after, each planted after a clean one: one that fails
+# before its tools module has imported, and the rest once it has, from a module the load never names
+# (a helper reached through another module, a helper its entry point's module imports), and one whose
+# refusal's own text imports a module that registers a tool.
+RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', 'tool-not-a-tool',
+           'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text')
+
+# Where the two are planted, and what a caller imported first: both top-level with nothing imported,
+# the clean one's package imported first, the failing one's imported first, or the clean one a
+# portion of the `cluster_mcp` namespace package, as every member is.
+LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace')
+
+# The clean capability's tool, and what a failed first load and its retries are failed with.
+FIRST_TOOL = 'planted_first_echo'
+FIRST_LOAD = 'a failed first load changed'
+RETRIED_LOAD = 'a load retried after a failure is not a first load'
+
+# A tools module's tail that raises an exception whose text, asked for, imports a module that
+# registers a tool.
+LATE = '''
+
+class Late(Exception):
+    """An exception whose text imports a module that registers a tool."""
+
+    def __str__(self) -> str:
+        import {m}.late  # noqa: F401
+        return 'planted late'
+
+
+raise Late()
+'''
+
+
+def clean_first(layout: str) -> tuple[str, dict[str, str]]:
+    """The clean capability planted first under `layout`: its package and its files."""
+    module = 'cluster_mcp.planted_first' if layout == 'namespace' else 'planted_first'
+    base = module.replace('.', '/')
+    return module, {f'{base}/__init__.py': '', f'{base}/tools.py': ECHO_TOOL.format(name=FIRST_TOOL),
+                    f'{base}/capability.py': capability_source(module, name='planted_first', text=echo_text(FIRST_TOOL))}
+
+
+def retried_failure(kind: str) -> tuple[str, str, dict[str, str], str]:
+    """The failing capability of `kind`: its distribution, entry point line, files and refusal."""
+    if kind in REJECTED:
+        dist, entry, files = rejected_package(kind)
+        return dist, entry, files, f'cannot load capability {dist}: {REJECTED[kind]["cause"]}'
+    if kind in UNLOADABLE:
+        case = unloadable(kind)
+        return case.dist, case.entry, case.files, f'cannot load capability {case.named}: {case.cause}'
+    module = 'planted_' + kind.replace('-', '_')
+    dist, entry = f'planted-{kind}', f'cap = {module}.capability:CAPABILITY'
+    if kind == 'stray-through-a-helper':
+        files = package(module, tools_tail=f'\nimport {module}_via  # noqa: E402, F401\n')
+        files[f'{module}_via.py'] = f'import {module}.helper  # noqa: F401\n'
+        files[f'{module}/helper.py'] = HELPER
+        cause = f"loading it registered ['planted_helper'], which are outside {module}.tools"
+    elif kind == 'non-tool-from-a-helper':
+        files = package(module)
+        files[f'{module}/capability.py'] = f'import {module}.helper  # noqa: F401\n\n' + files[f'{module}/capability.py']
+        files[f'{module}/helper.py'] = NOT_A_TOOL
+        cause = 'loading it registered a function, not a FunctionTool'
+    else:
+        files = package(module, tools_tail=LATE.format(m=module))
+        files[f'{module}/late.py'] = ECHO_TOOL.format(name='planted_late')
+        cause = 'Late: planted late'
+    return dist, entry, files, f'cannot load capability {dist}: {cause}'
+
+
+def load_through(entry: str, found: list[EntryPoint]) -> tuple[str, tuple[Loaded, ...], list[str] | None]:
+    """Load `found` through `entry`: the refusal's message ('' when it loads), what loaded, and the
+    tools the server serves (None but through `server`).
+
+    Anything else it raises or exits with fails the test: a load refuses only with a
+    `CapabilityLoadError`.
+    """
+    try:
+        if entry == 'load':
+            return '', load(found), None
+        if entry == 'installed':
+            return '', installed(), None
+        server = create_mcp_server('none', site=SITE)
+        return '', installed(), served_tools(server)
+    except CapabilityLoadError as exc:
+        return str(exc), (), None
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:
+        pytest.fail(f'the load raised {type(exc).__name__}, not a CapabilityLoadError naming a capability: {exc!r}')
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+@pytest.mark.parametrize('layout', LAYOUTS)
+@pytest.mark.parametrize('kind', RETRIED)
+@pytest.mark.parametrize('entry', RETRY_ENTRIES)
+def test_a_load_retried_after_a_failure_is_a_first_load(entry: str, kind: str, layout: str, names: tuple[str, ...],
+                                                        plant: Callable[..., EntryPoint],
+                                                        monkeypatch: pytest.MonkeyPatch,
+                                                        request: pytest.FixtureRequest) -> None:
+    # A failed load forgets what it imported, so a retry in the same process imports it again, as a
+    # first load in a fresh process would: with the failing capability still there it is refused as
+    # the first load refused it, never the clean one before it; without it, every capability loads
+    # with its tools, each registered once.
+    want = {n: by_name()[n].tools for n in names}
+    module, files = clean_first(layout)
+    clean = plant('planted-a-first', f'first = {module}.capability:CAPABILITY', files)
+    dist, line, failing_files, refusal = retried_failure(kind)
+    failing = plant(dist, line, failing_files)
+    found = [*members(names), clean, failing]
+    if entry != 'load':
+        monkeypatch.setattr(cluster_mcp.core.capabilities, 'entry_points', lambda group: tuple(found))
+        monkeypatch.setattr(cluster_mcp.core.capabilities, '_installed', None)
+    if layout == 'namespace':
+        request.addfinalizer(lambda: vars(cluster_mcp).pop('planted_first', None))
+    if layout == 'clean-imported-first':
+        __import__(module)
+    if layout == 'failing-imported-first':
+        __import__(line.split(' = ')[1].partition('.')[0])
+    assert f'{module}.tools' not in sys.modules, 'the clean capability was imported before its first load'
+    before = list(TOOL_REGISTRY)
+
+    first, _, _ = load_through(entry, found)
+    assert first == refusal, f'{FIRST_LOAD} its refusal: expected {refusal!r}, got {first!r}'
+    assert TOOL_REGISTRY == before, f'{FIRST_LOAD} the registry: it left {TOOL_REGISTRY[len(before):]} registered'
+    if layout == 'namespace':
+        assert 'planted_first' not in vars(cluster_mcp), \
+            f'{RETRIED_LOAD}: the failed load left cluster_mcp.planted_first bound to the module it imported'
+
+    again, _, _ = load_through(entry, found)
+    assert again == first, f'{RETRIED_LOAD}: with the failing capability still there, expected {first!r}, got {again!r}'
+    assert TOOL_REGISTRY == before, \
+        f'{RETRIED_LOAD}: the refused retry left {TOOL_REGISTRY[len(before):]} registered'
+
+    found.remove(failing)
+    message, loaded, served = load_through(entry, found)
+    if message:
+        pytest.fail(f'{RETRIED_LOAD}: with the failing capability removed, the retry was refused: {message}')
+    got = {each.capability.name: each.tools for each in loaded}
+    assert sorted(got) == sorted([*names, 'planted_first']), \
+        f'{RETRIED_LOAD}: with the failing capability removed, the retry loaded {sorted(got)}'
+    assert [tool.name for tool in got['planted_first']] == [FIRST_TOOL], \
+        f'{RETRIED_LOAD}: the clean capability came back with {[tool.name for tool in got["planted_first"]]}'
+    for name, tools in want.items():
+        assert [id(tool) for tool in got[name]] == [id(tool) for tool in tools], \
+            f'{RETRIED_LOAD}: the {name} member came back with {[tool.name for tool in got[name]]}, not its own tools'
+    for tool in (tool for tools in got.values() for tool in tools):
+        assert sum(held is tool for held in TOOL_REGISTRY) == 1 \
+            and sum(held.name == tool.name for held in TOOL_REGISTRY) == 1, \
+            f'{RETRIED_LOAD}: {tool.name!r} is not registered exactly once'
+    if served is not None:
+        assert served.count(FIRST_TOOL) == 1, f'{RETRIED_LOAD}: the server serves {served}'
 
 
 # The core's tools that open and close every listing, by name, as clients have always seen them.

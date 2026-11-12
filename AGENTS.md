@@ -164,7 +164,7 @@ member modules:
 | `startup.py` | What a server that cannot start tells its client: the SSH backend's `connect_failure_message` (`cannot connect to <host>: <cause>`, imported from `executor/ssh.py`) or a capability's load failure (`cannot load capability <distribution>: <cause>`, from `capabilities.py`), `answer_until_eof` (on stdio, every request answered with that message as a JSON-RPC error until EOF) and `StartupFailure`. Imports no MCP stack. |
 | `server.py` | `create_mcp_server()` — builds the `FastMCP` instance (named `cluster-mcp`), attaches auth, registers the core's tools and resources and those of the capabilities it is given (`run()` gives the ones the probe kept; by default every installed one, `installed()`), the middleware and the custom routes. Home of **`base_instructions()`**, the agent-facing contract: the core's text, then each loaded capability's, in composition order (§9). |
 | `instructions.py` | `CORE_INSTRUCTIONS`, the generic core of the served instructions: the core's own tools and `cluster://context`, no site named. Imports nothing. |
-| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; whatever a capability raises or exits with but a `KeyboardInterrupt` is refused naming it; a failure rolls the tool registry back), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a record any of whose values (its `commands` included) is not exactly its built-in type, a capability resource that is not a well-formed entry, not marked `executor: True`, at a URI already served, or that FastMCP refuses when `serve()` assembles it on the load's scratch server (§7, §8); `serve()` is how every server registers tools and resources. Imports no member. |
+| `capabilities.py` | The capability contract (§7): `GROUP` (the entry-point group `cluster_mcp.capabilities`), `Capability`, `Loaded`, `CapabilityLoadError` (`cannot load capability <distribution>: <cause>`), `load()` (the group's entry points, in distribution order, each checked; whatever a capability raises or exits with but a `KeyboardInterrupt` is refused naming it; a failure rolls the tool registry back and forgets the modules it imported), `installed()` (the one load the server and the tests share) and `composed()` (the base's order, `(order, distribution)`). It refuses a record any of whose values (its `commands` included) is not exactly its built-in type, a capability resource that is not a well-formed entry, not marked `executor: True`, at a URI already served, or that FastMCP refuses when `serve()` assembles it on the load's scratch server (§7, §8); `serve()` is how every server registers tools and resources. Imports no member. |
 | `probes.py` | The capability probe (§4, §7): `PROBE_TIMEOUT` (10 s, the one bound on every probe of a start), `LOOKUP` (the registered fixed script that answers, for each declared command, whether `type -P` finds it on PATH), `Verdict`, `Pending` (its deadline taken when the probe starts; `verdicts()` waits until it at most and decides each capability once), `start()` (one lookup of every command the loaded capabilities declare, through the executor given, on a daemon thread, or none when none is declared) and `unprobed()` (every capability served, nothing run). It decides which loaded capabilities the cluster can serve, never what startup does with that. Imports no member. |
 | `context.py` | `executor_var` (`ContextVar`) + `get_executor()`/`set_executor()`. **The isolation primitive.** Tiny and load-bearing. |
 | `middleware.py` | `SharedExecutorMiddleware` (ssh/local) and `AuthExecutorMiddleware` (delegate) — each sets the per-request executor for every tool call (`on_call_tool`) and resource read (`on_read_resource`) through one private `_install`, the delegate read hook skipping `OPEN_RESOURCES` — and `ToolErrorMiddleware`, the error boundary `create_mcp_server` adds before them, which turns an exception raised around a tool call into a tool error result, and one raised around a resource read into a `ResourceError`, each carrying `str(exc)`. |
@@ -402,7 +402,13 @@ import has no effect.
     `composed()` by order then distribution beside capabilities whose names, tools modules and
     distributions each sort differently (`test_composition_breaks_ties_by_distribution`), the load
     by distribution then entry-point name, not value; a failed load is not cached and a successful
-    one is, discovered once (`test_a_failed_load_is_not_cached`); and under each set the listing
+    one is, discovered once (`test_a_failed_load_is_not_cached`); a load retried after a failure,
+    through each library entry point, with a clean capability before the failing one in each package
+    layout (top-level, either one's package imported first, a portion of the `cluster_mcp`
+    namespace), is a first load: refused with the first load's message while the failing one is
+    there, the clean one never named, and without it every capability loaded with its tools, each
+    registered once, the planted one by name and each member's by identity
+    (`test_a_load_retried_after_a_failure_is_a_first_load`); and under each set the listing
     opens with the six opening core tools and closes with `cluster_context`, by name
     (`test_the_listing_opens_and_closes_with_the_core_tools_by_name`). Every kind of contribution a server would refuse while it is
     assembled, or would let replace another (`REJECTED`: a URI that is not a URL, a parameter on a
@@ -2191,7 +2197,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   `CORE_TOOLS` / `CLOSING_TOOLS` snapshots taken after them; a member import here would register
   its tools whether or not its capability loads (§7).
 - **`capabilities.py`** — `installed()` is the one load: a second `load()` of the same capabilities
-  registers nothing new, and a member whose editable install was not re-synced after its entry
+  after a successful one registers nothing new (after a failed one it imports the capabilities
+  again), and a member whose editable install was not re-synced after its entry
   point was added is silently absent (§7). Every type check of the record, of each value in it (each
   command, each resource entry, its keys and its values but the handler) and of the distribution's
   name is exact (`type(...) is`), never `isinstance`, and comes before the value is used: a
@@ -2819,8 +2826,18 @@ What each mode means:
   loader reads every distribution's entry points when FastMCP imports it, as it did before
   capabilities existed.) The first refusal raises `CapabilityLoadError`, `cannot load capability
   <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back to what it held before
-  the load began. A `KeyboardInterrupt` is not a refusal: the registry is cut back the same way and
-  it interrupts the server as it would anywhere (`exit_status.keyboard_interrupt`). At startup the
+  the load began and forgetting the modules the load imported (`_unimport`), so a later load in the
+  same process imports them again and is refused, or loads, as a first load in a fresh process
+  would. What is forgotten is every module new since the load began but a library's own lazy
+  import: one below a package that was already imported then as a regular package, and below no
+  loading capability's root (the outermost regular package of its entry point's module or its tools
+  module; a namespace package such as `cluster_mcp` protects nothing below it). The refusal's text
+  is built first, and the registry is cut last. **A retry runs a capability's modules again, so a
+  capability's import must be repeatable in one process**: one that registers at import into
+  another library's state that refuses a duplicate fails its retry, naming it (recorded, not fixed;
+  `issues/capability-import-side-effects-on-retry.md`). A `KeyboardInterrupt` is not a refusal: the
+  modules are forgotten and the registry cut back the same way (a retry after one is
+  `issues/capability-reload-after-interrupt.md`), and it interrupts the server as it would anywhere (`exit_status.keyboard_interrupt`). At startup the
   error stops the server, reported as a failed SSH connect is (§4); nothing catches it to start
   without the capability. So whatever a capability declares fails at the load or not at all, and so
   does whatever its code does while it loads (`test_what_a_server_would_refuse_is_refused_at_load`,
@@ -2831,7 +2848,10 @@ What each mode means:
   budget: a base too long for it is refused when the server is built, as a budget too small (§
   Configuration), whatever made it long.
 - `installed()` caches the load once it succeeds and never a failure: a failed load raises again,
-  loading again, on the next call (`test_a_failed_load_is_not_cached`).
+  loading again, on the next call (`test_a_failed_load_is_not_cached`). A load retried after a
+  failure, through `load()`, `installed()` or `create_mcp_server()` given no capabilities, refuses
+  with the first load's message while the failing capability is there, and without it loads every
+  capability with its tools, each registered once (`test_a_load_retried_after_a_failure_is_a_first_load`).
 - **A capability's `commands` are the commands its tools need on the cluster, declared as data and
   never as code**, so a probe of them runs no capability code. The Slurm member declares its six
   client commands (`sbatch`, `squeue`, `scancel`, `sacct`, `sinfo`, `scontrol`); the RCAC member

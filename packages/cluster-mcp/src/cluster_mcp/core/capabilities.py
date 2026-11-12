@@ -16,13 +16,15 @@ Nothing here runs at import. `installed()` loads every capability the environmen
 the server starts; a capability that cannot be discovered, ordered or loaded stops the load with a
 `CapabilityLoadError` naming its distribution, whatever its code raised or exited with (but a
 `KeyboardInterrupt`, which still interrupts), and leaves the tool registry as it was before the load
-began. The load assembles each capability's tools and resources on a scratch server through
-`serve()`, the one way every server takes them, so whatever a capability declares fails at the load
-or not at all. What an entry point names must be exactly a `Capability`, and every value in it the core
-or FastMCP reads exactly a built-in type, as must its distribution's name; the load refuses anything
-else before using it, so no read of a loaded record runs capability code. A capability's code is its
-modules, run at the load, and its tools and resource handlers: FastMCP reads each as it registers
-it, on the load's scratch server and on each server built after, and a request calls it.
+began, the modules the load imported forgotten, so a later load imports them again as a first load
+in a fresh process would. The load assembles each capability's tools and resources on a scratch
+server through `serve()`, the one way every server takes them, so whatever a capability declares
+fails at the load or not at all. What an entry point names must be exactly a `Capability`, and every
+value in it the core or FastMCP reads exactly a built-in type, as must its distribution's name; the
+load refuses anything else before using it, so no read of a loaded record runs capability code. A
+capability's code is its modules, run at the load, and its tools and resource handlers: FastMCP
+reads each as it registers it, on the load's scratch server and on each server built after, and a
+request calls it.
 """
 
 # Type annotations
@@ -31,10 +33,12 @@ from typing import Final, Iterable, NamedTuple
 
 # Standard libs
 import re
+import sys
 import warnings
 from dataclasses import dataclass
 from importlib import import_module
 from importlib.metadata import Distribution, EntryPoint, distributions, entry_points
+from types import ModuleType
 
 # External libs
 from fastmcp import FastMCP
@@ -178,6 +182,86 @@ def _below(module: str, package: str) -> bool:
     return module == package or module.startswith(package + '.')
 
 
+# What `_file` gives for a `sys.modules` value that is not plainly a module.
+_NOT_PLAIN: Final = object()
+
+
+def _file(module: object) -> object:
+    """`module`'s `__file__` as its namespace holds it: a `str` for a regular package or a plain module,
+    None for a namespace package; `_NOT_PLAIN` when `module` is not exactly a `ModuleType` or its
+    `__file__` is neither.
+
+    Read through `vars()`, never `getattr`: an object of a type of its own in `sys.modules` would run
+    its code on any attribute read.
+    """
+    if type(module) is not ModuleType:
+        return _NOT_PLAIN
+    file = vars(module).get('__file__')
+    return file if file is None or type(file) is str else _NOT_PLAIN
+
+
+def _root(name: str) -> str:
+    """The outermost package of the module `name` that is plainly a module with a `__file__`, or `name`
+    when none is: `cluster_mcp.example` for `cluster_mcp.example.capability`, since `cluster_mcp` is a
+    namespace package that every member shares."""
+    parts = name.split('.')
+    for i in range(1, len(parts) + 1):
+        prefix = '.'.join(parts[:i])
+        if type(_file(sys.modules.get(prefix))) is str:
+            return prefix
+    return name
+
+
+def _roots(ordered: Iterable[_Entry], loaded: Iterable[Loaded], capability: Capability | None) -> tuple[str, ...]:
+    """The root (`_root`) of each module a load of `ordered` reached for: each entry point's module, the
+    tools module of each capability in `loaded`, and that of `capability`, the one it was loading.
+
+    An entry point's module is read from its value, and only when that is exactly a `str`, never from
+    `ep.module`, which raises on a malformed value; the tools modules are exactly `str`, as `_checked`
+    passed them.
+    """
+    modules = [entry.ep.value.partition(':')[0].strip() for entry in ordered if type(entry.ep.value) is str]
+    modules += [each.capability.tools for each in loaded]
+    if capability is not None:
+        modules.append(capability.tools)
+    return tuple(_root(module) for module in modules if module)
+
+
+def _unimport(known: set[str], roots: tuple[str, ...]) -> None:
+    """Forget every module imported since `known`, a snapshot of `sys.modules`, but a library's own.
+
+    A load that failed leaves the modules it imported in `sys.modules`, where a later load would find
+    them imported and run none of them again: its capabilities would register nothing. Forgotten, they
+    are imported again, as a first load in a fresh process imports them, and register again.
+
+    A new module is a library's own lazy import, kept, when one of its packages was already imported at
+    the snapshot as a regular package (or as something not plainly a module, which is left alone), and
+    it lies below none of `roots`: FastMCP, pydantic or the standard library imports such a submodule as
+    it is first used, and its package holds it, so forgetting it would leave the package handing out the
+    old module beside the new one. A namespace package (`cluster_mcp`) holds every member and protects
+    nothing below it, and whatever lies below a capability's root is the capability's, even when a caller
+    imported its package first. When a forgotten module's package is plainly a module, the package's
+    attribute holding it is dropped too, so `from package import module` imports it again.
+
+    `sys.modules` is never iterated here, only copied in one call, and entries are popped: another
+    thread's import changes it as it goes. A module another thread is importing at that moment lies
+    outside what the load supports: it is not thread-safe.
+    """
+    for name in set(sys.modules) - known:
+        if type(name) is not str:
+            continue
+        parts = name.split('.')
+        packages = ('.'.join(parts[:i]) for i in range(1, len(parts)))
+        library = any(_file(sys.modules.get(package)) is not None for package in packages if package in known)
+        if library and not any(_below(name, root) for root in roots):
+            continue
+        module = sys.modules.pop(name, None)
+        package, _, leaf = name.rpartition('.')
+        holder = sys.modules.get(package) if package else None
+        if module is not None and type(holder) is ModuleType and vars(holder).get(leaf) is module:
+            vars(holder).pop(leaf, None)
+
+
 class _Invalid(Exception):
     """A payload that is not a well-formed `Capability`; its text is the sentence saying why."""
 
@@ -302,9 +386,10 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     resources cannot be served: assembled through `serve()` on a scratch server that holds the core's
     and every earlier capability's, FastMCP refuses it or keys it as one it already holds. Anything
     else raised or exited with while loading a capability fails it too, but a `KeyboardInterrupt`,
-    which is raised as it is. The first failure raises `CapabilityLoadError`, after `TOOL_REGISTRY` is
-    cut back to what it held before this load began; so does a distribution whose entry points cannot
-    be read while they are discovered.
+    which is raised as it is. The first failure raises `CapabilityLoadError`, after the modules this
+    load imported are forgotten (`_unimport`), so a later load imports them again, and `TOOL_REGISTRY`
+    is cut back to what it held before this load began; so does a distribution whose entry points
+    cannot be read while they are discovered. A load after a successful one imports nothing new.
     """
     found = _discovered() if eps is None else tuple(eps)
     entries = [_Entry(*_identity(ep), ep) for ep in found]
@@ -317,6 +402,8 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     names: dict[str, str] = {}
     loaded: list[Loaded] = []
     scratch = _scratch()
+    known = set(sys.modules)
+    capability: Capability | None = None
     try:
         for distribution, nameless, ep in ordered:
             if nameless:
@@ -381,10 +468,17 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
             uri_owners.update((uri, distribution) for uri in uris)
             loaded.append(Loaded(capability, distribution, tools))
     except BaseException as exc:
-        del TOOL_REGISTRY[start:]
-        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):
-            raise
-        raise CapabilityLoadError(distribution, _cause(exc)) from exc
+        # The refusal is built first: its text is a capability's code, and whatever that imports or
+        # registers is forgotten and cut with the rest. The registry is cut last, whatever forgetting raised.
+        try:
+            if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):
+                raise
+            raise CapabilityLoadError(distribution, _cause(exc)) from exc
+        finally:
+            try:
+                _unimport(known, _roots(ordered, loaded, capability))
+            finally:
+                del TOOL_REGISTRY[start:]
     return tuple(loaded)
 
 
@@ -396,7 +490,7 @@ def installed() -> tuple[Loaded, ...]:
     """Every capability this environment has, loaded on the first call and cached once it succeeds.
 
     The CLI, `create_mcp_server` and the tests share the one load, so no tool registers twice. A
-    failed load is not cached: it raises again on the next call.
+    failed load is not cached: the next call loads again, importing again what the failed one imported.
     """
     global _installed
     if _installed is None:

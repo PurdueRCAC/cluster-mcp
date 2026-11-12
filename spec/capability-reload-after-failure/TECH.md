@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/capability-reload-after-failure
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: A failed load forgets the modules it imported, and a retry is a first load
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -22,6 +22,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
@@ -86,7 +87,7 @@ refuses as a first load does, or loads every capability with its tools, each reg
 new test pins it on messages, tools and registrations. Every moved mutation anchor is re-planted,
 and the docs say what is now true.
 
-- [ ] `core/capabilities.py`: `import sys`, `from types import ModuleType`, and the helpers
+- [x] `core/capabilities.py`: `import sys`, `from types import ModuleType`, and the helpers
       `_file`, `_root`, `_roots` and `_unimport` after `_below`, as PLAN § 2 describes. Keep a new
       name only when an ancestor in `known` is a regular package (or not plainly a module) and the
       name is below no capability root. `pop` every other name. Drop the parent's attribute when the
@@ -94,11 +95,11 @@ and the docs say what is now true.
       on `str` keys and exact `ModuleType` objects, read through `vars()`, never `getattr`,
       `delattr` or `isinstance`, and never iterate `sys.modules` in Python. The docstrings say why
       each rule holds, and that a concurrent import is outside the loader's model.
-- [ ] `load()`: `known = set(sys.modules)` and `capability: Capability | None = None` right after
+- [x] `load()`: `known = set(sys.modules)` and `capability: Capability | None = None` right after
       `scratch = _scratch()`; the handler as PLAN § 2's code block (refusal built first; an outer
       `finally` whose inner `try` forgets and whose inner `finally` cuts the registry). Nothing in
       the loop body changes.
-- [ ] `tests/test_capabilities.py`: `test_a_load_retried_after_a_failure_is_a_first_load`,
+- [x] `tests/test_capabilities.py`: `test_a_load_retried_after_a_failure_is_a_first_load`,
       `@pytest.mark.unit`, parametrized `entry` (`load`, `installed`, `server`) × `kind`
       (`raises-at-tools`, `raises-at-declared`, `stray-imported-by-tools`, `tool-not-a-tool`,
       `stray-through-a-helper`, `non-tool-from-a-helper`, `registers-in-its-text`) × `layout`
@@ -109,17 +110,17 @@ and the docs say what is now true.
       load", step 3's refusal wrapped in `pytest.fail`. The `namespace` row asserts no stale
       attribute on `cluster_mcp` and its teardown removes any it left. Report the test's wall time
       in the commit body.
-- [ ] `tests/mutants.py`: re-plant `ROLLBACK` and the cases `capability-scratch-per-capability`,
+- [x] `tests/mutants.py`: re-plant `ROLLBACK` and the cases `capability-scratch-per-capability`,
       `capability-refusal-keeps-registry`, `capability-other-exception-keeps-registry` and
       `capability-load-failure-passes-re-raises` against the new text, each breaking the same
       contract with the same `why` as before; update the comment above `ROLLBACK`.
-- [ ] Docs, PLAN § 2 "Docs": the module, `load()` and `installed()` docstrings; AGENTS.md §7 (with
+- [x] Docs, PLAN § 2 "Docs": the module, `load()` and `installed()` docstrings; AGENTS.md §7 (with
       the requirement on capability authors that a capability's import be repeatable in one
       process, per the GOAL's plan-sign-off Clarification), the footgun note on `capabilities.py`, § Testing beside `test_a_failed_load_is_not_cached`, and
       the repository map's `capabilities.py` row.
-- [ ] Check that `tests/test_packaging.py`'s pure-namespace checks pass after a `namespace` row
+- [x] Check that `tests/test_packaging.py`'s pure-namespace checks pass after a `namespace` row
       (PLAN § 5).
-- [ ] Stage, then run the `verify:`.
+- [x] Stage, then run the `verify:`.
 - **Verify:** both eras of `test_capabilities.py`, `test_mutations.py` and `test_hygiene.py`; the
   new test by node id; `test_startup.py -k capabilit` (the CLI path still stops with exit 5) in
   both eras; the four re-planted mutation cases with the runner's controls.
