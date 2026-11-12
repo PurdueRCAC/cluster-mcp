@@ -3,7 +3,7 @@ slug: sandbox-dirs-left-on-kill
 title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
 current_phase: done
@@ -51,10 +51,10 @@ phases:
   hill: uphill
   verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files ledger mutants suite
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: e051738a4338791e9297c9eb7bba1fe413804792
+  verdict: changes-requested
+  blocked_reason: 'review cycle 1: F1 a closed directory in a case scratch crashes the runner (R2, R6); F2a-c unpinned keeps and sweeps (R1, R4)'
+  cycle: 1
 ---
 
 # TECH.md — The suite and the mutation runner leave no sandbox directory behind
