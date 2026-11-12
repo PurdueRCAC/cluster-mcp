@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-28 entries, each of which ships in the first release after it lands. **Part II** ships as
+29 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-eight entries: every open hardening, robustness and safety item, and the rest of the rename in
+Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -83,9 +83,10 @@ They come in six groups, in this order:
   every family registers through, and the mutation run's hung child. Part II starts once all four
   have landed. The mutation run's own job (the first gate below) lands before core extraction's
   review.
-- **Gates** (ten), because every later gate rests on them: the mutation run, the two gaps the skip
-  check still leaves and the pins it still lacks, the waits the timing rows still miss, an
-  annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
+- **Gates** (eleven), because every later gate rests on them: the mutation run and the pins its
+  stop path still lacks, the two gaps the skip check still leaves and the pins it still lacks, the
+  waits the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
+  wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (three): the site files' size, the startup update check, and the floors a git install
@@ -149,6 +150,18 @@ it gates nothing yet, and every later mutation gate rests on it.
 
 *Horizon: Part I, gates first; before core extraction's review · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
 **Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
+
+## The mutation runner's stop path is pinned for its main layer, not its deeper ones
+
+`mutant-child-outlives-timeout` gave `tests/mutants.py` a stop path that finds every process of a
+hung or signalled run, stops it and waits for it to be gone. Every R-ID's check is pinned, but its
+review left 13 survivors, each a deeper layer of a pinned class: a zombie in the walk, a look that
+fails inside the wait, a narrowed or widened catch, a signal type on the wrong base, an extra
+statement in `main`. The code is correct on each; a change of that kind would pass every row.
+Found by that cycle's review, cycle 3, 2026-11-10.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutant-child-outlives-timeout/`](spec/mutant-child-outlives-timeout/) (REVIEW cycle 3, mutant sweep); `tests/mutants.py` (`stop_run`, `run_members`, `_wait_gone`); `tests/test_mutations.py`*
+**Seed:** [`issues/mutant-runner-stop-pins.md`](issues/mutant-runner-stop-pins.md) · *status: unshaped*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
