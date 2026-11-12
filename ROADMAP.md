@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+30 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -88,8 +88,8 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (three): the site files' size, the startup update check, and the floors a git install
-  resolves against.
+- **Safety** (four): a tool object changed after the load, the site files' size, the startup update
+  check, and the floors a git install resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -117,7 +117,7 @@ still taken by `isinstance`. The outcome: every tool exactly a `FunctionTool` wi
 decided at load, the handler excepted. Pre-existing; no code changes until its cycle.
 
 *Horizon: before Part II, safety · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
-**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
+**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: adopted:capability-tool-objects-inert*
 
 ## A retried capability load after a failure registers nothing and blames the wrong distribution
 
@@ -340,6 +340,17 @@ bash 3.2 only). Pre-existing.
 
 *Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
+
+## A capability can change a tool object after the load has checked it
+
+The load serves the objects the capability built, so capability code can change one after the load;
+serving a copy rebuilt from the checked values would close it. `capability-tool-objects-inert`
+makes every registered tool exact at load, and the check holds at load only: a handler that sets a
+field of its own tool afterwards, to a value of a type of its own, runs that type's code the next
+time FastMCP lists or calls the tool. Pre-existing. Filed at that cycle's GOAL sign-off, 2026-11-12.
+
+*Horizon: Part I, safety · Depends on: capability-tool-objects-inert (the check it extends) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (GOAL, Q1); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-tool-objects-served-copy.md`](issues/capability-tool-objects-served-copy.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 

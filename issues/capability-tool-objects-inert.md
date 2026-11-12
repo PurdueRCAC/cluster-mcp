@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:capability-tool-objects-inert
 kind: fix
 appetite: small
 lane: public
