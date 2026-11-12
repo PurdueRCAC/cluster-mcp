@@ -1,6 +1,6 @@
 [project]
 name = "cluster-mcp-rcac"
-version = "0.1.5"
+version = "0.2.0"
 description = "Purdue RCAC-specific tools for cluster-mcp"
 readme = "README.md"
 requires-python = ">=3.14"

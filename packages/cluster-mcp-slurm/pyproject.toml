@@ -1,6 +1,6 @@
 [project]
 name = "cluster-mcp-slurm"
-version = "0.1.5"
+version = "0.2.0"
 description = "Slurm tools for cluster-mcp"
 readme = "README.md"
 requires-python = ">=3.14"

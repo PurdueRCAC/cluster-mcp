@@ -4,7 +4,7 @@
 # is packages/cluster-mcp. The extras are also what makes `uv sync` install every member.
 [project]
 name = "rcac-mcp"
-version = "0.1.5"
+version = "0.2.0"
 description = "Deprecated name of cluster-mcp: installs cluster-mcp[slurm,rcac] and the rcac-mcp command"
 readme = "README.md"
 requires-python = ">=3.14"
