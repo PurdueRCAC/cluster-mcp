@@ -42,12 +42,14 @@ from __future__ import annotations
 
 import ast
 import itertools
+import logging
 import re
 import sys
 import textwrap
 import tomllib
 from dataclasses import dataclass, fields, replace
 from importlib.metadata import Distribution, EntryPoint, entry_points
+from importlib.metadata import version as metadata_version
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -57,7 +59,8 @@ import cluster_mcp
 import cluster_mcp.core
 import cluster_mcp.core.capabilities
 from harness import SITE, FastMCP, served_instructions, served_surface, served_tools
-from cluster_mcp.core.capabilities import GROUP, Capability, CapabilityLoadError, Loaded, composed, installed, load
+from cluster_mcp.core.capabilities import (GROUP, TOOL_RULES, Capability, CapabilityLoadError, Loaded, _default_violation,
+                                           _tool_violation, composed, installed, load)
 from cluster_mcp.core.instructions import CORE_INSTRUCTIONS
 from cluster_mcp.core.resources import OPEN_RESOURCES, RESOURCE_REGISTRY
 from cluster_mcp.core.server import create_mcp_server
@@ -170,11 +173,14 @@ def plant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[
     `plant(dist, entry, files)` writes `files` (path → text) and a `<dist>-0.0.1.dist-info` declaring
     `entry` (or several, one per line, returned as a tuple), with the directory first on `sys.path`;
     `metadata` (text or bytes) replaces the one its `METADATA` would hold. Afterwards the registry holds
-    what it held before the test and every planted module is forgotten, so no planted tool reaches
-    another test.
+    what it held before the test, every planted module is forgotten, so no planted tool reaches
+    another test, and `FastMCP.add_tool` and the load's `_below` are what they were, whatever a planted
+    module replaced them with.
     """
     before = list(TOOL_REGISTRY)
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(FastMCP, 'add_tool', FastMCP.add_tool)
+    monkeypatch.setattr(cluster_mcp.core.capabilities, '_below', cluster_mcp.core.capabilities._below)
 
     def planted(dist: str, entry: str, files: dict[str, str] | None = None,
                 metadata: str | bytes | None = None) -> EntryPoint | tuple[EntryPoint, ...]:
@@ -659,7 +665,7 @@ REJECTED: dict[str, dict[str, str]] = {
     },
     'tool-without-a-module': {
         'tools_tail': NO_MODULE,
-        'cause': "AttributeError: 'NoneType' object has no attribute 'startswith'",
+        'cause': 'loading it registered a tool whose fn has a __module__ that is a NoneType, not a str',
     },
 }
 
@@ -1064,32 +1070,50 @@ RAISED = {
 }
 
 # When it runs: while its entry point's module is imported; while its tools module is, after its tool
-# registered; once both are, while the load reads what it declared (the module its tool names, a `str`
-# whose `==` runs the statement, as the load's attribution of each registered tool compares it: the
-# record's own values are exact types, refused before any of their code could run, `exact-<site>`); or
-# while its resource is assembled (a handler that runs it on any attribute it lacks, as FastMCP reads
-# one) or its tool is (a `FunctionTool` of its own that runs it when FastMCP reads its version).
+# registered; once both are, while the load reads what it declared (`DECLARED`); or while its resource
+# is assembled (a handler that runs it on any attribute it lacks, as FastMCP reads one) or its tool is
+# (`ODD_TOOL`). The record's values and the tool objects are exact, refused before any of their code
+# could run (`exact-<site>`, `tool-*`), so the last two of these times are reached through what the
+# capability's code changed at import: the core's and FastMCP's own functions, which the load's checks
+# do not cover.
 WHEN = ('entry-point', 'tools', 'declared', 'served', 'served-tool')
 
-# The tools module's tail that replaces its registered tool with one of its own class, which runs
-# `{statement}` when its version is read.
+# The tools module's tail that replaces `FastMCP.add_tool` with a function that, for its own tool, puts
+# it back and runs `{statement}`: the load assembling its tool runs it.
 ODD_TOOL = '''
 
-from fastmcp.tools.function_tool import FunctionTool  # noqa: E402
-from cluster_mcp.core.tools import TOOL_REGISTRY  # noqa: E402
+from fastmcp import FastMCP  # noqa: E402
+
+_add_tool = FastMCP.add_tool
 
 
-class _Odd(FunctionTool):
-    def __getattribute__(self, name: str) -> object:
-        if name == 'version':
-            {statement}
-        return super().__getattribute__(name)
-
-    def __repr__(self) -> str:
-        return '_Odd()'
+def _adding(self, tool, *args, **kwargs):
+    if tool is planted_echo:
+        FastMCP.add_tool = _add_tool
+        {statement}
+    return _add_tool(self, tool, *args, **kwargs)
 
 
-TOOL_REGISTRY[-1] = _Odd(**{{field: getattr(planted_echo, field) for field in type(planted_echo).model_fields}})
+FastMCP.add_tool = _adding
+'''
+
+# The tools module's tail that replaces the load's `_below` with a function that, for its own tools
+# module, puts it back and runs `{statement}`: the load attributing its tools to what it declared runs it.
+DECLARED = '''
+
+import cluster_mcp.core.capabilities as _loader  # noqa: E402
+
+_below = _loader._below
+
+
+def _reading(module: str, package: str) -> bool:
+    if package == {package!r}:
+        _loader._below = _below
+        {statement}
+    return _below(module, package)
+
+
+_loader._below = _reading
 '''
 
 # A module beside the tools module that registers a tool, and what it is called.
@@ -1156,11 +1180,12 @@ def subclass_files(module: str, field: str) -> tuple[dict[str, str], str]:
     return files, cls
 
 
-# What a record holds as an exact built-in type, given a type of its own: a subclass of `str`, `int`,
-# `tuple` or `dict` whose every operation below exits once the entry point's module has built its
-# record, as one that reads `order.__eq__` once did after the load, ending the start with exit 0 and no
-# message. These are the operations the core, FastMCP and Python's own comparisons, hashes, iteration,
-# formatting and method calls reach a value through.
+# What a record or a tool holds as an exact built-in type, given a type of its own: a subclass of `str`,
+# `int`, `tuple`, `dict`, `list`, `set`, `float` or `timedelta`, a metaclass (of `type`) or a plain object,
+# whose every operation below exits once the planted module has built its record or changed its tool, as
+# one that reads `order.__eq__` once did after the load, ending the start with exit 0 and no message.
+# These are the operations the core, FastMCP and Python's own comparisons, hashes, iteration,
+# formatting, attribute reads and method calls reach a value through.
 OPERATIONS = {
     'str': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__len__', '__iter__',
             '__contains__', '__getitem__', '__add__', '__mul__', '__mod__', '__format__', '__str__', '__repr__',
@@ -1176,6 +1201,21 @@ OPERATIONS = {
     'dict': ('__eq__', '__ne__', '__len__', '__iter__', '__contains__', '__getitem__', '__setitem__', '__or__',
              '__ror__', '__reversed__', '__format__', '__str__', '__repr__', 'get', 'keys', 'values', 'items',
              'copy', 'setdefault', 'pop'),
+    'list': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__len__', '__iter__', '__contains__',
+             '__getitem__', '__setitem__', '__add__', '__mul__', '__reversed__', '__format__', '__str__', '__repr__',
+             'copy', 'count', 'index', 'append', 'extend'),
+    'set': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__len__', '__iter__', '__contains__',
+            '__or__', '__and__', '__sub__', '__xor__', '__format__', '__str__', '__repr__', 'copy', 'union',
+            'issubset', 'add'),
+    'float': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__bool__', '__int__',
+              '__float__', '__add__', '__radd__', '__sub__', '__rsub__', '__mul__', '__truediv__', '__neg__',
+              '__abs__', '__format__', '__str__', '__repr__', '__round__', '__trunc__'),
+    'timedelta': ('__eq__', '__ne__', '__lt__', '__le__', '__gt__', '__ge__', '__hash__', '__bool__', '__add__',
+                  '__radd__', '__sub__', '__rsub__', '__mul__', '__truediv__', '__neg__', '__abs__', '__format__',
+                  '__str__', '__repr__', 'total_seconds'),
+    'type': ('__eq__', '__ne__', '__hash__', '__getattribute__', '__instancecheck__', '__subclasscheck__',
+             '__call__', '__or__', '__ror__', '__format__', '__str__', '__repr__', 'mro'),
+    'object': ('__eq__', '__ne__', '__hash__', '__getattribute__', '__format__', '__str__', '__repr__'),
 }
 
 # The planted classes, each named `Planted<Type>`: `_RAN` records each operation run once `_ARMED`
@@ -1201,6 +1241,8 @@ def _planted(base: type) -> type:
 
 
 PlantedStr, PlantedInt, PlantedTuple, PlantedDict = (_planted(t) for t in (str, int, tuple, dict))
+PlantedList, PlantedSet, PlantedFloat, PlantedTimedelta, PlantedType, PlantedObject = (
+    _planted(t) for t in (list, set, float, __import__('datetime').timedelta, type, object))
 '''
 
 # A resource entry's source, every key and value given as source text.
@@ -1291,18 +1333,217 @@ def raising_files(module: str, statement: str, when: str) -> dict[str, str]:
         files[f'{module}/capability.py'] = (PLANTED_STOP + '\n' + head + stub + '\n\nCAPABILITY = '
                                             + tail.replace('resources=()', f"resources=({resource(handler='_Handler()')},)"))
     else:
-        tail = (f'\n\nclass _Module(str):\n    def __eq__(self, other: object) -> bool:\n        {statement}\n\n'
-                '    __hash__ = str.__hash__\n\n\nplanted_echo.fn.__module__ = _Module(planted_echo.fn.__module__)\n')
-        files = package(module, tools_tail='\n' + PLANTED_STOP + tail)
+        files = package(module, tools_tail='\n' + PLANTED_STOP + DECLARED.format(package=f'{module}.tools',
+                                                                                   statement=statement))
     return files
+
+
+# The tool objects a capability registers are decided at load too: every registry entry is exactly a
+# `FunctionTool`, its instance state is what pydantic gives one, and each field of the installed FastMCP's
+# model holds what its rule (`TOOL_RULES`) accepts, each refused naming the distribution with none of its
+# code run. The tools module changes its registered tool `planted_echo` after it is built (building it
+# coerces the top level back to a built-in), with the planted types of its capability module at hand, and
+# then arms them. The families come from the installed model and the rule table, so a field FastMCP adds
+# asks for its rows: `tool-subclass-reads-<field>` (a subclass of `FunctionTool` whose code runs when the
+# field is read), `tool-exact-<field>` (a value of a type of its own there; for `fn`, a callable that is
+# not a function), `tool-default-<field>` for each field the default rule decides (an exact, JSON-like value
+# that is not its default, which the rule for a field no rule names would accept), and `TOOL_DEPTH`'s rows
+# at depth and in the instance state.
+TOOL_FIELDS = tuple(cluster_mcp.core.capabilities.FunctionTool.model_fields)
+# The fields decided by type; every other field is the default rule's. Named here, not read from the rule
+# table, so a table that loses a field's rule still has its rows, and they fail.
+TYPED = ('name', 'description', 'parameters', 'output_schema', 'return_type', 'fn')
+DEFAULT_RULED = tuple(f for f in TOOL_FIELDS if f not in TYPED)
+
+# The names a planted tools module takes from its capability module.
+PLANTED_NAMES = ('_ARMED', '_RAN', 'PlantedStr', 'PlantedInt', 'PlantedDict', 'PlantedList', 'PlantedSet',
+                 'PlantedFloat', 'PlantedTimedelta', 'PlantedType', 'PlantedObject')
+
+# What `tool-exact-<field>` sets each field to (source text), and the rule's cause; every field the default
+# rule decides is given `DEFAULT_EXACT`'s value, its cause `is not its default`.
+TOOL_EXACT = {
+    'name': ("PlantedStr('planted_echo')", 'is a PlantedStr, not a str'),
+    'description': ("PlantedStr('Echo a text back.')", 'is a PlantedStr, not a str'),
+    'parameters': ('PlantedDict(planted_echo.parameters)', 'is a PlantedDict, not a dict'),
+    'output_schema': ('PlantedDict(planted_echo.output_schema)', 'is a PlantedDict, not a dict'),
+    'return_type': ("PlantedType('Returned', (), {})", 'holds a PlantedType, not a class or an alias it accepts'),
+    'fn': ('PlantedObject()', 'is a PlantedObject, not a function'),
+}
+DEFAULT_EXACT = {'version': "PlantedStr('1')", 'title': "PlantedStr('Planted')", 'icons': 'PlantedList()',
+                 'tags': 'PlantedSet()', 'meta': 'PlantedDict()', 'task_config': "PlantedDict(mode='forbidden')",
+                 'annotations': 'PlantedDict()', 'execution': 'PlantedDict()', 'auth': 'PlantedList()',
+                 'timeout': 'PlantedFloat(1.0)', 'run_in_thread': 'PlantedInt(1)'}
+# What `tool-default-<field>` sets each field to: exact and JSON-like, but not its default.
+DEFAULT_OTHER = {'version': "'1'", 'title': "'Planted'", 'icons': '[]', 'tags': "['planted']",
+                 'meta': "{'planted': True}", 'task_config': "{'mode': 'forbidden'}", 'annotations': '{}',
+                 'execution': '{}', 'auth': '[]', 'timeout': '1.0', 'run_in_thread': 'False'}
+
+# The rows at depth and in the instance state: the change (source text) and the cause after `loading it
+# registered `.
+TOOL_DEPTH = {
+    'tool-exact-parameters-key': ("planted_echo.parameters['properties'][PlantedStr('planted')] = {}",
+                                  'a tool whose parameters holds a PlantedStr key, not a str'),
+    'tool-exact-parameters-value': ("planted_echo.parameters['properties']['text']['type'] = PlantedStr('string')",
+                                    'a tool whose parameters holds a PlantedStr, not a JSON value'),
+    'tool-exact-parameters-element': ("planted_echo.parameters['required'][0] = PlantedStr('text')",
+                                      'a tool whose parameters holds a PlantedStr, not a JSON value'),
+    'tool-exact-parameters-twice': ("planted_echo.parameters['properties']['again'] = "
+                                    "planted_echo.parameters['properties']['text']",
+                                    'a tool whose parameters holds one container twice'),
+    'tool-exact-output_schema-value': ("planted_echo.output_schema['type'] = PlantedStr('object')",
+                                       'a tool whose output_schema holds a PlantedStr, not a JSON value'),
+    'tool-exact-task_config-state': ('planted_echo.task_config.__dict__ = PlantedDict(vars(planted_echo.task_config))',
+                                     'a tool whose task_config is not its default'),
+    'tool-exact-task_config-mode': ("planted_echo.task_config.mode = PlantedStr('forbidden')",
+                                    'a tool whose task_config is not its default'),
+    'tool-exact-task_config-poll_interval': ('planted_echo.task_config.poll_interval = PlantedTimedelta(seconds=5)',
+                                             'a tool whose task_config is not its default'),
+    'tool-exact-return_type-module': ("planted_echo.return_type = type('Returned', (), {'__module__': PlantedStr(__name__)})",
+                                      'a tool whose return_type holds a class whose __module__ is a PlantedStr, not a str'),
+    'tool-exact-return_type-attribute-name': ("planted_echo.return_type = type('Returned', (), {PlantedStr('planted'): 1})",
+                                              'a tool whose return_type holds a class with a PlantedStr attribute name, '
+                                              'not a str'),
+    'tool-exact-return_type-argument': ("planted_echo.return_type = list[PlantedStr('planted')]",
+                                        'a tool whose return_type holds a PlantedStr, not a class or an alias it accepts'),
+    'tool-state-dict': ("object.__setattr__(planted_echo, '__dict__', PlantedDict(vars(planted_echo)))",
+                        'a tool whose __dict__ is a PlantedDict, not a dict'),
+    'tool-state-key': ("vars(planted_echo)[PlantedStr('name')] = vars(planted_echo).pop('name')",
+                       'a tool whose __dict__ has a PlantedStr key, not a str'),
+    'tool-state-extra-key': ("object.__setattr__(planted_echo, 'planted', PlantedStr('planted'))",
+                             "a tool whose 'planted', which is not a field, holds a PlantedStr, not a JSON value"),
+    'tool-state-missing-field': ("del vars(planted_echo)['title']", 'a tool with no title'),
+    'tool-state-fields-set': ("object.__setattr__(planted_echo, '__pydantic_fields_set__', "
+                              'PlantedSet(planted_echo.__pydantic_fields_set__))',
+                              'a tool whose __pydantic_fields_set__ is a PlantedSet, not a set'),
+    'tool-state-fields-set-element': ("planted_echo.__pydantic_fields_set__.add(PlantedStr('planted'))",
+                                      'a tool whose __pydantic_fields_set__ holds a PlantedStr, not a str'),
+    'tool-state-extra': ("object.__setattr__(planted_echo, '__pydantic_extra__', PlantedDict())",
+                         'a tool whose __pydantic_extra__ is a PlantedDict, not None'),
+    'tool-state-private': ("object.__setattr__(planted_echo, '__pydantic_private__', PlantedDict())",
+                           'a tool whose __pydantic_private__ is a PlantedDict, not None'),
+    'tool-state-missing-slot': ("object.__delattr__(planted_echo, '__pydantic_extra__')",
+                                'a tool with no __pydantic_extra__'),
+    'tool-exact-fn-module': ('planted_echo.fn.__module__ = PlantedStr(planted_echo.fn.__module__)',
+                             'a tool whose fn has a __module__ that is a PlantedStr, not a str'),
+}
+
+# A subclass of `FunctionTool` whose code runs when `{field}` is read (`nothing`: one that adds no code,
+# `named-by-its-metaclass`: one whose metaclass's code runs when its name is read), put in the registry in
+# place of the tool it copies.
+TOOL_SUBCLASS = '''
+
+class {cls}(FunctionTool):
+    """A tool whose code runs when its `{field}` is read: it hands back what was registered."""
+
+    def __getattribute__(self, name: str) -> object:
+        if name == {field!r} and _ARMED:
+            _RAN.append(name)
+            raise SystemExit(0)
+        return super().__getattribute__(name)
+'''
+TOOL_NAMED = '''
+
+class _Naming(type(FunctionTool)):
+    """A metaclass whose code runs when the name of a class of it is read."""
+
+    @property
+    def __name__(cls) -> str:
+        if _ARMED:
+            _RAN.append('__name__')
+            raise SystemExit(0)
+        return type.__dict__['__name__'].__get__(cls)
+
+
+class {cls}(FunctionTool, metaclass=_Naming):
+    """A tool whose type's name is its metaclass's code."""
+'''
+
+# A resource handler whose annotation, read as FastMCP assembles the resource, changes the planted tool.
+SPOILING = '''
+
+def _spoil() -> type:
+    """Give the planted tool a name of a type of its own, then arm the planted types."""
+    from {module}.tools import planted_echo
+    planted_echo.name = PlantedStr('planted_echo')
+    _ARMED.append(True)
+    return str
+
+
+def _read_spoiling() -> _spoil():
+    """A resource whose annotation changes a tool."""
+    return 'planted'
+'''
+
+TOOL_KINDS = [*(f'tool-subclass-reads-{field}' for field in ('nothing', *TOOL_FIELDS)),
+              'tool-subclass-named-by-its-metaclass', *(f'tool-exact-{field}' for field in TOOL_FIELDS),
+              *(f'tool-default-{field}' for field in DEFAULT_RULED), *TOOL_DEPTH,
+              'tool-changed-by-a-resource-handler', 'tool-changed-by-a-later-capability']
+
+
+def with_planted_types(files: dict[str, str], module: str, tail: str = '') -> dict[str, str]:
+    """`files` with the planted types in `module`'s capability module, and `tail` after them."""
+    head, _, rest = files[f'{module}/capability.py'].partition('\n\nCAPABILITY = ')
+    assert rest, files[f'{module}/capability.py']
+    return {**files, f'{module}/capability.py': head + PLANTED_TYPES + tail + '\n\nCAPABILITY = ' + rest}
+
+
+def tool_files(module: str, change: str) -> dict[str, str]:
+    """A planted package `module` whose tools module runs `change` once its tool is registered, with the
+    planted types at hand, then arms them."""
+    prelude = ('\n\nfrom fastmcp.tools.function_tool import FunctionTool  # noqa: E402, F401\n'
+               'from cluster_mcp.core.tools import TOOL_REGISTRY  # noqa: E402, F401\n'
+               f'from {module}.capability import {", ".join(PLANTED_NAMES)}  # noqa: E402, F401\n')
+    return with_planted_types(package(module, tools_tail=prelude + change + '\n\n_ARMED.append(True)\n'), module)
+
+
+def tool_unloadable(kind: str, module: str, dist: str, entry: str) -> Unloadable:
+    """The planted capability of a `TOOL_KINDS` kind."""
+    if kind.startswith('tool-subclass-'):
+        field = kind.removeprefix('tool-subclass-reads-').removeprefix('tool-subclass-')
+        cls = 'Reads' + ''.join(part.title() for part in field.replace('-', '_').split('_'))
+        stub = TOOL_NAMED.format(cls=cls) if field == 'named-by-its-metaclass' else \
+            f'\n\nclass {cls}(FunctionTool):\n    """A subclass adding nothing."""\n' if field == 'nothing' else \
+            TOOL_SUBCLASS.format(cls=cls, field=field)
+        swap = (f'\n\nTOOL_REGISTRY[-1] = {cls}(**{{field: getattr(planted_echo, field) '
+                'for field in type(planted_echo).model_fields})')
+        return Unloadable(dist, entry, tool_files(module, stub + swap), None, dist,
+                          f'loading it registered a {cls}, not a FunctionTool')
+    if kind.startswith('tool-default-'):
+        field = kind.removeprefix('tool-default-')
+        return Unloadable(dist, entry, tool_files(module, f'planted_echo.{field} = {DEFAULT_OTHER[field]}'), None,
+                          dist, f'loading it registered a tool whose {field} is not its default')
+    if kind in TOOL_DEPTH:
+        change, cause = TOOL_DEPTH[kind]
+        return Unloadable(dist, entry, tool_files(module, change), None, dist, f'loading it registered {cause}')
+    if kind == 'tool-changed-by-a-resource-handler':
+        files = with_planted_types(package(module, resources=f"({resource(handler='_read_spoiling')},)"), module,
+                                   SPOILING.format(module=module))
+        return Unloadable(dist, entry, files, None, dist,
+                          'loading it registered a tool whose name is a PlantedStr, not a str')
+    if kind == 'tool-changed-by-a-later-capability':
+        later = f'{module}_later'
+        files = with_planted_types(package(module), module)
+        files |= package(later, tool='planted_later_echo', text=echo_text('planted_later_echo'))
+        files[f'{later}/capability.py'] = (f'from {module}.capability import PlantedStr, _ARMED\n'
+                                           f'import {module}.tools\n\n'
+                                           f"{module}.tools.planted_echo.name = PlantedStr('planted_echo')\n"
+                                           '_ARMED.append(True)\n\n' + files[f'{later}/capability.py'])
+        return Unloadable(dist, f'{entry}\nlater = {later}.capability:CAPABILITY', files, None, dist,
+                          'the registry holds a tool whose name is a PlantedStr, not a str')
+    field = kind.removeprefix('tool-exact-')
+    value, why = TOOL_EXACT.get(field, (DEFAULT_EXACT.get(field, 'PlantedDict()'), 'is not its default'))
+    return Unloadable(dist, entry, tool_files(module, f'planted_echo.{field} = {value}'), None, dist,
+                      f'loading it registered a tool whose {field} {why}')
 
 
 def unloadable(kind: str) -> Unloadable:
     """The planted capability of `kind`: `<raised>-at-<when>`, a `TIMING` kind, `nameless-<NAMELESS kind>`,
-    `subclass-reads-<SUBCLASS_READS field>`, or `exact-<EXACT_SITES site>`."""
+    `subclass-reads-<SUBCLASS_READS field>`, `exact-<EXACT_SITES site>`, or a `TOOL_KINDS` kind."""
     module = 'planted_' + kind.replace('-', '_')
     dist = f'planted-{kind}'
     entry = f'cap = {module}.capability:CAPABILITY'
+    if kind.startswith('tool-'):
+        return tool_unloadable(kind, module, dist, entry)
     if kind.startswith('nameless-'):
         metadata, cause = NAMELESS[kind.removeprefix('nameless-')]
         return Unloadable(dist, entry, package(module), metadata, entry.split(' = ')[1], cause)
@@ -1334,7 +1575,7 @@ def unloadable(kind: str) -> Unloadable:
 
 UNLOADABLE = [*(f'{raised}-at-{when}' for when in WHEN for raised in RAISED), *TIMING,
               *(f'nameless-{kind}' for kind in NAMELESS), *(f'subclass-reads-{field}' for field in SUBCLASS_READS),
-              *(f'exact-{site}' for site in EXACT_SITES)]
+              *(f'exact-{site}' for site in EXACT_SITES), *TOOL_KINDS]
 
 
 @pytest.mark.unit
@@ -1345,13 +1586,205 @@ def test_a_capability_that_cannot_load_is_refused_naming_it(kind: str, names: tu
     case = unloadable(kind)
     ep = plant(case.dist, case.entry, case.files, case.metadata)
     before = list(TOOL_REGISTRY)
-    message = load_error([*members(names), ep])
+    message = load_error([*members(names), *(ep if isinstance(ep, tuple) else (ep,))])
     want = f'cannot load capability {case.named}: {case.cause}'
     assert message == want, f'a capability that cannot load was not refused naming it: expected {want!r}, got {message!r}'
     assert TOOL_REGISTRY == before, f'a refused load left {[t for t in TOOL_REGISTRY[len(before):]]} registered'
     # A value of a type of its own is refused for its type before any of its operations runs.
     ran = getattr(sys.modules.get(case.entry.split(' = ')[1].split(':')[0]), '_RAN', None)
     assert not ran, f'a capability that cannot load was not refused naming it: its code ran during the load: {ran}'
+
+
+def echo_tool() -> object:
+    """A tool built as `@mcp_tool` builds one, registered nowhere."""
+    def planted_free(text: str) -> str:
+        """Echo a text back."""
+        return text
+    return cluster_mcp.core.capabilities.Tool.from_function(planted_free, description='Echo a text back.')
+
+
+@pytest.mark.unit
+def test_every_function_tool_field_has_a_rule() -> None:
+    # A re-lock to a FastMCP whose model adds or drops a field fails here until the rule table follows it.
+    model = cluster_mcp.core.capabilities.FunctionTool.model_fields
+    assert set(TOOL_RULES) == set(model), \
+        f'the rule table does not name exactly the locked model\'s fields: {sorted(set(TOOL_RULES) ^ set(model))}'
+    # Each other field is the default rule's, and holds its declared default in a tool `@mcp_tool` builds.
+    ruled = [field for field in DEFAULT_RULED if TOOL_RULES[field] is not _default_violation]
+    assert ruled == [], f'the rule table does not give the default rule these fields: {ruled}'
+    tool = echo_tool()
+    held = {field: _default_violation(vars(tool)[field], model[field]) for field in DEFAULT_RULED}
+    assert DEFAULT_RULED and held == dict.fromkeys(DEFAULT_RULED), \
+        f'a field the default rule decides is not at its default in a tool @mcp_tool builds: {held}'
+
+
+@pytest.mark.unit
+def test_the_locked_model_holds_no_private_attribute_and_forbids_extras() -> None:
+    # The state rules follow the installed model; a re-lock that gives it private attributes or extras
+    # fails here, so the rows that plant them are written against the model they will run on.
+    model = cluster_mcp.core.capabilities.FunctionTool
+    assert model.__private_attributes__ == {}, model.__private_attributes__
+    assert model.model_config.get('extra') == 'forbid', model.model_config
+
+
+# A value JSON-like at every depth, which the rule for a field no rule names accepts, and one of a type
+# of its own whose every operation is recorded, which it does not.
+JSON_LIKE = {'planted': [None, True, 1, 1.5, 'planted', [], {}]}
+
+
+class Undecided:
+    """A value of a type of its own: each operation the load could reach it through is recorded."""
+
+    RAN: list[str] = []
+
+    def __getattribute__(self, name: str) -> object:
+        Undecided.RAN.append(name)
+        return object.__getattribute__(self, name)
+
+    def __eq__(self, other: object) -> bool:
+        Undecided.RAN.append('__eq__')
+        return False
+
+    def __hash__(self) -> int:
+        Undecided.RAN.append('__hash__')
+        return 0
+
+    def __bool__(self) -> bool:
+        Undecided.RAN.append('__bool__')
+        return True
+
+    def __repr__(self) -> str:
+        Undecided.RAN.append('__repr__')
+        return 'Undecided()'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+@pytest.mark.parametrize('field', TOOL_FIELDS)
+def test_a_field_no_rule_names_is_checked_by_the_generic_rule(field: str, names: tuple[str, ...],
+                                                             monkeypatch: pytest.MonkeyPatch,
+                                                             caplog: pytest.LogCaptureFixture) -> None:
+    # As a newer FastMCP within the declared range would give it: a field the rule table does not name.
+    why = 'a field no rule names was not decided by the generic rule'
+    loader = cluster_mcp.core.capabilities
+    monkeypatch.delitem(TOOL_RULES, field)
+    monkeypatch.setattr(loader, '_warned', set())
+    version = metadata_version('fastmcp')
+
+    def warned() -> list[str]:
+        return [r.getMessage() for r in caplog.records
+                if r.name == loader.__name__ and r.levelno == logging.WARNING and repr(field) in r.getMessage()]
+
+    with caplog.at_level(logging.WARNING, logger=loader.__name__):
+        accepted = echo_tool()
+        setattr(accepted, field, JSON_LIKE)
+        assert _tool_violation(accepted) is None, f'{why}: a JSON-like value was refused'
+        assert warned() == [], f'{why}: a JSON-like value was warned of: {warned()}'
+        undecided = echo_tool()
+        setattr(undecided, field, Undecided())
+        Undecided.RAN.clear()
+        assert _tool_violation(undecided) is None, f'{why}: a value it does not accept was refused, not served undecided'
+        assert _tool_violation(undecided) is None, f'{why}: a value it does not accept was refused, not served undecided'
+        assert Undecided.RAN == [], f'{why}: deciding the value ran its code: {Undecided.RAN}'
+        try:
+            load(members(names))
+        except CapabilityLoadError as exc:
+            pytest.fail(f'{why}: the members were refused: {exc}')
+    found = warned()
+    assert len(found) == 1 and version in found[0], \
+        f'{why}: {len(found)} warnings naming the field and FastMCP {version} in a process, expected one: {found}'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_a_tool_registered_before_the_load_is_decided_too(names: tuple[str, ...],
+                                                          plant: Callable[..., EntryPoint]) -> None:
+    # Registered by a module imported before the load began, it is no capability's yet; the first
+    # capability the load reads the registry for is refused for it, its code not run.
+    why = 'a tool registered before the load was not decided'
+    module = 'planted_early_tool'
+    files = tool_files(module, "planted_echo.name = PlantedStr('planted_echo')")
+    helper = {f'{module}_helper/__init__.py': files.pop(f'{module}/tools.py').replace(f'{module}.capability',
+                                                                                        f'{module}_helper.types'),
+              f'{module}_helper/types.py': PLANTED_TYPES}
+    ep = plant('planted-early-tool', f'cap = {module}.capability:CAPABILITY', package(module) | helper)
+    __import__(f'{module}_helper')
+    before = list(TOOL_REGISTRY)
+    eps = [*members(names), ep]
+    message = load_error(eps)
+    first = sorted(e.dist.name for e in eps)[0]
+    want = f'cannot load capability {first}: the registry holds a tool whose name is a PlantedStr, not a str'
+    assert message == want, f'{why}: expected {want!r}, got {message!r}'
+    assert TOOL_REGISTRY == before, f'{why}: the refusal left {TOOL_REGISTRY[len(before):]} registered'
+    assert sys.modules[f'{module}_helper.types']._RAN == [], f'{why}: its code ran during the load'
+
+
+# Tools of every shape the load accepts: each return type `Tool.from_function` gives a type for, every
+# JSON-like scalar and container in a schema, a description and output schema of None, and a JSON-like
+# value beside the fields. The controls that a check too strict refuses.
+SHAPES = '''
+import collections.abc
+import dataclasses
+import enum
+import typing
+from typing import Annotated, Any, Literal, NamedTuple, TypedDict
+
+import pydantic
+
+from cluster_mcp.core.tools import mcp_tool
+
+
+@dataclasses.dataclass
+class Point:
+    x: int
+
+
+class Model(pydantic.BaseModel):
+    x: int
+
+
+class Colour(enum.Enum):
+    RED = 'red'
+
+
+class Shape(TypedDict):
+    x: int
+
+
+class Pair(NamedTuple):
+    x: int
+    y: int
+'''
+RETURNS = {'str': 'str', 'none': 'None', 'dict': 'dict', 'dataclass': 'Point', 'model': 'Model',
+           'models': 'list[Model]', 'enum': 'Colour', 'typed_dict': 'Shape', 'named_tuple': 'Pair',
+           'literal': "Literal['a', 1, True, None]", 'annotated': "Annotated[str, pydantic.Field(description='x')]",
+           'tuple': 'tuple[int, ...]', 'abc': 'collections.abc.Sequence[int]', 'optional': 'Point | None',
+           'typing_list': 'typing.List[int]', 'any': 'Any', 'unannotated': None}
+SHAPED = '''
+planted_shape_str.parameters['x-planted'] = {'none': None, 'bool': True, 'int': 1, 'float': 1.5, 'str': 'x',
+                                             'list': [None, [1, [2.5]], {}], 'dict': {'a': {'b': []}}}
+planted_shape_dict.output_schema['x-planted'] = [None, False, 0, -1.5, '', [], {'a': [{}]}]
+planted_shape_str.description = None
+planted_shape_none.output_schema = None
+object.__setattr__(planted_shape_str, 'planted', {'a': [1, 1.5, True, None, 'x']})
+'''
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+def test_an_inert_tool_of_every_accepted_shape_loads(names: tuple[str, ...], plant: Callable[..., EntryPoint]) -> None:
+    tools = SHAPES + ''.join(f'\n\n@mcp_tool\ndef planted_shape_{name}(text: str){"" if kind is None else " -> " + kind}:'
+                             f'\n    """Return a planted value."""\n    return None\n' for name, kind in RETURNS.items()) + SHAPED
+    text = 'Planted tools:\n' + '\n'.join(f'- planted_shape_{name}: Return a planted value' for name in RETURNS)
+    files = package('planted_shapes', text=text)
+    files['planted_shapes/tools.py'] = tools
+    ep = plant('planted-shapes', 'shapes = planted_shapes.capability:CAPABILITY', files)
+    try:
+        loaded = load([*members(names), ep])
+    except CapabilityLoadError as exc:
+        pytest.fail(f'an inert tool of a shape the load accepts was refused: {exc}')
+    assert [tool.name for tool in loaded[-1].tools] == [f'planted_shape_{name}' for name in RETURNS], \
+        f'an inert tool of a shape the load accepts was refused: {loaded[-1].tools}'
 
 
 # A keyboard interrupt raised, and one raised while the load reads the text of what a capability raised.

@@ -385,11 +385,36 @@ import has no effect.
     serves, and a value of a type of its own wherever the record holds a built-in one (`exact-<site>`,
     `EXACT_SITES`: each field, a command, a resource entry, a key of one, and each value of one but
     its handler; a subclass of `str`, `int`, `tuple` or `dict` whose every operation in `OPERATIONS`
-    exits once its record is built), refused for its type with none of those operations run. Each is refused in one line naming its distribution, and a failed load leaves
-    `TOOL_REGISTRY` as it was. Whatever a capability's code raises or exits with (an `Exception`,
+    exits once its record is built), refused for its type with none of those operations run. So is
+    each tool object that is not inert (`TOOL_KINDS`, generated from the installed `FunctionTool`'s
+    fields and `TOOL_RULES`): a subclass of `FunctionTool` whose code reads a field, or none, or whose
+    metaclass names it (`tool-subclass-*`); a value of a type of its own in each field, set after the
+    tool is built (`tool-exact-<field>`; for `fn`, a callable that is not a function); an exact,
+    JSON-like value that is not its default in each field the default rule decides
+    (`tool-default-<field>`); a planted key, value, element or shared container in a schema, a
+    `TaskConfig` or return type of a type of its own at depth, and each kind of instance state that is
+    not pydantic's (`TOOL_DEPTH`); a `fn.__module__` of a type of its own; and a tool changed by a
+    resource handler's annotation or by a later capability's import (`tool-changed-*`). The planted
+    types (`PLANTED_TYPES`, adding `list`, `set`, `float`, `timedelta`, a metaclass and a plain object)
+    live in the capability module, which the tools module imports. Each is refused in one line naming its distribution, and a failed load leaves
+    `TOOL_REGISTRY` as it was. A tool registered before the load began is decided too, the first
+    capability loaded refused for it (`test_a_tool_registered_before_the_load_is_decided_too`); a tool
+    of every accepted shape loads (`test_an_inert_tool_of_every_accepted_shape_loads`: each return type
+    `Tool.from_function` gives for a class, a dataclass, a pydantic model, an enum, a `TypedDict`, a
+    `NamedTuple`, `Literal`, `Annotated`, a generic, a union and `Any`, every JSON-like scalar and
+    container in a schema); `TOOL_RULES` names exactly the locked model's fields, each default-rule
+    field at its default in a tool `@mcp_tool` builds (`test_every_function_tool_field_has_a_rule`),
+    and the locked model has no private attributes and forbids extras
+    (`test_the_locked_model_holds_no_private_attribute_and_forbids_extras`); with each field dropped
+    from the table in turn, a JSON-like value is decided with no warning, a value of a type of its own
+    is served undecided, none of its code run, with one warning per field per process naming the field
+    and FastMCP's version, and the members still load
+    (`test_a_field_no_rule_names_is_checked_by_the_generic_rule`). Whatever a capability's code raises or exits with (an `Exception`,
     `SystemExit` with 0, an int, a string or none, another `BaseException`, an exception whose text
     exits), whenever it runs (its entry point's import, its tools module's, the load's reading of
-    what it declared, FastMCP's reading of its handler), a registration outside its tools module or
+    what it declared, FastMCP's reading of its resource handler or assembling of its tool; the
+    reading and the assembling reached through the load's `_below` and `FastMCP.add_tool`, which the
+    planted module replaces and the `plant` fixture restores), a registration outside its tools module or
     of a non-tool made at its entry point's import (by that module, a module it imports, or its
     tools module imported from it), and a distribution whose metadata cannot be read or names none
     (named by its entry point's value) are each refused naming it beside each member set
@@ -662,7 +687,8 @@ import has no effect.
     `test_capabilities.UNLOADABLE` (whatever its code raises or exits with, whenever; a registration
     made at its entry point's import; a nameless distribution, named by its entry point's value; a
     subclass of `Capability`; a value of a type of its own in the record, which on a start that let it
-    load ended the start with exit 0 and no message once composing the base compared it)
+    load ended the start with exit 0 and no message once composing the base compared it; a tool
+    object that is not inert)
     (`test_a_capability_that_cannot_load_stops_startup`); each drive runs in its own process group,
     killed whole if it outlives its bound. The suite drives one kind of each family
     (`CLI_REJECTED`, `CLI_UNLOADABLE`): after the load the CLI's handling does not depend on the
@@ -2800,9 +2826,29 @@ What each mode means:
   - whose `commands` is not exactly a `tuple` of exactly `str`, or names a
     command that is not a plain command name (`COMMAND`: a letter, digit or `_`, then up to 254 of
     those or `.`, `+`, `-`; no path, space or shell character) or one already declared;
-  - that registers anything but a `FunctionTool`, or a tool outside its tools module, at any time
-    since its load began: its entry point's import included, and whether the load or its own code
-    (its entry-point module, or a module either imports) imported its tools module;
+  - that registers a tool outside its tools module, at any time since its load began: its entry
+    point's import included, and whether the load or its own code (its entry-point module, or a
+    module either imports) imported its tools module;
+  - while the registry holds anything but exactly a `FunctionTool` (a subclass is refused too, its
+    type named: `loading it registered a <type>, not a FunctionTool`), or a tool whose instance state
+    is not what pydantic gives one or one of whose fields holds a value its rule does not accept
+    (`loading it registered a tool whose <field> …`; `the registry holds …` for an entry registered
+    before its load began). The registry is decided whole, the core's tools and earlier capabilities'
+    included, before the load first reads an entry and again once its resources are assembled (FastMCP
+    reads each resource handler there, the capability's code). The rules (`TOOL_RULES`, one per field
+    of the installed FastMCP's `FunctionTool`, read at run time): `name` exactly a `str`;
+    `description` None or exactly a `str`; `parameters` exactly a `dict`, and `output_schema` None or
+    one, JSON-like at every depth (exactly None, `bool`, `int`, `float` or `str`, or exactly a `list`
+    or a `dict` keyed exactly by `str`, no container twice); `return_type` None, no annotation,
+    `typing.Any`, `...`, a class of a metaclass the load names (`type`, pydantic's, `enum`'s, `abc`'s,
+    `TypedDict`'s) or an alias it names (a generic, a union, `Annotated`, `Literal`) whose parts pass
+    in turn; `fn` exactly a function whose `__module__` is exactly a `str` (what it does when a request
+    calls it is the capability's code, by design); every other field its declared default, node for
+    node, as `@mcp_tool` leaves it. A field the installed FastMCP adds that no rule names is decided by
+    one generic rule, never skipped: a value JSON-like at every depth, or its own default, passes; any
+    other is served undecided, with one warning on stderr per field per process naming the field and
+    FastMCP's version, and never refuses a capability. A re-lock to a FastMCP whose model has a field
+    no rule names fails the suite (`test_every_function_tool_field_has_a_rule`);
   - whose name, one of whose tool names or one of whose resource URIs is already taken (by the
     core, or by a capability loaded before it), or whose instructions do not list exactly its
     tools, each once;
@@ -2854,17 +2900,29 @@ What each mode means:
 - **No read of a loaded record runs capability code.** The record is exactly a `Capability`
   (`type(value) is Capability`, never `isinstance`), every value in it the core or FastMCP reads is
   exactly a built-in type (the refusals above), and so is the distribution's name, by which
-  `composed()` and the listing order the records. The load checks each before it uses it and
-  refuses anything else, naming the distribution, so a comparison, hash, iteration or format of a
-  record's value after the load (startup composing the base and probing, a server listing tools and
-  resources) runs none. What does run capability code: its modules, at the load, and its tools
-  (each a `FunctionTool` holding its function) and resource handlers, which FastMCP reads as it
-  registers them, on the load's scratch server and again on each server built after, and a request
-  calls (`test_a_capability_that_cannot_load_is_refused_naming_it`: its `subclass-reads-<field>`
-  rows for every field of the record and its `exact-<site>` rows for every value but the handler,
-  each beside each member set; `test_a_distribution_name_of_a_type_of_its_own_is_no_name`; and
-  `subclass-reads-commands` and `exact-order` driven through the CLI over each transport in
-  `test_a_capability_that_cannot_load_stops_startup`, every kind with
+  `composed()` and the listing order the records. The tool objects a capability registers are
+  decided too: each exactly a `FunctionTool`, every field holding what its rule accepts. The load
+  checks each before it uses it and refuses anything else, naming the distribution, so a
+  comparison, hash, iteration or format of a record's value or a tool's field after the load
+  (startup composing the base and probing, a server built from the loaded capabilities, listing
+  tools and resources) runs none. The check holds at load: a change the capability's own code makes
+  to a tool object afterwards (a handler that edits its own tool when a request calls it) is not
+  covered, and `issues/capability-tool-objects-served-copy.md` takes that up. It covers the objects a
+  capability hands the core, not the classes or modules its code can change at import (FastMCP's,
+  the core's own), which is how the `served-tool` and `declared` timings still reach the load. What
+  does run capability code: its modules, at the load; its resource handlers, which FastMCP reads as
+  it registers them, on the load's scratch server and again on each server built after; and each
+  tool's `fn` and each resource handler when a request calls it, serializing a tool's result through
+  its declared return type included (`test_a_capability_that_cannot_load_is_refused_naming_it`: its
+  `subclass-reads-<field>` rows for every field of the record and its `exact-<site>` rows for every
+  value but the handler, and its `tool-subclass-reads-<field>`, `tool-exact-<field>` and
+  `tool-default-<field>` rows for every field of the installed `FunctionTool`, with the depth, state
+  and `tool-changed-*` rows, each beside each member set;
+  `test_a_distribution_name_of_a_type_of_its_own_is_no_name`;
+  `test_a_tool_registered_before_the_load_is_decided_too`;
+  `test_a_field_no_rule_names_is_checked_by_the_generic_rule`; and `subclass-reads-commands`,
+  `exact-order`, `tool-subclass-reads-name` and `tool-exact-parameters-value` driven through the CLI
+  over each transport in `test_a_capability_that_cannot_load_stops_startup`, every kind with
   `CLUSTER_MCP_TEST_EVERY_KIND=1`).
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;

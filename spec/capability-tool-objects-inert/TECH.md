@@ -1,17 +1,17 @@
 ---
 slug: capability-tool-objects-inert
-title: "A capability's registered tool objects run none of its code when they are read"
+title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
 status: in_progress
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The load decides every registered tool object inert, refusing it naming the distribution
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -23,6 +23,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 2
   verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
@@ -111,12 +112,13 @@ checklists below are the work. `code-build` executes the next actionable phase, 
 
 ## Phase P1 — The load decides every registered tool object inert, refusing it naming the distribution
 **Satisfies:** R1, R2, R4, R5, R6, R7 · **Depends on:** —
-**Goal:** `load()` decides every registry entry but the core's with `_tool_violation` before its
+**Goal:** `load()` decides every registry entry (the core's included, as `PLAN.md` § 2 has it; amended at
+build, 2026-11-12) with `_tool_violation` before its
 first read of it, by the field rules of `PLAN.md` § 2, refusing a non-inert one in one line naming the
 distribution (and the type or the field); the members load and serve unchanged; §7 says so in the
 same commit.
 
-- [ ] `core/capabilities.py`: `_type_name`, `_json_violation`, `_same`, `_default_violation`,
+- [x] `core/capabilities.py`: `_type_name`, `_json_violation`, `_same`, `_default_violation`,
   `_return_type_violation` (with `_RETURN_CLASSES` and `_RETURN_ALIASES`), the field rules (`_a_str`,
   `_a_str_or_none`, `_a_schema`, `_a_schema_or_none`, and `fn`'s: exactly a `types.FunctionType`
   whose `__module__` is exactly a `str`), `_unnamed`, `_undecided` (one WARNING per field per process,
@@ -127,10 +129,10 @@ same commit.
   `FunctionTool.model_fields` in `_tool_violation` with one loop that looks each rule up as
   `TOOL_RULES.get(field)`; a field with none goes to `_unnamed`, and when that does not accept the
   value, `_undecided(field)` is called and the field is served undecided (R4 as amended).
-- [ ] `load()`: the two decisions of `PLAN.md` § 2 (`if held := _registry_violation(before):` then
+- [x] `load()`: the two decisions of `PLAN.md` § 2 (`if held := _registry_violation(before):` then
   the refusal), replacing the `odd` lines, and after the resources are assembled. Touch no other line of `load()` (the sibling cycle's lines, `PLAN.md` § 5). Docstrings
   (`load()`, the module) follow.
-- [ ] Tests, `@mark.unit`: the families `verify/rows.py` lists, in
+- [x] Tests, `@mark.unit`: the families `verify/rows.py` lists, in
   `test_a_capability_that_cannot_load_is_refused_naming_it` beside each member set (planted types in
   the capability module; values set after construction); the `served-tool` timing re-carried
   (`ODD_TOOL` replaces `FastMCP.add_tool` for its own tool, restoring it as it raises; the `plant`
@@ -142,19 +144,26 @@ same commit.
   `test_an_inert_tool_of_every_accepted_shape_loads`, `test_a_tool_registered_before_the_load_is_decided_too`,
   `test_the_locked_model_holds_no_private_attribute_and_forbids_extras`; the generic-rule test asserts
   one WARNING per field per process (R4 as amended at sign-off, Q-D).
-- [ ] `tests/mutants.py`: re-plant every case whose anchor the change moves (`test_mutation_anchor_applies`
+- [x] `tests/mutants.py`: re-plant every case whose anchor the change moves (`test_mutation_anchor_applies`
   names them), retargeting the `tool-assembly` and `declared` cases to the re-carried rows, and record
   each retarget or removal in the commit body; add a case for every alternative of the narrow set
   `verify/alternatives.py coverage p1` lists (34: 2026-11-12 · foreman ruling at plan sign-off: Q-E), beside every member set, or
   record it in its `EQUIVALENT` with why. Every other alternative is graded at review from the diff
   sweep, per the factory's mutation-testing method (operator's KB, `method/mutation-testing.md` §
   When a review is done).
-- [ ] `AGENTS.md` §7 (refusal bullet; the "No read of a loaded record runs capability code" paragraph,
+- [x] `AGENTS.md` §7 (refusal bullet; the "No read of a loaded record runs capability code" paragraph,
   naming `issues/capability-tool-objects-served-copy.md`; the objects, not the classes or modules a
   capability's code can change at import) and § Testing (the new families), in this commit (R7).
   `tests/fixtures/served_surface.json` and the README do not change.
-- [ ] Stage everything, then run the gate's modes one at a time (`cli-*`, `replanted-*` and
+- [x] Stage everything, then run the gate's modes one at a time (`cli-*`, `replanted-*` and
   `mutants-*`, each under the 10-minute command cap: measured at the plan, about 3 s a case per era).
+- **Build notes (2026-11-12).** The gate was red twice on the run's own unfinished work (`attempts: 2`), each
+  fixed in the run and every mode rerun from the start: (1) `capability-other-exception-escapes` and
+  `-keeps-registry` were killed only by `tool-without-a-module`, whose cause now comes from `fn`'s rule rather
+  than the load's generic exit; retargeted to `raises-at-declared`, which still takes that exit; (2) the
+  `tool-default-<field>` rows were generated from `TOOL_RULES`, so a mutant that took a field from the default
+  rule removed its own killing row (collection, not a kill); the test now names the six typed fields and gives
+  the rest to the default rule, and `test_every_function_tool_field_has_a_rule` pins that the table does too.
 - **Verify:** `sh spec/capability-tool-objects-inert/verify/p1.sh` `phase`, `cli-legacy`, `cli-modern`, `replanted-legacy`,
   `replanted-modern`, `mutants-legacy`, `mutants-modern` (the frontmatter's chain; 2026-11-12 · foreman ruling at plan sign-off:
   the mutation modes run the narrow set, Q-E).
