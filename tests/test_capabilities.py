@@ -1770,6 +1770,131 @@ def test_a_load_retried_after_a_failure_is_a_first_load(entry: str, kind: str, l
             f'{LIBRARY_KEPT}: the retries imported {LAZY} again, which ran {sys.modules[LIBRARY].RUNS}'
 
 
+def assert_loads_with_its_tools(entry: str, found: list[EntryPoint], names: tuple[str, ...],
+                                want: dict[str, tuple[object, ...]], fragment: str) -> None:
+    """Load `found` through `entry` and assert it loads the clean capability with its own tool and each
+    member with its tools (`want`, read before any monkeypatch), each registered once, failing with
+    `fragment` otherwise."""
+    message, loaded, served = load_through(entry, found)
+    if message:
+        pytest.fail(f'{fragment}: with the failing capability removed, the retry was refused: {message}')
+    got = {each.capability.name: each.tools for each in loaded}
+    assert sorted(got) == sorted([*names, 'planted_first']), \
+        f'{fragment}: with the failing capability removed, the retry loaded {sorted(got)}'
+    assert [tool.name for tool in got['planted_first']] == [FIRST_TOOL], \
+        f'{fragment}: the clean capability came back with {[tool.name for tool in got["planted_first"]]}'
+    for name, tools in want.items():
+        assert [id(tool) for tool in got[name]] == [id(tool) for tool in tools], \
+            f'{fragment}: the {name} member came back with {[tool.name for tool in got[name]]}, not its own tools'
+    for tool in (tool for tools in got.values() for tool in tools):
+        assert sum(held is tool for held in TOOL_REGISTRY) == 1 \
+            and sum(held.name == tool.name for held in TOOL_REGISTRY) == 1, \
+            f'{fragment}: {tool.name!r} is not registered exactly once'
+    if served is not None:
+        assert served.count(FIRST_TOOL) == 1, f'{fragment}: the server serves {served}'
+
+
+# A library's submodule that registers a tool at import, below the library's regular package that a
+# caller imported first, as `library-imported-first` imports it: bound to its name as `@mcp_tool`
+# binds it, registered without being bound, or bound with a second failing capability after the one
+# that imports it, which a retry that kept the submodule would name instead.
+LIBRARY_STRAYS = ('bound', 'unbound', 'bound-then-another-fails')
+LIBRARY_TOOL = 'planted_library_echo'
+
+
+def library_stray(kind: str) -> tuple[dict[str, str], str, list[tuple[str, str, dict[str, str]]]]:
+    """The library and the failing capabilities of `kind`: the library's files, the first refusal, and
+    each failing capability's distribution, entry point line and files, in load order."""
+    extra = ECHO_TOOL.format(name=LIBRARY_TOOL)
+    if kind == 'unbound':
+        extra = extra.replace('@mcp_tool\n', '') + f'\n\nmcp_tool({LIBRARY_TOOL})\n'
+    library = {f'{LIBRARY}/__init__.py': 'RUNS = []\n', f'{LIBRARY}/extra.py': extra}
+    module = 'planted_library_stray'
+    failing = [('planted-library-stray', f'cap = {module}.capability:CAPABILITY',
+                package(module, tools_tail=f'\nimport {LIBRARY}.extra  # noqa: E402, F401\n'))]
+    if kind == 'bound-then-another-fails':
+        failing.append(('planted-second-raises', 'cap = planted_second_raises.capability:CAPABILITY',
+                        package('planted_second_raises', tools_tail="\nraise RuntimeError('planted second')\n")))
+    refusal = (f"cannot load capability planted-library-stray: loading it registered [{LIBRARY_TOOL!r}], "
+               f"which are outside {module}.tools")
+    return library, refusal, failing
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+@pytest.mark.parametrize('kind', LIBRARY_STRAYS)
+@pytest.mark.parametrize('entry', RETRY_ENTRIES)
+def test_a_retry_runs_again_a_library_module_that_registered(entry: str, kind: str, names: tuple[str, ...],
+                                                             plant: Callable[..., EntryPoint],
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    # A library's module that a failed load imported and whose import registered decides that load, so
+    # a retry runs it again, as a first load in a fresh process runs it: the failing capability is
+    # refused as the first load refused it, never loaded nor passed over for one after it. A library's
+    # lazy import that registered nothing is kept (`library-imported-first` above).
+    want = {n: by_name()[n].tools for n in names}
+    module, files = clean_first('top-level')
+    library, refusal, failing = library_stray(kind)
+    clean = plant('planted-a-first', f'first = {module}.capability:CAPABILITY', {**files, **library})
+    failing_eps = [plant(dist, line, failing_files) for dist, line, failing_files in failing]
+    found = [*members(names), clean, *failing_eps]
+    if entry != 'load':
+        monkeypatch.setattr(cluster_mcp.core.capabilities, 'entry_points', lambda group: tuple(found))
+        monkeypatch.setattr(cluster_mcp.core.capabilities, '_installed', None)
+    __import__(LIBRARY)
+    assert f'{LIBRARY}.extra' not in sys.modules, f'{LIBRARY}.extra was imported before the first load'
+    before = list(TOOL_REGISTRY)
+
+    first, _, _ = load_through(entry, found)
+    assert first == refusal, f'{FIRST_LOAD} its refusal: expected {refusal!r}, got {first!r}'
+    assert TOOL_REGISTRY == before, f'{FIRST_LOAD} the registry: it left {TOOL_REGISTRY[len(before):]} registered'
+
+    again, loaded, _ = load_through(entry, found)
+    assert again == first, \
+        f'{RETRIED_LOAD}: with the failing capability still there, expected {first!r}, got ' \
+        f'{again or [each.distribution for each in loaded]!r}'
+    assert TOOL_REGISTRY == before, \
+        f'{RETRIED_LOAD}: the refused retry left {TOOL_REGISTRY[len(before):]} registered'
+
+    for ep in failing_eps:
+        found.remove(ep)
+    assert_loads_with_its_tools(entry, found, names, want, RETRIED_LOAD)
+
+
+INTERRUPTED_LOAD = 'a load retried after an interrupt is not a first load'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('names', MEMBER_SETS)
+@pytest.mark.parametrize('when', WHEN)
+@pytest.mark.parametrize('how', list(INTERRUPTS))
+def test_a_load_retried_after_an_interrupt_is_a_first_load(how: str, when: str, names: tuple[str, ...],
+                                                           plant: Callable[..., EntryPoint]) -> None:
+    # An interrupted load forgets what it imported as a failed one does, so a retry is a first load:
+    # interrupted again while the interrupting capability is there, and without it every capability
+    # loads with its tools, each registered once, the clean one before it included.
+    want = {n: by_name()[n].tools for n in names}
+    module, files = clean_first('top-level')
+    clean = plant('planted-a-first', f'first = {module}.capability:CAPABILITY', files)
+    interrupting = f'planted_interrupt_{how.replace("-", "_")}_{when.replace("-", "_")}'
+    ep = plant(f'planted-interrupt-{how}-{when}', f'cap = {interrupting}.capability:CAPABILITY',
+               raising_files(interrupting, INTERRUPTS[how], when))
+    found = [*members(names), clean, ep]
+    before = list(TOOL_REGISTRY)
+    for attempt in ('first', 'retried'):
+        try:
+            load(found)
+        except KeyboardInterrupt:
+            pass
+        except BaseException as exc:
+            pytest.fail(f'{INTERRUPTED_LOAD}: the {attempt} load raised {exc!r}, not a KeyboardInterrupt')
+        else:
+            pytest.fail(f'{INTERRUPTED_LOAD}: the {attempt} load was not interrupted')
+        assert TOOL_REGISTRY == before, \
+            f'{INTERRUPTED_LOAD}: the {attempt} load left {[t.name for t in TOOL_REGISTRY[len(before):]]} registered'
+    found.remove(ep)
+    assert_loads_with_its_tools('load', found, names, want, INTERRUPTED_LOAD)
+
+
 # The core's tools that open and close every listing, by name, as clients have always seen them.
 OPENING = ('run_command', 'list_directory', 'read_file', 'write_file', 'upload_file', 'download_file')
 CLOSING = ('cluster_context',)

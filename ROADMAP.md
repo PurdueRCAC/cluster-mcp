@@ -88,9 +88,9 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (five): a capability load retried after an interrupt, a retry over an import's side
-  effects, the site files' size, the startup update check, and the floors a git install resolves
-  against.
+- **Safety** (five): an interrupt inside a failed capability load's cleanup, a retry over an
+  import's side effects, the site files' size, the startup update check, and the floors a git
+  install resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -342,14 +342,15 @@ bash 3.2 only). Pre-existing.
 *Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
 
-## A capability load retried after an interrupt may register nothing and blame the wrong distribution
+## An interrupt that lands inside a failed load's cleanup may leave a retry registering nothing
 
-A `KeyboardInterrupt` that cuts a load short cuts the tool registry back the way a failed load does,
-and leaves the imported tools modules cached in the same way. A library caller that catches it and
-loads again could meet the defect `capability-reload-after-failure` fixes for a failure. Read from
-the code, not observed. The command line never retries.
+A load that an interrupt cuts short forgets what it imported and cuts the tool registry back, as a
+failed load does (`capability-reload-after-failure`), so a retry is a first load. An interrupt that
+lands inside that cleanup, or inside the import system's removal of a module whose import raised,
+can stop it partway and leave modules imported, so a library caller's retry could register nothing
+for a clean capability. Read from the code, not observed. The command line never retries.
 
-*Horizon: Part I, safety · Depends on: capability-reload-after-failure (its fix may cover this) · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (REVIEW cycle 1, F2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-reload-after-interrupt.md`](issues/capability-reload-after-interrupt.md) · *status: unshaped*
 
 ## A capability whose import registers into another library's state can't be retried

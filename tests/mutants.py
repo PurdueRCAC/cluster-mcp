@@ -312,7 +312,7 @@ ROLLBACK = ('        try:\n'
             '            raise CapabilityLoadError(distribution, _cause(exc)) from exc\n'
             '        finally:\n'
             '            try:\n'
-            '                _unimport(known, _roots(ordered, loaded, capability))\n'
+            '                _unimport(known, _roots(ordered, loaded, capability), TOOL_REGISTRY[start:])\n'
             '            finally:\n'
             '                del TOOL_REGISTRY[start:]\n')
 # The registry cut, the last step of that exit.
@@ -341,6 +341,9 @@ RETRY_ENTRIES = ('load', 'installed', 'server')
 RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', 'tool-not-a-tool',
            'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text')
 RETRY_LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'library-imported-first')
+# The library modules whose import registers, a failing capability imports, and a retry runs again,
+# as `test_capabilities.LIBRARY_STRAYS` names them.
+LIBRARY_STRAYS = ('bound', 'unbound', 'bound-then-another-fails')
 
 
 def retried(*layouts: str) -> tuple[str, ...]:
@@ -2648,15 +2651,22 @@ CASES: tuple[Case, ...] = (
     # finds the clean capability's tools module imported, registers nothing for it, and refuses it.
     Case('capability-retry-imports-nothing', LOADER,
          ((ROLLBACK, ROLLBACK.replace('            try:\n'
-                                      '                _unimport(known, _roots(ordered, loaded, capability))\n'
+                                      '                _unimport(known, _roots(ordered, loaded, capability), TOOL_REGISTRY[start:])\n'
                                       '            finally:\n'
                                       '                del TOOL_REGISTRY[start:]\n',
                                       '            del TOOL_REGISTRY[start:]\n')),),
          retried(), 'a load retried after a failure is not a first load'),
     # A failed load that forgets every module new since its snapshot, a library's own lazy import too.
     Case('capability-failure-forgets-every-new-module', LOADER,
-         (('        if library and not any(_below(name, root) for root in roots):\n            continue\n', ''),),
+         (('    kept = {name for name in new if _library(name, known, roots)}\n', '    kept: set[str] = set()\n'),),
          retried('library-imported-first'), "a failed load forgot a library's own lazy import"),
+    # A failed load that keeps a library's module whose import registered, so a retry never runs it
+    # again and loads, or passes over, the capability a first load refuses for what it registered.
+    Case('capability-failure-keeps-a-registering-library-module', LOADER,
+         (('    if kept and not _accounted(new, kept, registered):\n        kept = set()\n', ''),),
+         tuple(f'{CAPABILITIES}::test_a_retry_runs_again_a_library_module_that_registered[{entry}-{kind}-both]'
+               for entry in RETRY_ENTRIES for kind in LIBRARY_STRAYS),
+         'a load retried after a failure is not a first load'),
     Case('capability-composition-tie-unbroken', 'core/capabilities.py',
          (('    return tuple(sorted(capabilities, key=lambda c: (c.capability.order, c.distribution)))\n',
            '    return tuple(sorted(capabilities, key=lambda c: c.capability.order))\n'),),

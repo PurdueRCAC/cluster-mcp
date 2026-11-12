@@ -38,7 +38,7 @@ import warnings
 from dataclasses import dataclass
 from importlib import import_module
 from importlib.metadata import Distribution, EntryPoint, distributions, entry_points
-from types import ModuleType
+from types import FunctionType, ModuleType
 
 # External libs
 from fastmcp import FastMCP
@@ -227,33 +227,74 @@ def _roots(ordered: Iterable[_Entry], loaded: Iterable[Loaded], capability: Capa
     return tuple(_root(module) for module in modules if module)
 
 
-def _unimport(known: set[str], roots: tuple[str, ...]) -> None:
-    """Forget every module imported since `known`, a snapshot of `sys.modules`, but a library's own.
+def _library(name: str, known: set[str], roots: tuple[str, ...]) -> bool:
+    """Whether the module `name`, new since `known`, is a library's own lazy import: one of its packages
+    was already imported at the snapshot as a regular package (or as something not plainly a module,
+    which is left alone), and it lies below none of `roots`."""
+    parts = name.split('.')
+    packages = ('.'.join(parts[:i]) for i in range(1, len(parts)))
+    return (any(_file(sys.modules.get(package)) is not None for package in packages if package in known)
+            and not any(_below(name, root) for root in roots))
+
+
+def _accounted(new: list[str], kept: set[str], registered: list[object]) -> bool:
+    """Whether each entry of `registered` is a function, or a tool of one, defined in a module this load
+    forgets (one of `new` not in `kept`) or in one the import system dropped as it raised, which a
+    retry imports again; and none is defined in a module in `kept`.
+
+    A function's module is its `__globals__`, through each `__wrapped__`, since a tool wraps its
+    function; a namespace no module in `sys.modules` has is a dropped module's. Any other entry is not
+    accounted for: which module registered it is unknown. Only identities are compared, and only what
+    is exactly a `ModuleType`, a `FunctionTool` or a function is read, through `vars()`, so no
+    capability code runs.
+    """
+    live = {id(vars(module)) for module in tuple(sys.modules.values()) if type(module) is ModuleType}
+    owners: dict[int, str] = {}
+    for name in new:
+        module = sys.modules.get(name)
+        if type(module) is ModuleType:
+            owners[id(vars(module))] = name
+    for entry in registered:
+        fn, seen, places = vars(entry).get('fn') if type(entry) is FunctionTool else entry, set(), set()
+        while type(fn) is FunctionType and id(fn) not in seen:
+            seen.add(id(fn))
+            places.add(id(fn.__globals__))
+            fn = vars(fn).get('__wrapped__')
+        if any(owners.get(place) in kept for place in places) \
+                or not any(place in owners or place not in live for place in places):
+            return False
+    return True
+
+
+def _unimport(known: set[str], roots: tuple[str, ...], registered: list[object]) -> None:
+    """Forget every module imported since `known`, a snapshot of `sys.modules`, but a library's own lazy
+    imports (`_library`), when every entry the load registered, `registered`, is accounted for by a
+    module it forgets (`_accounted`).
 
     A load that failed leaves the modules it imported in `sys.modules`, where a later load would find
     them imported and run none of them again: its capabilities would register nothing. Forgotten, they
     are imported again, as a first load in a fresh process imports them, and register again.
 
-    A new module is a library's own lazy import, kept, when one of its packages was already imported at
-    the snapshot as a regular package (or as something not plainly a module, which is left alone), and
-    it lies below none of `roots`: FastMCP, pydantic or the standard library imports such a submodule as
-    it is first used, and its package holds it, so forgetting it would leave the package handing out the
-    old module beside the new one. A namespace package (`cluster_mcp`) holds every member and protects
-    nothing below it, and whatever lies below a capability's root is the capability's, even when a caller
-    imported its package first. When a forgotten module's package is plainly a module, the package's
-    attribute holding it is dropped too, so `from package import module` imports it again.
+    A library's own lazy import is kept: FastMCP, pydantic or the standard library imports such a
+    submodule as it is first used, and its package holds it, so forgetting it would leave the package
+    handing out the old module beside the new one. A namespace package (`cluster_mcp`) holds every
+    member and protects nothing below it, and whatever lies below a capability's root is the
+    capability's, even when a caller imported its package first. But a library module whose import
+    registered decides the load as a capability's does, and a retry that kept it would not register
+    again: when an entry is not accounted for, nothing new is kept, since which kept module imported
+    the one that registered it is unknown too. When a forgotten module's package is plainly a module,
+    the package's attribute holding it is dropped too, so `from package import module` imports it again.
 
     `sys.modules` is never iterated here, only copied in one call, and entries are popped: another
     thread's import changes it as it goes. A module another thread is importing at that moment lies
     outside what the load supports: it is not thread-safe.
     """
-    for name in set(sys.modules) - known:
-        if type(name) is not str:
-            continue
-        parts = name.split('.')
-        packages = ('.'.join(parts[:i]) for i in range(1, len(parts)))
-        library = any(_file(sys.modules.get(package)) is not None for package in packages if package in known)
-        if library and not any(_below(name, root) for root in roots):
+    new = [name for name in set(sys.modules) - known if type(name) is str]
+    kept = {name for name in new if _library(name, known, roots)}
+    if kept and not _accounted(new, kept, registered):
+        kept = set()
+    for name in new:
+        if name in kept:
             continue
         module = sys.modules.pop(name, None)
         package, _, leaf = name.rpartition('.')
@@ -476,7 +517,7 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
             raise CapabilityLoadError(distribution, _cause(exc)) from exc
         finally:
             try:
-                _unimport(known, _roots(ordered, loaded, capability))
+                _unimport(known, _roots(ordered, loaded, capability), TOOL_REGISTRY[start:])
             finally:
                 del TOOL_REGISTRY[start:]
     return tuple(loaded)

@@ -58,6 +58,18 @@ are at the GOAL commit `aa1688a`.
     moment lies outside the loader's model. The loader is not thread-safe today: `TOOL_REGISTRY` is
     a bare list.
 
+- **Amendment, review cycle 1 (F1), 2026-11-12.** The keep rule alone kept a library's submodule
+  whose import registered a stray tool, so a retry never ran it again and loaded the capability a
+  first load refuses. `_unimport(known, roots, registered)` now takes the failed load's
+  registrations, `TOOL_REGISTRY[start:]` read in the handler before the cut, and a helper
+  `_accounted` decides whether any library import may be kept: every entry must be a function, or a
+  tool of one (through each `__wrapped__`), whose `__globals__` is a module the load forgets or one
+  the import system dropped as it raised, and none a module it would keep. Otherwise every new
+  module is forgotten, since which module registered the entry, or which kept module imported that
+  one, cannot be told. `_library` holds the keep test the loop held. Identities only, and `vars()`
+  of exact `ModuleType`, `FunctionTool` and function objects, so no capability code runs. Still
+  outside `:320-382`.
+
 **`load()`:**
 
 - Right after `scratch = _scratch()` (`:319`) and before `try:` (`:320`), two lines:
@@ -355,6 +367,9 @@ The new test's 336 rows are not measured yet. Build reports their time in the P1
   system's own cleanup of a failing module. `issues/capability-reload-after-interrupt.md` can be
   confirmed against this when it is shaped. This cycle adds no interrupt row, and the seed stays
   as filed.
+  - 2026-11-12, review cycle 1 (F2): the seed misstated this, so the remediation pins the covered
+    case (`test_a_load_retried_after_an_interrupt_is_a_first_load`) and restates the seed to the two
+    windows above.
 - **Prototype.** The prototype was a detached worktree, `capability-reload-after-failure-proto`.
   It was cut at the GOAL commit `aa1688a`, not at `origin/develop`, so that it carried the cycle's
   GOAL, and it was closed before the sign-off. A build-time prototype or mutation copy freezes

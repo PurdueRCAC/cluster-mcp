@@ -3,10 +3,10 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/capability-reload-after-failure
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -23,10 +23,10 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
+  verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load tests/test_capabilities.py::test_a_retry_runs_again_a_library_module_that_registered tests/test_capabilities.py::test_a_load_retried_after_an_interrupt_is_a_first_load && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load tests/test_capabilities.py::test_a_retry_runs_again_a_library_module_that_registered tests/test_capabilities.py::test_a_load_retried_after_an_interrupt_is_a_first_load && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-failure-forgets-every-new-module capability-failure-keeps-a-registering-library-module capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
-  status: done
+  status: in_progress
   satisfies:
   - R6
   depends_on:
@@ -34,7 +34,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-failure-forgets-every-new-module capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-failure-forgets-every-new-module capability-failure-keeps-a-registering-library-module capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
   last_reviewed_commit: 425bf499f2a0acddb7fa91d8b1f30c1aeac3836b
   verdict: changes-requested
@@ -121,6 +121,44 @@ and the docs say what is now true.
 - [x] Check that `tests/test_packaging.py`'s pure-namespace checks pass after a `namespace` row
       (PLAN § 5).
 - [x] Stage, then run the `verify:`.
+- [x] **Remediation, review cycle 1 (2026-11-12): F1 and F2.** P1 and P2 reopened together: the
+      fix moves the handler line `ROLLBACK` anchors, so the re-planted and new mutation cases ride
+      in P1's commit (the `test_mutation_anchor_applies` lockstep), and P2 keeps the full gate.
+      - **F1 (R1):** a failed load kept a library's submodule whose import registered (a stray tool
+        from below a regular package a caller imported first), so the retry never ran it again and
+        loaded, or passed over, the capability a first load refuses. The property: a retry runs
+        again every module whose import registered anything, wherever it lies; a library's lazy
+        import that registered nothing stays kept. `_unimport` now takes the failed load's
+        registrations (`TOOL_REGISTRY[start:]`, read in the handler before the cut) and keeps a
+        library's lazy imports only while `_accounted` finds every entry a function, or a tool of
+        one, defined in a module it forgets or one the import system dropped as it raised, and none
+        defined in a module it would keep; otherwise nothing new is kept. It compares identities
+        and reads only exact `ModuleType`, `FunctionTool` and function objects through `vars()`. The
+        loop's registered-entry checks (the sibling's lines) are untouched.
+      - `tests/test_capabilities.py`: `test_a_retry_runs_again_a_library_module_that_registered`,
+        `entry` × `kind` (`bound`, `unbound`, `bound-then-another-fails`) × `names`, 36 rows, F1's
+        layout: the library's package imported first, its submodule registering a stray tool,
+        bound by `@mcp_tool` or registered without a binding, and the wrong-distribution variant
+        with a second failing distribution after the first. The keep side stays pinned by the 84
+        `library-imported-first` rows.
+      - `tests/mutants.py`: `capability-failure-keeps-a-registering-library-module` deletes the
+        forced forget, killed by the new test's 9 rows beside `both` with "a load retried after a
+        failure is not a first load"; `ROLLBACK`, and with it every case built on it
+        (`capability-retry-imports-nothing` included), re-planted for the handler's new argument;
+        `capability-failure-forgets-every-new-module` re-planted on the `kept` set.
+      - Gate (2026-11-12, the retuned `verify:`): 2528 passed in each era (2451 before; the 76 new
+        rows run in 1.4 s), the three retry tests 496 in each era, `test_startup.py -k capabilit`
+        46 in each, and all seven of the cycle's cases killed with the runner's controls reported.
+      - **F2:** `test_a_load_retried_after_an_interrupt_is_a_first_load`, `how` × `when` × `names`,
+        40 rows: an interrupt cuts the load short after a clean capability, a retry is interrupted
+        again, and without the interrupting one every capability loads with its tools, each once.
+        `issues/capability-reload-after-interrupt.md` (this cycle's seed, not on `develop`) is
+        restated in place to what stays open, an interrupt inside the handler's cleanup or the
+        import system's, with its `ROADMAP.md` entry and the Safety group's line; the Part I count
+        (31) and the group count (five) are unchanged, and every seed stays paired.
+      - Docs: AGENTS.md §7 says the retry registers again what the failed load registered, wherever
+        the module lies, names `_accounted`'s rule, both new tests and the interrupted retry, and
+        says other state an import changed stays changed; § Testing names both new tests.
 - **Verify:** both eras of `test_capabilities.py`, `test_mutations.py` and `test_hygiene.py`; the
   new test by node id; `test_startup.py -k capabilit` (the CLI path still stops with exit 5) in
   both eras; the four re-planted mutation cases with the runner's controls.
@@ -172,6 +210,10 @@ contract; every deferral is recorded; the profile's full `verify` is green.
 - [x] Standing last-phase items: the previous cycle's last phase carried no project-level
       obligation beyond the ledger (no `## Times` quote in this repo).
 - [x] Stage, then run the `verify:`.
+- [x] **Remediation, review cycle 1:** P2's `verify:` self-checks
+      `capability-failure-keeps-a-registering-library-module` too. The ledger is walked again: the
+      restated interrupt seed keeps its entry, and the remediation adds no deferral.
+- [ ] Run the full `verify:` on the remediated tree (the foreman schedules it).
 - **Verify:** the new case and the four re-planted ones with the runner's controls, then the
   profile's full `verify`, both eras and the sandboxed `cluster-mcp --help`.
 - **Touches:** `tests/mutants.py`; by the amendment, `tests/test_capabilities.py`, `AGENTS.md` and

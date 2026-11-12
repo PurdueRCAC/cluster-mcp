@@ -409,7 +409,13 @@ import has no effect.
     message while the failing one is there, the clean one never named, and without it every
     capability loaded with its tools, each registered once, the planted one by name and each
     member's by identity, while the library's submodule the clean one imports is kept, run once
-    (`test_a_load_retried_after_a_failure_is_a_first_load`); and under each set the listing
+    (`test_a_load_retried_after_a_failure_is_a_first_load`); a library's submodule that a failing
+    capability imports and that registers a tool, bound to its name or not, is run again by the
+    retry, which refuses that capability as the first load did, never loading it nor naming a second
+    failing one after it (`test_a_retry_runs_again_a_library_module_that_registered`); a load
+    retried after an interrupt is a first load too, interrupted again, and without the interrupting
+    capability every capability loads with its tools, the clean one before it included
+    (`test_a_load_retried_after_an_interrupt_is_a_first_load`); and under each set the listing
     opens with the six opening core tools and closes with `cluster_context`, by name
     (`test_the_listing_opens_and_closes_with_the_core_tools_by_name`). Every kind of contribution a server would refuse while it is
     assembled, or would let replace another (`REJECTED`: a URI that is not a URL, a parameter on a
@@ -2828,19 +2834,28 @@ What each mode means:
   capabilities existed.) The first refusal raises `CapabilityLoadError`, `cannot load capability
   <distribution>: <cause>` on one line, after cutting `TOOL_REGISTRY` back to what it held before
   the load began and forgetting the modules the load imported (`_unimport`), so a later load in the
-  same process imports them again and is refused, or loads, as a first load in a fresh process
-  would. What is forgotten is every module new since the load began but a library's own lazy
-  import: one below a package that was already imported then as a regular package, and below no
-  loading capability's root (the outermost regular package of its entry point's module or its tools
-  module; a namespace package such as `cluster_mcp` protects nothing below it). That a library's
-  own lazy import is kept is pinned by the `library-imported-first` rows of
-  `test_a_load_retried_after_a_failure_is_a_first_load`. The refusal's text is built first, and the
-  registry is cut last. **A retry runs a capability's modules again, so a
-  capability's import must be repeatable in one process**: one that registers at import into
-  another library's state that refuses a duplicate fails its retry, naming it (recorded, not fixed;
+  same process imports them again, registers again what the failed load registered, wherever the
+  module that registered it lies, and is refused, or loads, as a first load in a fresh process would.
+  What else an import did to other modules' state stays done. What is forgotten is every module new
+  since the load began but a library's own lazy import: one below a package that was already
+  imported then as a regular package, and below no loading capability's root (the outermost regular
+  package of its entry point's module or its tools module; a namespace package such as
+  `cluster_mcp` protects nothing below it). Such a module is kept only while every entry the failed
+  load registered is a function, or a tool of one, defined in a module it forgets or in one the
+  import system dropped as it raised (`_accounted`), the module a `@mcp_tool` registration comes
+  from; otherwise nothing new is kept, since which module registered the entry, or which kept module
+  imported that one, is unknown. That a library's own lazy import is kept is pinned by the
+  `library-imported-first` rows of `test_a_load_retried_after_a_failure_is_a_first_load`, and that
+  a library module whose import registered is run again by
+  `test_a_retry_runs_again_a_library_module_that_registered`. The refusal's text is built first, and
+  the registry is cut last. **A retry runs a capability's modules again, so a capability's import
+  must be repeatable in one process**: one that registers at import into another library's state
+  that refuses a duplicate fails its retry, naming it (recorded, not fixed;
   `issues/capability-import-side-effects-on-retry.md`). A `KeyboardInterrupt` is not a refusal: the
-  modules are forgotten and the registry cut back the same way (a retry after one is
-  `issues/capability-reload-after-interrupt.md`), and it interrupts the server as it would anywhere (`exit_status.keyboard_interrupt`). At startup the
+  modules are forgotten and the registry cut back the same way, so a retry is a first load
+  (`test_a_load_retried_after_an_interrupt_is_a_first_load`; an interrupt that lands inside that
+  cleanup is `issues/capability-reload-after-interrupt.md`), and it interrupts the server as it
+  would anywhere (`exit_status.keyboard_interrupt`). At startup the
   error stops the server, reported as a failed SSH connect is (§4); nothing catches it to start
   without the capability. So whatever a capability declares fails at the load or not at all, and so
   does whatever its code does while it loads (`test_what_a_server_would_refuse_is_refused_at_load`,
