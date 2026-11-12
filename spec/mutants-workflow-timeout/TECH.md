@@ -59,7 +59,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 4 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
 - id: P5
   name: The third hosted run, the budget row and the ledger (Run A dispatches, Run B records)
-  status: pending
+  status: in_progress
   satisfies:
   - R4
   - R3
@@ -258,8 +258,8 @@ with its seed.
 
 Two runs: Run A dispatches, Run B records.
 
-**Run A (the brief authorises the push and one dispatch):**
-- [ ] `mutants-gate.py prepush` and `untouched 5` on the head, P4's closing commit, which still
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush` and `untouched 5` on the head, P4's closing commit, which still
       differs from `T1` only in the records. Mark P5 `in_progress` with the note "Run A: dispatched",
       commit, push.
 - [ ] With no other run of the organisation queued or in progress, dispatch once and find the run id
