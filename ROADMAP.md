@@ -180,7 +180,9 @@ defect of their shape goes unrefused; its remediation's tree-test oracle kills t
 the tree holds. Thirty remain: block kinds and `self`/`cls` in the reader, qualifier and generic
 arguments in the walker, binding forms in shadow detection, exception classes at resolution and at
 import, and the refusal line's text. The check behaves correctly on each; the fix is a planted row
-per shape and a sweep over each domain. Seeded by the cycle 2 remediation, 2026-11-12.
+per shape and a sweep over each domain. It also holds the forms the check does not read today: a
+factory or annotations reached only through names built at run time, which pass unrefused (none
+occurs today). Seeded by the cycle 2 remediation, 2026-11-12.
 
 *Horizon: 0.2.0, gates · Depends on: annotation-check · Refs: [`spec/annotation-check/`](spec/annotation-check/) (REVIEW cycle 2, N3–N7)*
 **Seed:** [`issues/annotation-check-pin-gaps.md`](issues/annotation-check-pin-gaps.md) · *status: unshaped*

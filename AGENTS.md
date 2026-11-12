@@ -957,7 +957,8 @@ import has no effect.
     callback), a factory's name as a string (`getattr(typing, 'TypedDict')`), and `__annotations__`
     or `__annotate__` spelled anywhere but a read `type` call's namespace, is refused as unreadable,
     never passed. Not read: a function body's own variable annotations, which Python never
-    evaluates, and a class whose factory and annotations the source never names.
+    evaluates. Not read today, and not refused: a class whose factory or annotations the source
+    reaches only through names built at run time; `issues/annotation-check-pin-gaps.md` holds them.
     `workspace_violations(root)` returns
     the check's refusal lines for a workspace: it takes the members from the root `pyproject.toml`'s
     `[tool.uv.workspace]` and their modules from each member's `src/`, so a member or module added

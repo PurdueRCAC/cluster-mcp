@@ -170,6 +170,8 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
   - Seed: the 30 survivors of N3 to N7 the oracle cannot reach, `issues/annotation-check-pin-gaps.md`
     with its `ROADMAP.md` entry (Part I's counts move from 28 to 29 entries, gates from twelve to
     thirteen).
+  - Foreman ruling (2026-11-12): the forms the check cannot see are not accepted as scope; they are
+    a "not read today" section of `issues/annotation-check-pin-gaps.md`, which `AGENTS.md` names.
   - Runs: the build commit holds P1 and P2 `in_progress`. `gate.sh P1` ran green on a dangling
     candidate of the same tree (`SEEN_RED_REV`); `verify/sweep.py`, the checker on the commit, and
     P2's full `verify` run when the foreman releases the host, and close both phases.
