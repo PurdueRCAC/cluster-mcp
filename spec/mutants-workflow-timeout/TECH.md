@@ -3,7 +3,7 @@ slug: mutants-workflow-timeout
 title: A dispatched mutation run finishes and reports every case
 kind: ci
 appetite: small
-status: blocked
+status: in_review
 branch: ci/mutants-workflow-timeout
 base: develop
 current_phase: done
@@ -70,7 +70,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F2-docs-controls-prefill.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
+  attempts: 1
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F2-docs-controls-prefill.py && uv run -q python -I spec/mutants-workflow-timeout/remediation/F3-budget-row-figures.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
 review:
   last_reviewed_commit: 30231aa068f3708e4260e998a53959bb1086c846
   verdict: changes-requested
@@ -284,8 +285,26 @@ P5 run 3).
       - `AGENTS.md`'s row and § Testing sentence;
       - `runs.txt` and the TECH state;
       - seeds.
+
+**Review cycle 1 remediation** (reopened 2026-11-12; see Amendments). No code, workflow or bound
+changes; no dispatch.
+- [x] F-a: the `mutants budget` row gains, after the baseline, the figures its whole-run test needs:
+      the measured concurrency (20 jobs at once), the wave count (4 for the 78 shards), the time per
+      wave of the worst run, and where the run would cross 15:00, at the measured rate and at the
+      refit's worst-case rate. Figures only; the bound's wording stays.
+- [x] F-b: the row attributes each counted run to its own head commit and states that the three
+      measured the same code. The gate's baseline sentence stays verbatim, so `docs --final` reads
+      it unchanged.
+- [x] The review's two coverage observations, `ledger-empty-name` and `ledger-control-else`, seeded
+      together as `issues/mutants-ledger-guard-pins.md` with its `ROADMAP.md` entry in Part I's
+      Gates group, after the flaky case's; the Part I and Gates counts bumped; the seed/ROADMAP
+      pairing check empty.
+- [x] `remediation/F3-budget-row-figures.py` runs `runs --final` unchanged, then rebuilds both new
+      sentences from its output and the runs' head commits and requires the row to end with them.
+      P5's `verify:` runs F3 in place of `runs --final`.
 - **Verify:** the frontmatter `verify:` (Run B). Run A runs only `prepush` and `untouched 5`.
-- **Touches:** `AGENTS.md` (the row's baseline, § Testing's cost sentence), `runs.txt`; seeds.
+- **Touches:** `AGENTS.md` (the row's baseline, § Testing's cost sentence; in remediation, the row's
+  run commits and wave figures), `runs.txt`; seeds; `remediation/F3-budget-row-figures.py`.
 
 ## Amendments
 
@@ -444,6 +463,67 @@ P5 run 3).
     `verify/` is not edited. The run-3 lines added to `issues/mutants-linux-fd-59.md`,
     `issues/mutants-flaky-ssh-returns-at-exit-status.md` and their `ROADMAP.md` entries are
     accepted.
+- **2026-11-12, review cycle 1 remediation** (REVIEW.md, verdict changes-requested at `30231aa`;
+  the foreman's triage: F-a accepted as a finding, F-b fixed, the two coverage observations
+  seeded). P5 is reopened, the phase whose `satisfies` holds R3 and R4; no other phase is touched.
+  - **F-a, the arithmetic.** Every input is a measured figure of the three counted runs:
+    - concurrency: 20 jobs at once at most in each run (`runs` prints it per run; the review's
+      `waves.out` has the 21st, 41st and 61st shards starting at 95–114 s, 206–235 s and
+      312–384 s from dispatch, so the slots refill in waves of 20);
+    - shards ⌈1,164 ÷ 15⌉ = 78; waves ⌈78 ÷ 20⌉ = 4;
+    - time per wave: the worst run, 591 s (9:51, run 43260825655), over its 4 waves = 147.75 s,
+      about 2:28, with the plan and any queueing folded in. The measured gaps between wave starts,
+      100–149 s, sit at or under it;
+    - the measured rate: 6 waves project 6 × 147.75 = 886.5 s (14:47, 13.5 s inside 900 s), and 7
+      project 1,034.25 s (17:14). Six waves hold 6 × 20 = 120 shards, 120 × 15 = 1,800 cases, so the
+      run crosses 15:00 from the 121st shard, at case 1,801. The answer holds for any time per wave
+      above 900 ÷ 7 = 128.6 s and up to 900 ÷ 6 = 150 s; past 150 s, 5 waves are the most that fit
+      (100 shards, 1,500 cases);
+    - the worst-case rate, the refit `runs --final` prints (every job as slow as the slowest seen,
+      waves that never overlap): 8.4 s a child, 50 s of overhead, the plan done at 18 s, so a job of
+      50 + (15 + 3) × 8.4 ≈ 201 s and a run of 18 + W × 201 s: 4 waves 822 s (13:42), 5 waves 1,023 s
+      (17:03). Four waves hold 80 shards, 1,200 cases, so on this projection the run crosses from
+      the 81st shard, at case 1,201, 37 cases past today's 1,164.
+
+    The row states both crossings. Which rate a cycle plans against is the maintainer's to judge;
+    the bound's wording is unchanged.
+  - **F-b.** The runs' heads (`gh run view --json headSha`): 43255195424 at `aff08bd` (T1, the
+    measured commit `runs.txt` names), 43260825655 at `32e1d5c`, 43265827418 at `36bd540`. The
+    filtered diffs `git diff --stat aff08bd 32e1d5c -- . ':(exclude)spec/' ':(exclude)issues/'
+    ':(exclude)ROADMAP.md'` and the same for `aff08bd 36bd540` are both empty; unfiltered, the
+    later commits differ from T1 only in `ROADMAP.md`, the `issues/mutants-*` seeds, `TECH.md` and
+    `runs.txt`. The gate's baseline sentence, which names `aff08bd` as the measured commit, is kept
+    verbatim and the next sentence names each run's head, so `docs --final` and F2 read the row
+    unchanged and no wrapper of theirs is needed.
+  - **The checker.** `remediation/F3-budget-row-figures.py` (review cycle 1, F-a and F-b) runs the
+    frozen `runs --final` unchanged and requires `runs: ok`, then builds the two new sentences from
+    its printed figures and each run's head, checks the same-code claim by `git diff --name-only`,
+    and requires the staged row to end with the baseline and those two sentences. Its controls
+    plant the reviewed row, two heads swapped, a wrong wave count, a wrong crossing wave and a wrong
+    concurrency, each asserted to land once and be refused. Seen red first: with the reviewed row
+    in the index, the frozen mode green (`runs: ok`), F3 failed on the row ("does not end with the
+    baseline, each run's head and the wave figures"), and its plants, which need the new sentences,
+    landed nowhere. An earlier try stopped inside the frozen mode on a transient `gh run view`
+    error, which passed on retry. P5's `verify:` runs F3 in place of `runs --final`,
+    which F3 runs unchanged; `verify/` is not edited.
+  - **The coverage observations.** `ledger-empty-name` (drop `or not name`, `tests/mutants.py:6073`)
+    and `ledger-control-else` (`elif word != 'control'` → `else:`, `:6077`) each remove a guard that
+    never fires on a report the runner prints. Under the method's rule for a finished review (a
+    hand-made mutant that pins no R-ID's check and no reachable behaviour is a coverage observation,
+    and it is seeded), they are seeded together as `issues/mutants-ledger-guard-pins.md`, with a
+    `ROADMAP.md` entry in Part I's Gates group after the flaky case's. Part I goes from 33 entries
+    to 34 and Gates from sixteen to seventeen; the seed/ROADMAP pairing check is empty.
+  - **Gates run.** P5's `verify:` only, through its wrapper chain (F2 over F1 over the frozen
+    `controls`; F3 over `runs --final`). The profile's full `verify` is not re-run: nothing outside
+    `AGENTS.md`'s row, `ROADMAP.md`, `issues/` and `spec/` changes, and `git diff --name-only
+    d5e3be0` with those filtered out is empty.
+  - **Attempt 1, red, recorded.** The first run of the retuned `verify:` was red inside the
+    frozen `runs --final` alone: run 43265827418's shard 7 read as "0 verdicts" and no ledger line.
+    The gate's log fetch (`gh run view --log --job`, no exit check) had returned an empty log; the
+    same job's log, fetched again at once, holds all 469 lines and its 15 `killed` lines, and the
+    same mode was green on these runs minutes before (F3's red-first run). Every other step was
+    green, F3's row check and controls included. The runs are immutable, so the red is the fetch,
+    not the tree: the gate was re-run from its first step on the identical tree.
 
 ---
 
