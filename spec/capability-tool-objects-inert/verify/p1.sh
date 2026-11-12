@@ -6,23 +6,22 @@
 # of the installed model holding what its rule accepts, a field no rule names checked by the generic
 # rule), refusing it naming the distribution, and AGENTS.md §7 says so in the same commit.
 #
-#   sh spec/capability-tool-objects-inert/verify/p1.sh [phase|cli-legacy|cli-modern|replanted-legacy|replanted-modern|mutants-legacy-K|mutants-modern-K|all]   (K = 1, 2, 3, 4)
+#   sh spec/capability-tool-objects-inert/verify/p1.sh [phase|cli-legacy|cli-modern|replanted-legacy|replanted-modern|mutants-legacy|mutants-modern|all]
 #
 # `phase` (about 2 min warm): the served-surface fixture as develop held it (index against BASE_REF); docs_gate.py; rows.py; alternatives.py coverage p1; then P1's named
 # tests in both eras. `cli-<era>`: every tool-object kind of the refusal (and the re-carried
-# `served-tool` timing) driven through the CLI over each drive, `CLUSTER_MCP_TEST_EVERY_KIND=1`
-# (about 73 kinds x 3 drives at about 1.1 s a row, measured at the plan: about 4 min an era). `replanted-<era>`: every loader case this change
+# `served-tool` and `declared` timings) driven through the CLI over each drive, `CLUSTER_MCP_TEST_EVERY_KIND=1`
+# (about 80 kinds x 3 drives at about 1.1 s a row, measured at the plan: about 4.5 min an era). `replanted-<era>`: every loader case this change
 # re-plants (replanted.py), killed in that era (counted at build; at about 3 s a case, a count over
 # 180 is split before it nears the 10-minute command cap).
-# `mutants-<era>-K`: shard K of 4 of every P1 alternative's case, killed in that era (358
-# alternatives on the plan's prototype at about 3 s a case: about 4.5 min a shard). `all` runs every
+# `mutants-<era>`: every case of the narrow set (alternatives.py, ruled at sign-off), killed in that
+# era (34 cases at about 3 s: about 2 min). `all` runs every
 # mode. Footprint: one process tree at a time, nothing in the background, under 1 GB.
 set -eu
 . "$(dirname "$0")/lib.sh"
 MODE=${1:-all}
 need_mode "$MODE" phase cli-legacy cli-modern replanted-legacy replanted-modern \
-  mutants-legacy-1 mutants-legacy-2 mutants-legacy-3 mutants-legacy-4 \
-  mutants-modern-1 mutants-modern-2 mutants-modern-3 mutants-modern-4 all
+  mutants-legacy mutants-modern all
 
 if [ "$MODE" = phase ] || [ "$MODE" = all ]; then
   uv sync --locked -q
@@ -54,7 +53,7 @@ tests/test_hygiene.py::test_no_spec_ids_in_the_package_or_the_suite'
 fi
 cli() {
   CLUSTER_MCP_TEST_EVERY_KIND=1 ran_pytest "$1" tests/test_startup.py::test_a_capability_that_cannot_load_stops_startup \
-    -k 'tool-subclass or tool-exact or tool-default or tool-state or tool-changed or served-tool'
+    -k 'tool-subclass or tool-exact or tool-default or tool-state or tool-changed or served-tool or declared'
 }
 replanted() {
   ids=$($PY $V/replanted.py)
@@ -65,11 +64,5 @@ case $MODE in cli-legacy|all) cli legacy ;; esac
 case $MODE in cli-modern|all) cli modern ;; esac
 case $MODE in replanted-legacy|all) replanted legacy ;; esac
 case $MODE in replanted-modern|all) replanted modern ;; esac
-case $MODE in mutants-legacy-1|all) $PY $V/alternatives.py cases p1 handshake 1/4 ;; esac
-case $MODE in mutants-legacy-2|all) $PY $V/alternatives.py cases p1 handshake 2/4 ;; esac
-case $MODE in mutants-legacy-3|all) $PY $V/alternatives.py cases p1 handshake 3/4 ;; esac
-case $MODE in mutants-legacy-4|all) $PY $V/alternatives.py cases p1 handshake 4/4 ;; esac
-case $MODE in mutants-modern-1|all) $PY $V/alternatives.py cases p1 modern 1/4 ;; esac
-case $MODE in mutants-modern-2|all) $PY $V/alternatives.py cases p1 modern 2/4 ;; esac
-case $MODE in mutants-modern-3|all) $PY $V/alternatives.py cases p1 modern 3/4 ;; esac
-case $MODE in mutants-modern-4|all) $PY $V/alternatives.py cases p1 modern 4/4 ;; esac
+case $MODE in mutants-legacy|all) $PY $V/alternatives.py cases p1 handshake ;; esac
+case $MODE in mutants-modern|all) $PY $V/alternatives.py cases p1 modern ;; esac

@@ -1,6 +1,6 @@
 # PLAN — A capability's registered tool objects run none of its code when they are read
 
-> **Status:** Draft for review · **Last updated:** 2026-11-12
+> **Status:** Signed off 2026-11-12, with the rulings recorded in § 3 and § 5 · **Last updated:** 2026-11-12
 > **Authoritative technical design.** The *how*. Vision/contract is [`GOAL.md`](GOAL.md);
 > the phased executable roadmap is [`TECH.md`](TECH.md). Backing detail is in
 > [`research/`](research/). Every design element traces to a GOAL R-ID.
@@ -8,11 +8,12 @@
 ## 1. Summary
 
 `load()` stops taking a registered tool on `isinstance`. One function, `_tool_violation`, decides each
-registry entry inert before the load first reads it, and again after each later point of the load
+registry entry inert before the load first reads it, and again after the one later point of the load
 where capability code runs: exactly a `FunctionTool`, its instance state
 exactly what pydantic gives one, and every field of the installed FastMCP's model holding what its
-field's rule accepts, read by type before value, `fn` excepted. A field no rule names is checked by
-one generic rule. The members' tools already hold exactly what the rules accept, so nothing they
+field's rule accepts, read by type before value (`fn` decided by its type and module only, its
+behaviour excepted). A field no rule names is checked by one generic rule, and a value it does not
+accept is served undecided with one warning (R4 as amended at sign-off). The members' tools already hold exactly what the rules accept, so nothing they
 serve changes. Two phases: the check with its refusal rows and §7 (P1), then the proof that serving
 runs no capability code but the handler, with the whole cycle's checks (P2).
 
@@ -25,24 +26,24 @@ All code changes are in `packages/cluster-mcp/src/cluster_mcp/core/capabilities.
 `TOOL_REGISTRY`, the core's tools included (they pass every rule, and a capability's code at import
 could spoil one), hands each to `_tool_violation`, and returns the first violation worded by index:
 `loading it registered <why>` for an entry at or after `before`, `the registry holds <why>` for one
-before it. `load()` calls it three times per capability, each `if held := _registry_violation(before):
+before it. `load()` calls it twice per capability, each `if held := _registry_violation(before):
 raise CapabilityLoadError(distribution, held)`, inside the `try` so a refusal takes the one failure
 exit (registry cut back, `:383-387`):
 
 1. after `import_module` (`:329`), replacing the `odd` lines (`:330-332`), before `stray` (`:333`),
    the load's first read of an entry (`fn`, `name`); it also catches this capability's import
    changing an earlier capability's tool;
-2. after the attribution (`:341`), because `stray` and the attribution read `fn.__module__` of every
-   entry, which is the capability's code (`fn` is excepted) and can change a tool already decided
-   (the adversarial review's HIGH-1), before the name checks (`:342`) read `tool.name`;
-3. after the resources are assembled (`:378`), because FastMCP reads a resource handler there (its
-   annotations, capability code), before `names`, `owners` and `Loaded` record the capability.
+2. after the resources are assembled (`:378`), because FastMCP reads a resource handler there (its
+   annotations, capability code, which can change a decided tool: the adversarial review's HIGH-1),
+   before `names`, `owners` and `Loaded` record the capability.
 
-Nothing else of a capability's runs between the third decision and the next capability's import, or
-the load's return. It walks the whole registry, not `TOOL_REGISTRY[before:]`, because the
+With `fn` exactly a function and its `__module__` exactly a `str` (Q-B, B2), `stray` and the
+attribution read `fn.__module__` running no capability code, so no decision is needed between them
+and the name checks; the plan's earlier second decision, after `:341`, is dropped. Nothing else of a
+capability's runs between the last decision and the next capability's import, or the load's return. It walks the whole registry, not `TOOL_REGISTRY[before:]`, because the
 attribution reads every entry, including ones registered before this load began (`research/03`
-risk 2). No verdict is kept across loads, and no message carries an `id()`. The three passes cost
-about 5 ms a capability (one pass over 24 entries measured at 1.6 ms).
+risk 2). No verdict is kept across loads, and no message carries an `id()`. The two passes cost
+about 3.5 ms a capability (one pass over 24 entries measured at 1.6 ms).
 
 **`_tool_violation(entry) -> str | None`**, in this order, each step deciding a type before anything
 reads the value:
@@ -76,7 +77,7 @@ chains test types; never `in` a tuple or set of types.
 | `parameters` | J | exactly `dict`, JSON-like at every depth | listing, to the wire; `Any` values below the top level keep any object, even through `from_function` |
 | `output_schema` | J | `None`, or exactly `dict`, JSON-like at every depth | listing; `convert_result` at a call |
 | `return_type` | T | `None`, no annotation (`inspect.Signature.empty`), `typing.Any`, `...`; a class whose metaclass is exactly `type`, pydantic's `ModelMetaclass`, `enum.EnumType`, `abc.ABCMeta` or `typing._TypedDictMeta` (its namespace, read through `type`'s descriptor, keyed exactly by `str`; its `__module__`, when held, exactly `str`); or an alias exactly a `types.GenericAlias`, `typing._GenericAlias`, `typing.Union`, `typing._UnionGenericAlias`, `typing._AnnotatedAlias` (metadata exactly pydantic `FieldInfo` or JSON-like) or `typing._LiteralGenericAlias` (arguments exact scalars), its state read through its instance dictionary, whose origin and arguments pass the same rule | `add_tool` reads it (`isinstance`, `__module__` `==`, `get_origin`/`get_args`); the RCAC member returns its own dataclass, so no by-value rule fits; the widened lists accept what `from_function` gives for a pydantic model, an enum, a `TypedDict`, a `Literal`, `Annotated`, `tuple[int, ...]` and an `abc` generic (the review's HIGH-2, each probed) |
-| `fn` | X | anything: excepted | the handler, which a request calls; the load's own read of `fn.__module__` stays as §7 counts it (§ 5, Q-B) |
+| `fn` | X′ | exactly a function (`types.FunctionType`, an `async def` included), its `__module__` exactly a `str`; what it does when called is excepted | the handler, which a request calls; the load reads its `__module__` (`stray`, `:341`), which then runs no capability code (§ 5, Q-B, B2) |
 | `version` | F | its default, `None` | the key, version mixing and sort, `get_meta`, at `add_tool` and listing |
 | `title` | F | `None` | listing |
 | `icons` | F | `None` | listing |
@@ -104,10 +105,13 @@ instance state, and anything else by identity. That every F field's declared def
 `Tool.from_function` gives it through `@mcp_tool` is pinned by a test (§ 6), so F is the GOAL's
 third kind ("only what `Tool.from_function` gives it") read from the installed model.
 
-**The generic rule** (`_unnamed`, R4): a field no rule names passes when its value is JSON-like at
-every depth (J), or its own declared default (F). It never skips a field, and it accepts whatever a
-newer FastMCP's `from_function` leaves at its default or fills with JSON, so it does not refuse a
-capability for the field being unknown. Its limit is in § 5.
+**The generic rule** (`_unnamed`, R4 as amended at sign-off, Q-D): a field no rule names is decided,
+never skipped. A value JSON-like at every depth (J), or its own declared default (F), passes. Any other
+value is served undecided: `_tool_violation` calls `_undecided(field)`, which logs one WARNING on
+stderr per field per process (a module-level set of the fields warned, as `core/deprecation.py`'s
+`legacy_warning` keeps one, through `Logger.with_name(__name__)`), naming the field and the installed
+FastMCP's version (`fastmcp.__version__`). A field no rule names never refuses a capability. The
+warned set is per field, not per object, so it is no verdict kept across loads.
 
 **`TOOL_RULES` names every field of the locked model.** A suite test holds `set(TOOL_RULES) ==
 set(FunctionTool.model_fields)`, so a re-lock to a FastMCP with a new field (or without one) fails
@@ -137,23 +141,26 @@ follow. No spec id in package or suite. README and the served-surface fixture do
   state rows `verify/rows.py` names (`tool-exact-parameters-key`, `…-value`, `…-element`, `…-twice`,
   `tool-exact-output_schema-value`, `tool-exact-task_config-state|mode|poll_interval`,
   `tool-exact-return_type-module|attribute-name|argument`, `tool-state-dict|key|extra-key|
-  missing-field|fields-set|fields-set-element|extra|private|missing-slot`, and the three later changes
-  the review found: `tool-changed-by-its-handler-module`, a `fn.__module__` whose `==` sets the name to
-  a type of its own; `tool-changed-by-a-resource-handler`, a handler annotation that does it while the
+  missing-field|fields-set|fields-set-element|extra|private|missing-slot`, and the later changes
+  the review found: `tool-exact-fn-module`, a `fn.__module__` that is a `str` subclass (refused at the
+  first decision under B2, none of its code run), and `tool-exact-fn`, a callable not a function;
+  `tool-changed-by-a-resource-handler`, a handler annotation that does it while the
   resources are assembled; `tool-changed-by-a-later-capability`, a second planted capability's import
   that does it to the first's tool). Each asserts the one-line message
   naming the distribution and the field, the registry cut back, and `_RAN` empty: the planted types
   (`PLANTED_TYPES`, extended with `list`, `set`, `float`, `timedelta` and a metaclass) live in the
   capability module, which the tools module imports, because the test reads `_RAN` there.
 - The `served-tool` timing keeps its 32 rows and its `KeyboardInterrupt` rows with a new carrier
-  (§ 3, deviation row 1).
+  (§ 3, deviation row 1); so does the `declared` timing (row 1b).
 - `test_a_capability_that_cannot_load_stops_startup`: `CLI_UNLOADABLE` gains
   `tool-subclass-reads-name` and `tool-exact-parameters-value` (R6: one kind of each).
 - New: `test_every_function_tool_field_has_a_rule` (the table equals the locked model's fields; a
   fresh `@mcp_tool`-style `Tool.from_function` gives each F field its declared default);
-  `test_a_field_no_rule_names_is_checked_by_the_generic_rule[<field>]` (every field but `fn` and
-  `return_type`, the rule table monkeypatched to drop it: the members still load, a JSON-like
-  non-default value is accepted, a value of a type of its own is refused naming the field);
+  `test_a_field_no_rule_names_is_checked_by_the_generic_rule[<field>]` (every model field, the rule
+  table monkeypatched to drop it: the members still load; a planted tool holding a JSON-like value
+  there loads with no warning; one holding a value of a type of its own loads, served undecided, with
+  exactly one WARNING naming the field and the FastMCP version, none of the value's code run by the
+  load, and a second load in the process warns no more);
   `test_an_inert_tool_of_every_accepted_shape_loads` (planted tools holding every accepted scalar
   and container in `parameters` and `output_schema`, `description` and `output_schema` `None`, a
   JSON-like non-field attribute, and each `return_type` form `from_function` gives for `str`, `None`,
@@ -174,9 +181,9 @@ follow. No spec id in package or suite. README and the served-surface fixture do
 | R-ID | Design element(s) that satisfy it |
 |------|-----------------------------------|
 | R1 | step 1 of `_tool_violation`; `_type_name`; the first decision's place before `stray`; `tool-subclass-*` rows |
-| R2 | steps 2-3; `TOOL_RULES` (J, F, T, X); `_json_violation`, `_same`; the three decisions, so no value the load reads was changed after it was decided; `tool-exact-*`, `tool-default-*`, depth, state and `tool-changed-*` rows |
+| R2 | steps 2-3; `TOOL_RULES` (J, F, T, X′); `_json_violation`, `_same`; the two decisions, so no value the load reads was changed after it was decided; `tool-exact-*`, `tool-default-*`, depth, state and `tool-changed-*` rows |
 | R3 | the rules make every field FastMCP reads at `add_tool` and listing an exact built-in or FastMCP's own default; `test_a_served_capability_runs_none_of_its_code_but_its_handler` (P2) |
-| R4 | step 3 walks `FunctionTool.model_fields` at run time; `_unnamed`; `test_every_function_tool_field_has_a_rule`, `test_a_field_no_rule_names_is_checked_by_the_generic_rule` |
+| R4 (amended) | step 3 walks `FunctionTool.model_fields` at run time; `_unnamed`, `_undecided` (one WARNING per field per process); `test_every_function_tool_field_has_a_rule`, `test_a_field_no_rule_names_is_checked_by_the_generic_rule` |
 | R5 | the members' 17 tools pass every rule unchanged (prototype); `test_served_surface_matches_baseline` with the fixture unedited (gated against develop) |
 | R6 | the families above in the refused-naming-it test beside each set; two CLI kinds; the existing cut-back assertion |
 | R7 | §7 refusal bullet and paragraph, § Testing, in P1's commit (`verify/docs_gate.py` reads the index) |
@@ -205,8 +212,11 @@ Walked before research (gate #1) and on the drafted design (gate #2).
 | Deviation | Why needed | Simpler alternative rejected because |
 |-----------|-----------|--------------------------------------|
 | 1. The `served-tool` timing's carrier changes from a `FunctionTool` subclass to a planted module that replaces `FastMCP.add_tool` for its own tool (restoring it as it raises; the `plant` fixture restores it regardless) | Once tools are exact, a capability's code can no longer run while FastMCP reads its tool, so the old carrier is refused earlier (40 rows, 5 mutants lose their kill, `research/03`). Code at import can still change FastMCP itself, which this check does not cover (§7 says so), so the `except` around the scratch `serve()` stays live and keeps its rows | Retiring the timing leaves a live `except` unpinned and 5 mutants surviving; removing the `except` changes how a FastMCP refusal of a tool is worded |
-| 2. The registry is decided whole (the core's tools too), three times a capability, not only `TOOL_REGISTRY[before:]` once | R3 needs every tool the attribution hands a capability decided, `:341` reads entries registered before the load began, and capability code runs at three later points of the load (the handler-module reads, the resource assembly, the next capability's import) where it can change a decided tool (HIGH-1) | `[before:]` once leaves those entries read unchecked and lets a later change through; a single pass at the load's end lets the load itself read a changed `name` first |
+| 2. The registry is decided whole (the core's tools too), twice a capability, not only `TOOL_REGISTRY[before:]` once | R3 needs every tool the attribution hands a capability decided, `:341` reads entries registered before the load began, and capability code runs at two later points of the load (the resource assembly, the next capability's import) where it can change a decided tool (HIGH-1; the handler-module reads run none once `fn` is decided, B2) | `[before:]` once leaves those entries read unchecked and lets a later change through; a single pass at the load's end lets the load itself read a changed `name` first |
+| 1b. The `declared` timing's carrier changes from a `str`-subclass `fn.__module__` (refused under B2) to a planted module that replaces the load's `_below` for its own tools module (restoring it as it raises; the `plant` fixture restores it regardless); `REJECTED['tool-without-a-module']` (`fn.__module__ = None`) is refused by `fn`'s rule, its cause changing to it. 2026-11-12 · foreman ruling at plan sign-off: Q-B is B2, with the `declared` timing re-carried | As row 1: capability code at import can still change the core's own functions, which this check does not cover, so the load's reading of what a capability declared stays a time its code can run, and the timing keeps its rows | Retiring the timing drops its rows and their `KeyboardInterrupt` rows from the `test_a_capability_that_cannot_load_is_refused_naming_it` family §7 names |
 | 3. R3's planted tool "that would run code on any read of a field but `fn`" is read as two halves: such a tool is refused at load with none of its code run (the R2 rows), and a planted capability that passes is served, listed and called with a monitor that records any code of its files that runs | A tool that would run code on a read cannot pass R1 and R2, which R3's WHERE requires | Planting it past the check would need the check switched off in the test, proving nothing about the shipped load |
+
+| 4. Step 5's dry run of the prototype's full suite, once, is not run at the plan: P2's full verify (`full-legacy-1..4`, `full-modern-1..4`, `full-ends`) stands in for it. 2026-11-12 · foreman ruling at plan sign-off: the host is shared and heavy runs are scheduled | The skill asks for one full-suite run on the prototype before sign-off | Running it at the plan would take a shared host's heavy-run slot the foreman schedules |
 
 Each row was read against the R-ID it touches: row 1 keeps R6's rows and changes no refusal of R1/R2;
 row 2 widens R1's "a capability's load registers" to every entry the load reads, a superset, and
@@ -239,6 +249,8 @@ For the plan gate:
 
 - **Q-A, the field rules.** The table in § 2, F against J for the eleven constant fields: F is tighter
   and smaller, and refuses a future member that sets, say, `annotations` until its rule is widened.
+  2026-11-12 · foreman ruling at plan sign-off: the rule table as proposed, F (the declared default, node for node) for the
+  constant fields.
 - **Q-B, `fn`.** (B1, the plan) Excepted outright; the second decision catches any tool its
   `fn.__module__` code changed. The load's own `fn.__module__` reads (`stray`, `:341`) still run a
   `str` subclass's code when a capability's function carries one through `functools.wraps`, at load
@@ -248,33 +260,56 @@ For the plan gate:
   FunctionType` and an exact-`str` `__module__` (`research/01` risk 1) closes that at its root, makes
   the second decision unnecessary, and takes the carrier from the `declared` timing (its rows and
   `KeyboardInterrupt` rows re-carried or retired, and `tool-without-a-module`'s cause changes).
+  2026-11-12 · foreman ruling at plan sign-off: B2. `fn` is exactly a function (`types.FunctionType`, async included) with an
+  exact-`str` `__module__`, so wording any refusal runs no capability code; the `declared` timing is
+  re-carried (§ 3, row 1b). All 17 member tools pass (checked at the ruling, and the 7 core tools).
+  GOAL's Clarifications record the changed reading of R2 and the Outcome.
 - **Q-C, `return_type` at a call.** Rule T makes `add_tool`'s reads inert. At a call FastMCP builds a
   `TypeAdapter` on it to serialize the handler's result, which reads the capability's dataclass
   (annotations, hooks). The plan counts that as the call (the handler's declared return type, for its
   result); the R3 test returns a `str`. The alternative, walking the class, is far beyond the appetite.
+  2026-11-12 · foreman ruling at plan sign-off: yes: serializing the declared `return_type` at a call is part of the call.
 - **Q-D, the generic rule's limit.** A newer FastMCP field that `from_function` fills with a value
   neither JSON-like nor its default (as `return_type` is today) would refuse every capability on that
   FastMCP, loudly at startup, naming the field. No rule covers it without running capability code
   (`research/02` § 4). The suite catches it at the next re-lock.
+  2026-11-12 · foreman ruling at plan sign-off: not accepted as written: it conflicts with the GOAL ruling (Q3) that an
+  unknown field never refuses every capability just for being unknown. An unknown field whose value
+  is JSON-like or its declared default passes; one that is neither is served undecided, with one
+  WARNING on stderr per field per process naming the field and the FastMCP version: not silent, not a
+  refusal (§ 2, the generic rule). The `set(TOOL_RULES) == model_fields` suite test stays, so the next
+  re-lock fails until the field gets a rule. R4's text is amended to match (GOAL).
 - **Q-E, mutation scale.** 358 alternatives on the folded prototype (`verify/alternatives.py coverage
   p1`, with the review's statement, loop and return alternatives), about 3 s a case per era measured,
   so about 18 min an era in four shards, plus 86 re-planted cases (about 4 min an era). Narrower option: the rule-table and family alternatives only
   (about 25), leaving node-kind alternatives to review's diff sweep, graded per the factory's
   mutation-testing method (operator's KB, `method/mutation-testing.md` § When a review is done).
+  2026-11-12 · foreman ruling at plan sign-off: the narrower set, about 25 rule and family cases, graded per that method's §
+  When a review is done, covering the node kinds the adversarial review found unswept in the depth
+  walks (a statement deleted, a `while` that never runs, a returned value). The set
+  (`verify/alternatives.py`, `NARROW`): each named rule replaced by no check (6); each default-rule
+  field left to the generic rule (11) and the default rule replaced by no check (1); the undecided
+  warning dropped (1) and repeated (1); the fields walked from the rule table (1); the type named
+  through its own `__name__` (1); the walk over only what this capability registered (1); each of the
+  two decisions in `load()` dropped (2); and in each depth walk (`_json_violation`, `_same`,
+  `_return_type_violation`) the descending push deleted, its `while` never entered and its first
+  refusal returning the other answer (9): 34 cases, about 2 min an era measured at about 3 s a case.
 - **Q-F, the wording of an entry before `before`.** A non-inert entry this capability's load did not
   register (one registered before the load began, or an earlier capability's that this one's code
   changed) is refused naming the capability being loaded, `the registry holds …`, which need not be
   its owner (no owner is known before `fn.__module__` is read).
+  2026-11-12 · foreman ruling at plan sign-off: accepted as planned.
 
 Risks, not deferred: depth and size bounds are not added (a 260-deep schema passes the load and fails
 listing, as today; adding a bound is a new refusal with figures to rule). The record checks'
 `type(value).__name__` and `_shown`'s `in` (`research/02` § 2) can run a metaclass's code at load;
-pre-existing, outside this GOAL, raised here for the foreman to rule whether it earns a seed.
+pre-existing, outside this GOAL. 2026-11-12 · foreman ruling at plan sign-off: seeded as
+[`issues/capability-record-checks-metaclass-code.md`](../../issues/capability-record-checks-metaclass-code.md)
+(kind fix, appetite small, unshaped), with a ROADMAP.md entry in Part I's Safety group.
 Prototype numbers come from one host, the plan's.
 
 **Sibling `capability-reload-after-failure` (shared lines).** Both change `load()`. This cycle
-replaces `:330-332` with the first decision, inserts the second after `:341` and the third before
-`:379` (two lines each), and adds module-level functions and `TOOL_RULES` above
+replaces `:330-332` with the first decision, inserts the second before `:379` (two lines), and adds module-level functions and `TOOL_RULES` above
 `_listing_violation`; it leaves `start`, `_scratch()`, the `try` (`:312-321`), `before` and
 `import_module` (`:324-329`), `stray` and the attribution (`:333-341`), the resource loop and the
 recording (`:371-382`) and the failure exit (`:383-387`) as they are. Its refusals are `CapabilityLoadError`s raised inside the `try`, so they
@@ -291,8 +326,9 @@ cases anchored in `load()`), `tests/test_capabilities.py` (`UNLOADABLE`, the `pl
   CLI kind of each), `alternatives.py coverage p1`, then the named tests in both eras; `cli-<era>` —
   every `tool-` kind through the CLI over each drive (`CLUSTER_MCP_TEST_EVERY_KIND=1`); `replanted-<era>`
   — every case whose edits or targets differ from develop's, or that is new, or anchored in `load()`,
-  or killed by a `served-tool` row, killed; `mutants-<era>-K` — every P1 alternative's case, killed,
-  four shards an era. Each named-test run fails on any skip and on an empty parameter set.
+  or killed by a `served-tool` or `declared` row, killed; `mutants-<era>` — every case of the narrow
+  set (Q-E), killed, one run an era. Each named-test run fails on any skip and on an empty parameter
+  set.
 - **P2** (`verify/p2.sh`): `phase` — fixture, docs, rows, `alternatives.py coverage all`, the R3 test
   and P1's new tests in both eras; `ledger`; the profile's full verify as its own commands
   (`full-<era>-1..4`, `full-ends`), each under the 10-minute command cap.
@@ -303,6 +339,7 @@ cases anchored in `load()`), `tests/test_capabilities.py` (`UNLOADABLE`, the `pl
 - **CI budget** (before → after, from `research/03`): `suite-*-4` gains about 260 in-process rows at
   0.01-0.02 s, about 5 s an era (baseline 7:22 / 7:33); `suite-*-3` gains 6 CLI rows at about 1.1 s,
   about 12 s an era on CI (7:10 / 7:34). Both stay under the 10-minute bound; the bound is not moved.
+  2026-11-12 · foreman ruling at plan sign-off: the figures stand as reported; no bound moves.
 
 ## 7. Adversarial review
 
@@ -312,7 +349,8 @@ while broken or refuses while good, and gates that pass a broken build. Two HIGH
 LOW; all folded:
 
 - HIGH-1, capability code later in the load changes a decided tool (a `fn.__module__` `==`, a
-  resource handler's annotations) → the three decisions (§ 2) and the `tool-changed-*` rows; the
+  resource handler's annotations) → the decisions (§ 2; three in the signed draft, two once Q-B
+  ruled B2) and the `tool-changed-*` and `tool-exact-fn-module` rows; the
   prototype refuses the reviewer's carrier with none of its code run.
 - HIGH-2, rule T refused ordinary return types (pydantic model, enum, `Literal`, `TypedDict`,
   `Annotated`, `tuple[int, ...]`, `abc` generics) → T widened to closed lists, each shape in the

@@ -73,9 +73,12 @@ object afterwards is a separate seed (Q1). The Slurm and RCAC members load and s
   after the load is out of scope, Q1.)
 - **R4** — The fields the load checks SHALL follow the `FunctionTool` model of the FastMCP installed
   at run time, so no field passes unchecked (Q3). WHERE that model has a field no rule names (a newer
-  FastMCP within the declared range), the load SHALL check it by one generic rule the plan proposes,
-  never skip it, and SHALL NOT refuse a capability only because the field is unknown. WHEN the
-  locked FastMCP's `FunctionTool` has a field no rule names, the suite SHALL fail.
+  FastMCP within the declared range), the load SHALL check it by one generic rule, never skip it: a
+  value that is JSON-like at every depth, or the field's own declared default, passes; any other value
+  is served undecided, with one WARNING on stderr per field per process naming the field and the
+  installed FastMCP's version. The load SHALL NOT refuse a capability because of a field no rule
+  names. WHEN the locked FastMCP's `FunctionTool` has a field no rule names, the suite SHALL fail.
+  (Amended at plan sign-off, Q-D.)
 - **R5** — The Slurm and RCAC members SHALL load and be served unchanged: their tools pass R1 and R2,
   and `test_served_surface_matches_baseline` passes with no fixture edit.
 - **R6** — Each refusal of R1 and R2 SHALL be driven by a planted capability in
@@ -136,6 +139,20 @@ object afterwards is a separate seed (Q1). The Slurm and RCAC members load and s
   at any depth.
 - **Security** — **A:** 2026-11-12 · foreman ruling at GOAL sign-off: not security work. Capability
   code is installed by the operator and already runs at import; this is §7's inertness rule.
+- **Q-B (plan), `fn`'s rule** — **A:** 2026-11-12 · foreman ruling at plan sign-off: `fn` is no longer
+  wholly excepted. It SHALL be exactly a function (`types.FunctionType`, an `async def` included) whose
+  `__module__` is exactly a `str`, so that deciding and wording any refusal runs no capability code;
+  what it does when a request calls it stays excepted. This changes the reading of R2's "an excepted
+  callable, as `fn` is" and of the Outcome's "the handler (`fn`) is excepted": the handler's behaviour
+  is excepted, its type and module are decided. All 17 member tools pass (checked at the ruling).
+- **Q-C (plan), `return_type` at a call** — **A:** 2026-11-12 · foreman ruling at plan sign-off:
+  serializing a tool's declared `return_type` at a call is part of the call (R3's "a tool call SHALL
+  run only that tool's handler").
+- **Q-D (plan), a field no rule names** — **A:** 2026-11-12 · foreman ruling at plan sign-off: the
+  plan's generic rule refused a value neither JSON-like nor its default, which would refuse every
+  capability for an unknown field, against Q3's ruling. Instead such a value is served undecided with
+  one WARNING per field per process (R4 amended). R3's "every capability's tools pass R1 and R2" reads
+  over the fields a rule names; an undecided field is the warned exception.
 
 ## Notes
 

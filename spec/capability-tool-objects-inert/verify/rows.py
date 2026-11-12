@@ -13,7 +13,8 @@ FastMCP adds, or a rule the build adds, asks for its rows):
 
 - `tool-subclass-reads-<field>` for every model field, plus `tool-subclass-reads-nothing` and
   `tool-subclass-named-by-its-metaclass` (a subclass of `FunctionTool`, refused for its type);
-- `tool-exact-<field>` for every model field but `fn` (a value of a type of its own there);
+- `tool-exact-<field>` for every model field (a value of a type of its own there; for `fn`, a callable
+  that is not a function);
 - `tool-default-<field>` for every field of `F_FIELDS` (the default rule; an exact value that is not
   its default), each mapped to `_default_violation` in `TOOL_RULES`;
 - the depth and state rows `DEPTH` names;
@@ -53,7 +54,7 @@ DEPTH = (
     'tool-state-dict', 'tool-state-key', 'tool-state-extra-key', 'tool-state-missing-field',
     'tool-state-fields-set', 'tool-state-fields-set-element', 'tool-state-extra', 'tool-state-private',
     'tool-state-missing-slot',
-    'tool-changed-by-its-handler-module', 'tool-changed-by-a-resource-handler', 'tool-changed-by-a-later-capability',
+    'tool-exact-fn-module', 'tool-changed-by-a-resource-handler', 'tool-changed-by-a-later-capability',
 )
 
 
@@ -73,7 +74,7 @@ def main() -> int:
     if not isinstance(rules, dict) or default_rule is None:
         return print('rows: the load has no TOOL_RULES table or no _default_violation', file=sys.stderr) or 1
     kinds = ([f'tool-subclass-reads-{f}' for f in fields] + ['tool-subclass-reads-nothing', 'tool-subclass-named-by-its-metaclass']
-             + [f'tool-exact-{f}' for f in fields if f != 'fn']
+             + [f'tool-exact-{f}' for f in fields]
              + [f'tool-default-{f}' for f in F_FIELDS if f in fields]
              + list(DEPTH))
     for f in F_FIELDS:

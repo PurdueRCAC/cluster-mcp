@@ -3,7 +3,8 @@
 
 """The mutation cases this cycle re-plants: every case of `tests/mutants.py` whose edits or targets
 differ from develop's at the cycle start (`BASE_REF`), or that is new; and every case that plants
-into `core/capabilities.py` with an edit inside `load()`, or that targets a `served-tool` row. The
+into `core/capabilities.py` with an edit inside `load()`, or that targets a `served-tool` or
+`declared` row (the two timings re-carried). The
 cases of this cycle's own alternatives are left to `alternatives.py`, which runs them.
 
     uv run python -I spec/capability-tool-objects-inert/verify/replanted.py      from the worktree root
@@ -50,7 +51,7 @@ def main() -> int:
     ids = [c.id for c in mutants.CASES if c.id not in own
            and (base.get(c.id) != (c.file, c.edits, c.targets)
                 or (c.file == LOADER and any(old in body for old, _ in c.edits))
-                or any('served-tool' in t for t in c.targets))]
+                or any('served-tool' in t or 'declared' in t for t in c.targets))]
     if not ids:
         print('replanted: no case', file=sys.stderr)
         return 1

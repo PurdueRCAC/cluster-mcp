@@ -7,25 +7,24 @@ take, and every mutant is caught beside every member set, in both protocol eras.
     uv run python -I spec/capability-tool-objects-inert/verify/alternatives.py [coverage|cases|equivalents|all] [p1|all] [both|handshake|modern] [K/N]
                                                                             from the worktree root
 
-Adapted from `spec/capability-probe/verify/alternatives.py` (the node-kind sweep, the settled-tree
-comparison and the case matching are that script's), over this cycle's decisions, found by parsing
-`core/capabilities.py`:
+Adapted from `spec/capability-probe/verify/alternatives.py` (the settled-tree comparison and the case
+matching are that script's). At the plan's sign-off (2026-11-12, Q-E) the sweep is the narrow set, not
+every node kind: the rule and family decisions, plus the node kinds the adversarial design review found
+unswept in the depth walks. Found by parsing `core/capabilities.py` (`extra()`):
 
-- every decision of the check's functions (`CHECK_FUNCTIONS`): the type naming, the JSON walker, the
-  node-for-node default comparison, the default rule, the return-type rule, each field rule, the
-  generic rule and the per-tool check;
-- the decisions no node kind names (`extra()`): each named field's rule replaced by no check, each
-  field the default rule names left to the generic rule instead, the generic rule replaced by no
-  check, the fields walked from the rule table instead of the installed model, the registry walk over
-  only what this capability's load registered, each of `load()`'s three decisions of the registry
-  dropped, the type named through its own (metaclass's) `__name__`; and, inside the check's
-  functions, each push onto a walk's stack or seen set dropped, each `while` never entered, each
-  returned value but None replaced by None (the adversarial design review's MEDIUM-4).
+- each named rule of `TOOL_RULES` replaced by no check (`NAMED_RULES`);
+- each default-rule field left to the generic rule, and the default rule replaced by no check
+  (`DEFAULT_FIELDS`);
+- the undecided warning for a field no rule names dropped, and given on every load;
+- the fields walked from the rule table instead of the installed model;
+- the type named through its own (metaclass's) `__name__`;
+- the registry walk over only what this capability's load registered;
+- each of `load()`'s decisions of the registry dropped (`DECISIONS_IN_LOAD`);
+- in each depth walk (`DEPTH_WALKS`), the push that descends deleted, its `while` never entered, and its
+  first answer but None turned to the other answer.
 
-The node kinds are the prior script's: each `if`, conditional expression and comprehension condition
-to always, never and its negation; each boolean operator to each operand alone and to the other
-operator; each comparison not the whole of a condition to its negation; each `except` widened,
-narrowed or re-raising; each element of an `in` tuple or an `isinstance` tuple dropped.
+Every other alternative is graded at review from the diff sweep (the factory's mutation-testing method,
+§ When a review is done).
 
 An alternative is mutated when a case of `tests/mutants.py`, or an equivalent recorded below, turns
 the file into the same syntax tree. `coverage` (seconds): every alternative mutated, and every such
@@ -35,7 +34,8 @@ that set cannot observe it; any gap fails, naming it. `cases`: each such case ru
 planted, `EQUIVALENT_TARGETS` passing in each era. K/N runs shard K of N of the cases.
 
 Footprint: one mutant child at a time, under 1 GB; `coverage` seconds; `cases` about 3 s a case per
-era (three loader cases measured at 9 s handshake and 8 s modern at the plan, 2026-11-12).
+era (three loader cases measured at 9 s handshake and 8 s modern at the plan, 2026-11-12): 34 cases,
+about 2 min an era.
 """
 
 from __future__ import annotations
@@ -59,15 +59,18 @@ FILES = {'p1': (LOADER,), 'all': (LOADER,)}
 ERAS = {'handshake': None, 'modern': 'modern'}
 SETS = tuple(mutants.MEMBER_SETS)
 
-# The module-level functions of the check (PLAN.md § 2): every decision in each is swept.
-CHECK_FUNCTIONS = ('_type_name', '_json_violation', '_same', '_default_violation', '_return_type_violation',
-                   '_a_str', '_a_str_or_none', '_a_schema', '_a_schema_or_none', '_excepted', '_unnamed',
-                   '_tool_violation', '_registry_violation')
-# How many times load() decides the registry: after its tools module's import, after the attribution
-# reads each entry's handler, after its resources are assembled (PLAN.md § 2).
-DECISIONS_IN_LOAD = 3
-# The table of field rules, and the rule for a field no rule names.
-RULES, NO_RULE, GENERIC = 'TOOL_RULES', '_excepted', '_unnamed'
+# The table of field rules; the fields it names; the fields it gives the default rule; a rule that checks
+# nothing (what a mutant puts in a rule's place); the warning for a field no rule names.
+RULES, NO_CHECK, WARN = 'TOOL_RULES', 'lambda value, info: None', '_undecided'
+NAMED_RULES = ('name', 'description', 'parameters', 'output_schema', 'return_type', 'fn')
+DEFAULT_FIELDS = ('version', 'title', 'icons', 'tags', 'meta', 'task_config', 'annotations', 'execution', 'auth',
+                  'timeout', 'run_in_thread')
+# How many times load() decides the registry: after its tools module's import, and after its resources
+# are assembled (PLAN.md § 2).
+DECISIONS_IN_LOAD = 2
+# The depth walks, each with the push by which it descends (PLAN.md § 5, Q-E).
+DEPTH_WALKS = {'_json_violation': 'stack.extend(node.values())', '_same': 'stack.extend(zip(a, b))',
+               '_return_type_violation': 'stack.extend(args)'}
 
 # Mutants that change no behaviour, each with why; filled by build as it finds them: name -> ((old,
 # new), why), planted in LOADER.
@@ -273,9 +276,24 @@ def _assigned(module: ast.Module, name: str) -> ast.AST | None:
     return None
 
 
+def _at(t: ast.Module, scope: str, kind: type, key: tuple) -> ast.AST:
+    return next(n for n in ast.walk(function(t, scope)) if isinstance(n, kind) and (n.lineno, n.col_offset) == key)
+
+
+def _without(t: ast.Module, scope: str, key: tuple) -> None:
+    """Delete the statement at `key` from `scope`, leaving `pass` where a body would empty."""
+    for parent in ast.walk(function(t, scope)):
+        for field in ('body', 'orelse', 'finalbody'):
+            body = getattr(parent, field, None)
+            if isinstance(body, list) and body and isinstance(body[0], ast.stmt):
+                kept = [s for s in body if (s.lineno, s.col_offset) != key]
+                if len(kept) != len(body):
+                    setattr(parent, field, kept or [ast.Pass()])
+
+
 def extra(text: str) -> tuple[list[Alternative], list[str]]:
-    """The value decisions no node kind names, each found by parsing (so a reformatted line is still
-    found, and a missing one is a gap)."""
+    """The narrow set (`NARROW`, PLAN.md § 5 Q-E), each found by parsing (so a reformatted line is
+    still found, and a missing one is a gap)."""
     found: list[Alternative] = []
     gaps: list[str] = []
     module = ast.parse(text)
@@ -288,39 +306,47 @@ def extra(text: str) -> tuple[list[Alternative], list[str]]:
     rules = _assigned(module, RULES)
     if not isinstance(rules, ast.Dict):
         return found, [f'{LOADER}: {RULES} is not a dict literal']
+    named = [k.value for k in rules.keys if isinstance(k, ast.Constant)]
+    if sorted(named) != sorted(NAMED_RULES):
+        gaps.append(f'{LOADER}: {RULES} names {sorted(named)}, not {sorted(NAMED_RULES)}')
     for i, (key, value) in enumerate(zip(rules.keys, rules.values)):
-        if key is not None and isinstance(key, ast.Constant):
+        if isinstance(key, ast.Constant):
             def unchecked(t: ast.Module, i: int = i) -> None:
-                _assigned(t, RULES).values[i] = ast.Name(id=NO_RULE, ctx=ast.Load())
-            if not (isinstance(value, ast.Name) and value.id == NO_RULE):
-                mutated(f'{RULES}: {key.value} unchecked', key.lineno, unchecked)
+                _assigned(t, RULES).values[i] = expr(NO_CHECK)
+            mutated(f'{RULES}: {key.value} unchecked', key.lineno, unchecked)
         elif key is None and isinstance(value, ast.DictComp):
             elts = value.generators[0].iter.elts if isinstance(value.generators[0].iter, ast.Tuple) else []
-            if not elts:
-                gaps.append(f'{LOADER}: the rule table unpacks no tuple of default-rule fields')
+            if sorted(e.value for e in elts) != sorted(DEFAULT_FIELDS):
+                gaps.append(f'{LOADER}: the default-rule fields are not {sorted(DEFAULT_FIELDS)}')
             for j, e in enumerate(elts):
                 def generic(t: ast.Module, i: int = i, j: int = j) -> None:
                     del _assigned(t, RULES).values[i].generators[0].iter.elts[j]
-
-                def none(t: ast.Module, i: int = i) -> None:
-                    _assigned(t, RULES).values[i].value = ast.Name(id=NO_RULE, ctx=ast.Load())
                 mutated(f'{RULES}: {e.value} left to the generic rule', e.lineno, generic)
+
+            def none(t: ast.Module, i: int = i) -> None:
+                _assigned(t, RULES).values[i].value = expr(NO_CHECK)
             mutated(f'{RULES}: the default-rule fields unchecked', value.lineno, none)
     check = function(module, '_tool_violation')
     if check is None:
         return found, gaps + [f'{LOADER}: no _tool_violation']
-    gets = [n for n in ast.walk(check) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-            and n.func.attr == 'get' and ast.unparse(n.func.value) == RULES]
-    if len(gets) != 1 or len(gets[0].args) != 2 or ast.unparse(gets[0].args[1]) != GENERIC:
-        gaps.append(f'{LOADER}: _tool_violation does not look each field up as {RULES}.get(field, {GENERIC})')
+    warns = [n for n in ast.walk(check) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+             and getattr(n.value.func, 'id', None) == WARN]
+    if len(warns) != 1:
+        gaps.append(f'{LOADER}: _tool_violation does not call {WARN}(field) once')
     else:
-        key = (gets[0].lineno, gets[0].col_offset)
+        key = (warns[0].lineno, warns[0].col_offset)
+        mutated('a field no rule names served undecided with no warning', warns[0].lineno,
+                lambda t, key=key: _without(t, '_tool_violation', key))
+    warner = function(module, WARN)
+    ifs = [n for n in warner.body if isinstance(n, ast.If)] if warner else []
+    if not ifs:
+        gaps.append(f'{LOADER}: {WARN} has no warned-once check')
+    else:
+        key = (ifs[0].lineno, ifs[0].col_offset)
 
-        def no_generic(t: ast.Module) -> None:
-            call = next(n for n in ast.walk(function(t, '_tool_violation')) if isinstance(n, ast.Call)
-                        and (n.lineno, n.col_offset) == key)
-            call.args[1] = ast.Name(id=NO_RULE, ctx=ast.Load())
-        mutated('a field no rule names unchecked', gets[0].lineno, no_generic)
+        def every_time(t: ast.Module, key: tuple = key) -> None:
+            _at(t, WARN, ast.If, key).test = ast.Constant(False)
+        mutated('a field no rule names warned on every load', ifs[0].lineno, every_time)
     loops = [n for n in ast.walk(check) if isinstance(n, ast.For) and ast.unparse(n.iter).endswith('.items()')
              and any(isinstance(m, ast.Attribute) and m.attr == 'get' and ast.unparse(m.value) == RULES
                      for m in ast.walk(n))]
@@ -330,8 +356,7 @@ def extra(text: str) -> tuple[list[Alternative], list[str]]:
         key = (loops[0].lineno, loops[0].col_offset)
 
         def from_table(t: ast.Module) -> None:
-            loop = next(n for n in ast.walk(function(t, '_tool_violation')) if isinstance(n, ast.For)
-                        and (n.lineno, n.col_offset) == key)
+            loop = _at(t, '_tool_violation', ast.For, key)
             fields = loop.iter.func.value
             loop.iter = expr(f'((f, {ast.unparse(fields)}[f]) for f in {RULES} if f in {ast.unparse(fields)})')
         mutated("the fields walked from the rule table, not the installed model", loops[0].lineno, from_table)
@@ -353,8 +378,7 @@ def extra(text: str) -> tuple[list[Alternative], list[str]]:
         key = (entries[0].lineno, entries[0].col_offset)
 
         def only_new(t: ast.Module) -> None:
-            loop = next(n for n in ast.walk(function(t, '_registry_violation')) if isinstance(n, ast.For)
-                        and (n.lineno, n.col_offset) == key)
+            loop = _at(t, '_registry_violation', ast.For, key)
             for n in list(ast.walk(loop.iter)):
                 for field, value in ast.iter_fields(n):
                     if isinstance(value, ast.Name) and value.id == 'TOOL_REGISTRY':
@@ -369,68 +393,59 @@ def extra(text: str) -> tuple[list[Alternative], list[str]]:
         gaps.append(f'{LOADER}: load() decides the registry {len(sites)} times, not {DECISIONS_IN_LOAD}')
     for site in sites:
         key = (site.lineno, site.col_offset)
+        mutated(f'load(): the registry not decided at line {site.lineno}', site.lineno,
+                lambda t, key=key: _without(t, 'load', key))
+    # In each depth walk: the push that descends deleted, the walk's loop never entered, and its first
+    # returned answer but None turned to the other answer.
+    for name, push in DEPTH_WALKS.items():
+        walk = function(module, name)
+        if walk is None:
+            gaps.append(f'{LOADER}: no depth walk {name}')
+            continue
+        pushes = [n for n in ast.walk(walk) if isinstance(n, ast.Expr) and ast.unparse(n) == push]
+        if len(pushes) != 1:
+            gaps.append(f'{LOADER}: {name} does not hold {push} once')
+        else:
+            key = (pushes[0].lineno, pushes[0].col_offset)
+            mutated(f'{name}: {push} dropped', pushes[0].lineno, lambda t, key=key, name=name: _without(t, name, key))
+        loops = [n for n in ast.walk(walk) if isinstance(n, ast.While)]
+        if len(loops) != 1:
+            gaps.append(f'{LOADER}: {name} has no one while loop')
+        else:
+            key = (loops[0].lineno, loops[0].col_offset)
 
-        def dropped(t: ast.Module, key: tuple = key) -> None:
-            for parent in ast.walk(function(t, 'load')):
-                for field in ('body', 'orelse', 'finalbody'):
-                    body = getattr(parent, field, None)
-                    if isinstance(body, list):
-                        setattr(parent, field, [s for s in body if not (isinstance(s, ast.If)
-                                                and (s.lineno, s.col_offset) == key)] or [ast.Pass()])
-        mutated(f'load(): the registry not decided at line {site.lineno}', site.lineno, dropped)
-    # Statements no node kind names, inside the check's functions: each push onto a walk's stack or seen
-    # set dropped, each loop's condition never true, each returned value but None replaced by None.
-    for scope in [f for f in (function(module, n) for n in CHECK_FUNCTIONS) if f]:
-        for node in ast.walk(scope):
-            if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Attribute) and node.value.func.attr in ('extend', 'append', 'add')):
-                key = (node.lineno, node.col_offset)
+            def never(t: ast.Module, key: tuple = key, name: str = name) -> None:
+                _at(t, name, ast.While, key).test = ast.Constant(False)
+            mutated(f'{name}: its while loop never runs', loops[0].lineno, never)
+        answers = sorted((n for n in ast.walk(walk) if isinstance(n, ast.Return) and n.value is not None
+                          and not (isinstance(n.value, ast.Constant) and n.value.value is None)),
+                         key=lambda n: (n.lineno, n.col_offset))
+        if not answers:
+            gaps.append(f'{LOADER}: {name} returns no answer but None')
+        else:
+            first = answers[0]
+            key = (first.lineno, first.col_offset)
+            other = ast.Constant(True) if isinstance(first.value, ast.Constant) and first.value.value is False \
+                else ast.Constant(False) if isinstance(first.value, ast.Constant) and first.value.value is True \
+                else ast.Constant(None)
 
-                def no_push(t: ast.Module, key: tuple = key, name: str = scope.name) -> None:
-                    for parent in ast.walk(function(t, name)):
-                        for field in ('body', 'orelse'):
-                            body = getattr(parent, field, None)
-                            if isinstance(body, list):
-                                setattr(parent, field, [s for s in body if not (isinstance(s, ast.Expr)
-                                                        and (s.lineno, s.col_offset) == key)] or [ast.Pass()])
-                mutated(f'{scope.name}: {ast.unparse(node)} dropped', node.lineno, no_push)
-            if isinstance(node, ast.While):
-                key = (node.lineno, node.col_offset)
-
-                def never(t: ast.Module, key: tuple = key, name: str = scope.name) -> None:
-                    loop = next(n for n in ast.walk(function(t, name)) if isinstance(n, ast.While)
-                                and (n.lineno, n.col_offset) == key)
-                    loop.test = ast.Constant(False)
-                mutated(f'{scope.name}: its while loop never runs', node.lineno, never)
-            if isinstance(node, ast.Return) and node.value is not None and not (
-                    isinstance(node.value, ast.Constant) and node.value.value is None):
-                key = (node.lineno, node.col_offset)
-
-                def returns_none(t: ast.Module, key: tuple = key, name: str = scope.name) -> None:
-                    ret = next(n for n in ast.walk(function(t, name)) if isinstance(n, ast.Return)
-                               and (n.lineno, n.col_offset) == key)
-                    ret.value = ast.Constant(None)
-                mutated(f'{scope.name}: line {node.lineno} returns None', node.lineno, returns_none)
+            def answered(t: ast.Module, key: tuple = key, name: str = name, other: ast.AST = other) -> None:
+                _at(t, name, ast.Return, key).value = copy.deepcopy(other)
+            mutated(f'{name}: line {first.lineno} returns {ast.unparse(other)}', first.lineno, answered)
     return found, gaps
 
 
 def alternatives(phase: str) -> tuple[list[Alternative], list[str]]:
-    found: list[Alternative] = []
-    gaps: list[str] = []
     if not (NAMESPACE / LOADER).exists():
         return [], [f'{LOADER}: missing']
     text = source(LOADER)
-    module = ast.parse(text)
-    scopes = [f for f in (function(module, n) for n in CHECK_FUNCTIONS) if f]
-    gaps += [f'{LOADER}: no function {n}' for n in CHECK_FUNCTIONS if function(module, n) is None]
-    found += decisions(text, LOADER, scopes)
-    more, missing = extra(text)
-    found += more
-    gaps += missing
+    found, gaps = extra(text)
     own = tree(text)
     unique: dict[tuple[str, str], Alternative] = {}
     for alt in found:
-        if alt.tree != own:
+        if alt.tree == own:
+            gaps.append(f'{alt.file}:{alt.line}: {alt.what}: changes nothing')
+        else:
             unique.setdefault((alt.file, alt.tree), alt)
     return list(unique.values()), gaps
 

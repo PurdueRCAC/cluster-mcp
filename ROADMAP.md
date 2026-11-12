@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-30 entries, each of which ships in the first release after it lands. **Part II** ships as
+31 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-one entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -88,8 +88,8 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (four): a tool object changed after the load, the site files' size, the startup update
-  check, and the floors a git install resolves against.
+- **Safety** (five): a tool object changed after the load, a metaclass's code in the record checks,
+  the site files' size, the startup update check, and the floors a git install resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -351,6 +351,18 @@ time FastMCP lists or calls the tool. Pre-existing. Filed at that cycle's GOAL s
 
 *Horizon: Part I, safety · Depends on: capability-tool-objects-inert (the check it extends) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (GOAL, Q1); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-tool-objects-served-copy.md`](issues/capability-tool-objects-served-copy.md) · *status: unshaped*
+
+## The record checks can run a metaclass's code while they word a refusal
+
+The load names a refused record value's type with `type(value).__name__`, and `_shown` tests a type
+with `in` on a tuple of types; both run code of a metaclass the capability defines (a `__name__`
+property, a `__getattribute__`, an `__eq__`), at load and inside its guard, so the refusal still
+names the distribution but its message can lie. Naming the type through `type`'s own descriptor and
+testing with `is`, as `capability-tool-objects-inert` does for tools, closes it. Pre-existing. Found
+by that cycle's planning, seeded at its plan sign-off, 2026-11-12.
+
+*Horizon: Part I, safety · Depends on: — · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (PLAN § 5, research 02); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-record-checks-metaclass-code.md`](issues/capability-record-checks-metaclass-code.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 
