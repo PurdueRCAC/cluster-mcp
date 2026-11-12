@@ -49,7 +49,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 3 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
 - id: P4
   name: The second hosted run (Run A dispatches, Run B reads)
-  status: pending
+  status: in_progress
   satisfies: *id001
   depends_on:
   - P3
@@ -233,8 +233,8 @@ closed on the foreman's GOAL Q3 ruling: the seven seeded in four groups.
 runs dispatched together would share the organisation's 20 job slots, and each would miss the
 15-minute envelope (PLAN § 2.5). Two runs: Run A dispatches, Run B reads.
 
-**Run A (the brief authorises the push and one dispatch):**
-- [ ] `mutants-gate.py prepush` and `untouched 4` on the head. The head is P3's closing commit, which
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush` and `untouched 4` on the head. The head is P3's closing commit, which
       differs from `T1` only in `spec/`, `issues/` and `ROADMAP.md` (PLAN § 3 row D3). Mark P4
       `in_progress` with the note "Run A: dispatched", commit, push.
 - [ ] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
@@ -382,6 +382,9 @@ Two runs: Run A dispatches, Run B records.
   Each names run `43255195424` at `aff08bd`, its shard, the target rows that passed on Linux, the
   macOS kill and an unverified likely cause, and suggests fix shapes without choosing one. No case,
   target or `why` changes in this cycle (Non-goal 3). P3 closes; P4's dispatch is the foreman's.
+- **2026-11-12 · foreman ruling: across runs 2 and 3, only a survivor not already seeded counts
+  against the three-case limit.** A re-occurrence of the seven cases seeded after run 1 does not
+  count. A case not killed in one run and killed in another is reported as a flaky case.
 
 ---
 
