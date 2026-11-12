@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-31 entries, each of which ships in the first release after it lands. **Part II** ships as
+32 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty-one entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,9 +84,9 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (fourteen), because every later gate rests on them: the mutation run, the pins its
+- **Gates** (fifteen), because every later gate rests on them: the mutation run, the pins its
   stop path still lacks and the case cleanup a second signal can cut short, the two gaps the skip check still leaves and the pins it still lacks, the
-  waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, a pin the sandbox sweep's listing guard lacks, the marker
+  waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, the pins the sandbox sweep's listing guard and its reopen's link guard lack, the marker
   wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
@@ -190,6 +190,18 @@ process listing fails (`tests/sandbox_dirs.py` `processes`), rather than read an
 
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (REVIEW cycle 1); `tests/sandbox_dirs.py`; `tests/test_sandbox_dirs.py`*
 **Seed:** [`issues/sandbox-sweep-listing-failure-unpinned.md`](issues/sandbox-sweep-listing-failure-unpinned.md) · *status: unshaped*
+
+## Nothing pins that the sandbox cleanup's reopen ignores a link inside a closed directory
+
+The suite's sandbox sweep and the mutation runner's case cleanup reopen directories a stopped test
+left closed, and never follow a link while they do (`tests/sandbox_dirs.py` `_open_tree`). The rows
+that pin this place their links at the top of the run directory; a hand-planted mutant that follows
+links survived `tests/test_sandbox_dirs.py` and, through a link inside a closed directory, opened a
+closed directory outside the run. A coverage observation; the code is correct today. Found by
+`sandbox-dirs-left-on-kill`'s review, cycle 2, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (REVIEW cycle 2); `tests/sandbox_dirs.py`; `tests/test_sandbox_dirs.py`*
+**Seed:** [`issues/sandbox-reopen-link-in-closed-dir-unpinned.md`](issues/sandbox-reopen-link-in-closed-dir-unpinned.md) · *status: unshaped*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
