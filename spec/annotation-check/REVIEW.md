@@ -410,3 +410,180 @@ Route each as its property over its whole domain; the instances above are exampl
 - Cycle 2 of ≤3 does not converge: cycle 1's routed classes F3–F5 are only partly closed, and the
   same open-ended class (an under-reading reader, unpinned forms) reappears wider. Escalated to the
   maintainer before a third build round.
+
+## Review cycle 3 — changes-requested (2026-11-12)
+
+- **Reviewed commit:** 011c31fe40cd115111ba1f4a22bf62bdd7831fcb  ·  **Base:** develop (merge base `e378c33`)
+- **Mode:** a fresh blind pass over the full spec-excluded diff. It also judged cycle 2's N1–N7 as
+  properties, graded the seed `issues/annotation-check-pin-gaps.md` as prose, and ran the diff sweep
+  over the code changed since `672720d`. One fresh reviewer (subagent, effort xhigh), no debate, no
+  sequential fallback. It was given GOAL and the rubric inline, the spec-excluded diff and log,
+  `AGENTS.md` by path, cycle 2's findings and routing verbatim, and the routing ruling (N1, N2, the
+  `AGENTS.md` entry and the tree test's oracle fixed; the N3–N7 remainder and the forms not read
+  today seeded). It graded mutation results by citation of `method/mutation-testing.md` § When a
+  review is done. Its evidence is in the gitignored `.local/review3/reviewer/`. Its report came back
+  as text and is summarized here.
+- **Contract drift:** only `9c053bf` (Q1, Q2) after the shape commit, as in cycles 1 and 2.
+
+### Verification run
+
+Orchestrator gates (spec-held) at HEAD, run one at a time before the reviewer started, evidence in
+`.local/review3/orchestrator/`:
+- `gate.sh phase` → static (base `e378c33`), docs, ledger ok. The ledger reports 0 deferrals: its
+  phrase list does not match the `Seed:` lines that name this cycle's seed, so it cannot see it.
+  Checked by hand instead: `issues/annotation-check-pin-gaps.md` exists, and `ROADMAP.md:188` has
+  its entry.
+- `gate.sh P1` → exit 0, 125 s: named tests and the module pass per era (268 each, about 3 s wall),
+  the rails and the served-surface baseline pass, `seen_red.sh` all 35 planted cases red with the
+  baseline green.
+- `remediation/F6-F8-review2.py --rev 011c31f` (before `9d8c01a`) → 0 failures, exit 0, 207 s.
+- Cited, not re-run (same tree, run earlier the same day, in `.local/remediation2/`): `sweep.py`
+  → 102 mutants, 100 killed in both eras, 2 equivalent; `gate.sh P2` → `full` ok, 1565 s.
+- CI run 43246804608 at `011c31f` (read with `gh`) → success; slowest suite job 5:18 (handshake era, 4 of 4),
+  whole run 5:46 wall, every job inside the 10-minute `ci budget`.
+
+Reviewer (both eras throughout):
+- `uv lock --check` ok; `test_annotations`, `test_auth_modes`, `test_surface`, `test_hygiene`,
+  `test_suite_parts` → 509 passed per era. No full-suite run (the full gate is cited above).
+- No network: 268 passed per era with outbound network denied, `curl` failing under the same
+  profile (`logs/no-network.log`). Module about 2.5–2.8 s, tree test 1.55 s.
+- R7: no diff under `packages/`, `served_surface.json` unchanged, baseline and `test_auth_modes`
+  pass, `bin/sandbox.sh uv run cluster-mcp --help` exits 0.
+- Plants in real `src/` (core postponed `scripts.py`, core eager `instructions.py`, `AUTH_MODES`,
+  Slurm `tools.py`, RCAC `resources.py`): every position kind refused (`logs/real-r5-plants*.json`,
+  `logs/real-plants.txt`); a new module and a new member checked with no edit (`logs/real-r4-added*`).
+- N1's twelve contexts and the control all refused at HEAD (`logs/ctx-plants-head.txt`).
+- Cycle 2's 39 survivors ported to HEAD: 9 killed by the new oracle (D10–D13, D17–D19, B5, B10), 30
+  survive, each replayed as a real plant refused at HEAD and passed by the mutant
+  (`logs/replay-port.txt`, `logs/mutants-summary.txt`).
+- Diff sweep over the code changed since `672720d` (rule: `method/mutation-testing.md` § When a
+  review is done): 141 generated, 76 killed by assertion in both eras, 63 survived, 1 error-only
+  (FN1, an `IndexError`, not counted as a kill), 1 unviable (re-expressed and killed), 0 timed out,
+  0 unrun; 839 s on 2 workers (`logs/mutants-all.jsonl`, `logs/mutants-summary.txt`). Survivors:
+  6 CONFIRMED (N11 below), 12 equivalent, 45 coverage observations (below).
+- Tree hygiene: `git status --porcelain` empty on hand-back (checked again by the orchestrator);
+  every plant and mutant ran in `git archive` scratch trees under the evidence folder, each
+  hash-verified equal to HEAD afterwards; `$WT/.venv` unchanged (`uv sync --dry-run`: no changes);
+  only the ignored `.pytest_cache` touched.
+- Orchestrator sanity check: the cited logs exist and read as stated (spot-checked
+  `real-valid-{typeddict-inheritance,functional-typename,class-level-functional}-*-pytest.json`,
+  `real-annotate-def-local-*-pytest.json`, `real-control-local-class-statement-legacy-pytest.json`,
+  the six survivors in `mutants-summary.txt`). Independently reproduced on 3.14: a `TypedDict`
+  subclass's `__mro__` is `(C, dict, object)` while its `__annotations__` merges the base's keys, and
+  a functional `NamedTuple('Row', …)` bound to `_R` has `__qualname__` `Row`.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented by | Verified how (who) | Status |
+|------|----------------|--------------------|--------|
+| R1 | `annotation_positions`, `type_expression_violations`, `module_check`, `_unread_forms` | Reviewer: plants in every position kind across core (both modes), Slurm, RCAC; N1 contexts refused | ⚠️ met on reachable plants, with gaps N10 (`def __annotate__`) and N11 (six sweep survivors) |
+| R2 | `_verdict` | Reviewer: module rows both eras; N6 survivors reproduced at HEAD | ✅ met; N6 seeded |
+| R3 | `_refusal` | Reviewer: real-tree refusals name module, line, qualified name, text as written, why | ✅ met; N7 seeded |
+| R4 | `workspace_members`, `member_modules` | Reviewer: new module and new member checked with no edit | ⚠️ met today; N9 forces an edit to the check for valid later code |
+| R5 | the tree test; `spec/annotation-check/verify/seen_red.sh` | **Both.** Reviewer: plants red in core and two other members, HEAD green both eras. Orchestrator: `seen_red.sh` via `gate.sh P1`, 35/35 red, baseline green | ⚠️ met on the current tree; N9 turns it red on valid shapes |
+| R6 | the module in the collected suite | Reviewer: collected (268 items), network-free, about 2.7 s. Orchestrator: CI 43246804608 green at HEAD, every job ≤ 5:19 against the 10-minute `ci budget` | ✅ |
+| R7 | no `src/` or fixture change | Reviewer: empty `packages/` diff, baseline passes, drive ok. Orchestrator: `gate.sh static` | ✅ |
+
+Unmapped changes: none. The `ROADMAP.md` and `issues/` edits are seed bookkeeping.
+
+### Cycle-2 findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| N1 (functional forms) | **closed** as a property for the forms named; run-time-built names seeded | `logs/ctx-plants-head.txt`; rows in both directions |
+| N2 (`KW_ONLY`) | **closed** | valid shapes and cycle 2's `kw_only.py`, `valid_unusual.py` plants: 0 refusals; Q1–Q4 killed |
+| N3 (reader carve-outs) | **root cause closed** (oracle independent of the reader; 9 killed); remaining 11 seeded accurately; the oracle carries a new defect, N9 | `logs/replay-port.txt` |
+| N4–N7 | **seeded accurately**; all 30 remaining survive at HEAD and replay as real plants | `logs/replay-port.txt` |
+
+### Findings
+
+Four CONFIRMED (2 MEDIUM, 2 LOW), no PLAUSIBLE, no § Invariants violation, nothing
+security-related. Numbering continues from cycle 2.
+
+#### N9 [MEDIUM/CONFIRMED] The tree test's run-time oracle goes red on valid code
+- **Where:** `tests/test_annotations.py:933-936` (`runtime_positions`: the class name from
+  `obj.__qualname__`, inherited keys from `obj.__mro__[1:]`); its docstring at `:889-890` says a
+  `TypedDict`'s merged bases are handled.
+- **Failure scenario:** three valid shapes added to real `src/` turn
+  `test_every_kept_annotation_in_the_workspace_is_a_type` red with "annotations Python keeps that
+  the check did not read", in both eras: a `TypedDict` subclass of a `TypedDict` (its bases are not
+  in `__mro__`, only in `__orig_bases__`, so the inherited key is reported as the child's); a
+  functional form bound to a name other than its typename (`_Rv3Row = NamedTuple('Rv3Row', …)`;
+  `__qualname__` comes from the typename); a class-level functional form (`class H: Row =
+  NamedTuple('Row', …)`), the shape the reader claims to read.
+- **Impact:** fails closed, so no defect passes, but the first such shape in a later module or
+  family forces an edit to the check.
+- **Evidence:** `plant_real.py` → `logs/real-valid-*-pytest.json`; `logs/probe-oracle.json`;
+  orchestrator reproduction of the MRO and `__qualname__` facts.
+- **Touches:** R4, R5; Scope 1.
+
+#### N10 [MEDIUM/CONFIRMED] `def __annotate__` passes unread and unrefused, though `AGENTS.md` says every spelling of `__annotate__` is refused
+- **Where:** `_spelled`, `tests/test_annotations.py:470-481` (reads a string, keyword, attribute or
+  name, never a `def`'s name); the claim at `AGENTS.md:957-958` and the `annotation_positions`
+  docstring `:241-243`.
+- **Failure scenario:** a class inside a function body defining
+  `def __annotate__(format): return {'held': dict[str, int:]}` leaves the tree test green in both
+  eras while Python keeps the slice; the same class written `held: dict[str, int:]` is refused. At
+  module level, or in a class the module reaches, only the oracle catches it, as "kept but not read".
+- **Evidence:** `logs/real-annotate-def-local-*-pytest.json` (green),
+  `logs/real-control-local-class-statement-*-pytest.json` (red),
+  `logs/real-annotate-def-module*.json` (red via the oracle), `logs/probe-q.json`, `logs/probe-q2.json`.
+- **Touches:** R1; Scope 5 (the `AGENTS.md` entry describes `_spelled`/`_unread_forms` wrongly).
+
+#### N11 [LOW/CONFIRMED] Six diff-sweep survivors in the new unreadable-form detection
+- **Where and what:** AK2, `__annotate__` dropped from `ANNOTATION_KEYS` (`:89`); U6, the `else` of
+  `if TYPE_CHECKING` not visited (`:431-434`); UC6, a `type` namespace's `__annotations__` value not
+  checked (`:378`); UC10, `make_dataclass`'s `fields=` keyword not checked (`:387`); UFi10, a field
+  name constant not checked (`:410`); UFi2, `TypedDict` field keys not checked (`:401-402`).
+- **Failure scenario:** each passes every row in both eras; each replays as a planted defect that
+  HEAD refuses and the mutant passes, Python keeping the slice. In real `src/` the same holds inside
+  a function-local class, where the oracle cannot reach; at module level the oracle catches it.
+- **Evidence:** `logs/mutants-all.jsonl`, `logs/replay-sweep.json`, `logs/replay/`,
+  `logs/real-sweep-survivors.txt`, `logs/real-sweep-U6.txt`, `logs/real-{AK2,U6,UC6,UC10,UFi10}-local-*`.
+- **Touches:** R1. Sweep survivors (the enumeration), not hand-planted.
+
+#### N12 [LOW/CONFIRMED] The seed's "Not read today" misstates which routes pass
+- **Where:** `issues/annotation-check-pin-gaps.md:45-60`.
+- **Failure scenario:** it says `globals()['TypedDict']` passes unread and unrefused; it is refused
+  (the literal is spelled). `vars(typing)[name]` and `typing.__dict__[name]` are refused whenever the
+  name is a literal anywhere in `src/`; a metaclass or `type` alias given a namespace variable holding
+  `__annotations__` is refused when that key is written. Only names built at run time pass, the
+  seed's first route, which is accurate. The seed omits `def __annotate__` (N10). The `ROADMAP.md`
+  wording ("only through names built at run time") is accurate.
+- **Evidence:** `logs/probe-q2.json`.
+- **Touches:** rubric, seed graded as prose.
+
+#### Equivalent mutants and coverage observations (not findings)
+- Equivalent (reviewer, reasons in `logs/mutants-summary.txt`): AL3, FN4, RP13, RP3, SH2, SH3, UC7,
+  UFi5, UFi9, UFi11, FK1, FK3.
+- Coverage observations: 19 only add refusals (FK2, 13 FK-md-*, SP3, U1, U2, U3, UFi8); 5 reachable
+  only through run-time-built names, the seeded class (BC1, BC4, BC6, UC2, U4); 10 oracle
+  strengthenings or weakenings (CH2, RP2, RP7, RP9, RP10, RP12, RP16, RP17, RP18, RP20); 4 refusal
+  text only (SH1, SH4, SH5, U14); 1 contrived (UFi7); 6 tree-test assertions pinned only outside the
+  module (TT1–TT6). FN1 (error-only, red by `IndexError`) recorded, not counted.
+
+### Routing
+
+Not routed to build: cycle 3 is the last the loop allows, and two findings are MEDIUM. Escalated to
+the maintainer. The properties, for whichever route he picks:
+- **N9:** the oracle's expected set holds only what the source itself annotates on each object, by
+  the name the reader uses for it, for every valid shape (inheritance across `TypedDict` bases, a
+  functional form bound to another name or held in a class), and keeps going red on every position
+  Python keeps that the reader missed.
+- **N10:** every route that sets a class's annotations (`def __annotate__` included) is read or
+  refused as unreadable, never passed; `AGENTS.md` describes exactly what is refused.
+- **N11:** each survivor killed by a named row, or recorded equivalent with the reason.
+- **N12:** the seed states which routes pass, as reproduced.
+
+### Human-gate triggers
+
+- Not triggered. Every finding sits in `tests/test_annotations.py`, the `AGENTS.md` § Testing entry
+  or the seed; none is on § Invariants' high-blast-radius list, and none violates a `[human gate]`
+  section.
+
+### Convergence
+
+- Cycle 3 of ≤3 does not converge. Cycle 2's routed classes closed (N1, N2, the oracle's root
+  cause), and the seed's survivor counts reproduce exactly, but the oracle fix brought a false red on
+  valid code (N9), and the unreadable-form detection has a gap (N10) and six survivors (N11). The
+  loop's bound is reached: STOP for the maintainer.

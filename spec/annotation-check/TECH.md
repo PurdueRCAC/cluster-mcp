@@ -3,7 +3,7 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_review
+status: blocked
 branch: ci/annotation-check
 base: develop
 current_phase: done
@@ -37,10 +37,10 @@ phases:
   hill: uphill
   verify: sh spec/annotation-check/verify/gate.sh P2
 review:
-  last_reviewed_commit: 672720d3acf65a26fefed4d7a3e3b218416a05ce
+  last_reviewed_commit: 011c31fe40cd115111ba1f4a22bf62bdd7831fcb
   verdict: changes-requested
-  blocked_reason: 'review 2: 7 CONFIRMED (1 MEDIUM functional forms read in one context only, 6 LOW: KW_ONLY refused, 39 surviving mutants; tree-test oracle shares the reader); does not converge, escalated'
-  cycle: 2
+  blocked_reason: 'review 3: 4 CONFIRMED (2 MEDIUM: oracle false red on valid TypedDict inheritance and renamed functional forms; def __annotate__ passes unread; 2 LOW: 6 sweep survivors, seed misstates routes); loop bound reached, escalated'
+  cycle: 3
 ---
 
 # TECH.md — Nothing would catch the next silently wrong annotation
