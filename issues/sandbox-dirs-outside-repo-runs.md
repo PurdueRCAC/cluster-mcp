@@ -43,8 +43,18 @@ session's `cluster-mcp-run.*` directory, or the mutation runner's current `mutan
 with the sandbox directories and the pytest temporary directories inside it. On a hosted CI runner
 the machine is discarded; on a developer's host the directory stays.
 
-Pre-existing: the trap came in with the sandbox wrapper itself, before the factory; case 2 is the
-same exposure one level up, in the cleanup `sandbox-dirs-left-on-kill` added.
+**Case 3: a run directory kept for a sandbox still running at the session's end.** The suite's
+session cleanup (`own_tmp` in `tests/sandbox_dirs.py`) keeps its `cluster-mcp-run.*` directory
+while a sandbox directory in it is in use, as that cycle's GOAL asks (its R4 and the clarification on
+the run's own directory). Nothing revisits it afterwards: once the sandbox's command ends, its trap
+removes the sandbox's own directory and the run directory stays, empty, in the `TMPDIR` the run was
+started with. Every run of the profile's `verify` leaves two this way, one from each era's third
+suite command, where `tests/test_launch.py::test_a_local_end_record_split_across_reads_is_found`
+leaves a sandbox running `sleep 8` at the session's end. Found by `sandbox-dirs-left-on-kill`'s
+review, cycle 1, 2026-11-12; out of that cycle's scope, since its R1–R4 cover sandbox directories.
+
+Pre-existing: the trap came in with the sandbox wrapper itself, before the factory; cases 2 and 3 are
+the same exposure one level up, in the cleanup `sandbox-dirs-left-on-kill` added.
 
 ## Why it was deferred
 
@@ -63,8 +73,8 @@ developer chooses to keep.
 ## Sketch of the acceptance criteria
 
 - **R1** — WHEN a caller outside the repository's own runs SIGKILLs `bin/sandbox.sh` (alone or with
-  its process group), or a suite run or the mutation runner is SIGKILLed before its end, what its
-  sandboxes left SHALL be removed within a bound the maintainer sets, or SHALL be removable by a
+  its process group), or a suite run or the mutation runner is SIGKILLed before its end, or a run
+  keeps its directory for a sandbox still running at its end, what its sandboxes left SHALL be removed within a bound the maintainer sets, or SHALL be removable by a
   documented step that removes only directories no process uses.
 - **R2** — No directory of another sandbox still in use, and nothing that is not a sandbox directory,
   SHALL be removed.
@@ -73,7 +83,7 @@ developer chooses to keep.
 
 ## Notes
 
-- **A sketch, not a decision:** a likely remedy for both cases is clearing stale leftovers on the
+- **A sketch, not a decision:** a likely remedy for all three cases is clearing stale leftovers on the
   next start: a later suite run, mutation run or sandbox removes `cluster-mcp-sandbox.*`,
   `cluster-mcp-run.*` and `mutant-*` directories under its `TMPDIR` that no process uses, with the
   in-use test `tests/sandbox_dirs.py` already applies. Its open questions: an age or ownership guard

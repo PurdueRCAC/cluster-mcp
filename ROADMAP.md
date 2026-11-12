@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-30 entries, each of which ships in the first release after it lands. **Part II** ships as
+31 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-one entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,9 +84,9 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (thirteen), because every later gate rests on them: the mutation run, the pins its
+- **Gates** (fourteen), because every later gate rests on them: the mutation run, the pins its
   stop path still lacks and the case cleanup a second signal can cut short, the two gaps the skip check still leaves and the pins it still lacks, the
-  waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, the marker
+  waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, a pin the sandbox sweep's listing guard lacks, the marker
   wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
@@ -168,15 +168,28 @@ short the same way. Found by `sandbox-dirs-left-on-kill`'s P2 build, 2026-11-12.
 ## A sandbox killed outright where no run's cleanup runs leaves its directory
 
 `bin/sandbox.sh` removes its directory from a trap a SIGKILL skips. `sandbox-dirs-left-on-kill`
-cleans up after the suite and the mutation runner and leaves the wrapper as it is, so two cases still
-leave directories: a person or another tool that SIGKILLs a sandbox (a shell's `kill -9`, a gate
-script, a step cancelled outright) leaves it in that caller's `TMPDIR`, and a suite run or the
+cleans up after the suite and the mutation runner and leaves the wrapper as it is, so three cases
+still leave directories: a person or another tool that SIGKILLs a sandbox (a shell's `kill -9`, a
+gate script, a step cancelled outright) leaves it in that caller's `TMPDIR`; a suite run or the
 mutation runner SIGKILLed before its end leaves its run directory or case scratch, sandboxes
-included. That cycle's GOAL records both as known limitations; pre-existing. Clearing stale
-leftovers on the next start is a likely remedy, not yet decided.
+included; and a suite run keeps its run directory for a sandbox still running at its end, which
+stays empty once that sandbox's trap has run (two per `verify`). That cycle's GOAL records the first
+two as known limitations, and its review, cycle 1, found the third. Clearing stale leftovers on the
+next start is a likely remedy, not yet decided.
 
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (GOAL non-goals, Q4); `bin/sandbox.sh`*
 **Seed:** [`issues/sandbox-dirs-outside-repo-runs.md`](issues/sandbox-dirs-outside-repo-runs.md) · *status: unshaped*
+
+## Nothing pins the sandbox sweep's refusal when it cannot list processes
+
+The suite's sandbox sweep and the mutation runner's case cleanup keep what they found when the
+process listing fails (`tests/sandbox_dirs.py` `processes`), rather than read an empty table as
+"nothing in use". No test fails when that check is removed: a hand-planted mutant survived
+`tests/test_sandbox_dirs.py`. A coverage observation; the guard works today and fires only when
+`lsof` or `ps` fails. Found by `sandbox-dirs-left-on-kill`'s review, cycle 1, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (REVIEW cycle 1); `tests/sandbox_dirs.py`; `tests/test_sandbox_dirs.py`*
+**Seed:** [`issues/sandbox-sweep-listing-failure-unpinned.md`](issues/sandbox-sweep-listing-failure-unpinned.md) · *status: unshaped*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
