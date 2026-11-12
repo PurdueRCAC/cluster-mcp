@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+30 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -88,8 +88,8 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (three): the site files' size, the startup update check, and the floors a git install
-  resolves against.
+- **Safety** (four): a capability load retried after an interrupt, the site files' size, the
+  startup update check, and the floors a git install resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -126,7 +126,7 @@ load in the same process registers nothing for a capability that had loaded clea
 names it instead of the broken one. The command line never retries, so only a library caller sees it.
 
 *Horizon: before Part II, safety · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
-**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
+**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: adopted:capability-reload-after-failure*
 
 ## A mutant's child run outlives its timeout
 
@@ -340,6 +340,16 @@ bash 3.2 only). Pre-existing.
 
 *Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
+
+## A capability load retried after an interrupt may register nothing and blame the wrong distribution
+
+A `KeyboardInterrupt` that cuts a load short cuts the tool registry back the way a failed load does,
+and leaves the imported tools modules cached in the same way. A library caller that catches it and
+loads again could meet the defect `capability-reload-after-failure` fixes for a failure. Read from
+the code, not observed. The command line never retries.
+
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure (its fix may cover this) · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-reload-after-interrupt.md`](issues/capability-reload-after-interrupt.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 

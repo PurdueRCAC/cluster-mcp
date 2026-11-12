@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:capability-reload-after-failure
 kind: fix
 appetite: small
 lane: public
