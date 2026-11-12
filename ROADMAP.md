@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 28 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 29 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Twenty-eight entries: every open hardening, robustness and safety item, and the rename in code and
+Twenty-nine entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -70,11 +70,11 @@ through an attribute or an outcome raised directly.
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (twelve entries), because every later gate rests on them: the mutation run and
+- **Gates first** (thirteen entries), because every later gate rests on them: the mutation run and
   its children, the two gaps the skip check still leaves and the pins it still lacks, the
-  timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
-  wording, the image's init, and the surface fixture, which must land before the first cycle that
-  changes the served surface.
+  timing-sensitive reconnect test, an annotation check and the pins it still lacks, the test
+  harnesses' leftovers, the marker wording, the image's init, and the surface fixture, which must
+  land before the first cycle that changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
@@ -172,6 +172,18 @@ it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carr
 
 *Horizon: 0.2.0, gates · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
 **Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: adopted:annotation-check*
+
+## The annotation check behaves correctly on shapes its rows do not pin
+
+`annotation-check`'s second review found 39 mutants of the check that pass every row while a planted
+defect of their shape goes unrefused; its remediation's tree-test oracle kills the nine whose shape
+the tree holds. Thirty remain: block kinds and `self`/`cls` in the reader, qualifier and generic
+arguments in the walker, binding forms in shadow detection, exception classes at resolution and at
+import, and the refusal line's text. The check behaves correctly on each; the fix is a planted row
+per shape and a sweep over each domain. Seeded by the cycle 2 remediation, 2026-11-12.
+
+*Horizon: 0.2.0, gates · Depends on: annotation-check · Refs: [`spec/annotation-check/`](spec/annotation-check/) (REVIEW cycle 2, N3–N7)*
+**Seed:** [`issues/annotation-check-pin-gaps.md`](issues/annotation-check-pin-gaps.md) · *status: unshaped*
 
 ## A sandbox killed with SIGKILL leaves its directory behind
 

@@ -3,15 +3,15 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: blocked
+status: in_progress
 branch: ci/annotation-check
 base: develop
-current_phase: done
-last_updated: '2026-11-10'
+current_phase: P1
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The annotation check and its controls, seen red in each kind of position
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -23,10 +23,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py
+  verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py && .venv/bin/python -I spec/annotation-check/remediation/F6-F8-review2.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R7
@@ -131,6 +131,48 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
     planted red row, in both modes.
   - The redundant `local_class` guard in `module_check` is gone: the reader leaves `owner` empty for
     a class defined inside a function, which is what the guard decided.
+- **2026-11-12, review cycle 2 remediation** (`REVIEW.md`, changes-requested at `672720d`). A
+  foreman ruling scopes it to four fixes and one seed: N1, N2, the `AGENTS.md` sentence N1 names, and
+  the tree test's oracle (N3's root cause); N3 to N7's other survivors are seeded. P1 and P2 are
+  reopened. The fixes land in one P1 commit with the `AGENTS.md` entry they change, as cycle 1's
+  did; P2 closes after the profile's full `verify`, which waits on the foreman's release.
+  `gate.sh`, `seen_red.sh` and `sweep.py` are unchanged (every sweep anchor still holds); P1's
+  `verify:` is retuned to run, after them, `remediation/F6-F8-review2.py`, the kill evidence of
+  review cycle 2's N1 (checker F6), N2 (F7) and the oracle (F8).
+  - N1 (F6): a functional class form is read only as one name assigned the call at module or class
+    level with its fields written out as a literal. Every other spelling is a position marked
+    unreadable and refused: a call in a function body or a method, as a base class, with an
+    annotated, chained, tuple, walrus or attribute target; fields in a variable, from a call,
+    unpacked, or holding an element that is not a pair; a keyword the check does not read
+    (`make_dataclass(namespace=...)`); a `type` namespace not written out, unpacked or setting
+    `__annotate__`; a `types.new_class` body callback; a factory bound to another name or passed as
+    a value; a factory's name as a string; `__annotations__` or `__annotate__` spelled anywhere but
+    a read `type` call's namespace. An alias is taken from a `from ... import ... as ...` of any
+    module. An `if TYPE_CHECKING:` body, a class statement's base and a one-argument `type(x)` are
+    not refused. 26 spellings, each a row in both modes.
+  - N2 (F7): `dataclasses.KW_ONLY` is a qualifier valid only at the top of a class attribute. The
+    valid shapes hold two dataclasses using it (one frozen, one by a string annotation); rows refuse
+    it on a variable, on a parameter and below the top.
+  - The `AGENTS.md` § Testing entry, and the module docstring, state what is read, what is refused
+    as unreadable, and what is not read, and name `runtime_positions`.
+  - The oracle (F8): the tree test's child also runs `runtime_positions`, which imports every module
+    (never a `__main__`) and reads with `annotationlib`, as strings, each module's annotations, those
+    of every class reachable from it that names it as its module (less a base's keys), and those of
+    every live function compiled from its file (less wrappers and renamed functions). Every position
+    it finds must be one the reader read; the per-module count taken from `annotation_positions` is
+    gone. On the tree it finds 994 of the reader's 1,009 positions (the other 15 are nested
+    functions not alive after import), none missed, in 0.12 s.
+  - Kill evidence (`remediation/F6-F8-review2.py`, both eras, committed state): the new rows are red
+    against the check as it stood at `9d8c01a` and green now; fourteen mutants that undo part of a
+    fix are each red on their named rows; and nine of N3's reader survivors (D10 to D13, D17 to D19,
+    B5, B10) pass the old tree test and fail the new one. N3's D20 (`self` and `cls` skipped)
+    survives it, since the tree annotates neither.
+  - Seed: the 30 survivors of N3 to N7 the oracle cannot reach, `issues/annotation-check-pin-gaps.md`
+    with its `ROADMAP.md` entry (Part I's counts move from 28 to 29 entries, gates from twelve to
+    thirteen).
+  - Runs: the build commit holds P1 and P2 `in_progress`. `gate.sh P1` ran green on a dangling
+    candidate of the same tree (`SEEN_RED_REV`); `verify/sweep.py`, the checker on the commit, and
+    P2's full `verify` run when the foreman releases the host, and close both phases.
 
 ---
 
@@ -166,9 +208,12 @@ of position in the core and in other members.
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P1` (about 2 min, 113 s in the plan's dry
   run; it runs `verify/seen_red.sh`, R5's evidence, 35 plants, and prints the module's wall time,
   the figure PLAN § 5 quotes), then `verify/sweep.py` (review cycle 1 remediation: 102 mutants in
-  both eras, about 12 min, reading committed state; its record is `verify/sweep-record.md`).
+  both eras, about 12 min, reading committed state; its record is `verify/sweep-record.md`), then
+  `remediation/F6-F8-review2.py` (review cycle 2 remediation: the kill evidence of N1, N2 and the
+  oracle, both eras, about 4 min, reading committed state).
 - **Touches:** `tests/test_annotations.py`; `spec/annotation-check/verify/sweep.py` and its record
-  (remediation).
+  (review cycle 1 remediation); `spec/annotation-check/remediation/F6-F8-review2.py` (review cycle 2
+  remediation).
 
 ## Phase P2 — AGENTS.md names the check, and the full gate in both eras
 **Satisfies:** R6, R7 · **Depends on:** P1
@@ -183,13 +228,14 @@ profile's full `verify` passes with the check in its fourth command of each era.
 - [x] Deferral ledger: walk P1's and this phase's bodies, and PLAN, for every deferral (the
       phrases `code-plan` Step 6.7 names, which `gate.sh` → `ledger` greps for); each needs an
       `issues/` seed, pre-shaped from the KB's `ISSUE.md`, and a `ROADMAP.md` entry. The plan
-      files none.
-- [x] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
+      files none; review cycle 2's remediation files `issues/annotation-check-pin-gaps.md`.
+- [ ] Run `sh spec/annotation-check/verify/gate.sh phase` first (fast), then the full gate in the
       background (the profile's `verify`, about 26 min).
 - **Verify:** `sh spec/annotation-check/verify/gate.sh P2` (static, docs, ledger, then the profile's
   full `verify`, read from AGENTS.md § Factory at run time). R6's CI-budget clause is graded at
   publish on the cycle branch's CI run, not here.
-- **Touches:** `AGENTS.md` (§ Testing only).
+- **Touches:** `AGENTS.md` (§ Testing only); `issues/annotation-check-pin-gaps.md` and its
+  `ROADMAP.md` entry (review cycle 2 remediation).
 
 ---
 

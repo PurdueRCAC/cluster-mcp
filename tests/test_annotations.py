@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""Every annotation Python keeps at run time, in every workspace member's `src/`, is a type.
+"""The annotations Python keeps at run time, in every workspace member's `src/`, are types.
 
 An annotation that resolves to something other than a type passes silently: `typing.get_type_hints`
 returns `Final[slice(Dict[...], None, None)]` for `Final[Dict[...]:]` without complaint, and so does
@@ -10,8 +10,10 @@ eager evaluation. This module is the standing check against that class of defect
 `workspace_violations` finds the members from the root `pyproject.toml`'s `[tool.uv.workspace]` and
 their modules from each member's `src/`, so a member or module added later is checked on arrival.
 `annotation_positions` reads each module's syntax tree for the annotations Python keeps: module
-variables, class attributes (the functional `TypedDict` and `NamedTuple` forms included), and every
-function's and method's parameters and return, at any depth. Each one is evaluated as
+variables and class attributes declared by a simple annotated name, the fields of a functional class
+form written as one name assigned a call with its fields written out, and every function's and
+method's parameters and return, at any depth. A functional class form written any other way is a
+position the check cannot read, and is refused as one. Each readable position is evaluated as
 `typing.get_type_hints` evaluates a postponed annotation, in the imported module's namespace (a class
 attribute's in its class's), and `type_expression_violations` walks what it resolved to. An
 annotation that does not resolve, resolves to a non-type, or reads a name an enclosing class body or
@@ -20,16 +22,19 @@ function binds (where eager and postponed evaluation can disagree) is refused, o
 
 The check over the real tree runs in a fresh interpreter under `bin/sandbox.sh`: in process, the
 unit guard replaces `subprocess.Popen`, and an annotation naming it would resolve to the guard's
-refuser. The controls plant scratch workspaces under `tmp_path` and run in process.
+refuser. There `runtime_positions` reads what Python itself keeps on the imported modules, and every
+position it finds must be one the syntax reader read. The controls plant scratch workspaces under
+`tmp_path` and run in process.
 """
 
 from __future__ import annotations
 
+import annotationlib
 import ast
-import collections
 import collections.abc
 import dataclasses
 import enum
+import gc
 import importlib
 import json
 import os
@@ -59,6 +64,8 @@ QUALIFIERS: tuple[tuple[Any, str, frozenset[str]], ...] = (
     (typing.Required, 'Required', frozenset({ATTRIBUTE})),
     (typing.NotRequired, 'NotRequired', frozenset({ATTRIBUTE})),
     (typing.ReadOnly, 'ReadOnly', frozenset({ATTRIBUTE})),
+    # A dataclass's `_: KW_ONLY` marks the fields after it keyword-only.
+    (dataclasses.KW_ONLY, 'KW_ONLY', frozenset({ATTRIBUTE})),
 )
 # Special forms that are types on their own.
 BARE_TYPES = (typing.Any, typing.Never, typing.NoReturn, typing.Self, typing.LiteralString)
@@ -69,11 +76,18 @@ BARE_FORMS = (typing.Union, typing.Optional, typing.Literal, typing.Annotated, t
 TYPE_PARAMETERS = (typing.TypeVar, typing.ParamSpec, typing.TypeVarTuple,
                    typing.ParamSpecArgs, typing.ParamSpecKwargs)
 LITERAL_VALUES = (int, str, bytes, bool, enum.Enum)
-# The calls that build a class whose annotations Python keeps, by the name they are called by, and
-# the modules a `from … import … as …` alias of them is read from. `type` counts only when called
-# with three arguments whose namespace is a dict literal holding `__annotations__`.
-FUNCTIONAL_FORMS = frozenset({'TypedDict', 'NamedTuple', 'make_dataclass', 'type'})
-FUNCTIONAL_MODULES = frozenset({'typing', 'typing_extensions', 'dataclasses'})
+# The calls that build a class whose annotations Python keeps, by the name they are called by, bare,
+# as an attribute, or by the alias a `from … import … as …` of that name gives it, from any module.
+# `type` counts only when called with three arguments, and `new_class` only with a body callback.
+FUNCTIONAL_FORMS = frozenset({'TypedDict', 'NamedTuple', 'make_dataclass', 'type', 'new_class'})
+# The keywords a functional form takes that hold no annotation (every `NamedTuple` keyword is a field).
+FORM_KEYWORDS = {'TypedDict': frozenset({'total', 'closed'}),
+                 'make_dataclass': frozenset({'fields', 'bases', 'init', 'repr', 'eq', 'order', 'unsafe_hash',
+                                              'frozen', 'match_args', 'kw_only', 'slots', 'weakref_slot',
+                                              'module', 'decorator'})}
+# The keys of a class namespace that set its annotations.
+ANNOTATION_KEYS = frozenset({'__annotations__', '__annotate__'})
+UNREADABLE = 'a functional class form the check cannot read'
 TYPE_PARAMETER_KINDS = {'TypeVar': typing.TypeVar, 'ParamSpec': typing.ParamSpec,
                         'TypeVarTuple': typing.TypeVarTuple}
 
@@ -88,6 +102,8 @@ CHILD = textwrap.dedent(f"""\
     out, sys.stdout = sys.stdout, sys.stderr
     import test_annotations
     report = test_annotations.workspace_report(root)
+    report['kept'] = test_annotations.runtime_positions(
+        [name for modules in report['members'].values() for name in modules])
     out.write({REPORT_MARK!r} + json.dumps(report) + '\\n')
     """)
 CHILD_TIMEOUT = 300
@@ -102,7 +118,9 @@ class Position:
     the qualified name of the class whose namespace an attribute is evaluated in, empty for every
     other position and for a class defined inside a function (`local_class`), which no namespace
     reaches. `type_params` are the PEP 695 parameters in scope, `shadowed` the names it reads that an
-    enclosing class body or function binds, and `line` where it is written.
+    enclosing class body or function binds, and `line` where it is written. `unreadable` is why a
+    functional class form's call or reference cannot be read, which is its refusal; its `text` is
+    the call or reference as written, and it is never evaluated.
     """
 
     module: str
@@ -115,6 +133,7 @@ class Position:
     local_class: bool = False
     type_params: tuple[tuple[str, str], ...] = ()
     shadowed: tuple[str, ...] = ()
+    unreadable: str = ''
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -214,13 +233,25 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
     alias; every function and method, at any depth, gives its annotated parameters and its return.
     A function body's own variable annotations are never evaluated, so they are not read; nor is an
     annotated attribute or subscript target, which Python does not keep.
+
+    A functional form is read only as `Name = Form('Name', <fields>)`, one name assigned at module
+    or class level, with its fields written out as a literal. Every other call of one (in a function
+    body, as a base class, with a chained, tuple or attribute target, its fields in a variable or
+    unpacked), every reference to one that is not a call or a class statement's base (the factory
+    bound to another name or passed as a value), a factory's name as a string, and every spelling of
+    `__annotations__` or `__annotate__` outside a read `type` call's namespace, is returned as a
+    position whose `unreadable` says why: the check cannot find the annotations it builds, so it
+    refuses it.
     """
     tree = ast.parse(source, str(path))
     forms = {name: name for name in FUNCTIONAL_FORMS}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in FUNCTIONAL_MODULES:
+        if isinstance(node, ast.ImportFrom):
             forms.update((a.asname, a.name) for a in node.names if a.name in FUNCTIONAL_FORMS and a.asname)
     found: list[Position] = []
+    # The calls read as functional forms, and the namespace dicts (and their keys) of the `type`
+    # calls among them.
+    read: set[int] = set()
 
     def add(annotation: ast.expr, name: str, kind: str, scopes: list[_Scope], where: str,
             own_params: tuple[tuple[str, str], ...] = ()) -> None:
@@ -250,11 +281,16 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
         func = call.func
         form = (forms.get(func.id) if isinstance(func, ast.Name)
                 else func.attr if isinstance(func, ast.Attribute) and func.attr in FUNCTIONAL_FORMS else None)
+        if form is None or not _builds_a_class(form, call) or _unreadable_call(form, call):
+            return
+        read.add(id(call))
         keywords = {k.arg: k.value for k in call.keywords if k.arg}
         pairs: list[tuple[str, ast.expr]] = []
         if form == 'type':
             namespace = call.args[2] if len(call.args) == 3 else None
             if isinstance(namespace, ast.Dict):
+                read.add(id(namespace))
+                read.update(id(key) for key in namespace.keys if key is not None)
                 for key, value in zip(namespace.keys, namespace.values):
                     if isinstance(key, ast.Constant) and key.value == '__annotations__':
                         pairs += _field_pairs(value)
@@ -302,7 +338,147 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
                     body(block, scopes, where)
 
     body(tree.body, [], 'module')
+    for node, name, why in _unread_forms(tree, forms, read):
+        text = ast.get_source_segment(source, node) or ast.unparse(node)
+        found.append(Position(module, node.lineno, name, ATTRIBUTE, _shortened(text), '', unreadable=why))
     return found
+
+
+def _shortened(text: str) -> str:
+    return text if len(text) <= 200 else text[:197] + '...'
+
+
+def _builds_a_class(form: str, call: ast.Call) -> bool:
+    """Whether a call of a functional form's name builds a class: `type` only with three arguments
+    (or arguments unpacked into it), `new_class` only with a body callback; the others always."""
+    unpacked = any(isinstance(a, ast.Starred) for a in call.args) or any(k.arg is None for k in call.keywords)
+    if form == 'type':
+        return unpacked or len(call.args) == 3
+    if form == 'new_class':
+        return unpacked or len(call.args) > 3 or any(k.arg == 'exec_body' for k in call.keywords)
+    return True
+
+
+def _unreadable_call(form: str, call: ast.Call) -> str:
+    """Why the fields of a functional form's call cannot be read from its syntax, or '' when they can."""
+    if any(isinstance(a, ast.Starred) for a in call.args) or any(k.arg is None for k in call.keywords):
+        return 'its arguments are unpacked with * or **'
+    if form == 'new_class':
+        return 'new_class sets its namespace in a callback'
+    if form == 'type':
+        namespace = call.args[2]
+        if not isinstance(namespace, ast.Dict):
+            return 'its namespace is not written out as a dict literal'
+        keys = [k.value if isinstance(k, ast.Constant) and isinstance(k.value, str) else None for k in namespace.keys]
+        if None in keys:
+            return 'its namespace has a key that is not written out as a string'
+        if '__annotate__' in keys:
+            return 'its namespace sets __annotate__'
+        held = [v for k, v in zip(keys, namespace.values) if k == '__annotations__']
+        return _unreadable_fields('TypedDict', held[0]) if held else ''
+    if len(call.args) > 2:
+        return 'it takes more positional arguments than a name and its fields'
+    keywords = {k.arg: k.value for k in call.keywords}
+    allowed = FORM_KEYWORDS.get(form)
+    if allowed is not None:
+        extra = sorted(k for k in keywords if k not in allowed)
+        if extra:
+            return f'it takes the keyword {extra[0]}, which the check does not read'
+    fields = call.args[1:2] or [v for k, v in keywords.items() if k == 'fields' and form == 'make_dataclass']
+    return _unreadable_fields(form, fields[0]) if fields else ''
+
+
+def _unreadable_fields(form: str, fields: ast.expr) -> str:
+    """Why a functional form's fields argument cannot be read from its syntax, or '' when it can.
+
+    `TypedDict` (and a `type` namespace's `__annotations__`) take a dict literal with string keys;
+    `NamedTuple` a list or tuple of `(name, annotation)` pairs; `make_dataclass` a list or tuple of
+    names, pairs and `(name, annotation, field)` triples.
+    """
+    if form == 'TypedDict':
+        if not isinstance(fields, ast.Dict):
+            return 'its fields are not written out as a dict literal'
+        bad = [k for k in fields.keys if not (isinstance(k, ast.Constant) and isinstance(k.value, str))]
+        return f'a field name it cannot read: {ast.unparse(bad[0]) if bad[0] else "**"}' if bad else ''
+    if not isinstance(fields, (ast.List, ast.Tuple)):
+        return 'its fields are not written out as a list or tuple literal'
+    sizes = (2, 3) if form == 'make_dataclass' else (2,)
+    for element in fields.elts:
+        if form == 'make_dataclass' and isinstance(element, ast.Constant) and isinstance(element.value, str):
+            continue
+        if not (isinstance(element, (ast.Tuple, ast.List)) and len(element.elts) in sizes
+                and isinstance(element.elts[0], ast.Constant) and isinstance(element.elts[0].value, str)):
+            return f'a field it cannot read: {ast.unparse(element)}'
+    return ''
+
+
+def _unread_forms(tree: ast.Module, forms: dict[str, str], read: set[int]) -> list[tuple[ast.AST, str, str]]:
+    """Every functional class form in `tree` the reader did not read: the node, its qualified name
+    and why. An `if TYPE_CHECKING:` body never runs, so nothing in it is a form Python builds."""
+    found: list[tuple[ast.AST, str, str]] = []
+    allowed: set[int] = set()
+
+    def form_of(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            return forms.get(node.id)
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in FUNCTIONAL_FORMS:
+            # An attribute named `type` is a form only as `builtins.type`: `self.type(...)` is common.
+            if node.attr != 'type' or (isinstance(node.value, ast.Name) and node.value.id == 'builtins'):
+                return node.attr
+        return None
+
+    def visit(node: ast.AST, prefix: str) -> None:
+        if isinstance(node, ast.If) and _is_type_checking(node.test):
+            for statement in node.orelse:
+                visit(statement, prefix)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(node, ast.ClassDef):
+                allowed.update(id(base) for base in node.bases)
+            inside = {id(statement) for statement in node.body}
+            for child in ast.iter_child_nodes(node):
+                if id(child) not in inside:
+                    visit(child, prefix)
+            for statement in node.body:
+                visit(statement, f'{prefix}{node.name}.')
+            return
+        if isinstance(node, ast.Call) and (form := form_of(node.func)) is not None:
+            allowed.add(id(node.func))
+            if id(node) not in read and _builds_a_class(form, node):
+                # What its arguments spell is refused with it, not again on its own.
+                allowed.update(id(n) for arg in [*node.args, *node.keywords] for n in ast.walk(arg))
+                why = _unreadable_call(form, node) or 'it is not assigned to one name at module or class level'
+                found.append((node, f'{prefix}{ast.unparse(node.func)}(...)',
+                              f'{UNREADABLE}: {why}; only `Name = {form}("Name", <fields written out>)` at module or '
+                              'class level is read, so the annotations of the class it builds would go unchecked'))
+        elif (form := form_of(node)) is not None and form != 'type' and id(node) not in allowed:
+            found.append((node, f'{prefix}{ast.unparse(node)}',
+                          f'{UNREADABLE}: {form} is referenced other than by a call or as a base class, so a class '
+                          'built through that reference cannot be found; call it by its own name'))
+        elif id(node) not in read and id(node) not in allowed and (spelled := _spelled(node)) is not None:
+            found.append((node, f'{prefix}{spelled}',
+                          f'{UNREADABLE}: {spelled} is spelled outside a call the check reads, so the annotations '
+                          'set or built through it cannot be found'))
+        for child in ast.iter_child_nodes(node):
+            visit(child, prefix)
+
+    for statement in tree.body:
+        visit(statement, '')
+    return found
+
+
+def _spelled(node: ast.AST) -> str | None:
+    """The name a node spells that sets a class's annotations or reaches a factory by a string:
+    `__annotations__` or `__annotate__` as a string, a keyword, an attribute or a name, and a
+    functional form's name as a string (`getattr(typing, 'TypedDict')`)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        named = node.value
+        return named if named in ANNOTATION_KEYS or named in FUNCTIONAL_FORMS - {'type'} else None
+    named = (node.arg if isinstance(node, ast.keyword) else node.attr if isinstance(node, ast.Attribute)
+             else node.id if isinstance(node, ast.Name) else None)
+    if named not in ANNOTATION_KEYS:
+        return None
+    return ast.unparse(node) if isinstance(node, ast.Attribute) else named
 
 
 def _field_pairs(fields: ast.expr) -> list[tuple[str, ast.expr]]:
@@ -350,8 +526,9 @@ def type_expression_violations(hint: Any, kind: str) -> list[str]:
     Empty for a type. Special forms are compared by identity, never hashed: `P.args` and a list
     argument are unhashable. A `type` alias is walked into its value and a `NewType` into its
     supertype, each once. A qualifier (`Final`, `ClassVar`, `TypeAlias`, `Required`, `NotRequired`,
-    `ReadOnly`, `InitVar`) is valid only at the top, and only in its kind of position. A slice in an
-    `Annotated`'s metadata is refused: it drops that metadata as silently as a slice drops a type.
+    `ReadOnly`, `InitVar`, and the dataclass marker `KW_ONLY`) is valid only at the top, and only in
+    its kind of position. A slice in an `Annotated`'s metadata is refused: it drops that metadata as
+    silently as a slice drops a type.
     """
     found: list[str] = []
     walked: list[Any] = []
@@ -492,6 +669,8 @@ def _resolved(position: Position, globalns: dict[str, Any], localns: dict[str, A
 
 def _verdict(position: Position, globalns: dict[str, Any], localns: dict[str, Any]) -> str | None:
     """Why the position is refused, or None when it resolves to a type."""
+    if position.unreadable:
+        return position.unreadable
     if position.shadowed:
         return (f'reads {", ".join(position.shadowed)}, which an enclosing class body or function binds: '
                 'eager evaluation reads it there and postponed evaluation does not, so which object it '
@@ -700,6 +879,79 @@ def workspace_violations(root: Path) -> list[str]:
     return workspace_report(root)['violations']
 
 
+def runtime_positions(modules: list[str]) -> dict[str, list[str]]:
+    """The positions Python itself keeps at run time in `modules`, found without the syntax reader.
+
+    Each module is imported (a `__main__` module never is: it runs its program). Its own annotations,
+    those of every class reachable from its namespace that names it as its module, and those of
+    every function alive in the interpreter whose code was compiled from its file, are read with
+    `annotationlib` as strings, so nothing is evaluated. Each is named as the reader names its
+    position (`<locals>` dropped from a qualified name). A class's annotations that a base also holds
+    are left out (a `TypedDict` merges its bases'), and so is a function that wraps another
+    (`__wrapped__`) or whose qualified name is not its code's: its annotations are another function's.
+    Synthesized members (a `NamedTuple`'s `__new__`, a dataclass's `__init__`) are compiled from no
+    module's file, so they are never found. What cannot be read is returned under `unreadable`.
+    """
+    kept: set[str] = set()
+    unreadable: list[str] = []
+
+    def annotations(obj: Any, label: str) -> dict[str, Any]:
+        try:
+            return annotationlib.get_annotations(obj, format=annotationlib.Format.STRING)
+        except Exception as exc:
+            unreadable.append(f'{label}: {type(exc).__name__}: {exc}')
+            return {}
+
+    def quietly(obj: Any) -> dict[str, Any]:
+        try:
+            return annotationlib.get_annotations(obj, format=annotationlib.Format.STRING)
+        except Exception:
+            return {}
+
+    files: dict[str, str] = {}
+    for name in modules:
+        if name.rsplit('.', 1)[-1] == '__main__':
+            continue
+        try:
+            module = importlib.import_module(name)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:
+            unreadable.append(f'{name}: the import raised {type(exc).__name__}: {exc}')
+            continue
+        if getattr(module, '__file__', None) is None:
+            unreadable.append(f'{name}: it has no file, so no function compiled from it can be found')
+            continue
+        files[os.path.realpath(module.__file__)] = name
+        kept.update(f'{name}:{key}' for key in annotations(module, name))
+        pending, seen = list(vars(module).values()), set()
+        while pending:
+            obj = pending.pop()
+            if not isinstance(obj, type) or id(obj) in seen or getattr(obj, '__module__', None) != name:
+                continue
+            seen.add(id(obj))
+            qualname = obj.__qualname__.replace('<locals>.', '')
+            inherited = {key for base in obj.__mro__[1:] for key in quietly(base)}
+            kept.update(f'{name}:{qualname}.{key}' for key in annotations(obj, f'{name}:{qualname}')
+                        if key not in inherited)
+            pending.extend(vars(obj).values())
+    gc.collect()
+    compiled: dict[str, str | None] = {}
+    for obj in gc.get_objects():
+        if not isinstance(obj, types.FunctionType):
+            continue
+        code = obj.__code__
+        if code.co_filename not in compiled:
+            compiled[code.co_filename] = files.get(os.path.realpath(code.co_filename))
+        name = compiled[code.co_filename]
+        if name is None or '__wrapped__' in vars(obj) or obj.__qualname__ != code.co_qualname:
+            continue
+        qualname = obj.__qualname__.replace('<locals>.', '')
+        for key in annotations(obj, f'{name}:{qualname}'):
+            kept.add(f'{name}:{qualname}() ->' if key == 'return' else f'{name}:{qualname}({key})')
+    return {'positions': sorted(kept), 'unreadable': unreadable}
+
+
 # The tree.
 
 @pytest.mark.integration
@@ -725,8 +977,7 @@ def test_every_kept_annotation_in_the_workspace_is_a_type() -> None:
     assert len(expected) > 1 and unread == [], f'members with a src/ and no module read: {unread}'
     assert 'cluster_mcp.core.auth:AUTH_MODES' in report['positions'], 'AUTH_MODES was not among the positions read'
     # Every `.py` file under every member's `src/`, found by a walk of its own, is a module the check
-    # listed, and each contributed every position its syntax tree holds: none was left out by depth,
-    # by being a package's `__init__`, or by its member's place in the workspace.
+    # listed: none was left out by depth, by being a package's `__init__`, or by its member's place.
     files: dict[str, Path] = {}
     for member in workspace_members(ROOT):
         for folder, _, names in os.walk(member / 'src'):
@@ -737,9 +988,21 @@ def test_every_kept_annotation_in_the_workspace_is_a_type() -> None:
                     files['.'.join(dotted[:-1] if dotted[-1] == '__init__' else dotted)] = file
     listed = sorted(m for modules in report['members'].values() for m in modules)
     assert listed == sorted(files)
-    held = collections.Counter(p.rsplit(':', 1)[0] for p in report['positions'])
-    wanted = collections.Counter({m: len(annotation_positions(f.read_text(), m, f)) for m, f in files.items()})
-    assert held == +wanted
+    # Every annotation Python keeps on what the imported modules hold is a position the check read.
+    # The positions expected come from the interpreter, not from the syntax reader being checked.
+    kept = report['kept']
+    assert kept['unreadable'] == [], '\n'.join(['annotations Python keeps that could not be read:', *kept['unreadable']])
+    missed = sorted(set(kept['positions']) - set(report['positions']))
+    assert missed == [], '\n'.join(['annotations Python keeps that the check did not read:', *missed])
+    # The oracle is not vacuous: it found every kind of position, in more than one member.
+    holding = {member for member, modules in report['members'].items()
+               for p in kept['positions'] if p.split(':', 1)[0] in modules}
+    assert len(holding) > 1, f'Python keeps annotations in only {sorted(holding)}'
+    names = [p.split(':', 1)[1] for p in kept['positions']]
+    assert any('.' not in n and '(' not in n for n in names), 'no module variable among the kept positions'
+    assert any('.' in n and '(' not in n for n in names), 'no class attribute among the kept positions'
+    assert any(n.endswith(')') for n in names) and any(n.endswith(') ->') for n in names), \
+        'no parameter or no return among the kept positions'
 
 
 @pytest.mark.unit
@@ -920,6 +1183,61 @@ def test_a_planted_slice_is_refused_naming_where(scratch: Scratch, source: str, 
     assert 'slice' in violations[0].split(f': {where}: ', 1)[1].split("': ", 1)[1], violations
 
 
+FORMS_HEAD = 'import dataclasses\nimport functools\nimport types\nimport typing\nfrom typing import NamedTuple, TypedDict\n'
+# A functional class form spelled where the reader does not read it, most holding a slice Python keeps
+# on the class it builds: the source, and the qualified name its one refusal must show.
+UNREADABLE_FORMS = [
+    ('annotated-assignment', f'Planted: type = TypedDict("Planted", {{"held": {SLICE}}})\n', 'TypedDict(...)'),
+    ('chained-targets', f'Planted = Other = NamedTuple("Planted", [("held", {SLICE})])\n', 'NamedTuple(...)'),
+    ('tuple-target', f'Planted, other = TypedDict("Planted", {{"held": {SLICE}}}), 1\n', 'TypedDict(...)'),
+    ('walrus', f'(Planted := TypedDict("Planted", {{"held": {SLICE}}}))\n', 'TypedDict(...)'),
+    ('base-class', f'class Planted(NamedTuple("Base", [("held", {SLICE})])):\n    pass\n', 'NamedTuple(...)'),
+    ('attribute-target', f'class Holder:\n    pass\nHolder.Planted = NamedTuple("Planted", [("held", {SLICE})])\n',
+     'NamedTuple(...)'),
+    ('function-body', f'def make():\n    Planted = NamedTuple("Planted", [("held", {SLICE})])\n    return Planted\n',
+     'make.NamedTuple(...)'),
+    ('function-return', f'def make():\n    return TypedDict("Planted", {{"held": {SLICE}}})\n', 'make.TypedDict(...)'),
+    ('method-body', 'class Holder:\n    def build(self):\n'
+     f'        return dataclasses.make_dataclass("Planted", [("held", {SLICE})])\n',
+     'Holder.build.dataclasses.make_dataclass(...)'),
+    ('class-body-chained', f'class Holder:\n    Planted = Other = NamedTuple("Planted", [("held", {SLICE})])\n',
+     'Holder.NamedTuple(...)'),
+    ('fields-in-a-variable', f'fields = [("held", {SLICE})]\nPlanted = NamedTuple("Planted", fields)\n', 'NamedTuple(...)'),
+    ('fields-from-a-call', f'Planted = TypedDict("Planted", dict(held={SLICE}))\n', 'TypedDict(...)'),
+    ('field-in-a-variable', f'pair = ("held", {SLICE})\nPlanted = NamedTuple("Planted", [("other", int), pair])\n',
+     'NamedTuple(...)'),
+    ('unpacked-fields', f'more = {{"held": {SLICE}}}\nPlanted = NamedTuple("Planted", **more)\n', 'NamedTuple(...)'),
+    ('make-dataclass-namespace', 'Planted = dataclasses.make_dataclass("Planted", [("other", int)], '
+     f'namespace=dict(__annotations__={{"held": {SLICE}}}))\n', 'dataclasses.make_dataclass(...)'),
+    ('type-namespace-in-a-variable', 'space = {"held": 0}\nPlanted = type("Planted", (), space)\n', 'type(...)'),
+    ('type-namespace-unpacked', f'base = {{}}\nPlanted = type("Planted", (), {{**base, "__annotations__": {{"held": {SLICE}}}}})\n',
+     'type(...)'),
+    ('type-annotate', f'Planted = type("Planted", (), {{"__annotate__": lambda format: {{"held": {SLICE}}}}})\n', 'type(...)'),
+    ('namespace-dict', f'space = {{"__annotations__": {{"held": {SLICE}}}}}\n', '__annotations__'),
+    ('namespace-keyword', f'space = dict(__annotations__={{"held": {SLICE}}})\n', '__annotations__'),
+    ('annotations-assigned', f'class Holder:\n    pass\nHolder.__annotations__ = {{"held": {SLICE}}}\n',
+     'Holder.__annotations__'),
+    ('annotations-in-a-class-body', f'class Holder:\n    __annotations__ = {{"held": {SLICE}}}\n', 'Holder.__annotations__'),
+    ('factory-named-by-a-string', f'Planted = getattr(typing, "TypedDict")("Planted", {{"held": {SLICE}}})\n', 'TypedDict'),
+    ('new-class', 'Planted = types.new_class("Planted", (), {}, '
+     f'lambda ns: ns.update(__annotations__={{"held": {SLICE}}}))\n', 'types.new_class(...)'),
+    ('assigned-alias', f'Shape = typing.TypedDict\nPlanted = Shape("Planted", {{"held": {SLICE}}})\n', 'typing.TypedDict'),
+    ('passed-as-a-value', f'Build = functools.partial(NamedTuple, "Planted")\nPlanted = Build([("held", {SLICE})])\n',
+     'NamedTuple'),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('postponed', MODES)
+@pytest.mark.parametrize(('source', 'where'), [pytest.param(s, w, id=i) for i, s, w in UNREADABLE_FORMS])
+def test_an_unreadable_functional_form_is_refused(scratch: Scratch, source: str, where: str, postponed: bool) -> None:
+    module = scratch.module(FORMS_HEAD + source, postponed)
+    violations = scratch.report()['violations']
+    assert len(violations) == 1, violations
+    assert violations[0].startswith(f'{module}:') and f': {where}: ' in violations[0], violations
+    assert UNREADABLE in violations[0].split(f': {where}: ', 1)[1], violations
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize('postponed', MODES)
 @pytest.mark.parametrize(('source', 'where', 'error'), [
@@ -1000,8 +1318,9 @@ def test_a_type_checking_only_declaration_is_not_read(scratch: Scratch, postpone
     module = scratch.module(
         'import typing\nfrom typing import TYPE_CHECKING\n'
         'if TYPE_CHECKING:\n    held: Missing\n    def planted(given: Missing) -> None: ...\n'
+        '    Hidden = typing.NamedTuple("Hidden", fields)\n'
         'else:\n    kept: int = 0\n'
-        'if typing.TYPE_CHECKING:\n    other: Missing\n', postponed)
+        'if typing.TYPE_CHECKING:\n    other: Missing\n    Alias = typing.TypedDict\n', postponed)
     report = scratch.report()
     assert report['violations'] == []
     assert [p for p in report['positions'] if p.startswith(f'{module}:')] == [f'{module}:kept']
@@ -1020,6 +1339,12 @@ def test_a_type_checking_only_declaration_is_not_read(scratch: Scratch, postpone
                  id='initvar-variable'),
     pytest.param('from typing import Final\nheld: list[Final[int]] = []\n', 'held', 'Final below the top',
                  id='final-nested'),
+    pytest.param('from dataclasses import KW_ONLY\nheld: KW_ONLY = None\n', 'held', 'KW_ONLY on a variable',
+                 id='kw-only-variable'),
+    pytest.param('from dataclasses import KW_ONLY\ndef planted(given: KW_ONLY) -> None: ...\n', 'planted(given)',
+                 'KW_ONLY on a parameter', id='kw-only-parameter'),
+    pytest.param('import dataclasses\n@dataclasses.dataclass\nclass Planted:\n    held: list[dataclasses.KW_ONLY]\n',
+                 'Planted.held', 'KW_ONLY below the top', id='kw-only-nested'),
 ])
 def test_a_qualifier_out_of_its_place_is_named(scratch: Scratch, source: str, where: str, qualifier: str,
                                                postponed: bool) -> None:
@@ -1108,7 +1433,9 @@ def test_a_hint_the_check_cannot_walk_is_refused(scratch: Scratch, postponed: bo
 VALID = '''\
 import dataclasses
 import enum
+import types
 from collections.abc import Callable
+from dataclasses import KW_ONLY
 from typing import (Annotated, ClassVar, Concatenate, Final, Literal, NamedTuple, NewType, NotRequired,
                     Optional, Protocol, ReadOnly, Required, Self, TypeAlias, TypedDict)
 
@@ -1139,6 +1466,9 @@ class Movie(TypedDict):
 
 
 Point = TypedDict('Point', {'x': int, 'y': 'int'})
+Built = type('Built', (), {'count': 0})
+Empty = types.new_class('Empty', ())
+KIND = type(0)
 
 
 class Pair(NamedTuple):
@@ -1146,11 +1476,19 @@ class Pair(NamedTuple):
     right: 'Pair | None'
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Settings:
     count: ClassVar[int] = 0
     seed: dataclasses.InitVar[int] = 0
+    _: KW_ONLY
     name: str = ''
+
+
+@dataclasses.dataclass
+class Options:
+    path: str
+    _: dataclasses.KW_ONLY
+    verbose: 'bool' = False
 
 
 class Closer(Protocol):
@@ -1192,9 +1530,9 @@ class Later:
     pass
 '''
 # The positions VALID holds: 11 module variables; the attributes of Movie, Point, Pair, Settings,
-# Holder and Box; and the parameters and returns of close, get, copy, first, logged, inner, with_int
-# and later.
-VALID_POSITIONS = 11 + (3 + 2 + 2 + 3 + 1 + 1) + (1 + 1 + 1 + 2 + 2 + 3 + 2 + 2)
+# Options, Holder and Box; and the parameters and returns of close, get, copy, first, logged, inner,
+# with_int and later.
+VALID_POSITIONS = 11 + (3 + 2 + 2 + 4 + 3 + 1 + 1) + (1 + 1 + 1 + 2 + 2 + 3 + 2 + 2)
 
 
 @pytest.mark.unit
@@ -1339,6 +1677,8 @@ class OverParamSpec(typing.Generic[P]):
     pytest.param(typing.Required[int], VARIABLE, 'qualifier Required on a variable', id='required-variable'),
     pytest.param(list[typing.Final[int]], VARIABLE, 'qualifier Final below the top', id='qualifier-nested'),
     pytest.param(dataclasses.InitVar[int], PARAMETER, 'qualifier InitVar on a parameter', id='initvar-parameter'),
+    pytest.param(dataclasses.KW_ONLY, PARAMETER, 'qualifier KW_ONLY on a parameter', id='kw-only-parameter'),
+    pytest.param(list[dataclasses.KW_ONLY], ATTRIBUTE, 'qualifier KW_ONLY below the top', id='kw-only-nested'),
 ])
 def test_non_types_are_named(hint: Any, kind: str, fragment: str) -> None:
     found = type_expression_violations(hint, kind)
@@ -1351,5 +1691,5 @@ def test_non_types_are_named(hint: Any, kind: str, fragment: str) -> None:
                   typing.Annotated[int, 'meta'], typing.NewType('UserId', int)):
         assert type_expression_violations(valid, PARAMETER) == [], valid
     for valid in (typing.Final, typing.Final[int], typing.ClassVar[int], typing.Required[int],
-                  dataclasses.InitVar[int]):
+                  dataclasses.InitVar[int], dataclasses.KW_ONLY):
         assert type_expression_violations(valid, ATTRIBUTE) == [], valid
