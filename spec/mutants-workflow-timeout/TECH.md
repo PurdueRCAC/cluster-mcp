@@ -6,7 +6,7 @@ appetite: small
 status: in_progress
 branch: ci/mutants-workflow-timeout
 base: develop
-current_phase: P3
+current_phase: P4
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -37,7 +37,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py drive && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 - id: P3
   name: The first hosted run (Run A dispatches, Run B reads)
-  status: in_progress
+  status: done
   satisfies: &id001
   - R1
   - R2
@@ -201,7 +201,8 @@ two runs.
       workflow_dispatch --json databaseId,headSha -L 1`, whose `headSha` must be `T1`). Hand back
       `T1` and the run id. Never dispatch again in this run.
 
-**Run B:** Run B: stopped at the cases not killed (seven; see Amendments, 2026-11-12, P3 run 1).
+**Run B:** Run B: stopped at the cases not killed (seven; see Amendments, 2026-11-12, P3 run 1), then
+closed on the foreman's GOAL Q3 ruling: the seven seeded in four groups.
 - [x] Write `spec/mutants-workflow-timeout/runs.txt`: `sha <T1 full>`, `run <id>`.
 - [x] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints:
       - the run's wall from dispatch and the most jobs it ran at once;
@@ -216,12 +217,12 @@ two runs.
 
       Do not resize, fix or re-dispatch inside this phase: the maintainer asked for the measured run
       back (GOAL Q6), and the remaining two dispatches are his to place.
-- [ ] Cases not killed (GOAL Q3): more than three, **stop** and hand the list to the foreman before
+- [x] Cases not killed (GOAL Q3): more than three, **stop** and hand the list to the foreman before
       seeding. Three or fewer: each gets `issues/<slug>.md`, pre-shaped from the KB's `ISSUE.md`
       template (`status: unshaped`, naming the run id, the case id, its `FAILED` reason and that it
       was found by `mutants-workflow-timeout`), and a `ROADMAP.md` entry. No case, target or `why`
       changes here (Non-goal 3).
-- [ ] Stage, run the frontmatter `verify:`, mark P3 done, commit.
+- [x] Stage, run the frontmatter `verify:`, mark P3 done, commit.
 - **Verify:** the frontmatter `verify:` (Run B).
 - **Touches:** `spec/mutants-workflow-timeout/runs.txt`; `issues/*.md` and `ROADMAP.md` only for
   seeds.
@@ -369,6 +370,18 @@ Two runs: Run A dispatches, Run B records.
   - Seven is more than GOAL Q3's three: P3 stops before seeding and hands the list to the
     foreman. The `runs` gate is green, so no attempt is recorded. P3 stays `in_progress`; no
     seed, case, workflow or runner change is made here, and nothing is re-dispatched.
+- **2026-11-12 · foreman ruling under GOAL Q3: the seven survivors are Linux-only, seeded in four
+  groups; size stays 15, since run 1 held both bounds.** The seeds, each `unshaped`, `kind: test`,
+  with its `ROADMAP.md` entry in Part I's Gates group after this cycle's:
+  - `issues/mutants-linux-bashrc-norc.md`: `script-reads-bashrc`, `fixed-script-reads-bashrc`;
+  - `issues/mutants-linux-posix-paths.md`: `tpc-paths-not-functions`,
+    `tpc-paths-unset-in-posix-mode`, `tpc-posix-kept`;
+  - `issues/mutants-linux-fd-59.md`: `tpc-fd-59`;
+  - `issues/mutants-linux-transfer-cause.md`: `transfer-cause-unnamed`.
+
+  Each names run `43255195424` at `aff08bd`, its shard, the target rows that passed on Linux, the
+  macOS kill and an unverified likely cause, and suggests fix shapes without choosing one. No case,
+  target or `why` changes in this cycle (Non-goal 3). P3 closes; P4's dispatch is the foreman's.
 
 ---
 
