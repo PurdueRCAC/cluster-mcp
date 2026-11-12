@@ -153,6 +153,10 @@ short `README.md`. The Slurm and RCAC members are the core's extras `[slurm]` an
 `pyproject.toml` is the workspace root and the code-less compat distribution `rcac-mcp`, which
 installs `cluster-mcp[slurm,rcac]` (§ Packaging).
 
+The human-facing pages sit outside the members: the repository's front page, `SECURITY.md`, and
+one page per member under `docs/` (`docs/core/README.md`, `docs/slurm/README.md`,
+`docs/rcac/README.md`). § Documentation says what each holds.
+
 The core package `packages/cluster-mcp/src/cluster_mcp/core/` (paths relative to it) and the two
 member modules:
 
@@ -349,13 +353,15 @@ import has no effect.
     unless the git on PATH runs (`git --version` exits 0), and never skips on CI (its own test
     catches every outcome, so it cannot skip itself).
     `EXPECTED_TOOLS` is hard-coded, so a tool change edits it in the same
-    commit as its capability's instructions text and the README (§ Invariants §9). The served
+    commit as its capability's instructions text and its member's docs page,
+    `docs/<member>/README.md` (§ Invariants §9). The served
     tools are also exactly the core's and those of every capability that loaded.
   - `tests/test_instructions.py` (`unit`): `instruction_violations`, `guidance_violations`,
     `NON_TOOL_TERMS`. The base (`base_instructions(installed())`, `SERVER_INSTRUCTIONS` in the
     module), both as composed and as served (what a harness client receives on connecting,
     `served_instructions`), lists exactly the registered tools, and neither it nor `INSTRUCTIONS.md` steers agents toward documentation
-    search — that is the separate `rcac-docs-mcp` service, which only the README points to. This
+    search — that is the separate `rcac-docs-mcp` service, which only the README's `[rcac]` row and
+    `docs/rcac/README.md` point to. This
     is §9 made executable; it reads list entries and backticked or snake_case names, so a tool
     whose name is a plain word, mentioned in bare prose, escapes it. `test_base_leaves_room_for_the_site`
     holds the base to 1,500 UTF-16 code units, so the default budget has room for site
@@ -1168,7 +1174,7 @@ import has no effect.
     or the `.bashrc` bash reads under sshd) that reads stdin in the foreground and from a
     background job (`head -c 1 &`) reads none of a write's content: a 160,000-byte `write_file` and
     a job script land byte-exact and no channel carried stdin
-    (`test_a_remote_rc_never_reads_a_writes_content`; AGENTS §2, the README and `Executor.write`
+    (`test_a_remote_rc_never_reads_a_writes_content`; AGENTS §2, `docs/core/README.md` and `Executor.write`
     state the route, `test_content_texts_state_the_sftp_route`); a background job either leaves
     running neither holds the call past the end records nor changes its result; on the slow link at
     256 KiB/s, 1 MiB/s and 4 MiB/s, behind a 1.6 s or 1.2 s stall after the exit status or a 5 s
@@ -1379,7 +1385,7 @@ import has no effect.
     when the step ends
     (`test_an_sftp_session_after_a_reconnect_opens_every_step_on_its_worker[channel|subsystem|version]`).
     The doc pin holds the `SSHExecutor` docstring, this file's
-    `executor/ssh.py` footgun and the README to the monitor's figures, the first two to where a
+    `executor/ssh.py` footgun and `docs/core/README.md` to the monitor's figures, the first two to where a
     call's opens wait, before its work starts and in a `write`'s own commands, and them, §2 and the
     `Executor` Protocol's `write`, `put` and `get` (their Raises name `ssh.TransferLost` and a
     transfer that may be partly made) to what a transfer cut short raises and leaves.
@@ -1729,9 +1735,46 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   the internal requirements are bare names unregistered on PyPI (the release recipe's `pypi`
   caveat). The release recipe cuts a tag and a GitHub release and says so plainly.
 - A **container build does exist locally**: `Dockerfile` + `compose.yml` (+ `nginx-dev.conf` for the
-  TLS dev proxy), documented in `README.md` § *Docker Compose with TLS*. `compose.yml` pins the
+  TLS dev proxy), documented in `SECURITY.md` § *Docker Compose with TLS*. `compose.yml` pins the
   server's argv (`-t http -H 0.0.0.0 -p 8000 -a jwt`), so a change to a CLI flag name or default is
-  a change to those files too — same same-commit rule as the instructions texts and the README.
+  a change to those files too — same same-commit rule as the instructions texts, `SECURITY.md` and
+  the docs pages, `docs/<member>/README.md`.
+
+## Documentation
+
+The human-facing pages follow one rule, so a change knows where its text goes.
+
+- **`README.md` is the front door.** A reader decides from it whether to use the server, and gets
+  it running. Its level-2 sections, in order: Quick Start (the client configuration, one install
+  line, and one sentence on the client's instructions limit linking `docs/core/README.md`);
+  Capabilities (a table of the core and each extra, each row linking its docs page, the `[rcac]`
+  row also the documentation service); Run modes (a table of `ssh`, `local` and `delegate`, each
+  linking `SECURITY.md`); Upgrading from rcac-mcp; Development; License. An opening of two or three
+  sentences sits under the title. It lists no tool, and outside § Upgrading from rcac-mcp it states
+  no figure: no duration, timeout, byte rate, exit code or signal name.
+- **Each docs page, `docs/<member>/README.md` (`core`, `slurm`, `rcac`),** holds § Tools (one list
+  line per tool its member registers, the line §9 keeps in step), § What it needs on the cluster
+  (the commands its member declares, each a code span) and § How it behaves. The core's page also
+  holds § Install (the extras, quoting the requirement, the uv workspace and PyPI note,
+  `CLUSTER_MCP_SSH_HOST`) and, under § How it behaves, the connection, commands and exit codes,
+  file writes, timeouts and the stop, which capabilities are served, the cluster's rules and the
+  instructions budget. The RCAC page also holds § RCAC documentation, the separate
+  `rcac-docs-mcp` service.
+- **`SECURITY.md` says how to run the service**: the run modes, and the hosted HTTP server (basic,
+  with JWT, and Docker Compose with TLS). It also holds the security model of each mode.
+- **Short sentences that say what a thing does and how to use it.** No marketing voice.
+- **Name a limit only where a user would otherwise get hurt**, in one sentence that links its
+  `issues/` seed.
+- **Exact figures go on the docs page, in a list or table**: each bound in seconds, the signal
+  order, each exit code. The README holds none outside § Upgrading from rcac-mcp.
+- **Edge cases stay in `issues/` or `AGENTS.md`**, linked from the docs page, not spelled out on it.
+- **Tests read the pages' text.** `tests/test_ssh_liveness.py`
+  (`test_liveness_texts_state_the_monitor`) and `tests/test_ssh_exec.py`
+  (`test_content_texts_state_the_sftp_route`, `test_separation_texts_state_the_remote_rc_exception`)
+  read `docs/core/README.md`; `tests/test_deprecation_window.py` reads the README's § Upgrading from
+  rcac-mcp. A rewrite keeps the strings they check.
+- **A package README** (`packages/<member>/README.md`) is its distribution's long description. It
+  links its docs page by the repository URL on `main`, never the repository README.
 
 ## Working on this codebase as an agent
 
@@ -1876,7 +1919,7 @@ release:
       (cluster-mcp, cluster-mcp-slurm, cluster-mcp-rcac) are bare names, unregistered on PyPI: only
       a uv install from git, which builds them from the same commit through the workspace sources,
       resolves them safely. pip, or any install with sources disabled, looks them up on the index,
-      where anyone could register them; the README's install note says the same. Registering the
+      where anyone could register them; the install note on docs/core/README.md says the same. Registering the
       names is a release's PyPI decision.
     twine: >-
       twine check --strict runs although nothing is uploaded: it validates the metadata a future
@@ -2497,8 +2540,8 @@ The two leaf files at the end of this list are footguns, not human-gated paths.
   say), which runs before anything can be parked, can write into a result while the command runs.
   `tests/test_ssh_exec.py` pins both halves: that such a job still can
   (`test_a_remote_rc_background_job_can_write_into_a_result`), and that every text promising
-  separation states it (`test_separation_texts_state_the_remote_rc_exception`: this section, the
-  README, the `run_command` description and the `Executor` docstring).
+  separation states it (`test_separation_texts_state_the_remote_rc_exception`: this section,
+  `docs/core/README.md`, the `run_command` description and the `Executor` docstring).
 - **No startup file reads a write's content, moves where a command starts, or holds a call
   open.** A command's stdin is empty. A local or delegated launch parks stdin while the login shell
   initialises, so a write's content, on a fixed script's stdin there, is out of every startup
@@ -3088,8 +3131,9 @@ What each mode means:
   same commit** — a tool the instructions do not mention is a
   tool agents will not reach for, and an instruction naming a tool that no longer exists is a
   hallucination the server itself induced.
-- The same commit also updates the tool inventory in `README.md`, which is what a human reads before
-  installing. Both are user-visible contracts.
+- The same commit also updates the tool's line in § Tools of its member's docs page,
+  `docs/<member>/README.md`, which is what a human reads before installing. Both are user-visible
+  contracts.
 - Tool **docstrings** are the per-tool schema description sent over MCP, which every model reads;
   they are API surface, not internal notes. The whole docstring is served as the description (§7),
   and each `Args:` line is served a second time as its argument's `description` in the input

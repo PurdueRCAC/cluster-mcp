@@ -29,7 +29,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q --with pyyaml python -I spec/readme-front-door/verify/docs-gate.py controls readme pages facts packages paths && uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py
 - id: P2
   name: AGENTS.md § Documentation and its pointers, the ledger, and the full gate
-  status: pending
+  status: in_progress
   satisfies:
   - R8
   - R9
@@ -156,17 +156,17 @@ the maintainer's read, GOAL Review mode).
 **Goal:** `AGENTS.md` states the rule this cycle followed and points every reference to moved text
 at its new home; the final tree passes every gate mode and the profile's full `verify`.
 
-- [ ] Add `## Documentation` after § Packaging, to PLAN § 2 (what each page holds; short sentences;
+- [x] Add `## Documentation` after § Packaging, to PLAN § 2 (what each page holds; short sentences;
       a limit only where a user would otherwise get hurt, in one sentence linking its seed; figures
       in a list or table on the docs page, none in the README; edge cases in `issues/` or
       `AGENTS.md`; the tests that read a page).
-- [ ] §9's same-commit bullet names `docs/<member>/README.md`, the tool's docs page.
-- [ ] Repoint the moved references PLAN § 2 lists (§ Testing's `EXPECTED_TOOLS`, `rcac-docs-mcp`,
+- [x] §9's same-commit bullet names `docs/<member>/README.md`, the tool's docs page.
+- [x] Repoint the moved references PLAN § 2 lists (§ Testing's `EXPECTED_TOOLS`, `rcac-docs-mcp`,
       SFTP-route and liveness-figure notes; §3's separation exception; § Packaging's Docker Compose
       pointer and its same-commit clause, naming `docs/<member>/README.md`; the release recipe's
       install note); § Repository map names `docs/`. Keep `EXCEPTION`, `CONTENT_RULE` and `SECTION_2_TRANSFER` where §2 and §3
       state them.
-- [ ] The ledger (`code-plan` Step 6.8): walk P1's and P2's bodies, PLAN.md and the branch's commit
+- [x] The ledger (`code-plan` Step 6.8): walk P1's and P2's bodies, PLAN.md and the branch's commit
       bodies for a deferral; each names an `issues/` seed with a `ROADMAP.md` entry (`prepush`
       checks it). This plan files no seed; the one overlapping seed, `issues/rename-in-docs.md`,
       stays as it is (Q4).
