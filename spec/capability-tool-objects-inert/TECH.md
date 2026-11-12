@@ -3,10 +3,10 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: done
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -24,10 +24,10 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 2
-  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern
+  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R5
@@ -36,7 +36,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
+  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
 review:
   last_reviewed_commit: dfff3e848011a077c3a8bf0aeae2883b5205daa9
   verdict: changes-requested
@@ -170,6 +170,42 @@ same commit.
 - **Touches:** `packages/cluster-mcp/src/cluster_mcp/core/capabilities.py`, `tests/test_capabilities.py`,
   `tests/test_startup.py`, `tests/mutants.py`, `AGENTS.md`.
 
+### Remediation, review cycle 1 (F1, F2, F3) — reopened 2026-11-12
+
+`REVIEW.md` cycle 1 routes F1 and F3 as one class, every refusal the tool rules can make held by the suite,
+and F2 as R4's default branch pinned. The guards are right (the reviewer's reach probes: HEAD refuses every
+input, running nothing); the suite did not hold them. No line of `core/capabilities.py` changes; the failure
+handler and the module cache (the sibling `capability-reload-after-failure`'s) are untouched.
+
+- [x] Rows in `test_a_capability_that_cannot_load_is_refused_naming_it`, beside each member set, each with its
+  own wording, none of its code run, the registry cut back (`TOOL_DEPTH`, 18 kinds): the return type's alias
+  state, a key of it (one colliding with `__origin__`, one not), its arguments, module and `Annotated`
+  metadata tuple, `Annotated` metadata, a `Literal` argument, an origin of each alias kind; `task_config` keyed
+  by a type of its own and with a key renamed, `tags` a set not its default; each slot but `__dict__` missing,
+  a fields set naming no field, private state on a model with none, a JSON-like extra on a model that forbids
+  extras. `PlantedTuple` joins the planted names.
+- [x] The state rules over a model a newer FastMCP may give (a private attribute with a non-JSON default, or
+  extras allowed, set on the installed model for the test): `test_a_tool_state_a_newer_model_refuses_is_refused_naming_it`
+  (7 kinds) and `..._accepts_loads` (3), beside each member set. The default rule's comparison over defaults a
+  FastMCP may declare: `test_the_default_rule_compares_node_for_node` (21 cases) and
+  `test_a_default_made_from_the_other_fields_is_never_made`.
+- [x] The liveness side: `test_a_return_type_that_holds_itself_loads_and_the_load_returns`, beside each member
+  set, the load bounded at 10 s by `SIGALRM` (the load takes well under 1 s), a stall refusing the capability.
+- [x] F2: `test_a_field_no_rule_names_passes_its_own_declared_default_unwarned`, beside each member set: with
+  the fields whose declared default is not JSON-like (`tags`, `task_config` on 4.1.4, computed) dropped from
+  the table, a tool holding those defaults and the members pass with no warning; another value of each is
+  warned of exactly once.
+- [x] Accepted shapes widened to what the walk's alternatives tell apart: a `Literal` of a `float`, an
+  `Annotated` with JSON-like metadata.
+- [x] `tests/mutants.py`: 40 cases, each killed by one of those rows (`replanted.py` selects them as new).
+- [x] The class checker `remediation/F1-tool-rule-sweep.py` (+ `F1-gate.sh`): 453 mutants generated from the
+  syntax tree of every decision of the tool-rule code, run in both eras, each killed or recorded equivalent
+  with why (4 recorded), the review's 10 coverage observations among them.
+- [x] `AGENTS.md` § Testing and §7's evidence list name the new rows and tests (same commit).
+- **Verify (retuned at remediation):** P1's chain, then `F1-gate.sh` `pins`, `control`, the eight sweep shards
+  and `report`. The sweep's shards run once on the final tree; P2's gate reads their `report` rather than
+  re-running them.
+
 ## Phase P2 — Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
 **Satisfies:** R3, R5 · **Depends on:** P1
 **Goal:** R3 shown by a test; the whole cycle's checks on the finished tree; every deferral seeded;
@@ -203,6 +239,10 @@ the profile's full verify green once.
   one); `full-ends` green.
 - **Verify:** `sh spec/capability-tool-objects-inert/verify/p2.sh` `phase`, `ledger`, `full-legacy-1` to `-4`, `full-modern-1` to `-4`,
   `full-ends` (the frontmatter's chain).
+- **Reopened at remediation (review cycle 1), 2026-11-12.** P2 built on P1, so it re-runs on the remediated
+  tree: `phase` and `ledger`, then `F1-gate.sh report` (the sweep P1's gate ran on the same tree, read, not
+  re-run), then the full verify, which the foreman schedules. Its earlier full-verify evidence (`0f34719`) no
+  longer stands for this tree.
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
 
 ---

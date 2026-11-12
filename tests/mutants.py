@@ -4022,6 +4022,162 @@ CASES += (
 )
 
 
+# Every refusal the tool rules can make, held: each decision of the depth walks, the default rule's
+# comparison and the instance-state checks that only a row at depth, a model a newer FastMCP may give, or
+# a default it may declare tells apart, each killed by that row (beside every member set where the row
+# is a load), or by the accepted shapes, the bounded walk of a return type that holds itself, or the
+# generic rule's own declared default.
+NEWER_REFUSED = f'{CAPABILITIES}::test_a_tool_state_a_newer_model_refuses_is_refused_naming_it'
+NEWER_ACCEPTED = f'{CAPABILITIES}::test_a_tool_state_a_newer_model_accepts_loads'
+SAME_ROWS = f'{CAPABILITIES}::test_the_default_rule_compares_node_for_node'
+NOT_COMPARED = 'the default rule did not compare a value with its default node for node'
+SHAPES_ROWS = f'{CAPABILITIES}::test_an_inert_tool_of_every_accepted_shape_loads'
+PARTS = '        if type(args) is not tuple or type(module) is not str or type(metadata) is not tuple:\n'
+SCALARS = '        if kind is bool or kind is int or kind is float or kind is str or kind is timedelta:\n'
+SET_SCALARS = ('            scalars = all(type(item) is str or type(item) is int or type(item) is bool or type(item) is float\n'
+               '                          or item is None for item in a)\n')
+LITERAL_ITEM = ('                if not (item is None or type(item) is bool or type(item) is int or type(item) is float\n'
+                '                        or type(item) is str):\n')
+EXTRA = '    if extra is not None and (not allowed or type(extra) is not dict or _json_violation(extra)):\n'
+
+
+def same_row(case_id: str, edits: tuple[tuple[str, str], ...], *rows: str) -> Case:
+    """A case killed by the default rule's comparison rows `rows`."""
+    return Case(case_id, LOADER, edits, tuple(f'{SAME_ROWS}[{row}]' for row in rows), NOT_COMPARED)
+
+
+CASES += (
+    Case('capability-tool-return-type-metadata-unchecked', LOADER,
+         (('            if type(item) is not FieldInfo and _json_violation(item):\n', '            if False:\n'),),
+         every_set(REFUSED_NAMING, 'tool-exact-return_type-annotated-metadata'), NOT_REFUSED),
+    alternative('capability-tool-return-type-metadata-json-like-refused', LOADER,
+                (('            if type(item) is not FieldInfo and _json_violation(item):\n',
+                  '            if type(item) is not FieldInfo:\n'),),
+                SHAPES_ROWS, '', 'an inert tool of a shape the load accepts was refused'),
+    Case('capability-tool-return-type-state-keys-unchecked', LOADER,
+         (("                if type(label) is not str:\n                    return f'holds a {_type_name(kind)} with a",
+           "                if False:\n                    return f'holds a {_type_name(kind)} with a"),),
+         every_set(REFUSED_NAMING, 'tool-exact-return_type-alias-attribute-name', 'tool-exact-return_type-alias-origin-name'),
+         NOT_REFUSED),
+    Case('capability-tool-return-type-state-unchecked', LOADER,
+         (("            if type(state) is not dict:\n                return f'holds a {_type_name(kind)} whose state",
+           "            if False:\n                return f'holds a {_type_name(kind)} whose state"),),
+         every_set(REFUSED_NAMING, 'tool-exact-return_type-alias-state'), NOT_REFUSED),
+    Case('capability-tool-return-type-parts-unchecked', LOADER, ((PARTS, '        if False:\n'),),
+         every_set(REFUSED_NAMING, 'tool-exact-return_type-alias-arguments', 'tool-exact-return_type-alias-module',
+                   'tool-exact-return_type-annotated-metadata-tuple'), NOT_REFUSED),
+    alternative('capability-tool-return-type-arguments-unchecked', LOADER,
+                ((PARTS, PARTS.replace('type(args) is not tuple or ', '')),),
+                REFUSED_NAMING, 'tool-exact-return_type-alias-arguments', NOT_REFUSED),
+    alternative('capability-tool-return-type-module-unchecked', LOADER,
+                ((PARTS, PARTS.replace(' or type(module) is not str', '')),),
+                REFUSED_NAMING, 'tool-exact-return_type-alias-module', NOT_REFUSED),
+    alternative('capability-tool-return-type-metadata-tuple-unchecked', LOADER,
+                ((PARTS, PARTS.replace(' or type(metadata) is not tuple', '')),),
+                REFUSED_NAMING, 'tool-exact-return_type-annotated-metadata-tuple', NOT_REFUSED),
+    alternative('capability-tool-return-type-literal-arguments-unchecked', LOADER,
+                ((LITERAL_ITEM, '                if False:\n'),),
+                REFUSED_NAMING, 'tool-exact-return_type-literal-argument', NOT_REFUSED),
+    alternative('capability-tool-return-type-literal-float-refused', LOADER,
+                ((LITERAL_ITEM, LITERAL_ITEM.replace(' or type(item) is float', '')),),
+                SHAPES_ROWS, '', 'an inert tool of a shape the load accepts was refused'),
+    Case('capability-tool-return-type-origin-unwalked', LOADER,
+         (("        if '__origin__' in state:\n            stack.append(state['__origin__'])",
+           "        if False:\n            stack.append(state['__origin__'])"),),
+         every_set(REFUSED_NAMING, 'tool-exact-return_type-alias-origin', 'tool-exact-return_type-generic-alias-origin'),
+         NOT_REFUSED),
+    alternative('capability-tool-return-type-generic-alias-origin-dropped', LOADER,
+                (("            state = {'__origin__': node.__origin__} if kind is types.GenericAlias else {}",
+                  '            state = {}'),),
+                REFUSED_NAMING, 'tool-exact-return_type-generic-alias-origin', NOT_REFUSED),
+    Case('capability-tool-return-type-cycle-unended', LOADER,
+         (('        if id(node) in seen:\n            continue\n        seen.add(id(node))\n        if kind is types.GenericAlias',
+           '        if False:\n            continue\n        seen.add(id(node))\n        if kind is types.GenericAlias'),),
+         every_set(f'{CAPABILITIES}::test_a_return_type_that_holds_itself_loads_and_the_load_returns'),
+         'a return type that holds itself did not load, the load returning'),
+    alternative('capability-tool-default-set-compared-by-type-only', LOADER,
+                (('            if not scalars or a != b:\n', '            if not scalars:\n'),),
+                REFUSED_NAMING, 'tool-default-tags-set', NOT_REFUSED),
+    alternative('capability-tool-default-keys-unchecked', LOADER,
+                (('                if type(label) is not str:\n                    return False\n',
+                  '                if False:\n                    return False\n'),),
+                REFUSED_NAMING, 'tool-exact-task_config-key', NOT_REFUSED),
+    alternative('capability-tool-default-keys-uncompared', LOADER,
+                (('            if list(a) != list(b):\n                return False\n',
+                  '            if False:\n                return False\n'),),
+                REFUSED_NAMING, 'tool-default-task_config-renamed-key', NOT_REFUSED),
+    alternative('capability-tool-fields-set-names-unchecked', LOADER,
+                (("        if label not in model:\n            return f'a tool whose __pydantic_fields_set__ names",
+                  "        if False:\n            return f'a tool whose __pydantic_fields_set__ names"),),
+                REFUSED_NAMING, 'tool-state-fields-set-name', NOT_REFUSED),
+    alternative('capability-tool-private-state-on-a-model-without', LOADER,
+                (('        if not privates or type(private) is not dict:\n', '        if type(private) is not dict:\n'),),
+                REFUSED_NAMING, 'tool-state-private-empty', NOT_REFUSED),
+    alternative('capability-tool-private-state-not-a-dict', LOADER,
+                (('        if not privates or type(private) is not dict:\n', '        if not privates:\n'),),
+                NEWER_REFUSED, 'private-not-a-dict', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-private-keys-unchecked', LOADER,
+                (("            if type(label) is not str:\n                return f'a tool whose __pydantic_private__ has",
+                  "            if False:\n                return f'a tool whose __pydantic_private__ has"),),
+                NEWER_REFUSED, 'private-key', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-private-attributes-uncompared', LOADER,
+                (('        if private.keys() != privates.keys():\n', '        if False:\n'),),
+                NEWER_REFUSED, 'private-other-attribute', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-private-values-unchecked', LOADER,
+                (('            if _json_violation(value) and not _same(value, privates[label].get_default()):\n',
+                  '            if False:\n'),),
+                NEWER_REFUSED, 'private-value', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-private-default-refused', LOADER,
+                (('            if _json_violation(value) and not _same(value, privates[label].get_default()):\n',
+                  '            if _json_violation(value):\n'),),
+                NEWER_ACCEPTED, 'private-default', 'a tool state a newer model accepts was refused'),
+    alternative('capability-tool-extra-on-a-model-that-forbids-them', LOADER,
+                ((EXTRA, EXTRA.replace('not allowed or ', '')),),
+                REFUSED_NAMING, 'tool-state-extra-json-like', NOT_REFUSED),
+    alternative('capability-tool-extra-not-a-dict', LOADER,
+                ((EXTRA, EXTRA.replace(' or type(extra) is not dict', '')),),
+                NEWER_REFUSED, 'extra-a-list', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-extra-values-unchecked', LOADER,
+                ((EXTRA, EXTRA.replace(' or _json_violation(extra)', '')),),
+                NEWER_REFUSED, 'extra-value', 'a tool state a newer model refuses was not refused naming it'),
+    alternative('capability-tool-unnamed-default-not-accepted', LOADER,
+                (('    if _json_violation(value) is None or _default_violation(value, info) is None:\n',
+                  '    if _json_violation(value) is None:\n'),),
+                f'{CAPABILITIES}::test_a_field_no_rule_names_passes_its_own_declared_default_unwarned', '',
+                'a field no rule names was not passed unwarned at its own declared default'),
+    Case('capability-tool-default-made-from-data-made', LOADER,
+         (('    elif info.default_factory_takes_validated_data:\n', '    elif False:\n'),),
+         (f'{CAPABILITIES}::test_a_default_made_from_the_other_fields_is_never_made',),
+         'a default made from the other fields was made'),
+    same_row('capability-tool-default-int-by-identity', ((SCALARS, SCALARS.replace(' or kind is int', '')),), 'int-equal'),
+    same_row('capability-tool-default-float-by-identity', ((SCALARS, SCALARS.replace(' or kind is float', '')),),
+             'float-equal'),
+    same_row('capability-tool-default-str-by-identity', ((SCALARS, SCALARS.replace(' or kind is str', '')),), 'str-equal'),
+    same_row('capability-tool-default-set-of-bools-refused', ((SET_SCALARS, SET_SCALARS.replace(' or type(item) is bool', '')),),
+             'set-equal'),
+    same_row('capability-tool-default-set-of-floats-refused',
+             ((SET_SCALARS, SET_SCALARS.replace(' or type(item) is float\n', '\n')),), 'set-equal'),
+    same_row('capability-tool-default-set-of-none-refused', ((SET_SCALARS, SET_SCALARS.replace('\n                          or item is None', '')),),
+             'set-equal'),
+    same_row('capability-tool-default-set-of-a-type-of-its-own', (('            if not scalars or a != b:\n',
+                                                                  '            if a != b:\n'),), 'set-of-a-type-of-its-own'),
+    same_row('capability-tool-default-node-twice-accepted', (('        if id(a) in seen:\n            return False\n',
+                                                             '        if False:\n            return False\n'),),
+             'one-node-twice'),
+    same_row('capability-tool-default-lengths-uncompared', (('        if len(a) != len(b):\n            return False\n',
+                                                            '        if False:\n            return False\n'),),
+             'list-longer', 'list-shorter'),
+    same_row('capability-tool-default-model-unwalked', (('            if issubclass(kind, BaseModel):\n',
+                                                        '            if False:\n'),), 'model-equal'),
+    same_row('capability-tool-default-other-object-accepted', (("            else:\n                return False\n            try:",
+                                                               "            else:\n                continue\n            try:"),),
+             'other-object'),
+    same_row('capability-tool-default-missing-slot-accepted', (('            except AttributeError:\n                return False\n',
+                                                               '            except AttributeError:\n                continue\n'),),
+             'model-missing-a-slot'),
+)
+
+
 # The capability probe: every decision of `core/probes.py`, and each check the load makes of a declared
 # command, mutated to every alternative it could take (each condition always, never and negated, each
 # boolean operator without each operand and with the other, each comparison negated, each `in` tuple

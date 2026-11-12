@@ -391,9 +391,13 @@ import has no effect.
     metaclass names it (`tool-subclass-*`); a value of a type of its own in each field, set after the
     tool is built (`tool-exact-<field>`; for `fn`, a callable that is not a function); an exact,
     JSON-like value that is not its default in each field the default rule decides
-    (`tool-default-<field>`); a planted key, value, element or shared container in a schema, a
-    `TaskConfig` or return type of a type of its own at depth, and each kind of instance state that is
-    not pydantic's (`TOOL_DEPTH`); a `fn.__module__` of a type of its own; and a tool changed by a
+    (`tool-default-<field>`); a planted key, value, element or shared container in a schema; a
+    `TaskConfig` of a type of its own at depth, keyed by one, or with a key renamed, and a `tags` set
+    that is not its default; a return type whose class, alias state, key of that state, arguments,
+    module, `Annotated` metadata or `Literal` argument is of a type of its own, or whose alias's origin
+    is no class or alias the rule accepts, of each alias kind; and each kind of instance state that is
+    not pydantic's, each slot but `__dict__` missing, a fields set naming no field, and private state
+    on a model that declares none (`TOOL_DEPTH`); a `fn.__module__` of a type of its own; and a tool changed by a
     resource handler's annotation or by a later capability's import (`tool-changed-*`). The planted
     types (`PLANTED_TYPES`, adding `list`, `set`, `float`, `timedelta`, a metaclass and a plain object)
     live in the capability module, which the tools module imports. Each is refused in one line naming its distribution, and a failed load leaves
@@ -410,11 +414,24 @@ import has no effect.
     container in a schema); `TOOL_RULES` names exactly the locked model's fields, each default-rule
     field at its default in a tool `@mcp_tool` builds (`test_every_function_tool_field_has_a_rule`),
     and the locked model has no private attributes and forbids extras
-    (`test_the_locked_model_holds_no_private_attribute_and_forbids_extras`); with each field dropped
+    (`test_the_locked_model_holds_no_private_attribute_and_forbids_extras`); the state rules follow the
+    installed model, so with a private attribute or extras given to it for the test, as a newer FastMCP
+    may declare, each state it refuses is refused naming the distribution beside each member set, none
+    of its code run (`test_a_tool_state_a_newer_model_refuses_is_refused_naming_it`), and the state it
+    accepts loads (`test_a_tool_state_a_newer_model_accepts_loads`); the default rule compares a value
+    with its default node for node over the defaults a FastMCP may declare (a pydantic model, a
+    dataclass, a list, a set, a dict, another object), running none of the value's code
+    (`test_the_default_rule_compares_node_for_node`), and never makes a default from the other fields
+    (`test_a_default_made_from_the_other_fields_is_never_made`); a return type that holds itself loads,
+    the load returning within a bound far above its own time
+    (`test_a_return_type_that_holds_itself_loads_and_the_load_returns`); with each field dropped
     from the table in turn, a JSON-like value is decided with no warning, a value of a type of its own
     is served undecided, none of its code run, with one warning per field per process naming the field
     and FastMCP's version, and the members still load
-    (`test_a_field_no_rule_names_is_checked_by_the_generic_rule`). Whatever a capability's code raises or exits with (an `Exception`,
+    (`test_a_field_no_rule_names_is_checked_by_the_generic_rule`); and with the fields whose declared
+    default is not JSON-like dropped from it, a tool holding those defaults, the members' included,
+    passes with no warning, and any other value of each is warned of once
+    (`test_a_field_no_rule_names_passes_its_own_declared_default_unwarned`). Whatever a capability's code raises or exits with (an `Exception`,
     `SystemExit` with 0, an int, a string or none, another `BaseException`, an exception whose text
     exits), whenever it runs (its entry point's import, its tools module's, the load's reading of
     what it declared, FastMCP's reading of its resource handler or assembling of its tool; the
@@ -2925,7 +2942,11 @@ What each mode means:
   and `tool-changed-*` rows, each beside each member set;
   `test_a_distribution_name_of_a_type_of_its_own_is_no_name`;
   `test_a_tool_registered_before_the_load_is_decided_too`;
+  `test_a_tool_state_a_newer_model_refuses_is_refused_naming_it`;
+  `test_the_default_rule_compares_node_for_node`;
+  `test_a_return_type_that_holds_itself_loads_and_the_load_returns`;
   `test_a_field_no_rule_names_is_checked_by_the_generic_rule`;
+  `test_a_field_no_rule_names_passes_its_own_declared_default_unwarned`;
   `test_a_served_capability_runs_none_of_its_code_but_its_handler`; and `subclass-reads-commands`,
   `exact-order`, `tool-subclass-reads-name` and `tool-exact-parameters-value` driven through the CLI
   over each transport in `test_a_capability_that_cannot_load_stops_startup`, every kind with
