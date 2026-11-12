@@ -310,14 +310,20 @@ import has no effect.
   (`tests/sandbox_dirs.py`): it removes every real directory named as `bin/sandbox.sh` names them
   (`cluster-mcp-sandbox.` and six characters), at any depth, unless a process still has its working
   directory in it or names it in its environment (`/proc` on Linux; elsewhere `lsof` and `ps -E`,
-  launched through `bin/sandbox.sh` and only when a leftover is found; a probe that cannot run fails
-  the sweep rather than guess). It then puts the caller's `TMPDIR` back and removes the run's
-  directory whole, with whatever the run's processes left in it, unless a sandbox directory in it is
-  still in use. Another run's directories, those left before the run, and anything in the pytest
-  temporary directory not named as a sandbox directory are never touched. A sandbox whose wrapper
-  was killed alone, whose command still runs outside its directory at the session's end, and whose
-  environment the host does not show (a system binary on macOS) is not seen as in use.
-  `tests/test_sandbox_dirs.py` pins the sweep.
+  launched through `bin/sandbox.sh` and only when a leftover is found; when that probe cannot run,
+  the sweep keeps every one it found rather than guess). It then puts the caller's `TMPDIR` back and
+  removes the run's directory whole, with whatever the run's processes left in it, unless a sandbox
+  directory in it is kept. A directory a stopped test left closed (mode `0o555` or `0`) does not stop
+  it: before the scan, `reopen` opens each closed directory in the run's directory that is not a
+  sandbox directory or inside one, so a sandbox in use beneath it is still seen, and `remove` opens
+  what it removes, and the closed directory holding a sandbox directory, whose mode it puts back.
+  The sweep never raises: what it keeps because the probe failed or because it cannot remove it, it
+  names on stderr (`kept <path>: <why>`), past pytest's output capture. Another run's directories,
+  those left before the run, and anything in the pytest temporary directory not named as a sandbox
+  directory are never touched, and no link is followed. A sandbox whose wrapper was killed alone,
+  whose command still runs outside its directory at the session's end, and whose environment the
+  host does not show (a system binary on macOS) is not seen as in use. `tests/test_sandbox_dirs.py`
+  pins the sweep.
 - `uv run pytest`. Only **`@mark.unit`** and **`@mark.integration`** are real markers under
   `--strict-markers`, and **every test carries one**: `tests/conftest.py` holds a single collection
   hook that fails the run with a `pytest.UsageError` listing any collected test that carries
@@ -1489,8 +1495,16 @@ import has no effect.
     its directory in it; a real sandbox is kept while it runs and removed by the next sweep once a
     group SIGKILL left it; a sandbox whose wrapper was SIGKILLed alone while its command runs on
     outside its directory is kept by the command's environment (on Linux, through `/proc`);
-    `own_tmp` redirects children only and puts `TMPDIR` back; and the mutation runner's
-    `case_scratch` keeps a case's scratch, named on stderr, when the processes cannot be listed.
+    `own_tmp` redirects children only and puts `TMPDIR` back. Fed planted process tables: the sweep
+    sweeps the run's pytest temporary directory, removes what a stopped test left closed (`0o555`
+    and `0`: in the run's directory, inside a killed sandbox's directory, a sandbox directory under a
+    closed directory, whose mode comes back) without altering a closed directory outside its reach or
+    behind a link, keeps a run directory holding a sandbox in use, sees a sandbox in use under a
+    directory left closed and leaves it unchanged, and keeps and names on stderr, without raising,
+    what it cannot remove and what it found when the processes cannot be listed. The mutation
+    runner's `case_scratch` the same: a scratch holding closed directories is removed; one holding a
+    sandbox in use (in sight or under a closed directory), one whose processes cannot be listed, and
+    one it cannot all remove are kept and named on stderr.
 - **The rails, in `tests/conftest.py`**, beside the collection hook (which they never feed: no
   fixture adds a marker):
   - **The unit guard** makes `unit` mean something: for a `unit` test, `HOME` and `XDG_*` point
@@ -1642,10 +1656,12 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   sandbox the run starts, the runner's own `bin/sandbox.sh` and those the child's tests start, makes
   its directory there, and so does the child pytest's temporary directory: once the case is
   reported the scratch is removed with them, however the run ended (its own exit, the stop past
-  `LIMIT`, or the stop on SIGTERM, SIGHUP or Ctrl-C). A scratch holding a sandbox directory some
-  process still uses (`tests/sandbox_dirs.py`'s `in_use`), or whose processes cannot be listed, is
-  kept and named on stderr (`kept <path>: <why>`); a SIGKILL to the runner leaves its scratch in the
-  runner's `TMPDIR`.
+  `LIMIT`, or the stop on SIGTERM, SIGHUP or Ctrl-C), directories a stopped test left closed included
+  (`tests/sandbox_dirs.py`'s `reopen` and `remove`). A scratch holding a sandbox directory some
+  process still uses (`in_use`), one whose processes cannot be listed, and one that cannot all be
+  removed are kept and named on stderr (`kept <path>: <why>`); the cleanup never raises, so the case
+  is still reported, later cases still run, and a signal still ends the runner by that signal. A
+  SIGKILL to the runner leaves its scratch in the runner's `TMPDIR`.
 
   A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget

@@ -3,10 +3,10 @@ slug: sandbox-dirs-left-on-kill
 title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
-current_phase: done
+current_phase: P3
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -23,7 +23,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files units kinds guards && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files units kinds guards && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F1-closed-dirs.py && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F2-pins.py && uv run pytest -q tests/test_sandbox_dirs.py tests/test_transports.py tests/test_hygiene.py tests/test_suite_parts.py
 - id: P2
   name: A mutation case's scratch is its child run's TMPDIR
   status: done
@@ -35,10 +35,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files rebase runner runner-timeout sample && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py && uv run pytest -q tests/test_mutations.py
+  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files rebase runner runner-timeout sample && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F1-closed-dirs.py && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F2-pins.py && uv run pytest -q tests/test_mutations.py
 - id: P3
   name: The mutant sweep, the ledger and the whole verify
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R3
@@ -49,7 +49,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files ledger mutants suite
+  verify: SDLK_MUTANTS=spec/sandbox-dirs-left-on-kill/remediation/review1-mutants.json uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files ledger mutants suite
 review:
   last_reviewed_commit: e051738a4338791e9297c9eb7bba1fe413804792
   verdict: changes-requested
@@ -131,6 +131,20 @@ sandbox directory stay; every harness kind of the GOAL's Problem items 1–5 is 
       as PLAN § 2 words them.
 - [x] Measure and put in the commit body: the new module's time in each era
       (`pytest --durations=0 tests/test_sandbox_dirs.py`, both eras), for PLAN § 3 row D4.
+- [x] Review cycle 1, F1 at the sweep, and F2a, F2b (reopened 2026-11-12): `tests/sandbox_dirs.py`
+      gains `reopen` (before the scan, each closed directory in the run's directory that is not a
+      sandbox directory or inside one is opened for the owner, so a sandbox in use beneath it is
+      seen) and `remove` (a plain removal first; on an error, the tree and a closed holding directory
+      opened, the holder's mode put back; no link followed; the error returned, never raised). The
+      sweep keeps every directory it found when the processes cannot be listed, keeps one it cannot
+      remove, and names both on stderr through `tell`; `own_tmp` names a run directory it cannot all
+      remove. `sandbox_tmp` routes `tell` past pytest's output capture. Rows in
+      `tests/test_sandbox_dirs.py` (all `unit`, on planted process tables): closed directories
+      (`0o555`, `0`) removed, links and outside directories unaltered, the holder's mode back; what
+      cannot be removed kept and named; a failed listing keeps and names; the pytest temporary
+      directory swept (F2a); the run directory kept while a sandbox in it is in use (F2b); a sandbox
+      in use under a closed directory seen and unaltered. `AGENTS.md` § Testing's fixture and module
+      bullets.
 - **Verify:** the frontmatter `verify:`: `files` (R5), `units`, `kinds` (R1, one row per harness
   kind) and `guards` (R3/R4), about a minute in all; then the narrowed suite (the new module,
   `test_transports`' own check of its `tmp_path`, the rail and anchors in `test_hygiene`, the
@@ -161,6 +175,19 @@ reported, and every sample case and control prints what develop printed.
       replaced (a live product fact, code-build Step 2.3).
 - [x] Measure and put in the commit body: the sample's wall time before (develop's runner) and after,
       from the `sample` mode's run and `verify/sample.expected`'s recording run (PLAN § 3 row D4).
+- [x] Review cycle 1, F1 at the runner, and F2c (reopened 2026-11-12): `case_scratch` runs `reopen`
+      before its scan, removes through `remove`, and keeps and names a scratch it cannot all remove;
+      it never raises, so the stopped case is reported, later cases run, and a signal still ends the
+      runner by that signal. Rows in `tests/test_sandbox_dirs.py`: a scratch holding closed
+      directories removed, one it cannot all remove kept and named, one holding a sandbox in use kept
+      and named (F2c), and one with a sandbox in use under a closed directory kept. `AGENTS.md`
+      § Testing's mutation-runner bullet. Two checkers, both sites:
+      [`remediation/F1-closed-dirs.py`](remediation/F1-closed-dirs.py) (the limit and signal paths
+      with a test holding closed directories: the runner past a patched `LIMIT` and on SIGTERM, SIGHUP
+      and SIGINT; a pytest session through a `subprocess.run` timeout and on SIGINT; and, on macOS, an
+      immutable file named past the capture), and [`remediation/F2-pins.py`](remediation/F2-pins.py)
+      (22 hand plants of F2a-c and F1's new decisions through `run_case`, each killed by its rows with
+      the contract's message, and an unmutated control).
 - **Verify:** the frontmatter `verify:`: `files`; `rebase` (the text merges with the sibling's in
   either order); `runner` (a child killed before its session ends, for a case on the package and one
   planting a repository copy: no sandbox directory, no scratch, `TMPDIR` put back; a child that ends
@@ -226,6 +253,19 @@ skips exactly what develop skips; the ledger is clean.
 - [x] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
       `mutants` (about 24 plants, one planted mode each: about 7 minutes), then `suite` (the profile's
       eight suite commands and its last, both eras, under a fresh `TMPDIR`: about 26 minutes).
+- [x] Review cycle 1 (reopened 2026-11-12): F1's fix moved the text five frozen plants anchor on
+      (`skip-run-dir`, `skip-basetemp`, `sweep-since`, `rmdir-dropped`, `skeleton-only`).
+      [`remediation/review1-mutants.json`](remediation/review1-mutants.json) is `verify/mutants.json`
+      with those five anchors, and their planted text, moved to the built code; their decisions,
+      modes and messages are unchanged. One plant changes mode: `links-taken` (a link with a sandbox's
+      name taken as a leftover) was killed by `guards` only because `shutil.rmtree` raised on the link
+      and the session failed, the crash F1 removes; `remove` now refuses the link, keeps it and names
+      it, so the decoys survive and `guards` passes. It is killed by `units` instead, whose
+      `test_leftovers_are_directories_with_a_sandbox_name` asserts the link is not a leftover (seen
+      alone: survived `guards`, killed by `units`). P3's `verify:` runs `mutants` on the list through
+      `SDLK_MUTANTS`, the frozen gate's own override.
+- [ ] Review cycle 1: the `suite` mode (the profile's whole `verify`) on the final tree. Left for the
+      foreman's full verify.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/sandbox-dirs-left-on-kill/verify/mutants.json`, `spec/sandbox-dirs-left-on-kill/PLAN.md`,
   `spec/sandbox-dirs-left-on-kill/TECH.md`, `spec/sandbox-dirs-left-on-kill/remediation/fork-base.py`,
@@ -297,6 +337,27 @@ skips exactly what develop skips; the ledger is clean.
   `remediation/fork-base.py` widens the `files` mode by exactly that path (`ALSO_ALLOWED`), and
   P3's `verify:` runs the frozen gate under the wrapper, as P1's and P2's do. (3) The seed's two
   corrections went in as dated lines. The heavy gate (`mutants`, then `suite`) waits for a slot.
+
+- **2026-11-12, review cycle 1 remediation (`changes-requested`: F1 MEDIUM, F2a-c LOW).** P1, P2
+  and P3 reopened. F1 (a closed directory in a case scratch or a sweep raised `PermissionError` out of
+  a bare `shutil.rmtree`) is fixed at both sites by `sandbox_dirs.reopen` and `sandbox_dirs.remove`,
+  and the cleanup never raises: what it cannot remove, or cannot tell is free, it keeps and names on
+  stderr. The sweep's failed listing used to raise (and fail the session); it now keeps what it found
+  and names it, as `case_scratch` already did (the review's routing: "never raises out of
+  `case_scratch` or the sweep", "keeps what it found rather than remove it"). P1 and P2 are
+  committed together, as `bundle`: `case_scratch` calls the helpers P1's file adds, both phases' rows
+  share `tests/test_sandbox_dirs.py`, and `AGENTS.md` describes both in the bullets the same-commit
+  rule pairs with them. Gates retuned: P1's and P2's `verify:` each add
+  `remediation/F1-closed-dirs.py` and `remediation/F2-pins.py` (both checkers cover both sites; each
+  ran once on the bundled tree, standing for both phases); P3's runs `mutants` on
+  `remediation/review1-mutants.json`. `remediation/fork-base.py` widens `files` by the review's seed,
+  `issues/sandbox-sweep-listing-failure-unpinned.md` (seen red without it), whose line reference
+  moved with the fix and is corrected in place (this cycle's own, not on `develop`). The frozen gate
+  has no closed-directory row; `F1-closed-dirs.py` is that row: every one of its rows goes red (23 of
+  its 30 checks) with the reviewed commit's `tests/sandbox_dirs.py`, `tests/mutants.py` and `tests/conftest.py`
+  (`--from 97750cc`). `bin/sandbox.sh` is unchanged (R5). One commit for P1-P3: P3's plant list
+  re-anchors text this same change moves, so its `mutants` mode cannot run on any split. P1 and P2
+  are done; P3 stays in progress until the foreman's full verify runs its `suite` mode.
 
 ## How `code-build` drives this
 

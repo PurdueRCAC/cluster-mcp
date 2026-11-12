@@ -6011,9 +6011,11 @@ def case_scratch(case_id: str) -> Iterator[str]:
 
     Every sandbox the child run starts, its own and its tests', makes its directory there, and so do
     the child pytest's temporary directories: removing the scratch removes them, however the child
-    ended (its own exit, a stop past `LIMIT`, or the stop a signal to the runner makes). A scratch
-    holding a sandbox directory some process still uses is left in place and named on stderr, and so
-    is one whose processes cannot be listed: the sweep never guesses that a directory is free.
+    ended (its own exit, a stop past `LIMIT`, or the stop a signal to the runner makes), directories a
+    stopped test left closed included (`sandbox_dirs.reopen`, `sandbox_dirs.remove`). A scratch holding
+    a sandbox directory some process still uses is left in place and named on stderr, and so is one
+    whose processes cannot be listed, and one that cannot all be removed: the sweep never guesses that
+    a directory is free, and never raises, so the case is still reported and the sweep goes on.
     """
     scratch = tempfile.mkdtemp(prefix=f'mutant-{case_id}-')
     saved = os.environ.get('TMPDIR')
@@ -6023,6 +6025,7 @@ def case_scratch(case_id: str) -> Iterator[str]:
     finally:
         # The process listing runs before `TMPDIR` is put back, so its own sandboxes land in the scratch.
         try:
+            sandbox_dirs.reopen(Path(scratch))
             left = sandbox_dirs.leftovers([Path(scratch)])
             reason = None
             if left and sandbox_dirs.in_use(left, sandbox_dirs.processes()):
@@ -6035,8 +6038,10 @@ def case_scratch(case_id: str) -> Iterator[str]:
             else:
                 os.environ['TMPDIR'] = saved
         if reason is None:
-            shutil.rmtree(scratch)
-        else:
+            error = sandbox_dirs.remove(Path(scratch))
+            if error is not None:
+                reason = f'it could not all be removed ({type(error).__name__}: {error})'
+        if reason is not None:
             print(f'kept {scratch}: {reason}', file=sys.stderr)
 
 

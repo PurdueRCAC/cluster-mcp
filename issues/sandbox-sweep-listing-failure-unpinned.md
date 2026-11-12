@@ -12,7 +12,7 @@ lane: public
 `tests/sandbox_dirs.py` decides whether a sandbox directory is in use from a table of every process
 of the account: on macOS `processes()` reads working directories with `lsof` and environments with
 `ps -E`, and when `ps` exits non-zero or `lsof` prints nothing it raises
-(`tests/sandbox_dirs.py:70`). The raise is what keeps the cleanup from guessing: the session sweep
+(`tests/sandbox_dirs.py:156`). The raise is what keeps the cleanup from guessing: the session sweep
 and the mutation runner's `case_scratch` then keep what they found instead of treating an empty
 table as "nothing in use".
 

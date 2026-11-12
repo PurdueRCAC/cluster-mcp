@@ -199,14 +199,24 @@ def path_shim(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 @pytest.fixture(scope='session', autouse=True)
-def sandbox_tmp(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+def sandbox_tmp(tmp_path_factory: pytest.TempPathFactory, pytestconfig: pytest.Config) -> Iterator[Path]:
     """Make every sandbox this run starts under a directory of the run's own, and sweep it at the end.
 
     A sandbox stopped by SIGKILL leaves its directory (bin/sandbox.sh removes it from a trap); the
     sweep removes it, and those left under the run's pytest temporary directory, unless a process
-    still uses one (`sandbox_dirs`).
+    still uses one (`sandbox_dirs`). What it keeps for any other reason it names on stderr, past the
+    output capture, which would otherwise swallow a line written at the session's end.
     """
-    with sandbox_dirs.own_tmp(tmp_path_factory.getbasetemp()) as run:
+    capture = pytestconfig.pluginmanager.getplugin('capturemanager')
+
+    def tell(line: str) -> None:
+        if capture is None:
+            sandbox_dirs.say(line)
+            return
+        with capture.global_and_fixture_disabled():
+            sandbox_dirs.say(line)
+
+    with sandbox_dirs.own_tmp(tmp_path_factory.getbasetemp(), tell) as run:
         yield run
 
 
