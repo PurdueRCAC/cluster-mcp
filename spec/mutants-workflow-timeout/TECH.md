@@ -3,7 +3,7 @@ slug: mutants-workflow-timeout
 title: A dispatched mutation run finishes and reports every case
 kind: ci
 appetite: small
-status: in_review
+status: blocked
 branch: ci/mutants-workflow-timeout
 base: develop
 current_phase: done
@@ -72,10 +72,10 @@ phases:
   hill: uphill
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F2-docs-controls-prefill.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
 review:
-  last_reviewed_commit: ''
-  verdict: none
-  blocked_reason: ''
-  cycle: 0
+  last_reviewed_commit: 30231aa068f3708e4260e998a53959bb1086c846
+  verdict: changes-requested
+  blocked_reason: 'F-b (LOW, CONFIRMED): budget row names one commit for three runs; F-a (MEDIUM, PLAUSIBLE) pending triage'
+  cycle: 1
 ---
 
 # TECH.md — A dispatched mutation run finishes and reports every case
