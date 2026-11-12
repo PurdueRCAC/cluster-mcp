@@ -3,11 +3,11 @@ slug: mutant-child-outlives-timeout
 title: A mutant whose child run hangs is reported, and leaves nothing running
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/mutant-child-outlives-timeout
 base: develop
 current_phase: done
-last_updated: '2026-11-10'
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: A child run past its limit is stopped whole, reported, and the sweep goes on
@@ -37,10 +37,10 @@ phases:
   hill: uphill
   verify: uv run python -I spec/mutant-child-outlives-timeout/verify/gate.py prepush && uv run python -I spec/mutant-child-outlives-timeout/remediation/untouched.py && uv run python -I spec/mutant-child-outlives-timeout/remediation/names.py && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
-  last_reviewed_commit: 767ea8e0aba266c7635d2806ed7e1c9704d1e51d
-  verdict: changes-requested
-  blocked_reason: 'review 3: the seed names only the timeout path on which the runner SIGKILLs its sandbox, not Ctrl-C/TERM/HUP (F6, LOW)'
-  cycle: 3
+  last_reviewed_commit: 91192884c21c63c75e56443bcb7b8a7ba9c1cbfc
+  verdict: approved
+  blocked_reason: ''
+  cycle: 4
 ---
 
 # TECH.md — A mutant whose child run hangs is reported, and leaves nothing running

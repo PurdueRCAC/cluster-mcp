@@ -502,3 +502,7 @@ Each path is in this cycle's logs, the case's `cluster-mcp-sandbox.*` home left 
 cases; the case that ended normally left none); TERM, HUP and INT in
 `.local/review3/hang/sig-branch-SIGTERM.log`, `sig-branch-SIGHUP.log`, `sig-branch-SIGINT.log`
 (and `sig-branch-pgSIGINT.log` for a Ctrl-C to the group). Nothing else in the seed changed.
+
+The FSM records this closure as `verdict: approved` with `cycle: 4`, because the only route its
+script offers counts every verdict as a pass. Cycle 4 is that ruling, not a fourth review; the
+reviewed commit is `9119288`, the last change outside `spec/`.
