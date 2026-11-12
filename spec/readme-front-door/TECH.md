@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: docs/readme-front-door
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The pages, one level down, and the tests that read them
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -25,6 +25,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 1
   verify: export UV_PYTHON=3.14 && uv run -q --with pyyaml python -I spec/readme-front-door/verify/docs-gate.py controls readme pages facts packages paths && uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_liveness.py::test_liveness_texts_state_the_monitor tests/test_ssh_exec.py::test_content_texts_state_the_sftp_route tests/test_ssh_exec.py::test_separation_texts_state_the_remote_rc_exception tests/test_deprecation_window.py tests/test_registry.py
 - id: P2
   name: AGENTS.md § Documentation and its pointers, the ledger, and the full gate
@@ -120,7 +121,7 @@ everything it no longer does, the package READMEs point at their pages, and the 
 `code-review`'s blind reviewer cannot see: the orchestrator grades them (and this cycle's review is
 the maintainer's read, GOAL Review mode).
 
-- [ ] Write `docs/core/README.md`, `docs/slurm/README.md` and `docs/rcac/README.md` to PLAN § 2's
+- [x] Write `docs/core/README.md`, `docs/slurm/README.md` and `docs/rcac/README.md` to PLAN § 2's
       outline: H1, lead, `## Tools` (one list line per tool, the baseline's line), `## What it needs
       on the cluster`, `## How it behaves`; the core's `## Install`; the RCAC page's
       `## RCAC documentation`. Every fact `verify/facts.yaml` homes on a page goes there with its
@@ -128,22 +129,22 @@ the maintainer's read, GOAL Review mode).
       code line it maps as a line of the page. Every figure line of
       the core page is a list item or a table row. Links into the repository are relative
       (`../../issues/…`).
-- [ ] Rewrite `README.md` to PLAN § 2: the opening (two or three sentences), `## Quick Start`,
+- [x] Rewrite `README.md` to PLAN § 2: the opening (two or three sentences), `## Quick Start`,
       `## Capabilities`, `## Run modes`, `## Upgrading from rcac-mcp` (byte for byte),
       `## Development`, `## License`; at most 120 lines; no figure outside § Upgrading.
-- [ ] `SECURITY.md`: the overview says how to run the service, the three modes with the README's
+- [x] `SECURITY.md`: the overview says how to run the service, the three modes with the README's
       one-line descriptions inside it; add `## Hosted HTTP server` with the three baseline recipes
       under `### Basic HTTP Server`, `### With JWT Authentication`, `### Docker Compose with TLS`;
       every baseline line outside the overview (lines 6–14) kept word for word.
-- [ ] Each package README links `https://github.com/PurdueRCAC/cluster-mcp/blob/main/docs/<member>/README.md`
+- [x] Each package README links `https://github.com/PurdueRCAC/cluster-mcp/blob/main/docs/<member>/README.md`
       in place of its "full documentation is the repository's README" line.
-- [ ] Repoint `tests/test_ssh_liveness.py` (one read) and `tests/test_ssh_exec.py` (two reads):
+- [x] Repoint `tests/test_ssh_liveness.py` (one read) and `tests/test_ssh_exec.py` (two reads):
       `(root / 'README.md')` becomes `(root / 'docs' / 'core' / 'README.md')`; the dict label may
       name the file; nothing else changes (comments aside). The comment above `EXPECTED_TOOLS` in
       `tests/test_registry.py` names its member's docs page.
-- [ ] If a phrase in the fact map cannot be kept in a short sentence, or a verbatim line cannot be
+- [x] If a phrase in the fact map cannot be kept in a short sentence, or a verbatim line cannot be
       kept, stop and report it: the map and the gate are frozen with the plan.
-- [ ] Stage everything, then run the frontmatter `verify:`.
+- [x] Stage everything, then run the frontmatter `verify:`.
 - **Verify:** the gate's `controls readme pages facts packages paths`, then the five page-reading
   test targets in both eras (about 20 s each).
 - **Touches:** `README.md`, `SECURITY.md`, `docs/{core,slurm,rcac}/README.md`,

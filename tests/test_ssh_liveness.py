@@ -652,14 +652,14 @@ TRANSFER_TEXT = (
     "by state before any handler that would read it as the server's answer, and a lost write leaves its staging "
     'directory (`issues/ssh-write-staging-leftover.md`).')
 
-# What AGENTS.md §2 and the README say of a transfer cut short.
+# What AGENTS.md §2 and docs/core/README.md say of a transfer cut short.
 SECTION_2_TRANSFER = ('raises `ssh.TransferLost`', 'may be partly made', 'the staging directory named',
                       "`put`'s remote target, or `get`'s local file, may be truncated")
 README_TRANSFER = ('the transfer may be partly made', 'issues/ssh-write-staging-leftover.md')
 # What the Executor Protocol's `write`, `put` and `get` say, in their Raises, of a transfer cut short.
 PROTOCOL_TRANSFER = ('`ssh.TransferLost`', 'the transfer may be partly made')
 
-# The figures the README states, at the default bound.
+# The figures docs/core/README.md states, at the default bound.
 README_FIGURES = ('15 s of quiet', "15 s after a\ncall's start", '29 s after a background probe', '44.45 s',
                   'within 29 s', 'every 44 s', '45 s')
 
@@ -690,7 +690,7 @@ def test_liveness_texts_state_the_monitor() -> None:
     assert unstated == [], f'the Executor Protocol\'s Raises does not state a transfer cut short: {unstated}'
     assert 'a lost connection is the one exception' in protocol['write'], \
         "the Executor Protocol's write says a failed transfer leaves the target untouched, with no exception"
-    readme = (root / 'README.md').read_text()
+    readme = (root / 'docs' / 'core' / 'README.md').read_text()
     assert [part for part in README_TRANSFER if part not in readme] == [], 'the README does not state a transfer cut short'
     assert ssh.TransferLost.__mro__[1] is ConnectionError
     absent = [figure for figure in README_FIGURES if ' '.join(figure.split()) not in ' '.join(readme.split())]

@@ -378,7 +378,7 @@ def test_content_texts_state_the_sftp_route() -> None:
     root = Path(__file__).resolve().parent.parent
     texts = {
         'AGENTS.md §2': _section((root / 'AGENTS.md').read_text(), '### 2. ', '### 3. '),
-        'README.md': (root / 'README.md').read_text(),
+        'docs/core/README.md': (root / 'docs' / 'core' / 'README.md').read_text(),
         'the Executor.write docstring': Executor.write.__doc__ or '',
     }
     missing = [name for name, text in texts.items() if CONTENT_RULE not in ' '.join(text.split())]
@@ -390,7 +390,7 @@ def test_separation_texts_state_the_remote_rc_exception() -> None:
     root = Path(__file__).resolve().parent.parent
     texts = {
         'AGENTS.md §3': _section((root / 'AGENTS.md').read_text(), '### 3. ', '### 4. '),
-        'README.md': (root / 'README.md').read_text(),
+        'docs/core/README.md': (root / 'docs' / 'core' / 'README.md').read_text(),
         'the run_command description': run_command.description or '',
         'the Executor docstring': Executor.__doc__ or '',
     }

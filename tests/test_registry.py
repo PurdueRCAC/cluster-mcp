@@ -30,7 +30,7 @@ from cluster_mcp.core.server import create_mcp_server
 from cluster_mcp.core.tools import CORE_TOOLS, TOOL_REGISTRY
 
 
-# Every tool change edits this set in the same commit as its member's instructions text and the README.
+# Every tool change edits this set in the same commit as its member's instructions text and its docs page.
 EXPECTED_TOOLS: frozenset[str] = frozenset({
     'average_wait',
     'cluster_context',
