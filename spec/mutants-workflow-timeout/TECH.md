@@ -240,8 +240,8 @@ runs dispatched together would share the organisation's 20 job slots, and each w
 - [ ] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
       the run id as P3 does. Hand it back. Never dispatch again in this run.
 
-**Run B:**
-- [ ] Append `run <id>` to `runs.txt`, and run `mutants-gate.py runs --runs-file
+**Run B:** Run B: read; held at the flaky case (see Amendments, 2026-11-12, P4 run 2).
+- [x] Append `run <id>` to `runs.txt`, and run `mutants-gate.py runs --runs-file
       spec/mutants-workflow-timeout/runs.txt`. Its stops are P3's. Seed any new case not killed as P3
       does: the same three-case limit counts across the runs.
 - [ ] Stage, run the frontmatter `verify:`, mark P4 done, commit.
@@ -385,6 +385,27 @@ Two runs: Run A dispatches, Run B records.
 - **2026-11-12 · foreman ruling: across runs 2 and 3, only a survivor not already seeded counts
   against the three-case limit.** A re-occurrence of the seven cases seeded after run 1 does not
   count. A case not killed in one run and killed in another is reported as a flaky case.
+- **2026-11-12, P4 run 2 read (Run B).**
+  - Run `43260825655`, a `workflow_dispatch` at `32e1d5c` (T1 plus records only), attempt 1,
+    conclusion failure. The `runs` gate over both runs is green (`runs: ok`): every case once in
+    78 shards, no job cancelled, every shard at its ledger with its controls passed.
+  - Figures: the run 591 s (9:51) from dispatch, within 900 s; 20 jobs at once at most; worst job
+    shard 2 at 156 s, within 290 s; median 108 s. Over both runs the worst job is still shard 37 of
+    run 1 (2:44), the worst wall run 2's 9:51. The refit now measures 7.6 s a child and 50 s
+    overhead; at 15 a shard it projects 186 s a job and 762 s a run, both bounds held, and
+    proposes 20. Both runs held both bounds, so the size stays at 15.
+  - Eight shards failed, each on one case: the seven seeded after run 1 (shards 14, 17, 39, 41, 47,
+    57, 60), the same targets as in run 1, which do not count; and shard 3,
+    `ssh-returns-at-exit-status`. Its five other targets failed with its `why`, but
+    `test_ssh_exec.py::test_a_late_sentinel_still_counts_as_started[bashrc]` failed for another
+    reason (no "cut before its end records"). In run 1 the case was killed, every target with its
+    `why`, and on macOS at T1, run alone, it is killed in 10 s. It is a flaky case under the
+    ruling above, reported and not counted: the row caught the mutant both times, but on a
+    loaded runner the mutant's early return seems to end the row at another failure first
+    (unverified; the runner's line does not quote the failure).
+  - No stop fires. `runs --final` will require the flaky case named in an `issues/` seed, as every
+    case not killed in any run is; whether it gets one is the foreman's. P4 stays `in_progress`
+    until then; nothing is seeded, changed or dispatched here.
 
 ---
 
