@@ -494,7 +494,7 @@ started from this review.
 
 ### Addendum (2026-11-12): F6 closed
 
-F6 is closed per the foreman's ruling, board 2026/11-12-seven-rulings (item 5): add the clause,
+F6 is closed per the foreman's ruling: add the clause,
 check it against the reviewer's logs, land; no fourth review. The clause commit `9119288` adds to
 the seed's one sentence the runner's own SIGTERM, SIGHUP or SIGINT (Ctrl-C) beside the 300 s limit.
 Each path is in this cycle's logs, the case's `cluster-mcp-sandbox.*` home left in the runner's
