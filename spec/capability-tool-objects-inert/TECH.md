@@ -3,10 +3,10 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
   verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R5
@@ -196,9 +196,11 @@ the profile's full verify green once.
   (`issues/capability-tool-objects-served-copy.md`, `issues/capability-record-checks-metaclass-code.md`),
   both present with ROADMAP entries; no commit body of the cycle defers anything. P2's gate has no
   re-planted mode, so `replanted.py`'s selection is not run here.
-- [ ] Then, with nothing else of this cycle running, the full verify's modes one at a time
+- [x] Then, with nothing else of this cycle running, the full verify's modes one at a time
   (`full-legacy-1` to `-4`, `full-modern-1` to `-4`, `full-ends`; the heavy runs the foreman
-  schedules).
+  schedules). Green on `0f34719`, 2026-11-12, each era: 44, 154, 513, and 4765 passed with 14
+  skipped (login-shell rows for a shell this host lacks; CI installs every shell and fails a missing
+  one); `full-ends` green.
 - **Verify:** `sh spec/capability-tool-objects-inert/verify/p2.sh` `phase`, `ledger`, `full-legacy-1` to `-4`, `full-modern-1` to `-4`,
   `full-ends` (the frontmatter's chain).
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
