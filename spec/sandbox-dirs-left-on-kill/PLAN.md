@@ -255,8 +255,8 @@ briefs are the rejected design's record.
   figures). And whether the GOAL's known limitation (callers outside the repository's runs) wants a
   record beyond `AGENTS.md`'s sentence: the seed `issues/sandbox-dirs-left-on-kill.md` is retired
   when this lands. The plan filed no new seed; the build filed two, on the foreman's rulings
-  (2026-11-12): `issues/sandbox-dirs-outside-repo-runs.md`, the GOAL's known limitation (a caller
-  outside the repository's runs that SIGKILLs a sandbox), and `issues/mutant-case-cleanup-interrupted.md`
+  (2026-11-12): `issues/sandbox-dirs-outside-repo-runs.md`, the GOAL's two known limitations (a
+  caller outside the repository's runs that SIGKILLs a sandbox; the run itself SIGKILLed), and `issues/mutant-case-cleanup-interrupted.md`
   (a second signal during a mutation case's cleanup); both pre-existing.
 - **The seed's "last three" referent** (GOAL Clarifications): fixed by whichever of this cycle and
   the sibling lands second, at its landing; P3 carries the item.

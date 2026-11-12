@@ -201,7 +201,8 @@ skips exactly what develop skips; the ledger is clean.
       - a second signal during a case's cleanup is deferred to `issues/mutant-case-cleanup-interrupted.md`
         (after `mutant-runner-stop-pins`);
       - the GOAL's known limitation is seeded as `issues/sandbox-dirs-outside-repo-runs.md`
-        (a caller outside the repository's runs that SIGKILLs a sandbox; after the seed above).
+        (after the seed above), with both its cases: a caller outside the repository's runs that
+        SIGKILLs a sandbox, and the run itself SIGKILLed before its end.
 - [x] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
       `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications). Done at P2's rebase (2026-11-12):
       the branch's own sentence on the runner, which stood before "The last three", was dropped for

@@ -5,7 +5,7 @@ appetite: small
 lane: public
 ---
 
-# A sandbox killed outright by a caller outside the repository's own runs leaves its directory
+# A sandbox killed outright where no run's cleanup runs leaves its directory
 
 ## Problem
 
@@ -18,7 +18,9 @@ the skeleton the script makes (`.config`, `.cache`, `.local/share`), sometimes w
 at a directory of its own and sweeps it when the session ends (`tests/sandbox_dirs.py`, the
 `sandbox_tmp` fixture), and the mutation runner makes each case's scratch its child run's `TMPDIR`
 (`case_scratch`). It left `bin/sandbox.sh` byte-identical (its R5), so a caller outside those runs
-still leaves a directory when it SIGKILLs the wrapper. Its GOAL records this as a non-goal:
+still leaves a directory in two cases, each a non-goal of its GOAL.
+
+**Case 1: a caller outside the repository's own runs** SIGKILLs the wrapper:
 
 > **Callers outside the repository's own runs (known limitation).** A developer's shell, a cycle's
 > `spec/*/verify/` gate script (such as `spec/agents-d-instructions/verify/serve_gate.py`, which
@@ -30,14 +32,27 @@ Such a caller is a person (a shell's `kill -9`, a terminal closed in a way that 
 or another tool (a gate script, an editor's task runner, a CI step cancelled outright). Each leftover
 lands in that caller's `TMPDIR`, usually the host's, where nothing tells it from another run's.
 
-Pre-existing: the trap came in with the sandbox wrapper itself, before the factory.
+**Case 2: the run itself is SIGKILLed** before its end, so its own cleanup never runs:
+
+> **A run that is itself killed (known limitation).** If the pytest run or the mutation runner is
+> killed before its end (SIGKILL, a cancelled CI job), its own cleanup does not run, and what its
+> sandboxes made stays in the location the run gave them.
+
+What stays is one directory per killed run in the `TMPDIR` the run was started with: a suite
+session's `cluster-mcp-run.*` directory, or the mutation runner's current `mutant-<case>-*` scratch,
+with the sandbox directories and the pytest temporary directories inside it. On a hosted CI runner
+the machine is discarded; on a developer's host the directory stays.
+
+Pre-existing: the trap came in with the sandbox wrapper itself, before the factory; case 2 is the
+same exposure one level up, in the cleanup `sandbox-dirs-left-on-kill` added.
 
 ## Why it was deferred
 
 `sandbox-dirs-left-on-kill`'s maintainer ruling (its GOAL, Q4, 2026-11-09) kept `bin/sandbox.sh`
 unchanged and narrowed the contract to the repository's own runs; the first design, a keeper process
-inside the wrapper, was rejected. Filed as a seed on the foreman's ruling at that cycle's P3 ledger,
-2026-11-12, so the known limitation has a record beyond `AGENTS.md`'s sentence.
+inside the wrapper, was rejected; a run's own cleanup cannot run after the run is SIGKILLed. Filed
+as a seed on the foreman's rulings at that cycle's P3 ledger, 2026-11-12, so both known limitations
+have a record beyond the GOAL and `AGENTS.md`'s sentence.
 
 ## Outcome / vision
 
@@ -48,8 +63,9 @@ developer chooses to keep.
 ## Sketch of the acceptance criteria
 
 - **R1** — WHEN a caller outside the repository's own runs SIGKILLs `bin/sandbox.sh` (alone or with
-  its process group), its sandbox directory SHALL be removed within a bound the maintainer sets, or
-  SHALL be removable by a documented step that removes only directories no process uses.
+  its process group), or a suite run or the mutation runner is SIGKILLed before its end, what its
+  sandboxes left SHALL be removed within a bound the maintainer sets, or SHALL be removable by a
+  documented step that removes only directories no process uses.
 - **R2** — No directory of another sandbox still in use, and nothing that is not a sandbox directory,
   SHALL be removed.
 - **R3** — The throwaway-environment contract (`AGENTS.md` § Factory, Throwaway environment) SHALL
@@ -57,6 +73,12 @@ developer chooses to keep.
 
 ## Notes
 
+- **A sketch, not a decision:** a likely remedy for both cases is clearing stale leftovers on the
+  next start: a later suite run, mutation run or sandbox removes `cluster-mcp-sandbox.*`,
+  `cluster-mcp-run.*` and `mutant-*` directories under its `TMPDIR` that no process uses, with the
+  in-use test `tests/sandbox_dirs.py` already applies. Its open questions: an age or ownership guard
+  so a concurrent run's directories are never taken, and whether the host's existing leftovers
+  (which `sandbox-dirs-left-on-kill` left to the developer) come into scope.
 - `bin/sandbox.sh` is on § Invariants' high-blast-radius list: a change there needs the maintainer.
 - The rejected keeper design and its research are kept as a record in
   `spec/sandbox-dirs-left-on-kill/` (`research/00`, `02`–`04`, `verify/keeper.py`, at `8520d9c`).

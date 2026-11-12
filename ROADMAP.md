@@ -165,13 +165,15 @@ short the same way. Found by `sandbox-dirs-left-on-kill`'s P2 build, 2026-11-12.
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (TECH, P2); `tests/mutants.py` (`case_scratch`, `stop_run`)*
 **Seed:** [`issues/mutant-case-cleanup-interrupted.md`](issues/mutant-case-cleanup-interrupted.md) · *status: unshaped*
 
-## A sandbox killed outright outside the repository's own runs leaves its directory
+## A sandbox killed outright where no run's cleanup runs leaves its directory
 
 `bin/sandbox.sh` removes its directory from a trap a SIGKILL skips. `sandbox-dirs-left-on-kill`
-cleans up after the suite and the mutation runner and leaves the wrapper as it is, so a person or
-another tool that SIGKILLs a sandbox (a shell's `kill -9`, a gate script, a step cancelled outright)
-still leaves its directory in that caller's `TMPDIR`. That cycle's GOAL records it as a known
-limitation; pre-existing.
+cleans up after the suite and the mutation runner and leaves the wrapper as it is, so two cases still
+leave directories: a person or another tool that SIGKILLs a sandbox (a shell's `kill -9`, a gate
+script, a step cancelled outright) leaves it in that caller's `TMPDIR`, and a suite run or the
+mutation runner SIGKILLed before its end leaves its run directory or case scratch, sandboxes
+included. That cycle's GOAL records both as known limitations; pre-existing. Clearing stale
+leftovers on the next start is a likely remedy, not yet decided.
 
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (GOAL non-goals, Q4); `bin/sandbox.sh`*
 **Seed:** [`issues/sandbox-dirs-outside-repo-runs.md`](issues/sandbox-dirs-outside-repo-runs.md) · *status: unshaped*
