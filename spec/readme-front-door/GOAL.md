@@ -45,13 +45,14 @@ page" means one of the three `docs/*/README.md` files.
 
 - **R1** — `README.md` SHALL hold these level-2 sections, in this order, and no others: an opening
   that says what the server is in two or three sentences; Quick Start, with the client
-  configuration and one install line; a table of the core and each extra, one row each, linking to
-  its docs page; a table of the three run modes (`ssh`, `local`, `delegate`), one row each, linking
-  to `SECURITY.md`; § Upgrading from rcac-mcp; Development; License. [NEEDS CLARIFICATION: where
-  do § *The cluster's rules, in the instructions* and § *RCAC Documentation* go? See Clarifications
-  Q2 and Q3.]
-- **R2** — `README.md` SHALL be at most [NEEDS CLARIFICATION: line ceiling for "about two screens",
-  Q1] source lines. Outside § Upgrading from rcac-mcp, which keeps its version window, it SHALL state
+  configuration, one install line, and one sentence on the client's instructions limit linking to
+  where `docs/core/README.md` says how to raise it; a table of the core and each extra, one row
+  each, linking to its docs page, with the `[rcac]` row carrying one line that links to the
+  documentation service on `docs/rcac/README.md`; a table of the three run modes (`ssh`, `local`,
+  `delegate`), one row each, linking to `SECURITY.md`; § Upgrading from rcac-mcp; Development;
+  License. § *The cluster's rules, in the instructions* moves to `docs/core/README.md` and
+  § *RCAC Documentation* to `docs/rcac/README.md` (Q2, Q3).
+- **R2** — `README.md` SHALL be at most 120 source lines, aiming at about 100 (Q1). Outside § Upgrading from rcac-mcp, which keeps its version window, it SHALL state
   no exact figure: no duration, timeout, byte rate, exit code or signal name.
 - **R3** — Each docs page SHALL list its member's tools, one line per tool; the commands its member
   needs on the cluster; and how its member behaves. Every tool the server registers (the
@@ -60,7 +61,8 @@ page" means one of the three `docs/*/README.md` files.
 - **R4** — `docs/core/README.md` SHALL carry what README § Quick Start and § Execution Modes say at
   the baseline about the connection (connect errors, reconnection, a silent link), timeouts and the
   stop, exit codes, and file writes, and what § *Which capabilities are served* says about the
-  capability probe. Its exact figures (each bound in seconds, the signal order, each exit code)
+  capability probe, and what § *The cluster's rules, in the instructions* says about site rules,
+  the instructions budget and raising the client's limit. Its exact figures (each bound in seconds, the signal order, each exit code)
   SHALL sit in a list or table.
 - **R5** — `SECURITY.md` SHALL describe how to run the service: the three run modes, and the hosted
   HTTP server (basic, with JWT, and Docker Compose with TLS) moved from the README. It SHALL keep
@@ -79,11 +81,18 @@ page" means one of the three `docs/*/README.md` files.
   its issue; exact figures on the docs page in a list or table, none in the README; edge cases in
   `issues/` or `AGENTS.md`, linked from the docs. §9's same-commit rule SHALL name the tool's docs
   page where it now names the README's tool inventory, and every other `AGENTS.md` reference to a
-  README section this cycle moves SHALL name that section's new home.
+  README section this cycle moves SHALL name that section's new home, including § Packaging's
+  pointer to README § *Docker Compose with TLS* (`AGENTS.md:1732` at the baseline, now
+  `SECURITY.md`) and the release recipe's "the README's install note" (`AGENTS.md:1879`, now the
+  page that carries the note).
 - **R9** — The branch SHALL change no file under `packages/*/src/` and no
   `tests/fixtures/served_surface.json`; the served tools, resources and instructions are unchanged.
   A test that reads `README.md` today SHALL read the file that holds its text on the branch, with
-  the strings it checks unchanged, and the profile's `verify` SHALL pass.
+  the strings it checks unchanged. In particular, `tests/test_ssh_liveness.py`
+  (`README_TRANSFER`, `README_FIGURES`, lines 658–697 at the baseline) and `tests/test_ssh_exec.py`
+  (`CONTENT_RULE` and the remote rc exception, lines 365–393) SHALL read `docs/core/README.md`, with
+  only the file path moved. `tests/test_deprecation_window.py` keeps reading `README.md`. The
+  profile's `verify` SHALL pass.
 
 ## Non-goals (no-gos)
 
@@ -96,7 +105,9 @@ page" means one of the three `docs/*/README.md` files.
 - The version bump to 0.2.1, the tag and the release notes belong to the release recipe, not this
   cycle.
 - `spec/`, `issues/` and `ROADMAP.md` records are not rewritten (an `issues/` seed may gain a link
-  target, not new text). [NEEDS CLARIFICATION: scope against `issues/rename-in-docs.md`, Q4.]
+  target, not new text).
+- `issues/rename-in-docs.md` stays as it is (`unshaped`), and the example hosts
+  (`cluster.rcac.purdue.edu`, `mcp.rcac.dev`) are carried as they are (Q4).
 
 ## Review mode
 
@@ -109,23 +120,18 @@ and `SECURITY.md` and the place it lives on the branch.
 
 ## Clarifications
 
-- **Q1:** "About two screens": what line ceiling does R2 set for `README.md`? (a) at most 100
-  source lines; (b) at most 120; (c) no number, the maintainer judges at review. —
-  [NEEDS CLARIFICATION]
-- **Q2:** § *The cluster's rules, in the instructions* (site rules from `/etc/agents.d`, the
-  instructions budget and how to raise Claude Code's limit): where does it go? (a) all of it to
-  `docs/core/README.md`; (b) the core page, with one Quick Start sentence and link for the Claude
-  Code limit, since a user's instructions are cut silently otherwise; (c) other. —
-  [NEEDS CLARIFICATION]
-- **Q3:** § *RCAC Documentation* (the separate documentation service to add alongside this
-  server): where does it go? (a) `docs/rcac/README.md`; (b) one line in the README's table row for
-  `[rcac]`; (c) both. — [NEEDS CLARIFICATION]
-- **Q4:** `issues/rename-in-docs.md` (status `unshaped`) asks the same files to label Purdue hosts
-  as site examples (`--ssh-host cluster.rcac.purdue.edu`, the TLS host `mcp.rcac.dev`). This cycle
-  rewrites those passages. (a) leave the seed alone and carry its passages as they are; (b) apply
-  its R2 (label site-specific example hosts) to the passages this cycle rewrites, and leave the
-  seed `unshaped`; (c) adopt the seed into this cycle (`status: adopted:readme-front-door`). —
-  [NEEDS CLARIFICATION]
+- **Q1:** "About two screens": what line ceiling does R2 set for `README.md`? — **A:** 2026-11-12 ·
+  foreman ruling at GOAL sign-off: at most 120 source lines, aiming at about 100; the maintainer
+  still judges "two screens" at review.
+- **Q2:** Where does § *The cluster's rules, in the instructions* go? — **A:** 2026-11-12 · foreman
+  ruling at GOAL sign-off: `docs/core/README.md` takes the section; Quick Start gets one sentence
+  and a link for the client's instructions limit, since otherwise the cut is silent.
+- **Q3:** Where does § *RCAC Documentation* go? — **A:** 2026-11-12 · foreman ruling at GOAL
+  sign-off: `docs/rcac/README.md` carries the documentation service, and the README's `[rcac]` row
+  gets one line linking to it.
+- **Q4:** Does this cycle take on `issues/rename-in-docs.md` (labelling the Purdue example hosts)?
+  — **A:** 2026-11-12 · foreman ruling at GOAL sign-off: no; leave the seed alone and carry the
+  example hosts as they are.
 - **Q:** Do test edits fit a docs-only cycle? — **A:** Yes: tests that read the README follow its
   text wherever it moves and stay green (the cycle request, 2026-11-12).
 - **Q:** What review does this cycle get? — **A:** The maintainer reads the rendered pages on the
@@ -140,4 +146,4 @@ and `SECURITY.md` and the place it lives on the branch.
   (`CONTENT_RULE`, the remote rc exception); `tests/mutants.py` plants in § Upgrading.
 - `AGENTS.md` §9 (the same-commit README tool inventory), § Packaging (§ *Docker Compose with TLS*,
   the install note), the release recipe's README install line.
-- `issues/rename-in-docs.md` (overlapping seed, Q4).
+- `issues/rename-in-docs.md` (overlapping seed, left alone, Q4).
