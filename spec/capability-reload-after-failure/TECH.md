@@ -3,10 +3,10 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/capability-reload-after-failure
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
-  status: in_progress
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -171,7 +171,7 @@ contract; every deferral is recorded; the profile's full `verify` is green.
       import; the seed, this cycle's own and not yet on `develop`, now says so in its Notes.
 - [x] Standing last-phase items: the previous cycle's last phase carried no project-level
       obligation beyond the ledger (no `## Times` quote in this repo).
-- [ ] Stage, then run the `verify:`.
+- [x] Stage, then run the `verify:`.
 - **Verify:** the new case and the four re-planted ones with the runner's controls, then the
   profile's full `verify`, both eras and the sandboxed `cluster-mcp --help`.
 - **Touches:** `tests/mutants.py`; by the amendment, `tests/test_capabilities.py`, `AGENTS.md` and
