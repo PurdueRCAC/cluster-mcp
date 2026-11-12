@@ -3,7 +3,7 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/capability-reload-after-failure
 base: develop
 current_phase: done
@@ -36,10 +36,10 @@ phases:
   hill: uphill
   verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-failure-forgets-every-new-module capability-failure-keeps-a-registering-library-module capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
-  last_reviewed_commit: 425bf499f2a0acddb7fa91d8b1f30c1aeac3836b
+  last_reviewed_commit: 3f763abcdddeeb741f048eaa7da1bc41b5e14cfc
   verdict: changes-requested
-  blocked_reason: F1 R1 retry vs library-kept stray module; F2 stale interrupt seed
-  cycle: 1
+  blocked_reason: 'A first-load refusal replaced in the failure handler; B F1 open: retry keeps a registering library module; C hand mutants'
+  cycle: 2
 ---
 
 # TECH.md — A capability load retried after a failure loads the healthy ones and names the broken one
