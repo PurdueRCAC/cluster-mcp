@@ -37,7 +37,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py drive && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 - id: P3
   name: The first hosted run (Run A dispatches, Run B reads)
-  status: pending
+  status: in_progress
   satisfies: &id001
   - R1
   - R2
@@ -189,8 +189,8 @@ within 600 − 310 s, the run within 900 s of its dispatch; any case not killed 
 decides whether the shard size stays (PLAN § 2.5). This phase waits on the hosted runner, so it is
 two runs.
 
-**Run A (the brief authorises the push and one dispatch):**
-- [ ] `mutants-gate.py prepush`, `untouched 3` and `workflow` on the head; mark P3 `in_progress` with
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush`, `untouched 3` and `workflow` on the head; mark P3 `in_progress` with
       the note "Run A: dispatched" in the TECH body below, commit, and note the head: it is the
       measured commit `T1`.
 - [ ] Push the branch. Before dispatching, check that no other run of the organisation is queued or
