@@ -491,3 +491,14 @@ maintainer-approved. The integration row runs 9.3–9.4 s per era, as `AGENTS.md
 Cycle 3 has not come back approved: one LOW finding, the F2 class's remaining clause. This is the
 third non-converging cycle; per the bounded loop it goes to the maintainer, and no remediation is
 started from this review.
+
+### Addendum (2026-11-12): F6 closed
+
+F6 is closed per the foreman's ruling, board 2026/11-12-seven-rulings (item 5): add the clause,
+check it against the reviewer's logs, land; no fourth review. The clause commit `9119288` adds to
+the seed's one sentence the runner's own SIGTERM, SIGHUP or SIGINT (Ctrl-C) beside the 300 s limit.
+Each path is in this cycle's logs, the case's `cluster-mcp-sandbox.*` home left in the runner's
+`TMPDIR`: the limit in `.local/review3/hang/run-branch/tmp/` (six homes for the six timed-out
+cases; the case that ended normally left none); TERM, HUP and INT in
+`.local/review3/hang/sig-branch-SIGTERM.log`, `sig-branch-SIGHUP.log`, `sig-branch-SIGINT.log`
+(and `sig-branch-pgSIGINT.log` for a Ctrl-C to the group). Nothing else in the seed changed.
