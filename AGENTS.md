@@ -405,9 +405,10 @@ import has no effect.
     one is, discovered once (`test_a_failed_load_is_not_cached`); a load retried after a failure,
     through each library entry point, with a clean capability before the failing one in each package
     layout (top-level, either one's package imported first, a portion of the `cluster_mcp`
-    namespace), is a first load: refused with the first load's message while the failing one is
-    there, the clean one never named, and without it every capability loaded with its tools, each
-    registered once, the planted one by name and each member's by identity
+    namespace, a library's package imported first), is a first load: refused with the first load's
+    message while the failing one is there, the clean one never named, and without it every
+    capability loaded with its tools, each registered once, the planted one by name and each
+    member's by identity, while the library's submodule the clean one imports is kept, run once
     (`test_a_load_retried_after_a_failure_is_a_first_load`); and under each set the listing
     opens with the six opening core tools and closes with `cluster_context`, by name
     (`test_the_listing_opens_and_closes_with_the_core_tools_by_name`). Every kind of contribution a server would refuse while it is
@@ -2831,8 +2832,10 @@ What each mode means:
   would. What is forgotten is every module new since the load began but a library's own lazy
   import: one below a package that was already imported then as a regular package, and below no
   loading capability's root (the outermost regular package of its entry point's module or its tools
-  module; a namespace package such as `cluster_mcp` protects nothing below it). The refusal's text
-  is built first, and the registry is cut last. **A retry runs a capability's modules again, so a
+  module; a namespace package such as `cluster_mcp` protects nothing below it). That a library's
+  own lazy import is kept is pinned by the `library-imported-first` rows of
+  `test_a_load_retried_after_a_failure_is_a_first_load`. The refusal's text is built first, and the
+  registry is cut last. **A retry runs a capability's modules again, so a
   capability's import must be repeatable in one process**: one that registers at import into
   another library's state that refuses a duplicate fails its retry, naming it (recorded, not fixed;
   `issues/capability-import-side-effects-on-retry.md`). A `KeyboardInterrupt` is not a refusal: the

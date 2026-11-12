@@ -334,6 +334,22 @@ def every_set(test: str, *cases: str) -> tuple[str, ...]:
                  for case in (cases or ('',)) for names in MEMBER_SETS)
 
 
+# The retried load's rows, by the axes `test_capabilities` parametrizes it with: each entry point it
+# is retried through, each failing kind, and each layout.
+RETRY_TEST = f'{CAPABILITIES}::test_a_load_retried_after_a_failure_is_a_first_load'
+RETRY_ENTRIES = ('load', 'installed', 'server')
+RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', 'tool-not-a-tool',
+           'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text')
+RETRY_LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'library-imported-first')
+
+
+def retried(*layouts: str) -> tuple[str, ...]:
+    """The retried load's row beside both members for each entry point, each failing kind and each of
+    `layouts` (none: every layout)."""
+    return tuple(f'{RETRY_TEST}[{entry}-{kind}-{layout}-both]'
+                 for entry in RETRY_ENTRIES for kind in RETRIED for layout in (layouts or RETRY_LAYOUTS))
+
+
 # The three files the capability sweep mutates every decision of, and the startup tests it kills with.
 LOADER, CLI, TOOLS = 'core/capabilities.py', 'core/__init__.py', 'core/tools/__init__.py'
 STARTUP = 'test_startup.py'
@@ -2628,6 +2644,19 @@ CASES: tuple[Case, ...] = (
          ((ROLLBACK, ROLLBACK.replace(CUT, '                if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
                                            '    ' + CUT)),),
          every_set(REFUSED_AT_LOAD, 'tool-without-a-module'), 'a refused load left'),
+    # Today's retry: a failed load cuts the registry back and forgets nothing it imported, so a retry
+    # finds the clean capability's tools module imported, registers nothing for it, and refuses it.
+    Case('capability-retry-imports-nothing', LOADER,
+         ((ROLLBACK, ROLLBACK.replace('            try:\n'
+                                      '                _unimport(known, _roots(ordered, loaded, capability))\n'
+                                      '            finally:\n'
+                                      '                del TOOL_REGISTRY[start:]\n',
+                                      '            del TOOL_REGISTRY[start:]\n')),),
+         retried(), 'a load retried after a failure is not a first load'),
+    # A failed load that forgets every module new since its snapshot, a library's own lazy import too.
+    Case('capability-failure-forgets-every-new-module', LOADER,
+         (('        if library and not any(_below(name, root) for root in roots):\n            continue\n', ''),),
+         retried('library-imported-first'), "a failed load forgot a library's own lazy import"),
     Case('capability-composition-tie-unbroken', 'core/capabilities.py',
          (('    return tuple(sorted(capabilities, key=lambda c: (c.capability.order, c.distribution)))\n',
            '    return tuple(sorted(capabilities, key=lambda c: c.capability.order))\n'),),

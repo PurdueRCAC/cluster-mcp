@@ -60,6 +60,10 @@ rules that such a capability is malformed and says how it is refused.
   a tool whose module the import system dropped, to a module
   (`spec/capability-reload-after-failure/research/01-load-module-cache.md` §7, PLAN § 3 deviation
   row 3).
+- The same class covers a library a capability first imports during the failed load: the retry
+  imports it again, and a library that refuses a second import in one process (a warning turned
+  into an error under `-W error`, say) would fail the retry, naming the capability. The plan's
+  research reproduced no such library (PLAN § 5).
 - Related: `spec/capability-reload-after-failure/` (PLAN § 4a F2, § 5 Q1);
   `issues/capability-reload-after-interrupt.md`; `AGENTS.md` § Invariants §7.
 - Found by: `capability-reload-after-failure` plan, adversarial review, 2026-11-12.

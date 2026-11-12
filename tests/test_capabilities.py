@@ -9,11 +9,11 @@ the core's tools and exactly theirs, listed in load order with the site context 
 base of the core's text and theirs in composition order that lists exactly the tools it serves.
 
 A capability that cannot be loaded is refused with one line naming its distribution, and the tool
-registry is left as it was, the modules the load imported forgotten, so a load retried after it in the
-same process is a first load. The failures are planted as distributions in a scratch directory (a
-`*.dist-info` beside its package, read with `Distribution.at`), so no test edits the tree; a planted
-capability with a tool and a resource is served beside the members with no core edit. The core's
-modules name no member.
+registry is left as it was, the modules the load imported forgotten but a library's own, so a load
+retried after it in the same process is a first load. The failures are planted as distributions in
+a scratch directory (a `*.dist-info` beside its package, read with `Distribution.at`), so no test
+edits the tree; a planted capability with a tool and a resource is served beside the members with no
+core edit. The core's modules name no member.
 
 The core serves its two context URIs; `cluster://storage` and its `rcac://storage` alias are the RCAC
 capability's, served exactly when it is given, and every alias is listed after every primary URI, a
@@ -1602,9 +1602,16 @@ RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', '
            'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text')
 
 # Where the two are planted, and what a caller imported first: both top-level with nothing imported,
-# the clean one's package imported first, the failing one's imported first, or the clean one a
-# portion of the `cluster_mcp` namespace package, as every member is.
-LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace')
+# the clean one's package imported first, the failing one's imported first, the clean one a portion
+# of the `cluster_mcp` namespace package, as every member is, or a library's package imported first,
+# whose submodule the clean one's tools module imports.
+LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'library-imported-first')
+
+# A library outside every capability, its regular package imported before the load as FastMCP's is,
+# and its submodule, which the clean capability's tools module imports: a library's own lazy import,
+# which a failed load keeps. The submodule records each time it runs in its package's `RUNS`.
+LIBRARY, LAZY = 'planted_library', 'planted_library.lazy'
+LIBRARY_KEPT = "a failed load forgot a library's own lazy import"
 
 # The clean capability's tool, and what a failed first load and its retries are failed with.
 FIRST_TOOL = 'planted_first_echo'
@@ -1631,8 +1638,13 @@ def clean_first(layout: str) -> tuple[str, dict[str, str]]:
     """The clean capability planted first under `layout`: its package and its files."""
     module = 'cluster_mcp.planted_first' if layout == 'namespace' else 'planted_first'
     base = module.replace('.', '/')
-    return module, {f'{base}/__init__.py': '', f'{base}/tools.py': ECHO_TOOL.format(name=FIRST_TOOL),
-                    f'{base}/capability.py': capability_source(module, name='planted_first', text=echo_text(FIRST_TOOL))}
+    files = {f'{base}/__init__.py': '', f'{base}/tools.py': ECHO_TOOL.format(name=FIRST_TOOL),
+             f'{base}/capability.py': capability_source(module, name='planted_first', text=echo_text(FIRST_TOOL))}
+    if layout == 'library-imported-first':
+        files[f'{base}/tools.py'] += f'\nimport {LAZY}  # noqa: E402, F401\n'
+        files[f'{LIBRARY}/__init__.py'] = 'RUNS = []\n'
+        files[f'{LIBRARY}/lazy.py'] = f'from {LIBRARY} import RUNS\n\nRUNS.append(__name__)\n'
+    return module, files
 
 
 def retried_failure(kind: str) -> tuple[str, str, dict[str, str], str]:
@@ -1712,7 +1724,10 @@ def test_a_load_retried_after_a_failure_is_a_first_load(entry: str, kind: str, l
         __import__(module)
     if layout == 'failing-imported-first':
         __import__(line.split(' = ')[1].partition('.')[0])
-    assert f'{module}.tools' not in sys.modules, 'the clean capability was imported before its first load'
+    if layout == 'library-imported-first':
+        __import__(LIBRARY)
+    assert f'{module}.tools' not in sys.modules and LAZY not in sys.modules, \
+        'the clean capability, or the submodule it imports, was imported before its first load'
     before = list(TOOL_REGISTRY)
 
     first, _, _ = load_through(entry, found)
@@ -1721,6 +1736,11 @@ def test_a_load_retried_after_a_failure_is_a_first_load(entry: str, kind: str, l
     if layout == 'namespace':
         assert 'planted_first' not in vars(cluster_mcp), \
             f'{RETRIED_LOAD}: the failed load left cluster_mcp.planted_first bound to the module it imported'
+    if layout == 'library-imported-first':
+        lazy = sys.modules.get(LAZY)
+        assert lazy is not None and vars(sys.modules[LIBRARY]).get('lazy') is lazy, \
+            f'{LIBRARY_KEPT}: {LAZY}, imported by the load, is gone from sys.modules or from its package'
+        assert sys.modules[LIBRARY].RUNS == [LAZY], f'{LIBRARY_KEPT}: {LAZY} ran {sys.modules[LIBRARY].RUNS}'
 
     again, _, _ = load_through(entry, found)
     assert again == first, f'{RETRIED_LOAD}: with the failing capability still there, expected {first!r}, got {again!r}'
@@ -1745,6 +1765,9 @@ def test_a_load_retried_after_a_failure_is_a_first_load(entry: str, kind: str, l
             f'{RETRIED_LOAD}: {tool.name!r} is not registered exactly once'
     if served is not None:
         assert served.count(FIRST_TOOL) == 1, f'{RETRIED_LOAD}: the server serves {served}'
+    if layout == 'library-imported-first':
+        assert sys.modules.get(LAZY) is lazy and sys.modules[LIBRARY].RUNS == [LAZY], \
+            f'{LIBRARY_KEPT}: the retries imported {LAZY} again, which ran {sys.modules[LIBRARY].RUNS}'
 
 
 # The core's tools that open and close every listing, by name, as clients have always seen them.

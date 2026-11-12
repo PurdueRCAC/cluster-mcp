@@ -26,7 +26,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_capabilities.py::test_a_load_retried_after_a_failure_is_a_first_load && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
-  status: pending
+  status: in_progress
   satisfies:
   - R6
   depends_on:
@@ -34,7 +34,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-failure-forgets-every-new-module capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -132,25 +132,50 @@ and the docs say what is now true.
 **Goal:** a mutation case plants today's retry behaviour and R5's test kills it, naming the
 contract; every deferral is recorded; the profile's full `verify` is green.
 
-- [ ] `tests/mutants.py`: `capability-retry-imports-nothing`, `file=LOADER`, targets every row
+- [x] `tests/mutants.py`: `capability-retry-imports-nothing`, `file=LOADER`, targets every row
       of `test_a_load_retried_after_a_failure_is_a_first_load` beside the `both` member set
-      (`entry` × `kind` × `layout`, 84 rows), `why` "a load retried after a failure is not a first
-      load". It replaces the inner `try:` / `_unimport(…)` / `finally:` with the bare cut-back.
-      The mutation gate is graded per `method/mutation-testing.md` § When a review is done, in the
-      operator's KB.
-- [ ] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and Notes, and
+      (`entry` × `kind` × `layout`, 84 rows; 105 with the layout the amendment below adds), `why`
+      "a load retried after a failure is not a first load". It replaces the inner `try:` /
+      `_unimport(…)` / `finally:` with the bare cut-back. The mutation gate is graded per
+      `method/mutation-testing.md` § When a review is done, in the operator's KB.
+- [x] **Amendment (foreman, 2026-11-12): a failed load keeps a library's own lazy import.** P1's
+      build found no row that fails when the load forgets every module new since `known`: a library's
+      lazy submodule the load imported (below a regular package already imported then, outside every
+      capability root) was forgotten with the rest and nothing noticed. Under that mutant all 84
+      rows above passed. Added:
+      - `tests/test_capabilities.py`: a fifth `layout`, `library-imported-first` (336 → 420 rows).
+        The test imports a planted library's regular package `planted_library` first, and the clean
+        capability's tools module imports its submodule `planted_library.lazy`, which records each
+        run in the package's `RUNS`. After the failed first load the submodule is still in
+        `sys.modules`, still bound on its package, and has run once; after the retries it is the
+        same module and has still run once. These messages start "a failed load forgot a library's
+        own lazy import".
+      - `tests/mutants.py`: `capability-failure-forgets-every-new-module`, `file=LOADER`, deletes
+        `_unimport`'s keep rule (`if library and not any(_below(name, root) for root in roots):
+        continue`), so every new module is forgotten. Its targets are the `library-imported-first`
+        rows beside `both` (`entry` × `kind`, 21 rows), `why` the fragment above. It joins the
+        P2 `verify:` self-check list.
+      - AGENTS.md: § Testing names the new layout and the kept submodule; §7 points the keep rule at
+        those rows.
+- [x] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and Notes, and
       the branch's commit bodies for "do not fix here", "known limitation", "left as a follow-up",
       "deferred", "limit" and "not covered"; each must have an `issues/` seed and a `ROADMAP.md`
       entry. Expected: `issues/capability-import-side-effects-on-retry.md`, filed by the plan with its
       `ROADMAP.md` entry (Q1's remainder), and nothing new. The interrupt windows PLAN Notes names
       belong to the existing `issues/capability-reload-after-interrupt.md`, and PLAN § 5's other
       risks are review risks, not deferrals. An unrecorded deferral fails the phase.
-- [ ] Standing last-phase items: the previous cycle's last phase carried no project-level
+      Result: as expected. Both seeds exist with their `ROADMAP.md` entries
+      (`capability-import-side-effects-on-retry`, `capability-reload-after-interrupt`), and no other
+      deferral turned up in P1, P2, PLAN §§ 4–5 and Notes, or the commit bodies. PLAN § 5 says Q1
+      also covers a library a capability first imports in the failed load and that refuses a second
+      import; the seed, this cycle's own and not yet on `develop`, now says so in its Notes.
+- [x] Standing last-phase items: the previous cycle's last phase carried no project-level
       obligation beyond the ledger (no `## Times` quote in this repo).
 - [ ] Stage, then run the `verify:`.
 - **Verify:** the new case and the four re-planted ones with the runner's controls, then the
   profile's full `verify`, both eras and the sandboxed `cluster-mcp --help`.
-- **Touches:** `tests/mutants.py`.
+- **Touches:** `tests/mutants.py`; by the amendment, `tests/test_capabilities.py`, `AGENTS.md` and
+  `issues/capability-import-side-effects-on-retry.md`.
 
 ---
 
