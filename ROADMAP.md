@@ -9,12 +9,12 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+28 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
 the rest of Part I. **Part III** ships as **0.4.0**: records of every call, audit logging, and
-lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and are not yet
+lexing and steering on the shell; two entries. Four more entries come after 0.3.0 and are not yet
 ordered. Within a Part, scope is never cut for pace.
 
 The order was revised on 2026-11-12. Every cycle starts from and lands on `develop`; a release
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Twenty-eight entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -90,8 +90,7 @@ They come in six groups, in this order:
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (three): the site files' size, the startup update check, and the floors a git install
   resolves against.
-- **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
-  separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
+- **Redesigns and trade-offs** (two): limits the timeout stop and the liveness check recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
 - **The rename finished** (two): the identity strings a client or a token sees, and the docs.
 
@@ -405,27 +404,6 @@ a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 *Horizon: Part I, trade-off · Depends on: ssh-half-open-link (cleared: landed on `develop` 2026-11-06) · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5; what can't be lifted becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
 
-## A startup file's background job can delay a result, or reach it over SSH
-
-Startup output never reaches a result, but a background process a startup file leaves running holds
-the call open until it exits or the timeout, and over SSH a job the remote login shell's own rc file
-starts can write into the channel after the sentinel. Neither is separable without a PTY or a
-server-owned session. Found by `safe-execution`'s focused review, 2026-10-17.
-
-- 2026-10-18: the first case is fixed in `safe-execution` (a bounded grace once the command has
-  exited, in all three modes); the SSH rc-file case remains, stated as the documented exception.
-- 2026-10-18 (review cycle 2): the first case now stops once nothing has arrived for the grace,
-  not a fixed grace after the exit, and the result carries a note saying so.
-- 2026-10-22: the first case has no timing rule any more: the call returns at the command's end
-  records on both streams; the SSH rc-file case remains for what such a job writes before them.
-
-Neither case shows with the clusters' default startup files (`safe-execution` research 01). The fix
-likely needs a different launch, a PTY or a session the server owns, which makes it the largest
-cycle in this Part.
-
-*Horizon: Part I, redesign · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5; what can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
-**Seed:** [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md) · *status: unshaped*
-
 ## The rename left two identity strings a client or a token sees
 
 The JWT issuer and audience are still `rcac-mcp`, so every token a deployment has minted keeps
@@ -692,7 +670,7 @@ release the legacy names may be removed in.
 
 # After 0.3.0 — not yet ordered
 
-Three entries whose order among themselves and against Part III is the maintainer's.
+Four entries whose order among themselves and against Part III is the maintainer's.
 
 ## Run your own server on the cluster, behind a token
 
@@ -731,6 +709,16 @@ and the window's own tests and README section go with it.
 *Horizon: 0.4.0 at the earliest, not yet ordered · Depends on: release 0.2.0 (the window opens there) · Refs: [`spec/rename-to-cluster-mcp/`](spec/rename-to-cluster-mcp/) (GOAL non-goals); `core/deprecation.py`*
 **Seed:** [`issues/remove-legacy-names.md`](issues/remove-legacy-names.md) · *status: unshaped*
 
+## Over SSH, a login rc file's background job can write into a result
+
+The accepted behaviour below has a later fix: the bootstrap tags each line of the command's output
+with the per-call nonce, and the backend keeps only tagged lines. It costs about a third more bytes,
+an encoder on the login node and line-by-line streaming, and whether a tagged line can be torn past
+`PIPE_BUF` is open. A PTY is ruled out.
+
+*Horizon: after 0.3.0, not yet ordered · Depends on: release 0.3.0 · Refs: `issues/startup-background-jobs.md` (accepted-behaviour 2026-11-12); [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a*
+**Seed:** [`issues/startup-output-nonce-tagging.md`](issues/startup-output-nonce-tagging.md) · *status: unshaped*
+
 ---
 
 # Settled questions
@@ -747,6 +735,11 @@ here: `spec/{slug}/` holds that account and the code itself refutes a re-filing.
   2026-10-26.* The per-call token that keeps same-second scripts apart costs 17 characters of the
   255-byte name; such a call fails loudly before submitting, and truncating would break the name
   rule. Record: [`issues/sbatch-long-job-name.md`](issues/sbatch-long-job-name.md).
+- **Over SSH, a login rc file's background job can write into a result** — *accepted-behaviour
+  2026-11-12.* What such a job writes before the command's end record reaches the result; it is
+  documented in `AGENTS.md` §3, the README and the `run_command` description, and pinned. The case of
+  a startup file's job holding the call was fixed by the end records (2026-10-22). The later fix is
+  seeded after 0.3.0. Record: [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md).
 
 ---
 
