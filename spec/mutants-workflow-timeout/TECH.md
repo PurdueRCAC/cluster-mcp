@@ -7,7 +7,7 @@ status: in_progress
 branch: ci/mutants-workflow-timeout
 base: develop
 current_phase: P3
-last_updated: '2026-11-10'
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The runner splits the cases into shards and checks a shard report
@@ -34,7 +34,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py controls && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py drive && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py drive && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 - id: P3
   name: The first hosted run (Run A dispatches, Run B reads)
   status: pending
@@ -70,7 +70,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py controls && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -326,6 +326,26 @@ Two runs: Run A dispatches, Run B records.
     at any count, which § 2.5 shows it does not (R3: a cycle that adds cases can tell).
   - `git merge-file` of `tests/mutants.py` and `AGENTS.md` against
     `fix/mutant-child-outlives-timeout` at `5ed1a63`, base `146cbc6`: both clean (2026-11-10).
+- **2026-11-12, rebase onto `develop` at `2719b7a`** (the sibling `mutant-child-outlives-timeout`
+  landed as `32a85c3`, then the 0.2.0 release).
+  - One conflict, `ROADMAP.md`: develop's horizon line for this cycle's entry kept, with the seed's
+    status `adopted:mutants-workflow-timeout`. `tests/mutants.py` and `AGENTS.md` merged clean; this
+    cycle's own files are byte-identical to before the rebase.
+  - The figures P2 recorded stand: 1,164 Linux cases (1,165 on macOS, the same ids), `SHARD_SIZE`
+    15, 78 shards of 14–15. The sibling's stop realises the 310 s hang allowance: `LIMIT` 300 s, then
+    at most `GONE_WITHIN` 10 s for the run to be gone. A hung case is now reported `FAILED` with its
+    timeout and the shard goes on, so D1's landing-order caveat no longer applies.
+  - 2026-11-12 · foreman ruling: after the rebase onto develop, P1's re-gate runs `untouched 2`,
+    cumulative, in place of `untouched 1`, whose file list is P1's. No attempt is recorded.
+  - 2026-11-12 · foreman ruling: the frozen `controls` mode's "untouched run_child" control plants
+    on `timeout=300)`, which the sibling's `run_child` no longer holds (it waits with
+    `communicate(timeout=LIMIT)`), so its plant lands nowhere and the control reads BAD; the
+    `untouched` check itself is sound. Seen red first (`controls: 1 failed`, that control alone).
+    `remediation/F1-controls-anchor.py` runs the mode unchanged, accepts only that one BAD and only
+    while its anchor is absent, then re-runs the control with plants that land once each
+    (`communicate(timeout=LIMIT)` → `600`, wanting "run_child changed"; `LIMIT = 300` → `600`,
+    wanting "LIMIT changed"). P2's and P5's `verify:` run the wrapper in place of `controls`;
+    `verify/` is not edited.
 
 ---
 
