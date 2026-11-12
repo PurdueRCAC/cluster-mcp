@@ -23,9 +23,10 @@ sandbox group on some path: `tests/test_startup.py` (`run_bounded`, on a timeout
 `spec/capability-probe/verify/drives.py`. The last three point the drive's `TMPDIR` at the test's
 own directory, so what they leave is removed with it, and `test_transports.py` asserts the sandbox
 was removed on its SIGTERM path. The mutation runner kills its sandbox outright too: when a case's
-child run passes its 300 s limit, `stop_run` (`tests/mutants.py`) freezes the whole run and then
-SIGKILLs it, the `bin/sandbox.sh` the runner started included. The runner sets no `TMPDIR` of its
-own, so that sandbox's home is left in the `TMPDIR` the runner was started with.
+child run passes its 300 s limit, or when the runner itself gets SIGTERM, SIGHUP or SIGINT (Ctrl-C),
+`stop_run` (`tests/mutants.py`) freezes the whole run and then SIGKILLs it, the `bin/sandbox.sh` the
+runner started included. The runner sets no `TMPDIR` of its own, so that sandbox's home is left in
+the `TMPDIR` the runner was started with.
 
 Observed on a developer Mac, 2026-11-01:
 
