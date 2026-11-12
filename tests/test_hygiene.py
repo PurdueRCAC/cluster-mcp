@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import functools
 import multiprocessing
 import os
 import pty
@@ -407,15 +408,17 @@ def test_unit_guard_redirects_home(tmp_path: Path) -> None:
 
 # The markers' meaning, as AGENTS.md § Testing and § Conventions each state it: a line reading exactly
 # MARKERS_STATED (indentation aside), then one item per marker, `- `<name>`: <description>`, at that
-# line's indentation, its wrapped lines two spaces deeper. A wrap is the only freedom the statement
-# has: joined at each line break by one space, the items say word for word, in the same order, what
-# the `markers` entries of pyproject.toml say. Case, punctuation, markup and spacing all count. The
-# statement ends at the section's end, at a list item less indented than its own, or at a blank line
-# followed by text no deeper than its items that starts no item there: anything else would render as
-# part of the last description, or as another marker.
+# line's indentation, its wrapped lines two spaces deeper. The comparison is decided once: each item's
+# lines are joined at every wrap by one space, which undoes line wrapping and nothing else, and the
+# (name, description) pairs must then equal pyproject.toml's `markers` entries exactly, in the same
+# order. Case, punctuation, markup, spacing and every character count. The statement ends at the
+# section's end, at a list item less indented than its own, or at a blank line followed by text no
+# deeper than its items that starts no item there: anything else would render as part of the last
+# description, or as another marker. Depth is counted as Markdown counts it: only spaces and tabs
+# indent, and a tab reaches the next multiple of four columns.
 MARKERS_STATED = 'Each marker means what its description in `pyproject.toml` says, word for word:'
 MARKER_ITEM = re.compile(r'- `([^`]*)`: (.*)')
-LIST_ITEM = re.compile(r'(?:[-*+]|[0-9]+[.)])(?: |$)')
+LIST_ITEM = re.compile(r'(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)')
 
 
 def described_markers(pyproject: str) -> list[tuple[str, str]]:
@@ -440,6 +443,9 @@ def stated_markers(section: str) -> tuple[list[tuple[str, str]], list[str]]:
             if item is None:
                 return [], [f'not a `- `<name>`: <description>` item: {line.strip()!r}']
             items.append([item[1], item[2]])
+        elif line.startswith(indent + '  \t'):
+            end = n
+            break
         elif items and line.startswith(indent + '  ') and line[len(indent) + 2:][:1] not in ('', ' '):
             items[-1][1] += ' ' + line[len(indent) + 2:]
         else:
@@ -448,19 +454,35 @@ def stated_markers(section: str) -> tuple[list[tuple[str, str]], list[str]]:
     return [(name, text) for name, text in items], statement_end_problems(rest[end:], indent)
 
 
+def markdown_indent(line: str) -> tuple[int, str]:
+    """The column `line`'s text starts at, as Markdown counts it, and that text: only spaces and tabs
+    indent, and a tab reaches the next multiple of four columns."""
+    column = 0
+    for n, char in enumerate(line):
+        if char == ' ':
+            column += 1
+        elif char == '\t':
+            column += 4 - column % 4
+        else:
+            return column, line[n:]
+    return column, ''
+
+
 def statement_end_problems(after: list[str], indent: str) -> list[str]:
     """Why the lines after a statement would render as part of it: a lazy continuation of its last
-    item, a paragraph inside it, or a further item."""
+    item, a paragraph inside it, or a further item. Only a line of spaces and tabs is blank."""
+    if after and after[0].strip(' \t') and not after[0].strip():
+        return [f'a line after the statement continues it: {after[0]!r}']
     if not after or not after[0].strip():
-        following = next((line for line in after if line.strip()), None)
+        following = next((line for line in after if line.strip(' \t')), None)
         if following is None:
             return []
-        depth = len(following) - len(following.lstrip())
-        if depth < len(indent) or (depth == len(indent) and not LIST_ITEM.match(following.lstrip())):
+        depth, text = markdown_indent(following)
+        if depth < len(indent) or (depth == len(indent) and not LIST_ITEM.match(text)):
             return []
         return [f'a line after a blank one joins the statement: {following.strip()!r}']
-    depth = len(after[0]) - len(after[0].lstrip())
-    if depth < len(indent) and LIST_ITEM.match(after[0].lstrip()):
+    depth, text = markdown_indent(after[0])
+    if depth < len(indent) and LIST_ITEM.match(text):
         return []
     return [f'a line after the statement continues it: {after[0].strip()!r}']
 
@@ -615,7 +637,9 @@ def test_marker_statement_check_catches_planted_drift(change: dict[str, str]) ->
 # above: an item line that is not a marker item skipped, a bullet other than `-`, a statement line
 # found by its opening words, any whitespace before it or any case, a lazy wrap joined in, a
 # pyproject.toml that describes no marker, and one punctuation class, curly quotes, a parenthesised
-# phrase or a sentence after the last one ignored.
+# phrase or a sentence after the last one ignored; then a later statement read in place of the
+# first, a pyproject.toml entry cut at a later `: ` or read whole when it has none, and whitespace
+# a wrap hides from the comparison (a deeper wrap, a blank wrap, tabs in or after a wrap's indent).
 @pytest.mark.unit
 @pytest.mark.parametrize('change', [
     pytest.param({'testing': 'through bin/x.sh\n=>through bin/x.sh\n  - except a gate, which needs nothing\n'},
@@ -644,9 +668,161 @@ def test_marker_statement_check_catches_planted_drift(change: dict[str, str]) ->
                  id='curly-quote-in-testing'),
     pytest.param({'testing': '(a window included)=>(a window excluded)'}, id='parenthesised-phrase-changed-in-testing'),
     pytest.param({'testing': 'through bin/x.sh\n=>through bin/x.sh. Except a gate.\n'}, id='sentence-after-the-last-in-testing'),
+    pytest.param({'testing': PLANTED_BLOCK + '=>' + PLANTED_BLOCK.replace('no door', 'no gate') + '\n' + PLANTED_BLOCK},
+                 id='stated-twice-the-last-exact-in-testing'),
+    pytest.param({'pyproject': 'goes through bin/x.sh"=>goes through bin/x.sh: except a gate"'},
+                 id='clause-after-a-colon-in-pyproject'),
+    pytest.param({'pyproject': f'"{PLANTED_ALPHA}"=>"alpha"',
+                  'testing': PLANTED_BLOCK.split('\n', 1)[1].split('  - `omega`')[0] + '=>  - `alpha`: alpha\n',
+                  'conventions': PLANTED_BLOCK.split('\n', 1)[1].split('  - `omega`')[0] + '=>  - `alpha`: alpha\n'},
+                 id='name-only-entry-in-pyproject'),
+    pytest.param({'pyproject': 'holds it to that=>holds  it to that', 'testing': '\n    it to that=>\n     it to that',
+                  'conventions': '\n    it to that=>\n     it to that'},
+                 id='double-space-hidden-by-a-deeper-wrap-in-testing'),
+    pytest.param({'pyproject': 'goes through bin/x.sh"=>goes through bin/x.sh "',
+                  'testing': 'through bin/x.sh\n=>through bin/x.sh\n    \n',
+                  'conventions': 'through bin/x.sh\n=>through bin/x.sh\n    \n'},
+                 id='trailing-space-hidden-by-a-blank-wrap-in-testing'),
+    pytest.param({'pyproject': 'holds it to that=>holds it  to that', 'testing': '\n    it to that=>\n\tit\tto that',
+                  'conventions': '\n    it to that=>\n\tit\tto that'},
+                 id='tabs-in-a-wrap-in-testing'),
+    pytest.param({'pyproject': 'holds it=>holds \tit', 'testing': '\n    it to that=>\n    \tit to that',
+                  'conventions': '\n    it to that=>\n    \tit to that'},
+                 id='tab-after-a-wrap-indent-in-testing'),
 ])
 def test_marker_statement_check_catches_narrower_drift(change: dict[str, str]) -> None:
     assert marker_statement_violations(*planted(**change)) != []
+
+
+def ended(after: str, nested: bool = False) -> tuple[str, str]:
+    """The planted pair with § Testing's statement followed by `after` in place of the next bullet;
+    `nested`, the statement sits in a bullet one level deeper."""
+    toml, agents = planted()
+    block = PLANTED_BLOCK
+    if nested:
+        block = '  - A nested bullet.\n' + ''.join('  ' + line for line in PLANTED_BLOCK.splitlines(keepends=True))
+    old = '- The markers are real.\n' + PLANTED_BLOCK + '- The next bullet.\n'
+    assert agents.count(old) == 1
+    return toml, agents.replace(old, '- The markers are real.\n' + block + after)
+
+
+# Where the statement ends, for each whitespace form a line can start with: a row is refused when
+# Markdown renders its text inside the last item or as another item of the list, and accepted when
+# Markdown places it after the list. Only spaces and tabs indent, a tab reaches the next multiple of
+# four columns, a line of other whitespace is not blank, and a list marker is `-`, `*`, `+` or one to
+# nine digits and `.` or `)`, followed by a space, a tab or the line's end.
+@pytest.mark.unit
+@pytest.mark.parametrize(('after', 'nested', 'refused'), [
+    pytest.param('- The next bullet.\n', False, False, id='a-less-indented-bullet'),
+    pytest.param('\n', False, False, id='a-blank-then-the-section-end'),
+    pytest.param('\n- The next bullet.\n', False, False, id='a-blank-then-a-less-indented-bullet'),
+    pytest.param('* The next bullet.\n', False, False, id='a-less-indented-star-bullet'),
+    pytest.param('1. The next item.\n', False, False, id='a-less-indented-ordered-item'),
+    pytest.param('123456789. The next item.\n', False, False, id='a-nine-digit-ordered-item'),
+    pytest.param('-\tThe next bullet.\n', False, False, id='a-tab-after-the-bullet'),
+    pytest.param('\n  # A heading in the bullet\n', False, False, id='a-blank-then-a-heading-at-the-items-indent'),
+    pytest.param('\n\u00a0A paragraph.\n', False, False, id='a-blank-then-a-no-break-space-paragraph'),
+    pytest.param('\n\u2003A paragraph.\n', False, False, id='a-blank-then-an-em-space-paragraph'),
+    pytest.param('\n\u00a0\n    A paragraph line.\n', False, False,
+                 id='a-blank-then-a-line-of-no-break-space-then-an-indented-line'),
+    pytest.param('', True, False, id='a-statement-in-a-nested-bullet'),
+    pytest.param('\n\tA paragraph of the nested bullet.\n', True, False, id='nested-a-blank-then-a-tab-indented-paragraph'),
+    pytest.param('\n \tA paragraph of the nested bullet.\n', True, False,
+                 id='nested-a-blank-then-a-space-and-tab-indented-paragraph'),
+    pytest.param('\t- except a gate\n', False, True, id='a-tab-then-an-exception-bullet'),
+    pytest.param('\t- `beta`: a third\n', False, True, id='a-tab-then-a-third-marker'),
+    pytest.param('\n\texcept a gate\n', False, True, id='a-blank-then-a-tab-indented-paragraph'),
+    pytest.param('\n \texcept a gate\n', False, True, id='a-blank-then-a-space-and-tab-indented-paragraph'),
+    pytest.param('\n\t- `beta`: a third\n', True, True, id='nested-a-blank-then-a-tab-indented-third-marker'),
+    pytest.param('\u00a0- except a gate\n', False, True, id='a-no-break-space-then-an-exception-bullet'),
+    pytest.param('\u2003- except a gate\n', False, True, id='an-em-space-then-an-exception-bullet'),
+    pytest.param('\u00a0\n    except a gate\n', False, True, id='a-line-of-no-break-space-then-a-wrapped-line'),
+    pytest.param('1234567890. except a gate\n', False, True, id='a-ten-digit-ordered-item'),
+    pytest.param('-except a gate\n', False, True, id='no-space-after-the-bullet'),
+    pytest.param('-\u00a0except a gate\n', False, True, id='a-no-break-space-after-the-bullet'),
+    pytest.param('2 except a gate\n', False, True, id='digits-without-a-delimiter'),
+    pytest.param('\n   - `beta`: a third\n', False, True, id='a-blank-then-a-third-marker-one-column-deeper'),
+])
+def test_marker_statement_ends_where_markdown_ends_it(after: str, nested: bool, refused: bool) -> None:
+    assert (marker_statement_violations(*ended(after, nested)) != []) == refused
+
+
+# The comparison ignores nothing but line wrapping, over the whole of its domain rather than one
+# carve-out at a time. The control's markers are the planted two and one whose description holds a
+# clause of each form a clause could be cut at; every edit of one name or description, made in one
+# place alone, must be refused: each character deleted, each replaced (its other case, or a letter),
+# each span between word boundaries dropped (any clause, at the start, the middle or the end), and
+# each character of EDIT_ALPHABET inserted at a description's start, middle and end and a name's end.
+CONTROL_MARKERS = (
+    ('alpha', 'Opens no door (a window included), reads no x/y.sh; the guard holds it to that'),
+    ('omega', 'needs what alpha is refused, itself or through a helper; every one goes through bin/x.sh'),
+    ('gamma', '(A lead) clause: one \u2014 two -- three, except [](a link) <!-- a comment --> it\u2019s '
+              '\u201csaid\u201d. A sentence. (A tail)'),
+)
+EDIT_ALPHABET = (''.join(map(chr, [*range(0x20, 0x7f), *range(0xa0, 0x100), *range(0x2000, 0x2070)]))
+                 + '\t\x0b\x0c\x1c\x1d\x1e\x1f\x85\u0301\u1680\u3000\ufeff')
+
+
+@functools.cache
+def toml_entry(name: str, text: str) -> str:
+    """One marker as a pyproject.toml `markers` entry, each character a basic string may not hold escaped."""
+    escaped = ''.join(c if ' ' <= c != '\x7f' and c not in '"\\' else f'\\u{ord(c):04x}' for c in f'{name}: {text}')
+    return f'    "{escaped}",\n'
+
+
+@functools.cache
+def stated_item(name: str, text: str, width: int) -> str:
+    """One marker as a statement item at two spaces, its words wrapped at `width` columns."""
+    lines: list[str] = []
+    for word in f'- `{name}`: {text}'.split(' '):
+        if lines and len(lines[-1]) + 1 + len(word) <= width:
+            lines[-1] += ' ' + word
+        else:
+            lines.append(word)
+    return '  ' + '\n    '.join(lines) + '\n'
+
+
+def stated_pair(pyproject=CONTROL_MARKERS, testing=CONTROL_MARKERS, conventions=CONTROL_MARKERS) -> tuple[str, str]:
+    """A pyproject.toml and an AGENTS.md stating these markers, § Testing wrapped at 60 columns and
+    § Conventions one line an item."""
+    def block(markers, width: int) -> str:
+        return f'  {MARKERS_STATED}\n' + ''.join(stated_item(name, text, width) for name, text in markers)
+    return ('[tool.pytest.ini_options]\nmarkers = [\n' + ''.join(toml_entry(*marker) for marker in pyproject) + ']\n',
+            '# AGENTS.md\n\n## Testing\n\n- The markers are real.\n' + block(testing, 60) + '- The next bullet.\n\n'
+            '## Invariants\n\n### Conventions (same-commit rules)\n\n- Tag every test.\n' + block(conventions, 10 ** 6)
+            + '- The next bullet.\n')
+
+
+def edits(text: str, inserted_at: tuple[int, ...]):
+    """Each edit the control makes to `text`, as (what, the edited text)."""
+    for n, char in enumerate(text):
+        yield f'{char!r} at {n} deleted', text[:n] + text[n + 1:]
+        other = char.swapcase() if char.swapcase() != char else 'xy'[char == 'x']
+        yield f'{char!r} at {n} replaced by {other!r}', text[:n] + other + text[n + 1:]
+    cuts = [n for n in range(len(text) + 1) if n in (0, len(text)) or not (text[n - 1].isalnum() and text[n].isalnum())]
+    for i, start in enumerate(cuts):
+        for stop in cuts[i + 1:]:
+            yield f'{text[start:stop]!r} dropped', text[:start] + text[stop:]
+    for at in inserted_at:
+        for char in EDIT_ALPHABET:
+            yield f'{char!r} inserted at {at}', text[:at] + char + text[at:]
+
+
+@pytest.mark.unit
+def test_marker_statement_check_refuses_every_edit() -> None:
+    assert marker_statement_violations(*stated_pair()) == []
+    passed, tried = [], 0
+    for place in ('pyproject', 'testing', 'conventions'):
+        for m, (name, text) in enumerate(CONTROL_MARKERS):
+            for part, original in ((0, name), (1, text)):
+                ends = (len(original),) if part == 0 else (0, len(original) // 2, len(original))
+                for what, edited in edits(original, ends):
+                    markers = list(CONTROL_MARKERS)
+                    markers[m] = (edited, text) if part == 0 else (name, edited)
+                    tried += 1
+                    if marker_statement_violations(*stated_pair(**{place: markers})) == []:
+                        passed.append(f'{place}, {name}, {("name", "description")[part]}: {what}')
+    assert tried > 0 and passed == [], f'{len(passed)} of {tried} edits pass:\n' + '\n'.join(passed[:40])
 
 # Every name of the SSH-host and user-map variables bin/sandbox.sh must unset, the legacy ones included.
 SANDBOX_UNSET = ('CLUSTER_MCP_SSH_HOST', 'RCAC_SSH_HOST', 'CLUSTER_MCP_USER_MAP', 'RCAC_USER_MAP')

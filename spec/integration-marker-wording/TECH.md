@@ -3,11 +3,11 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: blocked
+status: in_progress
 branch: test/integration-marker-wording
 base: develop
-current_phase: done
-last_updated: '2026-11-10'
+current_phase: P3
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The descriptions and AGENTS.md state the markers
@@ -21,7 +21,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1
+  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F5 F7
 - id: P2
   name: The word-for-word check, its planted drift and the mutant sweep
   status: done
@@ -33,10 +33,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F2
+  verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F6 F8
 - id: P3
   name: The full verify and the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -48,8 +48,8 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  attempts: 1
-  verify: sh spec/integration-marker-wording/verify/gate.sh P3 && sh spec/integration-marker-wording/remediation/checks.sh F1 F2 F4
+  attempts: 2
+  verify: sh spec/integration-marker-wording/verify/gate.sh P3 && sh spec/integration-marker-wording/remediation/checks.sh F1 F4 F5 F6 F7 F8
 review:
   last_reviewed_commit: 89f34b8e70093011ceef5e4bc43f6a6950f7e3c4
   verdict: changes-requested
@@ -160,6 +160,13 @@ the routes the probe found open.
       database); the commands block says what the static check does not read;
       `issues/marker-rule-gaps.md` and its ROADMAP entry name the XDG gap. Checker:
       `remediation/checks.sh F1`.
+- [x] Review cycle 2, findings 1 and 3: § Testing's line on integration tests states the marker in
+      `pyproject.toml`'s terms, found by a search of the whole file (checker `remediation/checks.sh
+      F5`); the commands block and the `tests/test_hygiene.py` entry state the static check's gap as
+      a class (it reads only a call to a launcher its docstring lists), the guard paragraph states
+      the guard's (it refuses by name; other exported variables and start-up values still name the
+      real home), and `issues/marker-rule-gaps.md` names every route an executed probe found
+      (checker `remediation/checks.sh F7`). The frozen gate's sentences stand, with text after them.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P1` — `wording` (the probe of
   `tests/conftest.py`, the claimed phrases present and "fast", "CLI", "drives" absent, the drafted
   word-for-word check on the staged files, the commands' and § Testing's sentences, the note gone),
@@ -198,6 +205,14 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       51-row table and `verify/` are unchanged but for `mutant-sweep.md`.
 - [x] Record the sweep's output in `verify/mutant-sweep.md` (one line a mutant, the run's date and
       commit).
+- [x] Review cycle 2, findings 2 and 4: the check counts depth as Markdown does (only spaces and
+      tabs indent, a tab to the next multiple of four columns, a line of other whitespace is not
+      blank, a list marker is CommonMark's, a tab after a wrap's indent ends the wrap);
+      `test_marker_statement_ends_where_markdown_ends_it` (27 rows, each held to a CommonMark parser
+      with a 2,600-case domain by `remediation/checks.sh F6`); seven narrower drift rows; the
+      comparison decided once and pinned over its whole domain by
+      `test_marker_statement_check_refuses_every_edit`; the sweep `remediation/checks.sh F8` (220
+      mutants: 215 killed, 3 equivalent, 2 seeded in `issues/marker-statement-deeper-carve-outs.md`).
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P2` — `wording`, `slice`, `ids`
   (junit in both eras: the live test, the 4 accept rows, exactly the 51 drift ids, and the kept rails
   `test_the_id_rule_is_stated_as_the_check_enforces_it`, `test_no_spec_ids_in_the_package_or_the_suite`,
@@ -218,6 +233,10 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
 - [x] Review cycle 1, finding 4: the claims of the ledger lines this cycle adds hold against the
       code and the history (`issues/integration-marker-check.md`'s fixture scope,
       `issues/stalled-reconnect-test-timing.md`'s commit). Checker: `remediation/checks.sh F4`.
+- [x] Review cycle 2: `issues/marker-rule-gaps.md` and its ROADMAP.md entry corrected in place
+      (this cycle's own seed, not yet on `develop`); the deeper layers the sweep and the CommonMark
+      probe left filed as `issues/marker-statement-deeper-carve-outs.md`, with its ROADMAP.md entry
+      and Part I's counts.
 - [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
@@ -250,6 +269,30 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
   stays in progress. The frozen gate checks two sentences word for word (the commands block's
   per-launch rule and the guard paragraph's open routes); finding 1 is fixed by text added after
   each, so the frozen oracle passes unchanged and needs no wrapper.
+
+- **2026-11-12, review cycle 2 remediation** (`REVIEW.md`, review cycle 2, changes-requested). P1
+  (findings 1 and 3: R1, R4), P2 (findings 2 and 4: R5) and P3 (the ledger, and the full verify) are
+  reopened and built together in one commit, `P2: review 2 F1–F4`: the fixes share `AGENTS.md`
+  § Testing, the seed `issues/marker-rule-gaps.md` and one gate run.
+  - **R5's reading.** R5 asks that every carve-out of the comparison be killed by a named row. The
+    comparison is now decided once (each item's wraps joined by one space, then exact equality) and
+    pinned over its whole domain by one control, `test_marker_statement_check_refuses_every_edit`,
+    whose edits are the named rows: each character deleted or replaced, each span between word
+    boundaries dropped, each character of `EDIT_ALPHABET` inserted, in each place alone. Where R5's
+    wording is stricter than the mutation method's rule for a finished review (a survivor that is a
+    deeper layer of a class a row or the control already pins is seeded, not a finding), the method
+    governs. The sweep's two such survivors (`cmp-dash-fold`, `sm-rstrip`) and the two shapes the
+    CommonMark probe found (a statement indented past its bullet's text, a wrap that starts a
+    block) are the seed `issues/marker-statement-deeper-carve-outs.md`, with its ROADMAP.md entry.
+  - **Checkers.** Review cycle 2's findings 1 to 4 are checked by `remediation/` F5 to F8 (checker
+    ids number on from cycle 1's F4). F8 supersedes cycle 1's F2 sweep, whose keys this round's
+    rewrite of `statement_end_problems` retired; F2 stays as the record. F1 and F4 still run.
+  - **Gates.** P1's `verify:` is `gate.sh prepush`, then `checks.sh F1 F5 F7`; P2's is `gate.sh
+    prepush`, then `checks.sh F1 F6 F8`; P3's is `gate.sh P3`, then `checks.sh F1 F4 F5 F6 F7 F8`.
+    One `prepush` run and one `checks.sh F1 F4 F5 F6 F7 F8` run on the final tree stand in for P1's
+    and P2's gates and for P3's parts before `full`. The frozen gate runs unchanged and unwrapped:
+    the check keeps every line the frozen sweep keys on, and the frozen wording sentences stand with
+    text added after them. P3's `full` is a heavy run scheduled outside this build, so P3 stays in progress.
 
 ## How `code-build` drives this
 

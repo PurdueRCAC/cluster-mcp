@@ -8,7 +8,7 @@ that promotion is where appetite, non-goals and the R-IDs get negotiated with a 
 The project is on a three-release arc, in this order. **Part 0** is done: the 0.1.x releases made
 the server safe and useful as it stood. **Part I** ships as **0.2.0**: every open hardening,
 robustness and safety item, and the rename to `cluster-mcp` finished in code and docs, with no
-capability reshaped; 30 entries. **Part II** ships as **0.3.0**: the capabilities behind package
+capability reshaped; 31 entries. **Part II** ships as **0.3.0**: the capabilities behind package
 extras, each tool family defined so another implementation is a contribution; 14 entries, eleven
 cycles and three absorbed seeds. **Part III** ships as **0.4.0**: records of every call, audit
 logging, and lexing and steering on the shell; two entries. Three more entries come after 0.3.0 and
@@ -45,7 +45,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — 0.2.0: hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rename in code and
+Thirty-one entries: every open hardening, robustness and safety item, and the rename in code and
 docs. No capability is reshaped here; that is Part II.
 
 Since 0.1.5, seven cycles have landed on `develop` and ship in 0.2.0. The rename to `cluster-mcp` and
@@ -70,11 +70,12 @@ through an attribute or an outcome raised directly.
 
 What remains comes in five groups, in this order:
 
-- **Gates first** (fourteen entries), because every later gate rests on them: the mutation run and
+- **Gates first** (fifteen entries), because every later gate rests on them: the mutation run and
   its children, the two gaps the skip check still leaves and the pins it still lacks, the
   timing-sensitive reconnect test, an annotation check, the test harnesses' leftovers, the marker
-  wording, its check and the gaps in what enforces it, the image's init, and the surface fixture,
-  which must land before the first cycle that changes the served surface.
+  wording, its check, the shapes its statement check still misreads and the gaps in what enforces
+  it, the image's init, and the surface fixture, which must land before the first cycle that
+  changes the served surface.
 - **The executor** (six): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch.
 - **Safety** (five): the capability load, the site files' size, the startup update check, and the
@@ -225,13 +226,27 @@ An executed probe against `tests/conftest.py` found routes the marker rules forb
 leave open: in a `unit` test, a `Popen` class bound before the test (`conftest.REAL_POPEN`) still
 launches, a `_socket` connect, a UDP send, an early-bound `getaddrinfo` and the `gethostbyname`
 family still reach the network, a fixture of wider scope launches before the guard is active, and
-an `XDG_*` variable other than the three the guard sets (`XDG_STATE_HOME`) arrives unchanged;
-and `tests/test_ssh_exec.py`'s `_host` runs `hdiutil` through
-`REAL_POPEN`, outside `bin/sandbox.sh`, a call the static launch check does not read. Found by the
-`integration-marker-wording` plan, 2026-11-09.
+an `XDG_*` variable other than the three the guard sets (`XDG_STATE_HOME`) arrives unchanged, as do
+other variables and values that name the real home (`GNUPGHOME`, `site.USER_BASE`); and the static
+launch check reads only a call to a launcher it lists, so `tests/test_ssh_exec.py`'s `_host`, which
+runs `hdiutil` through `REAL_POPEN` outside `bin/sandbox.sh`, goes unread, as would a fork, `pty`,
+`multiprocessing` or a launcher bound by assignment. Found by the `integration-marker-wording` plan,
+2026-11-09, and its review, 2026-11-10.
 
 *Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (PLAN); `tests/conftest.py` (`guard`, `REAL_POPEN`); `tests/test_ssh_exec.py` (`_host`)*
 **Seed:** [`issues/marker-rule-gaps.md`](issues/marker-rule-gaps.md) · *status: unshaped*
+
+## The marker-statement check passes three shapes CommonMark renders differently
+
+The check that holds `AGENTS.md`'s statement of the markers to `pyproject.toml` is pinned over its
+whole comparison domain and over each whitespace form a following line can start with. Three deeper
+shapes pass it and render differently: two characters a normalisation could merge that no row
+names (an em dash and a hyphen), a statement indented past its bullet's text, after which a less
+indented item still joins its list, and a wrap whose next line starts a block. Found by the
+`integration-marker-wording` review cycle 2 remediation, 2026-11-12.
+
+*Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (REVIEW, cycle 2); `tests/test_hygiene.py` (`marker_statement_violations`)*
+**Seed:** [`issues/marker-statement-deeper-carve-outs.md`](issues/marker-statement-deeper-carve-outs.md) · *status: unshaped*
 
 ## The image's init is pinned by its recipe, not by what it reaps
 

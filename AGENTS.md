@@ -119,7 +119,11 @@ bin/sandbox.sh sh -c "uv run cluster-mcp -e local --generate-token"
 # --strict-markers and every registered marker). HOME/auth/SSH isolation is unaffected. Wrapping
 # the whole run is a choice for a manual run; the rule the suite enforces is per launch: every
 # process an integration test launches goes through bin/sandbox.sh (§ Testing), and its static
-# check does not read a launch through conftest.REAL_POPEN (issues/marker-rule-gaps.md).
+# check does not read a launch through conftest.REAL_POPEN (issues/marker-rule-gaps.md). It reads
+# only a call to a launcher its docstring lists, through the module or a name imported from it, so
+# no other route to a process is read either (a launcher bound by assignment or getattr, a Popen
+# subclass, pty, os.fork, multiprocessing, an event loop's subprocess_exec, and the rest the seed
+# lists).
 bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
 ```
 
@@ -964,8 +968,11 @@ import has no effect.
     `sandbox_unset_violations`, `marker_statement_violations`, the suite's own rails. Every launch in every `tests/*.py` goes
     through `bin/sandbox.sh` and no argv names `sudo` or `ssh` (`test_cli_drives_are_sandboxed`,
     which does not read a call through `conftest.REAL_POPEN`: `tests/test_ssh_exec.py`'s `_host`
-    runs `hdiutil` through it, outside the sandbox, `issues/marker-rule-gaps.md`;
-    checked statically); no module but `tests/harness.py` imports the stack, by any of its import
+    runs `hdiutil` through it, outside the sandbox, `issues/marker-rule-gaps.md`; it reads only a
+    call to a launcher its docstring lists, through the module or a name imported from it, so no
+    other route to a process is read either: a launcher bound by assignment or `getattr`, a `Popen`
+    subclass, `pty`, `os.fork`, `multiprocessing`, an event loop's `subprocess_exec`, and the rest
+    the seed lists; checked statically); no module but `tests/harness.py` imports the stack, by any of its import
     names `fastmcp`, `mcp`, `mcp_types`, `httpx2`, `httpcore2` (and the old `httpx`)
     (`test_only_the_harness_imports_the_stack`, also static: `import`, `from … import`, and
     `import_module` / `__import__` / `pytest.importorskip` called with a literal name, including
@@ -992,8 +999,17 @@ import has no effect.
     markup, spacing, order, a missing or third marker and a clause added to a description all
     count, and the statement ends only where Markdown ends it: at the section's end, at a less
     indented list item, or at a blank line before text no deeper than its items that starts no
-    item; `test_marker_statement_check_catches_planted_drift` and
-    `test_marker_statement_check_catches_narrower_drift` plant each. A row that needs a login shell calls `conftest.need_shell`: off
+    item, depth counted as Markdown counts it (only spaces and tabs indent, and a tab reaches the
+    next multiple of four columns). Two shapes are read otherwise than Markdown renders them, and
+    are open: a statement indented past its bullet's text, which a less indented item can still
+    join, and a wrap whose next line starts a block (`issues/marker-statement-deeper-carve-outs.md`).
+    `test_marker_statement_check_catches_planted_drift` and
+    `test_marker_statement_check_catches_narrower_drift` plant each, and
+    `test_marker_statement_ends_where_markdown_ends_it` plants each whitespace form a line after
+    the statement can start with. `test_marker_statement_check_refuses_every_edit` holds the
+    comparison to ignoring nothing but line wrapping: every edit of one name or description in one
+    place is refused (each character deleted or replaced, each span between word boundaries
+    dropped, each character of `EDIT_ALPHABET` inserted). A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in
@@ -1495,7 +1511,11 @@ import has no effect.
     and its kin still look a name up; and a fixture of wider scope has launched before the guard is
     active (`issues/marker-rule-gaps.md`). Of the `XDG_*` variables it sets those three alone: one
     the shell exported beside them (`XDG_STATE_HOME`, say) reaches the test unchanged, and the
-    password database still names the real home (`issues/marker-rule-gaps.md`). **File I/O is not
+    password database still names the real home; so does any other variable the shell exported
+    with a path under it (`GNUPGHOME`, say), and a value computed from it before the test
+    (`site.USER_BASE`) keeps it (`issues/marker-rule-gaps.md`). The guard refuses by name: a route to
+    a process, the network or the real home that goes through no name it replaces reaches past it,
+    and the seed lists each one an executed probe found. **File I/O is not
     guarded:** a tool that falls back to local file operations is caught by `refusal_violations`'
     stated reason and the `transfer-local-fallback` planted case, not by the guard.
   - **The PATH shim**, for every test: `sudo` and `ssh` stand-ins come first on `PATH`; each
@@ -1647,10 +1667,10 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   `cluster_mcp.core.docs`, `cluster_mcp.core.tools.docs` or stale-leftover `rcac_mcp` row) with a message naming the path.
   Delete the leftover the message names with `del <path>` (§ Environment & working rules) and
   re-run; a fresh clone, the wheels and the sdists never carry it.
-- Integration tests drive the installed CLI, and **each one wraps its own drives in
-  `bin/sandbox.sh`** (checked statically, above). A whole-suite run under the sandbox still steps
-  back into the repo first (`cd "$CLUSTER_MCP_REPO"`) so pytest finds `pyproject.toml`
-  (§ Commands).
+- An `integration` test needs what a unit test is refused, and **every process it launches goes
+  through `bin/sandbox.sh`** (checked statically, above, for the launches that check reads). A
+  whole-suite run under the sandbox still steps back into the repo first (`cd "$CLUSTER_MCP_REPO"`)
+  so pytest finds `pyproject.toml` (§ Commands).
 - **PyYAML is not a dependency of this repository**, runtime or dev; it reaches `uv.lock` only
   transitively (through `fastmcp`), and nothing in `packages/` imports it. The factory FSM scripts live
   in the operator's KB, which runs them with `uv run --with pyyaml`.
