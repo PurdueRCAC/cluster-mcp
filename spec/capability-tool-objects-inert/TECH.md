@@ -3,10 +3,10 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -27,7 +27,7 @@ phases:
   verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R5
@@ -242,7 +242,10 @@ the profile's full verify green once.
 - **Reopened at remediation (review cycle 1), 2026-11-12.** P2 built on P1, so it re-runs on the remediated
   tree: `phase` and `ledger`, then `F1-gate.sh report` (the sweep P1's gate ran on the same tree, read, not
   re-run), then the full verify, which the foreman schedules. Its earlier full-verify evidence (`0f34719`) no
-  longer stands for this tree.
+  longer stands for this tree. Green on `4b04dad`, 2026-11-12: `phase` (706 passed an era), `ledger`,
+  `report` (453 mutants, 449 killed and 4 equivalent an era); the full verify, each era: 44, 154, 513, and
+  4947 passed with 14 skipped (the login-shell rows for a shell this host lacks; CI installs every shell);
+  `full-ends` green.
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
 
 ---
