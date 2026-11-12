@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-28 entries, each of which ships in the first release after it lands. **Part II** ships as
+29 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-eight entries: every open hardening, robustness and safety item, and the rest of the rename in
+Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,10 +84,10 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (eleven), because every later gate rests on them: the mutation run and the pins its
+- **Gates** (twelve), because every later gate rests on them: the mutation run and the pins its
   stop path still lacks, the two gaps the skip check still leaves and the pins it still lacks, the
-  waits the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
-  wording, and the image's init.
+  waits the timing rows still miss and the bounds two miss on hosted runners, an annotation check,
+  the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (three): the site files' size, the startup update check, and the floors a git install
@@ -195,6 +195,18 @@ review's hand-planted faults, 2026-11-10; introduced with those clocks.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `tests/test_probes.py`; `tests/test_ssh_exec.py`*
 **Seed:** [`issues/timing-rows-unrouted-waits.md`](issues/timing-rows-unrouted-waits.md) · *status: unshaped*
+
+## Two timing rows miss their bound on hosted runners, with nothing else wrong
+
+The start that follows the site read took 1.58 s against 1.4 s (`main` run 43252074771, the 0.2.0
+release commit, green on `develop`), and a `delegate-root` stop returned 0.74 s after its deadline
+against 0.5 s (run 43259703879, a branch that does not touch the stop). Every behaviour check in
+both rows held; each reads, unverified, as a wall-clock measure on a busy runner. The first is not
+the bounded start `stalled-reconnect-test-timing` fixed but a sibling it left out of scope. Any bound
+change is the maintainer's ruling. Found on CI, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/stalled-reconnect-test-timing/`](spec/stalled-reconnect-test-timing/); `tests/test_probe_startup.py`; `tests/test_timeout_stop.py`*
+**Seed:** [`issues/timing-rows-miss-on-hosted-runners.md`](issues/timing-rows-miss-on-hosted-runners.md) · *status: unshaped*
 
 ## Nothing would catch the next silently wrong annotation
 
