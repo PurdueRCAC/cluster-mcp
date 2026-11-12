@@ -64,6 +64,11 @@ rules that such a capability is malformed and says how it is refused.
   imports it again, and a library that refuses a second import in one process (a warning turned
   into an error under `-W error`, say) would fail the retry, naming the capability. The plan's
   research reproduced no such library (PLAN § 5).
+- The class has one more path: when an entry the failed load registered can't be traced to a module
+  it forgets (`_accounted` in `core/capabilities.py`), every module new since the load began is
+  forgotten, a library's own lazy import too, so the retry runs that import again; a library whose
+  submodule can't be imported twice in one process then fails the retry, naming a capability
+  (review cycle 1 remediation, 2026-11-12, ruled to stand: the forget favours R1).
 - Related: `spec/capability-reload-after-failure/` (PLAN § 4a F2, § 5 Q1);
   `issues/capability-reload-after-interrupt.md`; `AGENTS.md` § Invariants §7.
 - Found by: `capability-reload-after-failure` plan, adversarial review, 2026-11-12.

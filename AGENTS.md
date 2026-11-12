@@ -2844,9 +2844,12 @@ What each mode means:
   load registered is a function, or a tool of one, defined in a module it forgets or in one the
   import system dropped as it raised (`_accounted`), the module a `@mcp_tool` registration comes
   from; otherwise nothing new is kept, since which module registered the entry, or which kept module
-  imported that one, is unknown. That a library's own lazy import is kept is pinned by the
-  `library-imported-first` rows of `test_a_load_retried_after_a_failure_is_a_first_load`, and that
-  a library module whose import registered is run again by
+  imported that one, is unknown, and the retry imports a library's own lazy import again too, which
+  holds only if that import can be repeated (the class
+  `issues/capability-import-side-effects-on-retry.md` records). That a library's own lazy import is
+  kept is pinned by the `library-imported-first` rows of
+  `test_a_load_retried_after_a_failure_is_a_first_load`, and that a library module whose import
+  registered is run again by
   `test_a_retry_runs_again_a_library_module_that_registered`. The refusal's text is built first, and
   the registry is cut last. **A retry runs a capability's modules again, so a capability's import
   must be repeatable in one process**: one that registers at import into another library's state
