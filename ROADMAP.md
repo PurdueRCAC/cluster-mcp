@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-30 entries, each of which ships in the first release after it lands. **Part II** ships as
+31 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-one entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -88,8 +88,9 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (four): a capability load retried after an interrupt, the site files' size, the
-  startup update check, and the floors a git install resolves against.
+- **Safety** (five): a capability load retried after an interrupt, a retry over an import's side
+  effects, the site files' size, the startup update check, and the floors a git install resolves
+  against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -350,6 +351,17 @@ the code, not observed. The command line never retries.
 
 *Horizon: Part I, safety · Depends on: capability-reload-after-failure (its fix may cover this) · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-reload-after-interrupt.md`](issues/capability-reload-after-interrupt.md) · *status: unshaped*
+
+## A capability whose import registers into another library's state can't be retried
+
+A retried load imports a capability's modules again (`capability-reload-after-failure`), which is
+safe only when the import can be repeated in one process. A module that registers into another
+library's duplicate-refusing state at import, such as a metrics registry, fails the second run, and
+the retry refuses a capability that loaded cleanly, naming it. Ruled out of that cycle at its plan
+sign-off; replaying the cut registrations is the alternative. The command line never retries.
+
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (PLAN § 4a F2, § 5 Q1); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-import-side-effects-on-retry.md`](issues/capability-import-side-effects-on-retry.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 

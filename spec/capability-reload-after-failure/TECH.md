@@ -113,8 +113,9 @@ and the docs say what is now true.
       `capability-refusal-keeps-registry`, `capability-other-exception-keeps-registry` and
       `capability-load-failure-passes-re-raises` against the new text, each breaking the same
       contract with the same `why` as before; update the comment above `ROLLBACK`.
-- [ ] Docs, PLAN § 2 "Docs": the module, `load()` and `installed()` docstrings; AGENTS.md §7, the
-      footgun note on `capabilities.py`, § Testing beside `test_a_failed_load_is_not_cached`, and
+- [ ] Docs, PLAN § 2 "Docs": the module, `load()` and `installed()` docstrings; AGENTS.md §7 (with
+      the requirement on capability authors that a capability's import be repeatable in one
+      process, per the GOAL's plan-sign-off Clarification), the footgun note on `capabilities.py`, § Testing beside `test_a_failed_load_is_not_cached`, and
       the repository map's `capabilities.py` row.
 - [ ] Check that `tests/test_packaging.py`'s pure-namespace checks pass after a `namespace` row
       (PLAN § 5).
@@ -139,9 +140,10 @@ contract; every deferral is recorded; the profile's full `verify` is green.
 - [ ] **Deferral ledger** (last-phase item): walk P1's and P2's bodies, PLAN §§ 4–5 and Notes, and
       the branch's commit bodies for "do not fix here", "known limitation", "left as a follow-up",
       "deferred", "limit" and "not covered"; each must have an `issues/` seed and a `ROADMAP.md`
-      entry. Expected: none new. The interrupt windows PLAN Notes names belong to the existing
-      `issues/capability-reload-after-interrupt.md`, and PLAN § 5's risks are review risks, not
-      deferrals. An unrecorded deferral fails the phase.
+      entry. Expected: `issues/capability-import-side-effects-on-retry.md`, filed by the plan with its
+      `ROADMAP.md` entry (Q1's remainder), and nothing new. The interrupt windows PLAN Notes names
+      belong to the existing `issues/capability-reload-after-interrupt.md`, and PLAN § 5's other
+      risks are review risks, not deferrals. An unrecorded deferral fails the phase.
 - [ ] Standing last-phase items: the previous cycle's last phase carried no project-level
       obligation beyond the ledger (no `## Times` quote in this repo).
 - [ ] Stage, then run the `verify:`.

@@ -91,6 +91,10 @@ If it has gone or been mended, the retry loads every capability, each with its t
   `KeyboardInterrupt` cut short? **A:** (a), failures only. The interrupted case is seeded as
   `issues/capability-reload-after-interrupt.md` (Part I, safety) and is a Non-goal here.
 - 2026-11-12 · foreman ruling at GOAL sign-off: R6 (the mutation case) stays.
+- 2026-11-12 · foreman ruling at plan sign-off: R1 and R2 hold for capabilities whose import can be
+  repeated in one process. A retry re-imports a capability's modules, and §7 states that as a
+  requirement on capability authors. The rest is seeded as
+  `issues/capability-import-side-effects-on-retry.md`.
 
 ## Related materials
 

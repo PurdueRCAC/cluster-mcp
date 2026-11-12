@@ -96,7 +96,10 @@ are at the GOAL commit `aa1688a`.
   - `installed()`'s docstring (`:398-399`) says a failed load raises again on the next call,
     importing again.
 - AGENTS.md:
-  - §7 (`:2820-2823`): the same sentence beside the cut-back, naming the library rule;
+  - §7 (`:2820-2823`): the same sentence beside the cut-back, naming the library rule, and a
+    requirement on capability authors: a retry imports a capability's modules again, so a
+    capability's import must be repeatable in one process (the plan sign-off's ruling on Q1, GOAL
+    Clarifications);
   - §7, the `installed()` bullet (`:2833-2834`): names the new test;
   - the footgun note on `capabilities.py` (`:2193-2195`): "a second `load()` after a successful one
     registers nothing new; after a failed one it imports the capabilities again";
@@ -208,10 +211,13 @@ change.
 | The cut-back moves into a `finally` that runs after the refusal is built, and after `_unimport`. Today it runs before the refusal is formatted. | `_cause` runs capability code. A lazy import there must be forgotten and its tools cut. A raise or interrupt inside `_unimport` must still leave the registry cut (R4). | Forgetting before formatting, today's order plus one call, leaves a lazy registration standing after the failure (research/01 §2; review G2). |
 | `_unimport` keeps a library's lazy imports, and roots each capability at its outermost regular package. A bare "forget everything new" (H) has no such rule. | Under H, a library's lazily imported submodule would coexist with the old one held by its parent's attribute (research/01 §1). Without the roots, a caller that imported a capability's package first (`import cluster_mcp.rcac`) gets today's defect back (review F1). | H is shorter, but it carries that hazard into every failed load. Roots only at `ep.module` and `tools` (the candidate, or P) fail R1 open: the retry *loads* a capability the first load refused, when a helper made the registration (research/01, table rows 4-7). |
 | **A reading of R1 and R2 (Q1):** a retry *runs a capability's modules again*. R1 and R2 hold for a capability whose import can be repeated in one process. | A module-level registration in another library, such as a metrics collector that refuses a duplicate name, fails the second run. The retry then names a capability that loaded cleanly (review F2, probe: `cannot load capability aaa-good: ValueError: Duplicated timeseries …`). | The alternative is replay: keep each still-imported module's cut registrations and re-append them on a retry whose import is a no-op. It needs per-entry state that outlives a load. It cannot attribute a non-tool entry, or a tool whose module was dropped by the import system, to a module. It also adds loop lines inside the sibling's range (research/01 §7). The GOAL's non-goal leaves such state alone and does not undo it, but R1 as worded does not excuse it. |
+| **Step 5's prototype full-suite dry run is not run in the plan step;** P2's full `verify` stands in for it (foreman ruling at the plan sign-off, 2026-11-12: the host is shared and full runs are scheduled). | Code-plan Step 5 asks for the prototype's full suite once; this plan step was told to stop before any full run. | Running it here would take a heavy run the foreman schedules; targeted runs on the prototype were green but for the four anchors P1 re-plants. |
 
 Each row was read against the wording of R1 to R6. Rows 1 and 2 bend no R-ID: the refusal's text is
 the same (R1, R4), and the registry ends where it does today (R4). Row 3 is a reading of R1 and R2
-that the GOAL does not state. It goes to the sign-off as Q1, and no Clarification is written here.
+that the GOAL did not state; the plan sign-off accepted it (GOAL Clarifications, 2026-11-12) and
+the rest is seeded as `issues/capability-import-side-effects-on-retry.md`. Row 4 records a
+foreman ruling on the plan step itself and bends no R-ID.
 
 ## 4. Rabbit holes (resolved)
 
@@ -268,7 +274,9 @@ No security finding.
   process, as deviation row 3 reads it? Or must it also hold for one that registers into another
   library's duplicate-refusing state at import, which would mean replay instead of re-import (a
   larger change)? The default here is the first reading, recorded as a GOAL clarification at the
-  sign-off if accepted. If the second is ruled, the plan goes back to design.
+  sign-off if accepted. If the second is ruled, the plan goes back to design. **Ruled 2026-11-12:**
+  the first reading (GOAL Clarifications); the rest is seeded as
+  `issues/capability-import-side-effects-on-retry.md`, indexed in `ROADMAP.md` (Part I, safety).
 - **Third-party modules first imported during a failed load are imported again on the retry,**
   as a fresh process would import them, once. That includes a new top-level library a capability
   pulls in. A library that refuses a second import (numpy warns, and under `-W error` that warning
@@ -285,8 +293,7 @@ No security finding.
   review finding in it needs a human decision before landing.
 - **This plan step did not run the prototype's full suite.** The host is shared, and the foreman
   schedules full runs. The targeted runs on the prototype were green, apart from the four anchors
-  named above. Code-plan Step 5 asks for one full-suite run of the prototype. It is owed before
-  build, unless the foreman accepts P2's full `verify` in its place.
+  named above. Ruled at the plan sign-off: P2's full `verify` stands in for it (deviation row 4).
 
 ## 6. Verification strategy
 
