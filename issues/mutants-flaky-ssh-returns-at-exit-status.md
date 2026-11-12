@@ -31,6 +31,9 @@ The case gave different verdicts in two hosted runs of the same code:
 - **macOS at `aff08bd`**, run alone (`uv run python tests/mutants.py ssh-returns-at-exit-status`):
   killed, all six targets with the `why`, in 10 s.
 
+- **Run 3** (run `43265827418` at `36bd540`, 2026-11-12, shard 3 of 78): killed again. All six
+  targets failed with the `why`.
+
 So in every run the rows caught the mutant. What varied was the reason one row gave. Under the
 runner's rule (every target fails, and with the `why`), that single row decides whether the case is
 reported killed.

@@ -167,8 +167,8 @@ first hosted run, 2026-11-12.
 ## Renumbering the watchdog's descriptor to 59 survives on Linux
 
 `tpc-fd-59` moves the watchdog onto the descriptor the sentinel line points at the caller's stderr.
-On the hosted Linux runner one target passed and the other failed for the wrong reason; on macOS
-both fail with "still running". The cause is unverified. Found by `mutants-workflow-timeout`'s first
+On the hosted Linux runner one target passed and the other failed for the wrong reason in two runs;
+both passed in the third. On macOS both fail with "still running". The cause is unverified. Found by `mutants-workflow-timeout`'s first
 hosted run, 2026-11-12.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_timeout_stop.py` (`test_a_timed_out_command_is_stopped`); `core/executor/launch.py`*
@@ -188,9 +188,9 @@ hosted run, 2026-11-12.
 
 The case was killed on all six of its targets in the first hosted run and on macOS. In the second
 run, five were killed with its `why`, but `test_a_late_sentinel_still_counts_as_started[bashrc]`
-failed for another reason. The rows catch the mutant every time, but one row's reason varies with
-timing on a loaded runner (unverified). Found by `mutants-workflow-timeout`'s second hosted run,
-2026-11-12.
+failed for another reason. In the third run it was killed again. The rows catch the mutant every
+time, but one row's reason varies with timing on a loaded runner (unverified). Found by
+`mutants-workflow-timeout`'s second hosted run, 2026-11-12.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P4 run 2); `tests/test_ssh_exec.py` (`test_a_late_sentinel_still_counts_as_started`); the hosted-runner timing misses' seed on `develop`, a related cause*
 **Seed:** [`issues/mutants-flaky-ssh-returns-at-exit-status.md`](issues/mutants-flaky-ssh-returns-at-exit-status.md) · *status: unshaped*

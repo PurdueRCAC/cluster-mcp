@@ -26,6 +26,9 @@ The first dispatched mutation run (run `43255195424` at `aff08bd`, 2026-11-12, b
 Run alone on macOS at the same commit (`uv run python tests/mutants.py tpc-fd-59`), it is killed:
 both targets fail with "still running".
 
+- 2026-11-12: run 2 (`43260825655`) repeated run 1's verdicts. In run 3 (`43265827418`, shard 17)
+  both targets passed, `[ssh-bash-ignores-holding]` included.
+
 **Likely cause (unverified):** on the Linux runner, under bash 5.2, the program's descriptor
 handling differs from macOS's bash 3.2, so the stop still works through another path, or fails
 differently. Possible differences:

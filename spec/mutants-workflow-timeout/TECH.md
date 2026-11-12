@@ -3,10 +3,10 @@ slug: mutants-workflow-timeout
 title: A dispatched mutation run finishes and reports every case
 kind: ci
 appetite: small
-status: in_progress
+status: in_review
 branch: ci/mutants-workflow-timeout
 base: develop
-current_phase: P5
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -59,7 +59,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 4 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
 - id: P5
   name: The third hosted run, the budget row and the ledger (Run A dispatches, Run B records)
-  status: in_progress
+  status: done
   satisfies:
   - R4
   - R3
@@ -70,7 +70,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F2-docs-controls-prefill.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt --final && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
 review:
   last_reviewed_commit: ''
   verdict: none
@@ -193,7 +193,7 @@ two runs.
 - [x] `mutants-gate.py prepush`, `untouched 3` and `workflow` on the head; mark P3 `in_progress` with
       the note "Run A: dispatched" in the TECH body below, commit, and note the head: it is the
       measured commit `T1`.
-- [ ] Push the branch. Before dispatching, check that no other run of the organisation is queued or
+- [x] Push the branch. Before dispatching, check that no other run of the organisation is queued or
       in progress (`gh run list --status in_progress` and `--status queued` on this repository), since
       the Free plan's 20 jobs are shared (PLAN § 5); wait for it if one is. Then dispatch once:
       `gh workflow run mutants.yml --ref ci/mutants-workflow-timeout`;
@@ -262,23 +262,24 @@ Two runs: Run A dispatches, Run B records.
 - [x] `mutants-gate.py prepush` and `untouched 5` on the head, P4's closing commit, which still
       differs from `T1` only in the records. Mark P5 `in_progress` with the note "Run A: dispatched",
       commit, push.
-- [ ] With no other run of the organisation queued or in progress, dispatch once and find the run id
+- [x] With no other run of the organisation queued or in progress, dispatch once and find the run id
       as P3 does. Hand it back. This is the last dispatch Q4 allows.
 
-**Run B:**
-- [ ] Append `run <id>` to `runs.txt`. Run `mutants-gate.py runs --runs-file
+**Run B:** Run B: recorded; stopped at the verify, then closed under F2 (see Amendments, 2026-11-12,
+P5 run 3).
+- [x] Append `run <id>` to `runs.txt`. Run `mutants-gate.py runs --runs-file
       spec/mutants-workflow-timeout/runs.txt --final`; a red result is a **stop**, as in P3. Seed any
       new case not killed as P3 does.
-- [ ] Put the printed baseline sentence in the `mutants budget` row, in place of `Baseline: pending`,
+- [x] Put the printed baseline sentence in the `mutants budget` row, in place of `Baseline: pending`,
       and add the measured mean per case on the worst job that the gate prints.
-- [ ] In § Testing, replace "(… § Factory: pending)" with the cost the row holds ("N cases in S
+- [x] In § Testing, replace "(… § Factory: pending)" with the cost the row holds ("N cases in S
       shards, the run M:SS from dispatch, slowest job M:SS") and the pointer.
-- [ ] Nothing else in `AGENTS.md` changes.
-- [ ] **The deferral ledger** (`code-plan` Step 6.8): walk P1–P5's bodies here, PLAN § 5 and every
+- [x] Nothing else in `AGENTS.md` changes.
+- [x] **The deferral ledger** (`code-plan` Step 6.8): walk P1–P5's bodies here, PLAN § 5 and every
       branch commit body for "do not fix here", "known limitation", "follow-up", "deferred" or
       "not fixed". Each such item must name an `issues/` seed with a `ROADMAP.md` entry; the `prepush`
       mode checks it. This plan files no new seed of its own.
-- [ ] Stage, run the frontmatter `verify:`, mark P5 done, commit. The head differs from the measured
+- [x] Stage, run the frontmatter `verify:`, mark P5 done, commit. The head differs from the measured
       runs' commits only in:
       - `AGENTS.md`'s row and § Testing sentence;
       - `runs.txt` and the TECH state;
@@ -410,6 +411,39 @@ Two runs: Run A dispatches, Run B records.
   - 2026-11-12 · foreman ruling: the flaky case gets a seed of its own,
     `issues/mutants-flaky-ssh-returns-at-exit-status.md`, with its `ROADMAP.md` entry in Part I's
     Gates group after the four `mutants-linux-*` entries. P4 closes.
+- **2026-11-12, P5 run 3 read and recorded (Run B).**
+  - Run `43265827418`, a `workflow_dispatch` at `36bd540` (T1 plus records only), attempt 1,
+    conclusion failure: the run 494 s (8:14) from dispatch, 20 jobs at once at most, worst job
+    shard 6 at 191 s, median 109 s. Seven shards failed, each on one of the seven cases seeded
+    after run 1, which do not count; shard 3's flaky case was killed. `tpc-fd-59` had both targets
+    pass this time (in runs 1 and 2 one failed for the wrong reason); its seed and entry gain a
+    dated line, as does the flaky seed.
+  - `runs --final` is green over the three runs: every case not killed in any run (eight) is named
+    in a seed of this cycle. Worst of three: the run 9:51 from dispatch (run 2), within 900 s; the
+    slowest job 3:11 (shard 6, run 3), within 290 s, 12.7 s a case with its setup. The refit
+    measures 8.4 s a child and 50 s overhead: at 15 a shard it projects 201 s a job and 822 s a run,
+    both bounds held, and proposes 20. The size stays at 15, as measured.
+  - The printed baseline sentence is the `mutants budget` row's baseline, and § Testing states the
+    cost it holds (1,164 cases in 78 shards, the run 9:51 from dispatch, slowest job 3:11). The
+    deferral ledger is walked by `prepush` over P1–P5, PLAN § 5 and the commit bodies.
+  - P5's `verify:` is red at `remediation/F1-controls-anchor.py` alone: the frozen `controls` mode's
+    `docs final sound` and `docs final pending` controls plant by replacing `pending` in the staged
+    row, which now holds the baseline, so neither plant lands and both read BAD. With the pre-fill
+    `AGENTS.md` staged, the wrapper is green (`controls (re-anchored): ok`). `docs --final`,
+    `runs --final`, `prepush`, `untouched 5` and `workflow` are green on this tree. Stopped for the
+    foreman; no attempt is recorded, as with F1. P5 stays `in_progress`.
+  - 2026-11-12 · foreman ruling (code-build Step 1.3): `remediation/F2-docs-controls-prefill.py`
+    runs the F1 wrapper unchanged and accepts exactly the `docs final sound` and `docs final
+    pending` BADs, only while the staged row holds no `pending`. It re-runs those two controls,
+    built as the frozen mode builds them, on `AGENTS.md` at `36bd540` (the last commit with
+    `Baseline: pending`), with the plant asserted to land exactly once. Any other BAD or FAILED
+    line is red, and so are those two still failing on the pre-fill text. Seen red first on the
+    staged tree under F1 (`controls (re-anchored): 4 failed`). Under F2: green on the staged tree;
+    green with the pre-fill `AGENTS.md` staged; red (3 failed) with the row's `ubuntu-24.04`
+    dropped, naming `docs sound`. P5's `verify:` runs F2 in place of F1 (P2's keeps F1);
+    `verify/` is not edited. The run-3 lines added to `issues/mutants-linux-fd-59.md`,
+    `issues/mutants-flaky-ssh-returns-at-exit-status.md` and their `ROADMAP.md` entries are
+    accepted.
 
 ---
 
