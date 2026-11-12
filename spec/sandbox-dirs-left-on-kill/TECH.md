@@ -3,10 +3,10 @@ slug: sandbox-dirs-left-on-kill
 title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
   verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files rebase runner runner-timeout sample && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py && uv run pytest -q tests/test_mutations.py
 - id: P3
   name: The mutant sweep, the ledger and the whole verify
-  status: pending
+  status: done
   satisfies:
   - R1
   - R3
@@ -177,7 +177,7 @@ reported, and every sample case and control prints what develop printed.
 included; the profile's whole `verify` leaves no sandbox directory under the `TMPDIR` it ran under and
 skips exactly what develop skips; the ledger is clean.
 
-- [ ] `verify/mutants.json`: at least one plant per decision in PLAN § 6's table (the gate's
+- [x] `verify/mutants.json`: at least one plant per decision in PLAN § 6's table (the gate's
       `DECISIONS`), each `{id, decision, file, old, new, mode, why}` against the built code, `why` a
       fragment of the `FAIL` line the named mode prints. Start from `verify/mutants.draft.json` and
       re-anchor each plant to the built text; add a plant for any decision the build added. Record
@@ -186,14 +186,15 @@ skips exactly what develop skips; the ledger is clean.
       re-anchored to `case_scratch` as built), plus two for the decision P2 added, `runner-unlisted`
       (`runner-unlisted-raises`, `runner-unlisted-removes`), killed by `units` through the row below.
       Checked alone: the re-anchored plant killed by `runner`, the two new ones by `units`; both new
-      ones survive at `39399ab`, before the row. The full sweep's result is still to record.
+      ones survive at `39399ab`, before the row. The full sweep (P3's gate, 2026-11-12): all 26 killed,
+      each by its named mode; the result is in the P3 commit body.
 - [x] `tests/test_sandbox_dirs.py`: a `unit` row, `test_a_case_scratch_whose_processes_cannot_be_listed_is_kept`
       (the foreman's ruling at the P2 gate, 2026-11-12): with the process listing made to fail,
       `case_scratch` keeps the scratch and its sandbox directory, puts `TMPDIR` back, and names the
       scratch and the error on stderr. `AGENTS.md`'s module bullet for the file names it. The row
       lives here, not in `tests/test_mutations.py`, because the `files` mode allows this file and the
       `units` mode runs it, so the plants are graded by a gate mode.
-- [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
+- [x] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
       for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the `ledger` mode
       checks this file). Two seeds are filed, on the foreman's rulings (2026-11-12), both pre-existing,
       each with a `ROADMAP.md` entry in Part I's Gates (the Gates count and both Part I totals moved
@@ -220,9 +221,9 @@ skips exactly what develop skips; the ledger is clean.
          runner's stop covers, named: the stop past `LIMIT`, and SIGTERM, SIGHUP and SIGINT (Ctrl-C)
          to the runner (the gate's `runner-timeout` and P2's `remediation/runner-signals.py`); a
          SIGKILL to the runner still leaves its scratch (GOAL non-goal).
-- [ ] Put the `suite` mode's figures into PLAN § 3 row D4 beside the planner's, naming this run: each
+- [x] Put the `suite` mode's figures into PLAN § 3 row D4 beside the planner's, naming this run: each
       command's time and leftover count.
-- [ ] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
+- [x] Stage, then run the frontmatter `verify:` through `run_in_background`: `files`, `ledger`,
       `mutants` (about 24 plants, one planted mode each: about 7 minutes), then `suite` (the profile's
       eight suite commands and its last, both eras, under a fresh `TMPDIR`: about 26 minutes).
 - **Verify:** the frontmatter `verify:`.
