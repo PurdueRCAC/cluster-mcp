@@ -254,9 +254,10 @@ briefs are the rejected design's record.
 - **Questions for the sign-off:** D2 and D3 (readings of R1/R4 and R3), D5 (landing order), D4 (the
   figures). And whether the GOAL's known limitation (callers outside the repository's runs) wants a
   record beyond `AGENTS.md`'s sentence: the seed `issues/sandbox-dirs-left-on-kill.md` is retired
-  when this lands. The plan filed no new seed; the build filed one,
-  `issues/mutant-case-cleanup-interrupted.md` (a second signal during a mutation case's cleanup,
-  pre-existing; the foreman's ruling at the P2 gate, 2026-11-12).
+  when this lands. The plan filed no new seed; the build filed two, on the foreman's rulings
+  (2026-11-12): `issues/sandbox-dirs-outside-repo-runs.md`, the GOAL's known limitation (a caller
+  outside the repository's runs that SIGKILLs a sandbox), and `issues/mutant-case-cleanup-interrupted.md`
+  (a second signal during a mutation case's cleanup); both pre-existing.
 - **The seed's "last three" referent** (GOAL Clarifications): fixed by whichever of this cycle and
   the sibling lands second, at its landing; P3 carries the item.
 - **An empty run directory per era.** Each era's third command ends with `test_launch`'s

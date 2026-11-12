@@ -195,10 +195,13 @@ skips exactly what develop skips; the ledger is clean.
       `units` mode runs it, so the plants are graded by a gate mode.
 - [ ] The ledger (`code-plan` Step 6.8): walk P1–P3's bodies, PLAN.md and the branch's commit bodies
       for deferral phrases; each names an `issues/` seed with a `ROADMAP.md` entry (the `ledger` mode
-      checks this file). One seed is filed, on the foreman's ruling at the P2 gate (2026-11-12): a
-      second signal during a case's cleanup is deferred to `issues/mutant-case-cleanup-interrupted.md`
-      (pre-existing; its `ROADMAP.md` entry follows `mutant-runner-stop-pins` in Part I's Gates, and the
-      Gates count and both Part I totals moved with it; the seed/ROADMAP pairing check is empty).
+      checks this file). Two seeds are filed, on the foreman's rulings (2026-11-12), both pre-existing,
+      each with a `ROADMAP.md` entry in Part I's Gates (the Gates count and both Part I totals moved
+      with them; the seed/ROADMAP pairing check is empty):
+      - a second signal during a case's cleanup is deferred to `issues/mutant-case-cleanup-interrupted.md`
+        (after `mutant-runner-stop-pins`);
+      - the GOAL's known limitation is seeded as `issues/sandbox-dirs-outside-repo-runs.md`
+        (a caller outside the repository's runs that SIGKILLs a sandbox; after the seed above).
 - [x] If `mutant-child-outlives-timeout` landed before this cycle, fix the "last three" referent in
       `issues/sandbox-dirs-left-on-kill.md` (GOAL Clarifications). Done at P2's rebase (2026-11-12):
       the branch's own sentence on the runner, which stood before "The last three", was dropped for
@@ -251,7 +254,8 @@ skips exactly what develop skips; the ledger is clean.
   `verify:` also run `files`: retune each to the wrapper the same way when its build starts (P2's
   own rebase onto the sibling moves the fork point again, which the wrapper follows).
 - **2026-11-09, P1 build: the docs split.** P1's Throwaway environment sentence names the suite's
-  cleanup and the known limitation only; the mutation runner's clause joins it in P2, with
+  cleanup and the known limitation only (seed: `issues/sandbox-dirs-outside-repo-runs.md`, 2026-11-12);
+  the mutation runner's clause joins it in P2, with
   `case_scratch` (§ Conventions, docs in the same commit). The seed's facts the foreman flagged are
   P3's (a new checklist item there): P1 has no ledger work.
 

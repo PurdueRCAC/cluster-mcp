@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+30 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,9 +84,9 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (twelve), because every later gate rests on them: the mutation run, the pins its
+- **Gates** (thirteen), because every later gate rests on them: the mutation run, the pins its
   stop path still lacks and the case cleanup a second signal can cut short, the two gaps the skip check still leaves and the pins it still lacks, the
-  waits the timing rows still miss, an annotation check, the test harnesses' leftovers, the marker
+  waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, the marker
   wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
@@ -164,6 +164,17 @@ short the same way. Found by `sandbox-dirs-left-on-kill`'s P2 build, 2026-11-12.
 
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (TECH, P2); `tests/mutants.py` (`case_scratch`, `stop_run`)*
 **Seed:** [`issues/mutant-case-cleanup-interrupted.md`](issues/mutant-case-cleanup-interrupted.md) · *status: unshaped*
+
+## A sandbox killed outright outside the repository's own runs leaves its directory
+
+`bin/sandbox.sh` removes its directory from a trap a SIGKILL skips. `sandbox-dirs-left-on-kill`
+cleans up after the suite and the mutation runner and leaves the wrapper as it is, so a person or
+another tool that SIGKILLs a sandbox (a shell's `kill -9`, a gate script, a step cancelled outright)
+still leaves its directory in that caller's `TMPDIR`. That cycle's GOAL records it as a known
+limitation; pre-existing.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (GOAL non-goals, Q4); `bin/sandbox.sh`*
+**Seed:** [`issues/sandbox-dirs-outside-repo-runs.md`](issues/sandbox-dirs-outside-repo-runs.md) · *status: unshaped*
 
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
