@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-31 entries, each of which ships in the first release after it lands. **Part II** ships as
+32 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once four Part I entries have landed, and 0.3.0 ships when Part II has landed, without waiting for
@@ -72,7 +72,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty-one entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -90,9 +90,9 @@ They come in six groups, in this order:
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (five): a tool object changed after the load, a metaclass's code in the record checks,
   the site files' size, the startup update check, and the floors a git install resolves against.
-- **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
-  separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
-  maintainer's ruling.
+- **Redesigns and trade-offs** (four): limits the timeout stop, the liveness check, the startup
+  separation and the tool load's return-type rule recorded. Fix what can be fixed; what can't
+  becomes `accepted-behaviour` only on the maintainer's ruling.
 - **The rename finished** (two): the identity strings a client or a token sees, and the docs.
 
 ## The surface pin cannot follow a deliberate surface change
@@ -448,6 +448,19 @@ cycle in this Part.
 
 *Horizon: Part I, redesign · Depends on: safe-execution (cleared: landed on `develop` 2026-10-23) · Refs: [`spec/safe-execution/`](spec/safe-execution/) PLAN §2.2a, risk 5; what can't be fixed becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/startup-background-jobs.md`](issues/startup-background-jobs.md) · *status: unshaped*
+
+## The load refuses some return annotations FastMCP serves
+
+`capability-tool-objects-inert` decides a tool's `return_type` by an allowlist of metaclasses and
+aliases it can show inert, so a capability whose tool returns a `NewType`, a `type X = …` alias, a
+bare `typing.Dict` or `List`, an `Annotated` with `annotated_types` metadata, or a
+`typing_extensions.TypedDict` is refused at load, where `develop` loaded it and FastMCP serves it.
+No member returns one. Accepting a shape needs its own inertness decision first (a `type X = …` alias
+evaluates capability code lazily). Not pre-existing: that cycle's rule. Found by its review cycle 1,
+2026-11-12.
+
+*Horizon: Part I, trade-off · Depends on: capability-tool-objects-inert (the rule it widens) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) REVIEW cycle 1, F4; `AGENTS.md` § Invariants §7; `core/capabilities.py`; a shape that can't be decided inertly becomes `accepted-behaviour` only on the maintainer's ruling*
+**Seed:** [`issues/capability-tool-return-type-shapes.md`](issues/capability-tool-return-type-shapes.md) · *status: unshaped*
 
 ## The rename left two identity strings a client or a token sees
 
