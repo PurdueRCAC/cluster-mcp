@@ -3,10 +3,10 @@ slug: sandbox-dirs-left-on-kill
 title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -38,7 +38,7 @@ phases:
   verify: uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py files rebase runner runner-timeout sample && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/runner-signals.py && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F1-closed-dirs.py && uv run python -I spec/sandbox-dirs-left-on-kill/remediation/F2-pins.py && uv run pytest -q tests/test_mutations.py
 - id: P3
   name: The mutant sweep, the ledger and the whole verify
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R3
@@ -264,8 +264,12 @@ skips exactly what develop skips; the ledger is clean.
       `test_leftovers_are_directories_with_a_sandbox_name` asserts the link is not a leftover (seen
       alone: survived `guards`, killed by `units`). P3's `verify:` runs `mutants` on the list through
       `SDLK_MUTANTS`, the frozen gate's own override.
-- [ ] Review cycle 1: the `suite` mode (the profile's whole `verify`) on the final tree. Left for the
-      foreman's full verify.
+- [x] Review cycle 1: the `suite` mode (the profile's whole `verify`) on the final tree, `33f72ab`
+      (2026-11-12, 26:42 wall): `files` ok; all eight suite commands passed (legacy 212 / 144 / 215 /
+      220 s, modern 212 / 144 / 221 / 212 s), none left a sandbox directory, none made one in
+      `/tmp`; `verify`'s last command passed; the 28 skips are develop's. Two empty run directories
+      remain, case 3 of `issues/sandbox-dirs-outside-repo-runs.md`, which now also records the
+      pytest temporary directory's closed directories the sweep does not scan.
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/sandbox-dirs-left-on-kill/verify/mutants.json`, `spec/sandbox-dirs-left-on-kill/PLAN.md`,
   `spec/sandbox-dirs-left-on-kill/TECH.md`, `spec/sandbox-dirs-left-on-kill/remediation/fork-base.py`,

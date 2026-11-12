@@ -92,5 +92,8 @@ developer chooses to keep.
 - `bin/sandbox.sh` is on § Invariants' high-blast-radius list: a change there needs the maintainer.
 - The rejected keeper design and its research are kept as a record in
   `spec/sandbox-dirs-left-on-kill/` (`research/00`, `02`–`04`, `verify/keeper.py`, at `8520d9c`).
+- A sandbox directory under a mode-`0` directory in the session's pytest temporary directory is not
+  found: the sweep does not open closed directories there to scan them (only in the run's own
+  directory and a case scratch, `reopen`), so such a leftover stays (review cycle 1, 2026-11-12).
 - Related: `issues/mutant-case-cleanup-interrupted.md` (the mutation runner's own cleanup cut short).
 - Found by: `sandbox-dirs-left-on-kill` (GOAL non-goal, 2026-11-09); seeded 2026-11-12.
