@@ -7,6 +7,14 @@
 > § Invariants' high-blast-radius list, so trigger 2 ran the fan-out. The tests and the mutation case
 > are assertion deliverables, so trigger 3's adversarial review ran too (§ 4a).
 
+> **Superseded in part, 2026-11-12, after review cycle 2.** The GOAL's R2 was re-scoped (`cde0a99`):
+> a load after a failed one is refused, naming the first failure and saying to restart the process,
+> and nothing is reloaded. §§ 1–2's forgetting design (`_file`, `_root`, `_roots`, `_unimport`, the
+> snapshot before the loop, and the forgetting in the handler) is removed, and § 5's Q1 lapses with
+> it. What replaces it, and what was removed, is `TECH.md`'s P1 amendment for review cycle 2. The
+> rest of this plan (the invariant gate, the test shapes, the mutation case for today's retry) holds
+> as amended there.
+
 ## 1. Summary
 
 A failed load already cuts `TOOL_REGISTRY` back. It will also forget the modules it imported, so

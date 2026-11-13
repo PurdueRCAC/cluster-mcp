@@ -88,9 +88,9 @@ They come in six groups, in this order:
   annotation check, the test harnesses' leftovers, the marker wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (five): an interrupt inside a failed capability load's cleanup, a retry over an
-  import's side effects, the site files' size, the startup update check, and the floors a git
-  install resolves against.
+- **Safety** (five): a capability load retried after an interrupt, a failed load's refusal read past
+  a patched class, the site files' size, the startup update check, and the floors a git install
+  resolves against.
 - **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the startup
   separation recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -342,27 +342,28 @@ bash 3.2 only). Pre-existing.
 *Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
 
-## An interrupt that lands inside a failed load's cleanup may leave a retry registering nothing
+## A capability load retried after an interrupt may register nothing and blame the wrong distribution
 
-A load that an interrupt cuts short forgets what it imported and cuts the tool registry back, as a
-failed load does (`capability-reload-after-failure`), so a retry is a first load. An interrupt that
-lands inside that cleanup, or inside the import system's removal of a module whose import raised,
-can stop it partway and leave modules imported, so a library caller's retry could register nothing
-for a clean capability. Read from the code, not observed. The command line never retries.
+An interrupt that cuts a capability load short is not a failure: the load cuts the tool registry
+back but leaves what it imported imported, and leaves no refusal behind
+(`capability-reload-after-failure` refuses every load after a failed one). A library caller's retry
+therefore registers nothing for a capability that loaded cleanly before the interrupt and refuses it,
+naming it, and that refusal then refuses every later load. Observed with planted distributions. The
+command line never retries.
 
 *Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (REVIEW cycle 1, F2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-reload-after-interrupt.md`](issues/capability-reload-after-interrupt.md) · *status: unshaped*
 
-## A capability whose import registers into another library's state can't be retried
+## Nothing pins that a failed load's refusal is read past a patched class
 
-A retried load imports a capability's modules again (`capability-reload-after-failure`), which is
-safe only when the import can be repeated in one process. A module that registers into another
-library's duplicate-refusing state at import, such as a metrics registry, fails the second run, and
-the retry refuses a capability that loaded cleanly, naming it. Ruled out of that cycle at its plan
-sign-off; replaying the cut registrations is the alternative. The command line never retries.
+A failed capability load keeps its refusal as plain text, read through `vars()` and `args`, so no
+capability code runs (`capability-reload-after-failure`). A capability that patched the core's own
+`CapabilityLoadError` would run its code under a read through the attribute or `str()`, and no test
+tells those reads apart: two hand mutants survived that cycle's sweep. Only a capability acting on
+purpose reaches it.
 
-*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (PLAN § 4a F2, § 5 Q1); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
-**Seed:** [`issues/capability-import-side-effects-on-retry.md`](issues/capability-import-side-effects-on-retry.md) · *status: unshaped*
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (TECH P1, review cycle 2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-refusal-class-patched.md`](issues/capability-refusal-class-patched.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 

@@ -32,6 +32,7 @@ from typing import Any, Callable, Iterator
 import _posixsubprocess
 import pytest
 
+import cluster_mcp.core.capabilities
 import cluster_mcp.core.context
 from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.executor import launch
@@ -40,7 +41,8 @@ from cluster_mcp.core.executor import launch
 # same tools in the same order whatever a test imports first, and no capability registers twice. A
 # load that fails is not cached, so it does not stop collection: every test that needs the installed
 # capabilities fails with its message (`test_installed_finds_every_workspace_member` among them), the
-# header says it, and the tests of the load itself, which plant their own, still run. (A load raises
+# header says it, and the tests of the load itself, which plant their own, still run: each test starts
+# with no failed load behind it (`no_failed_load`). (A load raises
 # nothing but a `CapabilityLoadError`; anything else is a broken loader, reported the same way.)
 try:
     installed()
@@ -531,6 +533,18 @@ def open_tmp() -> Iterator[Path]:
             for name in dirs:
                 Path(parent, name).chmod(0o755)
         shutil.rmtree(root)
+
+
+@pytest.fixture(autouse=True)
+def no_failed_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test with no failed capability load behind it, as a fresh process starts.
+
+    A failed load refuses every later load in its process (`cluster_mcp.core.capabilities.load`), and
+    the suite fails loads on purpose, many in one process; a test of that refusal fails its load
+    itself. A load that failed as this module was imported is made again by each test that needs the
+    installed capabilities, and fails with its own message.
+    """
+    monkeypatch.setattr(cluster_mcp.core.capabilities, '_failed', None)
 
 
 @pytest.fixture(autouse=True)
