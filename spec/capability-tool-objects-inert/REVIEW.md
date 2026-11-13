@@ -287,3 +287,139 @@ The fix, if ruled in, would go as one property, both ways:
 - **Triggered,** and it holds until publish whatever a later cycle finds: N1 is CONFIRMED on
   `core/capabilities.py`, a path on § Invariants' high-blast-radius list (cycle 1's F1–F3 already
   triggered it). The maintainer's explicit sign-off is required before any further step.
+
+## Review cycle 3 — approved (2026-11-13)
+
+- **Reviewed commit:** `7d288c1` (cycle 2's remediation `5d33747`–`eca465d`, plus a `TECH.md`-only commit);
+  approved at `1cb4806`, this cycle's text fix and seed on top of it (below) · **Base:** develop (the branch is
+  9 commits behind `origin/develop`, a merge-readiness fact for publish)
+- **Mode:** a fresh blind pass over the full spec-excluded diff, all seven R-IDs, with cycle 2's N1 checked
+  closed as a property, both ways. One reviewer, no debate, no sequential fallback. Mutants aimed at what
+  cycle 2's remediation changed: `_return_type_violation`'s class branch.
+- **Contract:** `GOAL.md` at HEAD. `680c843` (the plan sign-off rulings) is confirmed by the maintainer
+  (`code-review` Step 1.4), closing what cycle 2 left open.
+- **Rulings this cycle grades under, both the foreman's as gate judge and recorded in `TECH.md`:**
+  (1) a class without the heap-type flag is exempt from the own-`__module__` rule: a class statement or
+  `type()` cannot make one, and the literal rule would refuse every member; the reviewer graded the
+  exemption on its merits (below). (2) The F1 sweep re-ran only `_return_type_violation`'s mutants; the
+  merged report reuses `4b04dad`'s verdicts for every other mutant and refuses any whose id or planted text
+  changed.
+- **Grading caps (the maintainer's, for this effort):** a defect only a capability's own code can reach,
+  acting on purpose, is LOW at most and seeded; a false refusal on a shape no file uses, letting nothing
+  invalid through, is seeded, LOW; a kill counts only when the expected reason is in the failure message.
+
+### Verification run
+
+Evidence lives in the worktree's gitignored `.local/review3/` (`orchestrator/`, `reviewer/`, `fix/`).
+
+- The light gates of P1's chain at `7d288c1`, one at a time (orchestrator, `orchestrator/summary.txt`), all
+  exit 0: `F5-gate.sh` `pins` (1276 passed an era), `cases` (both cases killed with the expected reason in
+  each era, the runner's three controls firing), `sweep-handshake` and `sweep-modern` (14 of 14 killed
+  each); `F1-gate.sh report-return-type` (461 mutants: 116 re-run, 114 killed and 2 equivalent an era; 345
+  read from `4b04dad`, 343 killed and 2 equivalent an era).
+- The profile's full `verify` was not re-run: it ran green on `eca465d`, 2026-11-13, one mode at a time
+  (each era 44, 154, 518 and 4969 passed with 14 skipped; `uv lock --check`; the sandboxed `--help`; 1644 s,
+  `.local/remed2/summary-full.txt`), and `7d288c1` changes only `TECH.md` (`git diff --stat eca465d..7d288c1`).
+- Reviewer, both eras, each exit 0 (`reviewer/baseline_summary.txt`): `tests/test_capabilities.py` 1235
+  passed, `tests/test_startup.py` 108, `tests/test_surface.py` with `tests/test_mutations.py` 1289;
+  `uv lock --check`.
+- Mutation (reviewer, the repo's `mutants.apply` and `run_child`, one child at a time, both eras, identical
+  results; `reviewer/sweep.json`, `sweep_legacy.log`, `sweep_modern.log`): nine mutants of the class branch,
+  every one killed with the expected reason in the rendered failure message: the own-module refusal dropped
+  (25 of 25 targets), static types refused (4 of 4), the own-namespace read replaced by an MRO read (20 of
+  25; the five `type`-metaclass rows are equivalent there, since `type`'s `__module__` read never walks the
+  MRO), the flag bit changed (24 of 24), the flag test inverted (24 of 24), the exact-`str` check made
+  `isinstance` (4 of 4) or dropped (4 of 4), the refusal reworded (25 of 25), the registry cut-back dropped
+  (20 of 20). The repo runner's own two cases: killed in each era (`reviewer/repo_runner.log`).
+- Depth probe (reviewer, `reviewer/probe_depth_test.py`): 100 rows, five metaclasses by ten depth shapes
+  beside two member sets, plus three controls, 103 passed an era, each refused with the exact cause, the
+  distribution and field named, `TOOL_REGISTRY` cut back, no capability code run.
+- Exemption probes (reviewer, `reviewer/exempt_probe.log`, `exempt_probe_wide.log`, `c_heap_probe.log`).
+- Tree clean on hand-back (`git status --porcelain` empty, checked by the orchestrator); the reviewer
+  mutated no ignored build state outside its evidence folder, and restored the one flag it cleared in a probe.
+
+### Cycle 2's finding
+
+- **N1 — closed, both ways.** Refuse: a class with no `__module__` of its own, of each accepted metaclass,
+  is refused naming the distribution and the field beside each member set, at every depth probed, with no
+  capability code run and the registry cut back; through the CLI, refused with stdout empty for each
+  metaclass. Without the rule, `abc`'s, pydantic's and `enum`'s classes ran the base's `__eq__` in the
+  scratch build, and `type`'s and `TypedDict`'s loaded; both are killed. Accept: the members load,
+  `test_served_surface_matches_baseline` and the inert-shapes test pass with no fixture change, and sixteen
+  further library and static return types load beside two member sets in both eras.
+- **The exemption on its merits (ruling 1).** No Python route reaches it: fourteen ways of making a class
+  (class statement, `type()`, `types.new_class`, dataclasses, `namedtuple`, `NamedTuple`, functional
+  `TypedDict` and `Enum`, `pydantic.create_model`, `abc`, `Protocol`, `Generic`) all set the flag. The 217
+  classes in the process that reach it all have metaclass exactly `type`, whose descriptor answers
+  `__module__` from the type's name with an exact `str`. Only native code reaches it: F1 below.
+
+### Requirement → evidence matrix
+
+No R-ID is an artifact deliverable; the blind reviewer graded all seven.
+
+| R-ID | Verified how | Status |
+|------|--------------|--------|
+| R1 | 76 `tool-subclass-*` rows; CLI `tool-subclass-reads-name` on three drives | ✅ |
+| R2 | 296 exact, default, state and changed rows; the 20 no-own-module rows; 100 depth rows (reviewer); CLI `tool-exact-parameters-value` | ✅ |
+| R3 | `test_a_served_capability_runs_none_of_its_code_but_its_handler` (4 rows); the no-own-module CLI test; N1 closed | ✅ |
+| R4 | `test_every_function_tool_field_has_a_rule` and the generic-rule tests (73 rows) | ✅ |
+| R5 | surface baseline passes with no fixture change; members load; inert-shapes rows | ✅ |
+| R6 | rows beside each of four member sets, each asserting the registry cut back (its mutant killed 20 of 20 an era); CLI kinds for R1 and R2 and the no-own-module CLI test | ✅ |
+| R7 | §7 lists the tool-object refusal, says the tool objects are decided and the check holds at load, names the served-copy seed; landed with the check (`5d33747` for this cycle's change) | ✅ |
+
+No spec id in source or tests (reviewer's grep over `reviewer/diff_nonspec.patch`). Unmapped changes: the
+ROADMAP entries and the earlier seeds, deferral bookkeeping. None is scope creep.
+
+### Findings
+
+#### F1 [LOW, seeded under the maintainer's cap] A capability's own native code can reach the static-type exemption
+- **Where:** `packages/cluster-mcp/src/cluster_mcp/core/capabilities.py:410` (the flag test).
+- **Scenario:** a class of `abc`'s metaclass with its `__module__` deleted, a base whose `__module__` is a
+  `str` subclass of the capability's own, and the heap-type flag cleared through `ctypes`. The rule
+  accepts it; FastMCP's `__module__` read resolves along the MRO and runs the capability's `__eq__` and
+  `startswith` in `serve()`.
+- **Evidence:** `reviewer/exempt_probe.py` under `bin/sandbox.sh`, `reviewer/exempt_probe.log` §3 (the flag
+  restored after).
+- **Grade:** a capability's own code acting on purpose, which already runs at import: LOW, seeded, not
+  blocking. Seeded as `issues/capability-return-type-heap-flag.md` with its `ROADMAP.md` entry (`1cb4806`).
+
+#### F2 [LOW, fixed; its false refusal seeded] §7 and the code's comments said "defined in C" where the rule decides by the heap-type flag
+- **Where:** `core/capabilities.py:378` and `:388`; `AGENTS.md` §7's return-type rule.
+- **Scenario:** a C extension's class made with `PyType_FromSpec` is a heap type: it passes when it holds
+  its own `__module__` (`decimal.Decimal`, pydantic-core's classes) and is refused when it holds none (an
+  undotted name), where §7 said a class defined in C "passes". No installed class has that shape, and
+  FastMCP reads `''` for it, so nothing invalid passes.
+- **Evidence:** `reviewer/c_heap_probe.log`, `reviewer/exempt_probe_wide.log`.
+- **Grade:** the text narrows no check (the refusal rule and its rows are stated right), so LOW, not the
+  rubric's gate-degrading drift. **Fixed in `1cb4806`:** §7, the rule's comment and docstring, and the
+  mutation case's comment say "a class without the heap-type flag", and that a heap type with no
+  `__module__` of its own is refused whatever made it. The false refusal is seeded with F1 (same seed).
+- **Also fixed in `1cb4806`** (the reviewer's note, not a finding): the no-own-module CLI test's comment
+  said the start "would have ended with exit 0" had capability code run; for `abc`'s, pydantic's and
+  `enum`'s classes the load's guard catches the exit and refuses with another cause, which the test's
+  cause check kills. The comment now says so.
+- **Gates on `1cb4806`** (orchestrator, `fix/summary.txt`), each exit 0: the hygiene, suite-parts,
+  surface and mutation-anchor tests (1524 passed an era); `F5-gate.sh` `pins` (1276 an era), `cases`,
+  `sweep-handshake` and `sweep-modern` (14 of 14 each); `F1-gate.sh report-return-type` (the same 461
+  verdicts, no mutant refused as changed); `uv lock --check`. The change is comments, docstring and
+  `AGENTS.md` text only, with no fixture touched.
+
+#### Not a finding
+- A capability that rewrites a shared accepted metaclass (a data descriptor on `ABCMeta.__module__`) falls
+  under §7's stated exclusion of classes and modules its code can change at import; not pursued.
+
+### Routing
+
+LOW-only, both under the maintainer's caps: fixed and seeded in this step, as the maintainer's routing for
+this cycle directs, and approved. `review.reviewed_commit` is `1cb4806`, so publish's staleness gate reads
+the text fix and the seed as reviewed.
+
+### Human-gate triggers
+
+- **Triggered in cycles 1 and 2** (F1–F3, N1, CONFIRMED on `core/capabilities.py`, a high-blast-radius
+  path in § Invariants), and the gate holds until publish. The maintainer pre-approved publish for this
+  review (relayed by the foreman, 2026-11-13). No CONFIRMED finding this cycle triggers it anew.
+
+### Optional completeness sub-pass
+
+- Not run this cycle.

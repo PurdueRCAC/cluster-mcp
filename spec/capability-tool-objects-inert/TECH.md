@@ -38,10 +38,10 @@ phases:
   hill: uphill
   verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report-return-type && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
 review:
-  last_reviewed_commit: 697dc8f572f7e7e22b37dbad09ec87ad0eacf6c3
-  verdict: changes-requested
-  blocked_reason: 'N1 (CRITICAL): a return type''s class decided by its own namespace while FastMCP reads __module__ through the MRO; server builds run capability code (R2, R3, §7). Escalated to the maintainer at cycle 2; human gate on core/capabilities.py'
-  cycle: 2
+  last_reviewed_commit: 1cb4806e4883216fafc3a0d98daaf3e5a9435679
+  verdict: approved
+  blocked_reason: ''
+  cycle: 3
 ---
 
 # TECH.md — A capability's registered tool objects run none of its code when they are read
