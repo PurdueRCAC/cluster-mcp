@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/PurdueRCAC/cluster-mcp/blob/main/SECURITY.md#reporting-security-issues
+    about: Never in a public issue. Email rcac-help@purdue.edu, as SECURITY.md describes.

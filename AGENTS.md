@@ -227,6 +227,11 @@ ROADMAP.md         # the ordered index of future cycles — one entry per issue
 
 Where each kind of deferral goes is fixed: § Factory → Where deferred work goes.
 
+Outside feedback arrives as GitHub issues written in the same shape as a seed:
+**`CONTRIBUTING.md`** tells a reporter, or the reporter's agent, what to collect and which headings
+to use, and **`.github/ISSUE_TEMPLATE/`** carries the same headings plus the private route for
+security reports. A clear issue becomes an `issues/{slug}.md` seed and a ROADMAP entry.
+
 ## Architecture & data flow
 
 ```

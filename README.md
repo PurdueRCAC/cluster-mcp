@@ -76,6 +76,13 @@ distribution that carries every capability (`cluster-mcp[slurm,rcac]`) and runs 
 `rcac-mcp` command. Update your MCP client
 configuration to the Quick Start form above.
 
+## Feedback
+
+Found a problem, or want a change? Open a [GitHub issue](https://github.com/PurdueRCAC/cluster-mcp/issues)
+following [CONTRIBUTING.md](CONTRIBUTING.md). If an agent is helping you, point it at that file: it
+says what to collect and how to write the issue so it can be acted on without another round. Report
+security problems privately, as [SECURITY.md](SECURITY.md) says.
+
 ## Development
 
 ```bash
