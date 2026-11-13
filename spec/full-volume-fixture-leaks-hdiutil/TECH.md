@@ -3,11 +3,11 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: blocked
+status: in_progress
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
-current_phase: done
-last_updated: '2026-11-10'
+current_phase: P3
+last_updated: '2026-11-12'
 phases:
 - id: P1
   name: Each hdiutil step runs in its own group under its bound; a hung or failed one is stopped and named
@@ -39,7 +39,7 @@ phases:
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2
 - id: P3
   name: The mutant sweep, the docs, the ledger and the full gate
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -53,7 +53,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/remediation/seed-in-scope.sh sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/remediation/F1-every-test-module-named.sh && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py rows && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py frozen-modern && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F2-fixture-sweep.py new-modern-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
+  verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/remediation/seed-in-scope.sh sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/remediation/F1-every-test-module-named.sh && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py rows && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py frozen-legacy && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py frozen-modern && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-modern-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-modern-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
 review:
   last_reviewed_commit: 660b64b8e5bbef20acc54b3232e5d21b95bd2310
   verdict: changes-requested
@@ -280,6 +280,78 @@ Cycle-specific, every phase:
     13.7 s and 13.5 s, then 17.9 s and 18.1 s, about 4.5 s more per era (the part's 163 s and 174 s
     above, under 3%). No figure changes.
 
+- **2026-11-12, review cycle 2 remediation (F3, F4, F5 and the seed), P3 reopened.** `REVIEW.md`
+  cycle 2 routed one MEDIUM and two LOW findings to build, with the maintainer's ruling on the
+  cleanup under an interrupt (the foreman's routing: the cleanup runs at today's per-step bounds, no
+  new timing figure; a second interrupt abandons it, and the report names what is left). P3 is
+  reopened alone (`set_phase.py --phase P3 --phase-status in_progress --current P3`), for review
+  cycle 1's reason. No figure changes.
+  - **F3, the fix.** `_step` handles a wait that any exception cuts short (`except BaseException`
+    after the bound's arm): `_cut_short` stops the step's group as `_stop` does, notes on the
+    exception that it was stopped and anything still running, and the exception goes on as itself.
+    A cut `create` or `attach` (now `_create_and_attach`) gets the cleanup a failed one gets, each
+    step at its own bound (`_clean_up_after`), what it leaves noted on the exception; the detach
+    after the body moved into `_in_use`, whose cut is noted by `attached_image` with the volume and
+    image it keeps, never tried again. A second exception during the stop or the cleanup abandons
+    it and goes on in the first one's place, with the first as its context (Python's own chaining;
+    the first is never swallowed into a pass or a `HostFailure`), naming what is left: the image if
+    it is there and any device made from it, or that there is none. Every text the frozen sweep and
+    F2's cases plant on is kept, so both plant unchanged. Shown with the stand-in only: the step,
+    in a session of its own, gets no signal; how real `hdiutil` takes SIGINT is not claimed.
+  - **F3, the rows.** `test_a_disk_image_step_cut_short_is_stopped_and_its_exception_goes_on`
+    raises each `BODY_EXITS` kind from the test's own SIGINT handler (SIGINT to the main thread
+    only, once the stand-in has reached its hang) at nine places: `create` (with and without a
+    device), `attach`, the `detach` after the body (and after a failed body), and, after a first
+    cut, a failed cleanup `detach`, and a second interrupt at the cleanup's `info` (with and without
+    an image) and its `detach`. The suite runs each kind where the whole cleanup follows and an
+    interrupt everywhere (19 rows); `CLUSTER_MCP_TEST_EVERY_KIND=1`, which the suite never sets,
+    runs every kind at every place (99 rows), and the checker sets it and asserts it collected
+    them. `test_a_disk_image_step_cut_short_still_running_is_named` pins the survivors' naming on
+    the cut path, and `test_a_disk_image_step_whose_stop_is_cut_short_names_its_group` a second
+    interrupt inside the stop (CONT, so the 5 s wait lasts; fired 1 s after the first, past the
+    0.25 s `communicate` itself waits on an interrupt). The row checks are shared (`_what_is_left`).
+  - **F4:** `BODY_EXITS` gains `fill`, an `OSError` (ENOSPC) as the fill's write raises, with its two
+    rows; `test_every_way_a_body_can_end_has_its_rows` asks for an assertion and an `OSError`, and
+    for a cut row per kind and an interrupt's row per place. B12 (`narrow-past-fill`) is killed.
+  - **F5:** `_clean_up` names the image only when it is there after a failed or garbled `info`
+    ("there is no image at …"), and still keeps and names one that is; the abandoned cleanup uses
+    the same rule. Rows `info-fails-without-image`, `info-answers-garbled-without-image`.
+  - **The sweep.** `remediation/F3-F5-fixture-sweep.py` supersedes `F2-fixture-sweep.py` (kept as
+    the record: its `coverage` reads the fixture as it was, so it is red now, and every F2 mode runs
+    it first). It takes F2's 123 cases (nine re-aimed, below) and the frozen 40, adds 118 (34
+    decisions; the 7 body families for `fill`; 7 cut families × 11 kinds), and checks that every
+    one of 99 decision lines in 11 functions is changed by a case. It reads a row's `why` in the
+    failure's message alone: F2 and the frozen runner match it in the message plus the traceback,
+    which prints the failing test's source, so any failure of that test matched (seen first on
+    `ps-pgid-not-read`, killed by "is not named", not the "does not say" it named). Under that rule
+    eight F2 cases name the words their rows fail with (each still killed, by the decision it
+    plants), and `step-hang-uncaught` names no `HostFailure` (the cut path now stops the step).
+    Survivors: F2's 12 as before (11 seeded, 1 equivalent), and one new, equivalent:
+    `detach-cut-named-on-failure` (a failed detach's `HostFailure` already carries the line, so the
+    report repeats a true line). No new seeded survivor.
+  - **P3's `verify:`** is retuned through `set_phase.py --verify-file` (read back byte-identical):
+    F2's modes give way to the checker's `rows`, `frozen-legacy`, `frozen-modern`, `prior-*` and
+    `new-*`; the frozen gate (`p3.sh sweep-a`, `sweep-b`) and `pre` under both wrappers stay.
+  - **The seed:** H01/H02 joins `issues/disk-image-fixture-deeper-pins.md` as item 12 with a draft
+    R6, and its `ROADMAP.md` entry's count; committed apart.
+  - **The runs** (build host, macOS 27, `UV_PYTHON=3.14`, load 2.1 to 7.4): light gates on the final tree: `pre`
+    under both wrappers ok (55 s); F1 ok (46 modules); the checker's `rows` 144 ids per era with the
+    opt-in (99 cut rows), none skipped (130 s); 64 disk-image ids in the suite. The sweep, every mode
+    on the final fixture and tests: `new-legacy-a` and `new-modern-a` 67 of 67 killed (2.8 min
+    each); `new-legacy-b` and `new-modern-b` 51 each, 50 killed and the 1 equivalent survived as
+    expected (4.1 and 4.2 min); `prior-legacy-a` and `prior-modern-a` 53 each, 41 killed, 11 seeded
+    and 1 equivalent survived as expected (8.7 and 8.8 min); `prior-legacy-b` and `prior-modern-b` 70
+    of 70 (2.5 min each); `frozen-legacy` and `frozen-modern` 40 of 40 (5.4 min each); the frozen gate
+    `p3.sh sweep-a` 19 of 19 (4.2 min) and `sweep-b` 21 of 21 (1.4 min). No unviable case, no timeout,
+    no process left; `hdiutil info` names no image of the rows. Red on the way, each fixed in the run
+    and rerun from the start of its mode: `prior-legacy-a` and `prior-modern-a` (the re-aims above),
+    `new-legacy-b` (`made-failure-dropped`, its own `why` matched only in the source, re-aimed to its
+    message). Not run here: `p3.sh full`, the foreman's.
+  - **Suite cost:** 25 more tests in the `-k 'not silent'` part (193 to 218 per era). The disk-image
+    tests, base (HEAD's tests) and branch back to back, twice per era, load about 2.5: 18.0 s and
+    30.4 s each time, about 12.4 s more per era (the part's 163 s and 174 s above, about 7%). Most is
+    the cut rows: each interrupt also waits out `communicate`'s own 0.25 s. No figure changes.
+
 ---
 
 ## Phase P1 — Each hdiutil step runs in its own group under its bound; a hung or failed one is stopped and named
@@ -383,6 +455,19 @@ by a row; the docs say what the fixture does; the full gate is green.
 - [x] Review cycle 1, the seeds: the review's six coverage observations and the sweep's other
       survivors as one seed, `issues/disk-image-fixture-deeper-pins.md`, with its `ROADMAP.md` Part I
       entry and the counts it moves; committed apart (Amendments).
+- [x] Review cycle 2, F3 (Amendments): `_step` stops a wait any exception cuts short and the
+      exception goes on as itself (`_cut_short`); a cut `create` or `attach` is cleaned up at the
+      per-step bounds (`_clean_up_after`); a cut `detach` (`_in_use`) is named, never retried; a
+      second interrupt abandons the stop or cleanup and names what is left. The cut rows (every kind,
+      every place with the opt-in), and the two cut survivor tests.
+- [x] Review cycle 2, F4 (Amendments): the `fill` body exit (an `OSError`) and its rows; the unit
+      test asks for it and for a cut row per kind and place.
+- [x] Review cycle 2, F5 (Amendments): after a failed or garbled cleanup `info`, the image is named
+      only when it is there; its two rows.
+- [x] Review cycle 2, the sweep: `remediation/F3-F5-fixture-sweep.py` (supersedes F2's), its modes
+      in P3's `verify:`; `AGENTS.md` and the module docstring describe the cut path and rows.
+- [x] Review cycle 2, the seed: H01/H02 as item 12 of `issues/disk-image-fixture-deeper-pins.md`,
+      its `ROADMAP.md` entry's count; committed apart (Amendments).
 - **Verify:** `sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh all` (about 40 min: run it in
   the background): `pre` (`rows.sh all`, the docs name both tests, the change stays in
   `tests/test_ssh_exec.py`, `tests/hdiutil_standin.py`, `AGENTS.md` and `spec/…`, graded from the

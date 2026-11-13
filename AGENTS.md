@@ -1160,9 +1160,15 @@ import has no effect.
     that hangs or fails is KILLed with everything it started, waited on for 5 s, and named with how
     it ended (the bound, or its exit status and the tail of its standard error) and anything still
     running. A failed `create` or `attach` detaches every device `hdiutil info` lists for the image
-    and removes it; a failed `detach` is never retried, and keeps the volume and the image and names
-    both, after the test's own failure when the test failed first, however it failed. A stand-in
-    for `hdiutil` pins this on every platform with no disk image: `tests/hdiutil_standin.py` (a
+    and removes it (when `info` cannot list them, it names the image only if the image is there); a
+    failed `detach` is never retried, and keeps the volume and the image and names both, after the
+    test's own failure when the test failed first, however it failed. A step's wait cut short by an
+    exception raised in the test's process (Ctrl-C's `KeyboardInterrupt`, which the step, in a
+    session of its own, never receives) stops the step as a hang is stopped, and the exception goes
+    on as itself: a cut `create` or `attach` is cleaned up as a failed one is, each step at its 120 s
+    bound, and a cut `detach` is not tried again and names the volume and the image. A second
+    interrupt during that stop or cleanup abandons it and goes on with the first as its context,
+    naming what is left. A stand-in for `hdiutil` pins this on every platform with no disk image: `tests/hdiutil_standin.py` (a
     helper, not collected), run as `python -I hdiutil_standin.py STATE VERB ARGS…` only through
     `bin/sandbox.sh` (it exits 2 otherwise). It keeps what `hdiutil` would make in the directory
     `STATE`: `plan.json` maps each verb to one plan per call (write the image, record a device, fork
@@ -1171,14 +1177,22 @@ import has no effect.
     `hdiutil` does and `detach` takes by whole device or mount point, and every process it runs
     appends `PID KIND VERB END` to `pids` (one that hangs outlives TERM and records it). The rows
     (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running[…]`) end every step every
-    way, and end the test's body every way it can end by raising (an assertion, each pytest
-    outcome, an interrupt, an exit, any other `BaseException`), each with a `detach` that succeeds
+    way, and end the test's body every way it can end by raising (an assertion, the fill's own
+    `OSError`, each pytest outcome, an interrupt, an exit, any other `BaseException`), each with a `detach` that succeeds
     and one that fails; pytest's skip and xfail outcomes are raised there as their exception types
     and caught with the rest, so no row skips. `test_every_way_a_body_can_end_has_its_rows`
     (`unit`) holds that list against Python's and pytest's classes.
     `test_a_stopped_step_still_running_is_named` pins how a survivor is named, and
     `test_the_disk_image_figures` (`unit`) the figures: 120 s per step, KILL, a 5 s wait, a 1 s bound
-    for a hanging stand-in. A staged file
+    for a hanging stand-in. Each of those ways also cuts a step's wait short
+    (`test_a_disk_image_step_cut_short_is_stopped_and_its_exception_goes_on[…]`), raised from the
+    test's own SIGINT handler once the stand-in hangs: each where the whole cleanup follows, and an
+    interrupt at every other place (`create`, `attach`, the `detach` after the body, the cleanup's
+    `info` and `detach` under a second interrupt); `CLUSTER_MCP_TEST_EVERY_KIND=1` cuts every place
+    every way, and the suite never sets it.
+    `test_a_disk_image_step_cut_short_still_running_is_named` and
+    `test_a_disk_image_step_whose_stop_is_cut_short_names_its_group` pin how a cut step's survivors,
+    and a stop the second interrupt cut short, are named. A staged file
     that falls short with no error, changes on its way to disk, or whose close fails is never
     placed (`test_a_staged_file_that_is_not_what_was_sent_is_never_placed[short|changed|close-fails]`),
     and `ssh.cksum` matches POSIX `cksum` and the host's. A connection lost after the command ran,

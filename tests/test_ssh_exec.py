@@ -73,11 +73,16 @@ verdict are never cut.
 
 The macOS full-volume rows attach a disk image with `hdiutil`, each step under a bound, in a process
 group of its own: a step that hangs or fails is KILLed with what it started and named, and a failed
-`create` or `attach` is cleaned up, while a failed `detach` keeps and names what it left. A stand-in
-for `hdiutil` (`hdiutil_standin.py`, through `bin/sandbox.sh`) pins every way a step can end, on
-every platform, with no disk image (`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running`),
-and every way the test's body can end inside it: an assertion, each pytest outcome, an interrupt or
-an exit, any `BaseException` (`test_every_way_a_body_can_end_has_its_rows`).
+`create` or `attach` is cleaned up, while a failed `detach` keeps and names what it left. A wait
+cut short by an exception in the test's process (an interrupt, which the step in its own session
+never receives) stops the step all the same, and the exception goes on as itself, after the cleanup
+a failed `create` or `attach` gets, or naming what a cut `detach` left; a second interrupt abandons
+that cleanup, naming what is left. A stand-in for `hdiutil` (`hdiutil_standin.py`, through
+`bin/sandbox.sh`) pins every way a step can end, on every platform, with no disk image
+(`test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running`), every way the test's body can
+end inside it: an assertion, the fill's own `OSError`, each pytest outcome, an interrupt or an exit,
+any `BaseException` (`test_every_way_a_body_can_end_has_its_rows`), and each of those cutting a
+step's wait short (`test_a_disk_image_step_cut_short_is_stopped_and_its_exception_goes_on`).
 """
 
 from __future__ import annotations
@@ -849,18 +854,37 @@ def _stop(proc: subprocess.Popen[bytes]) -> str:
     return f'; still running {STOP_WAIT} s after it was stopped: ' + ', '.join(f'pid {pid} ({command})' for pid, command in left)
 
 
+def _cut_short(cut: BaseException, verb: str, proc: subprocess.Popen[bytes]) -> None:
+    """After a step's wait was ended by `cut`, an exception raised in this process (as an interrupt's
+    handler raises one): stop the step and everything it started as `_stop` does, and note on `cut`
+    that it was stopped and anything still running. An exception during the stop (a second
+    interrupt) abandons its wait and goes on in place of `cut`, naming the group that may still run."""
+    try:
+        running = _stop(proc)
+    except BaseException as again:
+        again.add_note(f'{verb}: cut short by {type(cut).__name__}, then its stop by {type(again).__name__}: '
+                       f'process group {proc.pid} may still be running')
+        raise
+    cut.add_note(f'{verb}: cut short by {type(cut).__name__} and stopped' + running)
+
+
 def _step(hdiutil: tuple[str, ...], verb: str, bound: float, *args: str) -> tuple[str | None, bytes]:
     """Run one `hdiutil` verb as the leader of a process group of its own, up to `bound` seconds.
 
     It returns (None, its output) when it succeeded. A step that runs past its bound, or exits
     with a failure, is stopped with everything it started, and the failure text names the verb and
-    how it ended (the bound, or the exit status and the tail of its standard error).
+    how it ended (the bound, or the exit status and the tail of its standard error). A wait that an
+    exception raised in this process cuts short (an interrupt, which the step, in a session of its
+    own, never receives) stops the step all the same, and the exception goes on as itself.
     """
     proc = REAL_POPEN([*hdiutil, verb, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
         out, err = proc.communicate(timeout=bound)
     except subprocess.TimeoutExpired:
         return f'{verb}: ran past its bound of {bound} s and was stopped' + _stop(proc), b''
+    except BaseException as cut:
+        _cut_short(cut, verb, proc)
+        raise
     if proc.returncode != 0:
         left = _stop(proc)
         return f'{verb}: exited with status {proc.returncode}: {err.decode(errors="replace")[-400:].strip()}' + left, out
@@ -868,13 +892,13 @@ def _step(hdiutil: tuple[str, ...], verb: str, bound: float, *args: str) -> tupl
 
 
 def _clean_up(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path) -> list[str]:
-    """After a `create` or `attach` that failed or hung: detach every device backed by `image`, then
-    remove it. It returns what is left to report, in order: nothing when all went.
+    """After a `create` or `attach` that failed, hung or was cut short: detach every device backed by
+    `image`, then remove it. It returns what is left to report, in order: nothing when all went.
 
     The devices are the ones `hdiutil info` lists for the image (by real path; `hdiutil` reports the
     path as it was handed over), each detached by its whole disk. When `info` fails or answers with
-    no listing, nothing is removed. When a detach fails, there is no further attempt: the device
-    and the image are kept and named.
+    no listing, nothing is removed, and the image is named only if it is there. When a detach fails,
+    there is no further attempt: the device and the image are kept and named.
     """
     failure, out = _step(hdiutil, 'info', bound['info'], '-plist')
     listing: Any = None
@@ -886,6 +910,8 @@ def _clean_up(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path) ->
         else:
             if not isinstance(listing, dict):
                 failure = f'info: answered with no listing ({type(listing).__name__})'
+    if failure is not None and not image.exists():
+        return [failure, f'there is no image at {image}']
     if failure is not None:
         return [failure, f'the image is kept at {image}, and any device made from it stays attached']
     for entry in listing.get('images', []):
@@ -905,28 +931,41 @@ def _clean_up(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path) ->
     return []
 
 
-@contextlib.contextmanager
-def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
-                   bounds: dict[str, float] | None = None) -> Iterator[Path]:
-    """A 4 MB HFS+ image beside `where`, attached at `where` (macOS); detached and removed afterwards.
+def _clean_up_after(cut: BaseException, hdiutil: tuple[str, ...], bound: dict[str, float], image: Path) -> None:
+    """After a `create` or `attach` that `cut` cut short: the cleanup a failed one gets, each step at
+    its own bound, and what it leaves noted on `cut`. An exception during the cleanup (a second
+    interrupt) abandons it and goes on in place of `cut`, noting what is left: the image if it is
+    there, and any device made from it, or that there is none."""
+    try:
+        left = _clean_up(hdiutil, bound, image)
+    except BaseException as again:
+        again.add_note('the cleanup was abandoned')
+        again.add_note(f'the image is kept at {image}, and any device made from it stays attached' if image.exists()
+                       else f'there is no image at {image}')
+        raise
+    for line in left:
+        cut.add_note(line)
 
-    `hdiutil` is the argv that runs the tool (a stand-in's, in the rows that pin this). Every step
-    runs through `_step`. A `create` or `attach` that fails or hangs raises `HostFailure` naming it,
-    then what `_clean_up` left. After the body the volume is detached, once: a detach that fails
-    raises its failure and names the volume and the image it keeps (caused by the body's exception,
-    when the body raised), and one that succeeds removes the image, then raises an exception from the
-    body unchanged.
-    """
-    bound = _bounds(bounds)
-    image = where.parent / f'{where.name}.dmg'
+
+def _create_and_attach(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path, where: Path) -> str | None:
+    """Create `image` and attach it at `where`: None, or the failure of the step that failed."""
     failure, _ = _step(hdiutil, 'create', bound['create'], '-size', '4m', '-fs', 'HFS+', '-volname', 'cluster-mcp-full',
                        str(image))
     if failure is None:
         where.mkdir()
         failure, _ = _step(hdiutil, 'attach', bound['attach'], '-nobrowse', '-noautoopen', '-mountpoint', str(where),
                            str(image))
-    if failure is not None:
-        raise HostFailure('\n'.join([failure, *_clean_up(hdiutil, bound, image)]))
+    return failure
+
+
+@contextlib.contextmanager
+def _in_use(hdiutil: tuple[str, ...], bound: dict[str, float], image: Path, where: Path) -> Iterator[Path]:
+    """The volume attached at `where`, for the body; then detached once, and its image removed.
+
+    A detach that fails raises its failure and names the volume and the image it keeps (caused by
+    the body's exception, when the body raised); one that succeeds removes the image, then raises an
+    exception from the body unchanged.
+    """
     left = f'the volume stays attached at {where}, and its image is kept at {image}'
     try:
         yield where
@@ -940,6 +979,37 @@ def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
     if failure is not None:
         raise HostFailure(f'{failure}\n{left}')
     image.unlink()
+
+
+@contextlib.contextmanager
+def attached_image(where: Path, hdiutil: tuple[str, ...] = ('hdiutil',),
+                   bounds: dict[str, float] | None = None) -> Iterator[Path]:
+    """A 4 MB HFS+ image beside `where`, attached at `where` (macOS); detached and removed afterwards.
+
+    `hdiutil` is the argv that runs the tool (a stand-in's, in the rows that pin this). Every step
+    runs through `_step`. A `create` or `attach` that fails or hangs raises `HostFailure` naming it,
+    then what `_clean_up` left; one cut short by an exception (an interrupt) is cleaned up the same
+    way, and the exception goes on as itself, noting what is left (`_clean_up_after`). After the
+    body the volume is detached once (`_in_use`); a detach cut short is not tried again, and the
+    exception goes on as itself, noting the volume and the image it keeps.
+    """
+    bound = _bounds(bounds)
+    image = where.parent / f'{where.name}.dmg'
+    try:
+        failure = _create_and_attach(hdiutil, bound, image, where)
+    except BaseException as cut:
+        _clean_up_after(cut, hdiutil, bound, image)
+        raise
+    if failure is not None:
+        raise HostFailure('\n'.join([failure, *_clean_up(hdiutil, bound, image)]))
+    try:
+        with _in_use(hdiutil, bound, image, where) as at:
+            yield at
+    except BaseException as cut:
+        # Out of `_in_use` with its image still there and no `HostFailure`: a detach was cut short.
+        if image.exists() and not isinstance(cut, HostFailure):
+            cut.add_note(f'the volume stays attached at {where}, and its image is kept at {image}')
+        raise
 
 
 @contextlib.contextmanager
@@ -1047,18 +1117,24 @@ def _raises(kind: type[BaseException]) -> Callable[[str], NoReturn]:
     return end
 
 
+def _fill_fails(text: str) -> NoReturn:
+    """A body's end as the fill's own failure: its write runs out of room."""
+    raise OSError(errno.ENOSPC, text)
+
+
 def _interrupted_group(text: str) -> NoReturn:
     """A body's end that raises a group holding an interrupt (so no `ExceptionGroup`)."""
     raise BaseExceptionGroup(text, [KeyboardInterrupt()])
 
 
-# Every way a test body can end the fixture's `with` by raising: an assertion, each of pytest's
-# outcomes, each other class Python puts directly under `BaseException`, and a class none of these
-# names. Each takes the text it raises with. pytest's skip and xfail outcomes are raised as their
+# Every way a test body can end the fixture's `with` by raising: an assertion, the fill's own
+# failure (an `OSError` from its write), each of pytest's outcomes, each other class Python puts
+# directly under `BaseException`, and a class none of these names. Each takes the text it raises with. pytest's skip and xfail outcomes are raised as their
 # exception types, only inside a row's body, and `_drive_image` catches whatever that body raises:
 # no test skips or is marked xfail by them.
 BODY_EXITS: dict[str, Callable[[str], NoReturn]] = {
     'assertion': _raises(AssertionError),
+    'fill': _fill_fails,
     'pytest-fail': pytest.fail,
     'pytest-skip': _raises(pytest.skip.Exception),
     'pytest-xfail': _raises(pytest.xfail.Exception),
@@ -1112,6 +1188,13 @@ DISK_IMAGE_ROWS = {
     'info-answers-garbled': ({'attach': [{**FAILS, 'device': True}], 'info': [{'garbled': True}]}, None, 1, True,
                              'failure', ['attach: exited with status 1: ', 'info: answered with no listing (',
                                          'the image is kept at {image}, and any device made from it stays attached']),
+    # A cleanup that cannot list devices names the image only when it is there.
+    'info-fails-without-image': ({'create': [FAILS], 'info': [FAILS]}, None, 0, False, 'failure',
+                                 ['create: exited with status 1: ', 'info: exited with status 1: ', f'info {STANDIN_FAILURE}',
+                                  'there is no image at {image}']),
+    'info-answers-garbled-without-image': ({'create': [FAILS], 'info': [{'garbled': True}]}, None, 0, False, 'failure',
+                                           ['create: exited with status 1: ', 'info: answered with no listing (',
+                                            'there is no image at {image}']),
 }
 # However else the body ends: the image is gone and the body's own exception raised, or, when the
 # detach fails, both failures reported, the body's first.
@@ -1156,14 +1239,97 @@ def _kill_recorded(state: Path) -> None:
             os.kill(pid, signal.SIGKILL)
 
 
-def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]],
-                 body_ends: str | None) -> tuple[BaseException | None, BaseException | None, list[str]]:
+# What a cleanup a second interrupt abandoned notes, then what is left when the image is there.
+ABANDONED = 'the cleanup was abandoned'
+KEPT_IMAGE = 'the image is kept at {image}, and any device made from it stays attached'
+# A step's wait cut short, at each place a wait can be cut: (each verb's plans, how the body ends,
+# the verbs whose hang is cut short, in order (the first by the row's kind, each later one by an
+# interrupt: a second Ctrl-C), the row's own devices left, whether the image is left, the texts the
+# report carries, in order, `{kind}` the first cut's class).
+CUT_SITES = {
+    'create': ({'create': [HANGS]}, None, ['create'], 0, False, ['create: cut short by {kind} and stopped']),
+    'create-with-device': ({'create': [{**HANGS, 'image': True, 'device': True}]}, None, ['create'], 0, False,
+                           ['create: cut short by {kind} and stopped']),
+    'attach-with-device': ({'attach': [{**HANGS, 'device': True}]}, None, ['attach'], 0, False,
+                           ['attach: cut short by {kind} and stopped']),
+    'detach': ({'detach': [HANGS]}, None, ['detach'], 1, True, ['detach: cut short by {kind} and stopped', STAYS]),
+    'detach-after-the-body-failed': ({'detach': [HANGS]}, 'assertion', ['detach'], 1, True,
+                                     [BODY_FAILURE, 'detach: cut short by {kind} and stopped', STAYS]),
+    'then-cleanup-detach-fails': ({'attach': [{**HANGS, 'device': True}], 'detach': [FAILS]}, None, ['attach'], 1, True,
+                                  ['attach: cut short by {kind} and stopped', 'detach: exited with status 1: ',
+                                   f'detach {STANDIN_FAILURE}', KEPT_DEVICE]),
+    'then-cleanup-info': ({'attach': [{**HANGS, 'device': True}], 'info': [HANGS]}, None, ['attach', 'info'], 1, True,
+                          ['attach: cut short by {kind} and stopped', 'info: cut short by KeyboardInterrupt and stopped',
+                           ABANDONED, KEPT_IMAGE]),
+    'then-cleanup-info-without-image': ({'create': [HANGS], 'info': [HANGS]}, None, ['create', 'info'], 0, False,
+                                        ['create: cut short by {kind} and stopped',
+                                         'info: cut short by KeyboardInterrupt and stopped', ABANDONED,
+                                         'there is no image at {image}']),
+    'then-cleanup-detach': ({'attach': [{**HANGS, 'device': True}], 'detach': [HANGS]}, None, ['attach', 'detach'], 1, True,
+                            ['attach: cut short by {kind} and stopped', 'detach: cut short by KeyboardInterrupt and stopped',
+                             ABANDONED, KEPT_IMAGE]),
+}
+# The site every kind cuts short in the suite (its stop and the whole cleanup run); every other site is
+# cut by an interrupt. With `CLUSTER_MCP_TEST_EVERY_KIND=1`, every kind at every site.
+EVERY_CUT = os.environ.get('CLUSTER_MCP_TEST_EVERY_KIND') == '1'
+CUT_ROWS = {f'{site}-{kind}': (site, kind) for site in CUT_SITES for kind in BODY_EXITS
+            if EVERY_CUT or site == 'attach-with-device' or kind == 'keyboard-interrupt'}
+
+
+@contextlib.contextmanager
+def _cutting(state: Path, verbs: list[str], kind: str) -> Iterator[list[BaseException]]:
+    """While open, cut short this process's wait on each of `verbs`' planned hangs in turn, once the
+    stand-in has reached it (`stop`: 1 s after the cut before it, inside a stop's wait): SIGINT to
+    this process's main thread only, whose handler raises `kind` (a `BODY_EXITS` kind) the first time
+    and `KeyboardInterrupt` after (a second Ctrl-C), as Python's own raises an interrupt. Yields what
+    was raised, in order. The steps, in sessions of their own, get no signal."""
+    planted: list[BaseException] = []
+    ends = [BODY_EXITS[kind], *[_raises(KeyboardInterrupt)] * (len(verbs) - 1)]
+
+    def handler(signum: int, frame: Any) -> None:
+        try:
+            ends[len(planted)](f'a cut of {verbs[len(planted)]}')
+        except BaseException as exc:
+            planted.append(exc)
+            raise
+
+    done = threading.Event()
+
+    def watch() -> None:
+        for n, verb in enumerate(verbs):
+            want = verbs[:n + 1].count(verb)
+            while _hangs_recorded(state, verb) < want if verb != 'stop' else len(planted) < n:
+                if done.wait(0.01):
+                    return
+            if verb == 'stop' and done.wait(1):
+                return
+            signal.pthread_kill(threading.main_thread().ident or 0, signal.SIGINT)
+            while len(planted) <= n:
+                if done.wait(0.01):
+                    return
+
+    previous = signal.signal(signal.SIGINT, handler)
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        yield planted
+    finally:
+        done.set()
+        watcher.join()
+        signal.signal(signal.SIGINT, previous)
+
+
+def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]], body_ends: str | None,
+                 planted: list[BaseException] | None = None,
+                 cut: tuple[str, ...] = ()) -> tuple[BaseException | None, BaseException | None, list[str]]:
     """Run `attached_image` against the stand-in, its body ending as `body_ends` names (a
     `BODY_EXITS` kind) or returning: (what it raised, what the body raised, the mount points the
-    body saw). An interrupt the body did not raise is raised on, so a real one still stops the run."""
+    body saw). A verb in `cut` waits out its hang (`_cutting` cuts it short) rather than meet the short
+    bound. An interrupt neither the body nor `planted` raised is raised on, so a real one still
+    stops the run."""
     hdiutil = (str(SANDBOX), sys.executable, '-I', str(HDIUTIL_STANDIN), str(state))
-    bounds = {verb: SHORT_BOUND if any(p.get('end') == 'hang' for p in plan.get(verb, [])) else EASY_BOUND
-              for verb in HDIUTIL_VERBS}
+    bounds = {verb: SHORT_BOUND if verb not in cut and any(p.get('end') == 'hang' for p in plan.get(verb, []))
+              else EASY_BOUND for verb in HDIUTIL_VERBS}
     body: BaseException | None = None
     seen: list[str] = []
     try:
@@ -1176,10 +1342,15 @@ def _drive_image(state: Path, where: Path, plan: dict[str, list[dict[str, Any]]]
                     body = exc
                     raise
     except BaseException as exc:
-        if isinstance(exc, KeyboardInterrupt) and exc is not body:
+        if isinstance(exc, KeyboardInterrupt) and exc is not body and not any(exc is p for p in planted or []):
             raise
         return exc, body, seen
     return None, body, seen
+
+
+def _hangs_recorded(state: Path, verb: str) -> int:
+    """How many of `verb`'s hangs the stand-in has reached (a hang's child is recorded)."""
+    return [line.split()[1:] for line in (state / 'pids').read_text().splitlines()].count(['child', verb, 'hang'])
 
 
 def _hangs_reached(state: Path, plan: dict[str, list[dict[str, Any]]]) -> list[str]:
@@ -1187,6 +1358,52 @@ def _hangs_reached(state: Path, plan: dict[str, list[dict[str, Any]]]) -> list[s
     recorded = [line.split()[1:] for line in (state / 'pids').read_text().splitlines()]
     return [verb for verb, plans in plan.items()
             if recorded.count(['child', verb, 'hang']) != sum(1 for p in plans if p.get('end') == 'hang')]
+
+
+def _what_is_left(state: Path, plan: dict[str, list[dict[str, Any]]], where: Path, devices_left: int, image_left: bool,
+                  took: float, seen: list[str], report: str, says: list[str]) -> list[str]:
+    """A row's checks of what the fixture left and what its report says, whatever it raised: no
+    stand-in process left, each planned hang reached, the row's own devices and image as expected, the
+    foreign device untouched, no TERM, within the row's limit, the body run only when its steps
+    succeeded, the texts in order, and no survivor, kept image or attached device named that is not."""
+    violations = []
+    if _left_running(state):
+        violations.append(f'still running after the fixture: {_left_running(state)!r}')
+    unreached = _hangs_reached(state, plan)
+    if unreached:
+        violations.append(f'the stand-in did not reach its planned hang of {unreached} within {SHORT_BOUND} s '
+                          f'(a host too loaded to start it?)')
+    listed = _standin_devices(state)
+    own = [d for d in listed if d['dev-entry'] != FOREIGN]
+    if len(own) != devices_left:
+        violations.append(f'{len(own)} of its own devices left attached, not {devices_left}: {own!r}')
+    if not any(d['dev-entry'] == FOREIGN for d in listed):
+        violations.append(f'the device {FOREIGN} it did not make was detached')
+    image = where.parent / f'{where.name}.dmg'
+    if image.exists() != image_left:
+        violations.append(f'the image {"was left" if image.exists() else "is gone"}: {image}')
+    terms = [line for line in (state / 'pids').read_text().splitlines() if line.startswith('term ')]
+    if terms:
+        violations.append(f'a stand-in process was sent TERM: {terms!r}')
+    if took >= ROW_LIMIT:
+        violations.append(f'the row took {took:.1f} s, past its limit of {ROW_LIMIT} s')
+    body_runs = not any(p.get('end') in ('fail', 'hang') for verb in ('create', 'attach') for p in plan.get(verb, [])[:1])
+    if bool(seen) != body_runs:
+        violations.append(f'the body ran with a device at {where}: {bool(seen)}; it should have: {body_runs}')
+    at = 0
+    for text in says:
+        found = report.find(text, at)
+        if found < 0:
+            violations.append(f'the report does not carry {text!r} (in order, after offset {at}): {report}')
+            break
+        at = found + len(text)
+    if 'still running' in report:
+        violations.append(f'the report names a survivor where none was left: {report}')
+    if not image_left and 'is kept at' in report:
+        violations.append(f'the report names an image kept where none was: {report}')
+    if not devices_left and 'stays attached' in report:
+        violations.append(f'the report names a device attached where none was: {report}')
+    return violations
 
 
 @pytest.mark.integration
@@ -1213,30 +1430,8 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
         started = time.monotonic()
         raised, body, seen = _drive_image(state, where, plan, body_ends)
         took = time.monotonic() - started
-        violations = []
-        if _left_running(state):
-            violations.append(f'still running after the fixture: {_left_running(state)!r}')
-        unreached = _hangs_reached(state, plan)
-        if unreached:
-            violations.append(f'the stand-in did not reach its planned hang of {unreached} within {SHORT_BOUND} s '
-                              f'(a host too loaded to start it?)')
-        listed = _standin_devices(state)
-        own = [d for d in listed if d['dev-entry'] != FOREIGN]
-        if len(own) != devices_left:
-            violations.append(f'{len(own)} of its own devices left attached, not {devices_left}: {own!r}')
-        if not any(d['dev-entry'] == FOREIGN for d in listed):
-            violations.append(f'the device {FOREIGN} it did not make was detached')
-        if image.exists() != image_left:
-            violations.append(f'the image {"was left" if image.exists() else "is gone"}: {image}')
-        terms = [line for line in (state / 'pids').read_text().splitlines() if line.startswith('term ')]
-        if terms:
-            violations.append(f'a stand-in process was sent TERM: {terms!r}')
-        if took >= ROW_LIMIT:
-            violations.append(f'the row took {took:.1f} s, past its limit of {ROW_LIMIT} s')
-        body_runs = not any(p.get('end') in ('fail', 'hang') for verb in ('create', 'attach') for p in plan.get(verb, [])[:1])
-        if bool(seen) != body_runs:
-            violations.append(f'the body ran with a device at {where}: {bool(seen)}; it should have: {body_runs}')
         report = ''.join(traceback.format_exception(raised)) if raised is not None else ''
+        violations = _what_is_left(state, plan, where, devices_left, image_left, took, seen, report, says)
         if outcome is None and raised is not None:
             violations.append(f'raised although every step succeeded: {report}')
         elif outcome == 'body' and (raised is not body or raised.__cause__ is not None):
@@ -1245,19 +1440,47 @@ def test_a_disk_image_step_that_fails_or_hangs_leaves_nothing_running(row: str, 
             violations.append(f'raised no HostFailure: {report or "nothing raised"}')
         elif outcome == 'failure' and body_ends is not None and (body is None or raised.__cause__ is not body):
             violations.append(f'the failure is not caused by the body\'s own: {report}')
-        at = 0
-        for text in says:
-            found = report.find(text, at)
-            if found < 0:
-                violations.append(f'the report does not carry {text!r} (in order, after offset {at}): {report}')
-                break
-            at = found + len(text)
-        if 'still running' in report:
-            violations.append(f'the report names a survivor where none was left: {report}')
-        if not image_left and 'is kept at' in report:
-            violations.append(f'the report names an image kept where none was: {report}')
-        if not devices_left and 'stays attached' in report:
-            violations.append(f'the report names a device attached where none was: {report}')
+        assert violations == [], f'{row}:\n' + '\n'.join(violations)
+    finally:
+        _kill_recorded(state)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('row', list(CUT_ROWS))
+def test_a_disk_image_step_cut_short_is_stopped_and_its_exception_goes_on(row: str, tmp_path: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """A step's wait cut short by an exception raised in the test's process (as Ctrl-C raises
+    `KeyboardInterrupt`; the step, in a session of its own, gets no signal) stops the step and what it
+    started, and that exception goes on as itself, never swallowed or turned into another.
+
+    Each kind of `BODY_EXITS` cuts a hang short where the whole cleanup follows, and an interrupt
+    cuts every other wait: `create` and `attach` (cleaned up as a failed one is, each step at its
+    bound), the `detach` after the body (not tried again; the volume and image named), and the
+    cleanup's own `info` and `detach` after a first cut, where a second interrupt abandons the
+    cleanup and goes on in the first one's place, with it as its context, naming what is left. The
+    row's checks of what is left and said are the stand-in rows' own.
+    """
+    site, kind = CUT_ROWS[row]
+    plan, body_ends, verbs, devices_left, image_left, texts = CUT_SITES[site]
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    state = _stand_in(tmp_path, plan)
+    where, image = tmp_path / 'vol', tmp_path / 'vol.dmg'
+    try:
+        started = time.monotonic()
+        with _cutting(state, verbs, kind) as planted:
+            raised, body, seen = _drive_image(state, where, plan, body_ends, planted, tuple(verbs))
+        took = time.monotonic() - started
+        report = ''.join(traceback.format_exception(raised)) if raised is not None else ''
+        name = type(planted[0]).__name__ if planted else '(nothing)'
+        says = [text.format(where=where, image=image, kind=name) for text in texts]
+        violations = _what_is_left(state, plan, where, devices_left, image_left, took, seen, report, says)
+        if len(planted) != len(verbs):
+            violations.append(f'{len(planted)} of the {len(verbs)} waits {verbs} were cut short: {report}')
+        elif raised is not planted[-1]:
+            violations.append(f'the exception that cut the last wait short did not go on as itself: '
+                              f'{report or "nothing raised"}')
+        elif raised.__cause__ is not None or raised.__context__ is not (planted[0] if len(planted) > 1 else body):
+            violations.append(f'the exception went on with another cause or context: {report}')
         assert violations == [], f'{row}:\n' + '\n'.join(violations)
     finally:
         _kill_recorded(state)
@@ -1281,18 +1504,82 @@ def test_a_stopped_step_still_running_is_named(tmp_path: Path, monkeypatch: pyte
         raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, None)
         took = time.monotonic() - started
         report = ''.join(traceback.format_exception(raised)) if raised is not None else 'nothing raised'
-        recorded = [line.split() for line in (state / 'pids').read_text().splitlines()]
-        pids = [int(line[0]) for line in recorded if line[1:3] in (['step', 'create'], ['child', 'create'])]
-        violations = []
-        if len(pids) != 2:
-            violations.append(f'the stand-in recorded {recorded!r}, not a step and its child')
-        if f'create: {PAST}; still running 0.5 s after it was stopped: ' not in report:
-            violations.append(f'the report does not say what is still running: {report}')
-        for pid in pids:
-            if not re.search(rf'pid {pid} \([^)]*{re.escape(str(HDIUTIL_STANDIN))} {re.escape(str(state))} create', report):
-                violations.append(f'pid {pid} is not named with its command: {report}')
+        violations = _survivors_unnamed(state, report, f'create: {PAST}')
         if not SHORT_BOUND + 0.5 <= took < SHORT_BOUND + 3.5:
             violations.append(f'the run took {took:.2f} s, outside [{SHORT_BOUND + 0.5}, {SHORT_BOUND + 3.5})')
+        assert violations == [], '\n'.join(violations)
+    finally:
+        _kill_recorded(state)
+
+
+def _survivors_unnamed(state: Path, report: str, step: str) -> list[str]:
+    """`create`'s step and child, each named by pid and command after `step`'s text, as still running
+    0.5 s after the stop."""
+    recorded = [line.split() for line in (state / 'pids').read_text().splitlines()]
+    pids = [int(line[0]) for line in recorded if line[1:3] in (['step', 'create'], ['child', 'create'])]
+    violations = []
+    if len(pids) != 2:
+        violations.append(f'the stand-in recorded {recorded!r}, not a step and its child')
+    if f'{step}; still running 0.5 s after it was stopped: ' not in report:
+        violations.append(f'the report does not say what is still running: {report}')
+    for pid in pids:
+        if not re.search(rf'pid {pid} \([^)]*{re.escape(str(HDIUTIL_STANDIN))} {re.escape(str(state))} create', report):
+            violations.append(f'pid {pid} is not named with its command: {report}')
+    return violations
+
+
+@pytest.mark.integration
+def test_a_disk_image_step_cut_short_still_running_is_named(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A step cut short by an interrupt whose processes outlive the wait after its stop is named, pid
+    and command, on the interrupt that goes on, and the wait is bounded: as
+    `test_a_stopped_step_still_running_is_named`, with `create`'s hang cut short instead of met."""
+    monkeypatch.setattr(sys.modules[__name__], 'STOP_SIGNAL', signal.SIGCONT)
+    monkeypatch.setattr(sys.modules[__name__], 'STOP_WAIT', 0.5)
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    plan = {'create': [HANGS]}
+    state = _stand_in(tmp_path, plan)
+    try:
+        started = time.monotonic()
+        with _cutting(state, ['create'], 'keyboard-interrupt') as planted:
+            raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, None, planted, ('create',))
+        took = time.monotonic() - started
+        report = ''.join(traceback.format_exception(raised)) if raised is not None else 'nothing raised'
+        violations = _survivors_unnamed(state, report, 'create: cut short by KeyboardInterrupt and stopped')
+        if not planted or raised is not planted[0]:
+            violations.append(f'the interrupt did not go on as itself: {report}')
+        if not 0.5 <= took < 0.5 + 3.5:
+            violations.append(f'the run took {took:.2f} s, outside [0.5, 4.0)')
+        assert violations == [], '\n'.join(violations)
+    finally:
+        _kill_recorded(state)
+
+
+@pytest.mark.integration
+def test_a_disk_image_step_whose_stop_is_cut_short_names_its_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second interrupt during the stop of a step a first one cut short ends the stop's wait and goes
+    on in the first one's place, with it as its context, naming the step's process group as one that
+    may still run; the cleanup a cut `create` gets then runs. The stop is CONT, which ends nothing, so
+    its wait lasts its 5 s and the second interrupt, 1 s after the first, lands inside it (past the
+    0.25 s `communicate` itself waits on an interrupt for its child to exit)."""
+    monkeypatch.setattr(sys.modules[__name__], 'STOP_SIGNAL', signal.SIGCONT)
+    monkeypatch.setenv('TMPDIR', str(tmp_path))
+    plan = {'create': [HANGS]}
+    state = _stand_in(tmp_path, plan)
+    try:
+        with _cutting(state, ['create', 'stop'], 'keyboard-interrupt') as planted:
+            raised, _, _ = _drive_image(state, tmp_path / 'vol', plan, None, planted, ('create',))
+        report = ''.join(traceback.format_exception(raised)) if raised is not None else 'nothing raised'
+        named = re.findall(r'create: cut short by KeyboardInterrupt, then its stop by KeyboardInterrupt: '
+                           r'process group (\d+) may still be running', report)
+        # The stop was CONT: the step's group still runs, its leader the sandbox script holding the stand-in.
+        groups = {group for _, group, _, command in _processes() if str(state) in command and ' create ' in command}
+        violations = []
+        if len(planted) != 2 or raised is not planted[1] or raised.__context__ is not planted[0]:
+            violations.append(f'the second interrupt did not go on with the first as its context: {report}')
+        if len(groups) != 1 or named != [str(group) for group in groups]:
+            violations.append(f'the report names the group {named!r}, not the step\'s {sorted(groups)!r}: {report}')
+        if (tmp_path / 'vol.dmg').exists():
+            violations.append('the image was left')
         assert violations == [], '\n'.join(violations)
     finally:
         _kill_recorded(state)
@@ -1316,11 +1603,12 @@ def test_the_disk_image_figures() -> None:
 def test_every_way_a_body_can_end_has_its_rows() -> None:
     """The rows end the fixture's body every way a body can end by raising, each twice: with a detach
     that succeeds (the body's own exception raised unchanged) and with one that fails (both reported,
-    the body's first).
+    the body's first); and each way cuts a step's wait short in a row of its own.
 
-    The ways are an assertion, each of pytest's outcomes, each class Python puts directly under
-    `BaseException`, and a class none of these names; one Python or pytest adds fails this test
-    until it has its rows.
+    The ways are an assertion, the fill's own failure (an `OSError`), each of pytest's outcomes, each
+    class Python puts directly under `BaseException`, and a class none of these names; one Python or
+    pytest adds fails this test until it has its rows. Every place a wait can be cut short has an
+    interrupt's row.
     """
     raised: dict[str, BaseException] = {}
     for kind, end in BODY_EXITS.items():
@@ -1341,6 +1629,12 @@ def test_every_way_a_body_can_end_has_its_rows() -> None:
                    if not any(type(exc) is cls for exc in raised.values())]
     if not any(not isinstance(exc, (*python, *outcomes)) for exc in raised.values()):
         violations.append('no way raises a class neither Python nor pytest names')
+    violations += [f'no way raises {what}' for what, cls in (('an assertion', AssertionError), ("the fill's own failure", OSError))
+                   if not any(type(exc) is cls for exc in raised.values())]
+    violations += [f'no row cuts a wait short by {kind}' for kind in BODY_EXITS
+                   if not any(k == kind for _, k in CUT_ROWS.values())]
+    violations += [f'no row cuts {site} short by an interrupt' for site in CUT_SITES
+                   if (site, 'keyboard-interrupt') not in CUT_ROWS.values()]
     for kind in BODY_EXITS:
         rows = [(plan, outcome) for plan, ends, _, _, outcome, _ in DISK_IMAGE_ROWS.values() if ends == kind]
         if ({}, 'body') not in rows:
