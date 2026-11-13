@@ -1,4 +1,4 @@
-# GOAL — A capability load retried after a failure loads the healthy ones and names the broken one
+# GOAL — A capability load retried after a failure is refused, naming the first failure
 
 > **Origin spec.** The *what* and *why* — the locked contract `code-review` grades against.
 > The *how* lives in [`PLAN.md`](PLAN.md) and [`TECH.md`](TECH.md) (written by `code-plan`).
@@ -36,30 +36,34 @@ loader.
 
 ## Outcome / vision
 
-A load that fails leaves the process in a state where a retry behaves as a first load in a fresh
-process would. If the broken capability is still there, the retry refuses it with the same message.
-If it has gone or been mended, the retry loads every capability, each with its tools.
+A load that fails leaves the process refusing every later load. Each refusal names the first
+failure, its distribution and its cause, and says to restart the process; nothing is imported, run
+or registered again. The refusal never names a capability that loaded cleanly. A fresh process loads
+as a first load does.
 
 ## Acceptance criteria (the contract)
 
 - **R1** — IF a load fails, THEN a later load in the same process over the same capabilities SHALL
-  raise the refusal a first load in a fresh process raises: a `CapabilityLoadError` naming the same
-  distribution with the same cause, so its message is identical to the first load's. It SHALL never
+  raise a `CapabilityLoadError` naming the same distribution with the same cause as the first load's
+  refusal: its message is the first load's, followed by R2's instruction to restart. It SHALL never
   name a capability that loaded cleanly in the first load.
-- **R2** — WHEN a load in the same process follows a failed one and every capability it is given
-  loads cleanly (the failing one removed or mended), the load SHALL succeed. It SHALL return each
-  capability with the same tools a load in a fresh process returns it with, and SHALL leave each of
-  those tools registered exactly once.
+- **R2** — IF a load fails, THEN every later load in the same process SHALL be refused, whatever
+  capabilities it is given (the failing one removed or mended included). The refusal SHALL be a
+  `CapabilityLoadError` naming the first failure, its distribution and its cause, whose message
+  says to restart the process. The refused load SHALL import nothing, register nothing and run no
+  capability's code. A load in a fresh process SHALL behave as a first load (R4).
 - **R3** — R1 and R2 SHALL hold whichever library entry point makes the retry: `load()`,
   `installed()`, or `create_mcp_server()` when it is given no capabilities.
 - **R4** — A first load SHALL behave as it does today: the same capabilities load, the same ones
   are refused with the same message, and no tool it registered stays registered after it fails.
 - **R5** — A test SHALL plant a capability that loads cleanly and one that fails, with the clean
   one's tools first registered by the failing load. It SHALL then load again twice, once with the
-  failing one still present (R1) and once with it removed (R2). It SHALL assert that the retry's
-  refusal message equals the first load's, and on the tools returned and registered, not only on
-  the capability names. Among the failing capabilities it plants SHALL be one that fails after its
-  tools module has imported, where a retry's cause could differ.
+  failing one still present (R1) and once with it removed (R2). It SHALL assert that each retry's
+  refusal message is the first load's followed by the instruction to restart, and that a retry
+  registers no tool, imports no module and runs no capability's code, not only on the capability
+  names. Among the failing capabilities it plants SHALL be one that fails after its tools module has
+  imported. A test SHALL load in a fresh process after a failure and assert that it loads every
+  capability with its tools.
 - **R6** — A case in `tests/mutants.py` SHALL plant today's retry behaviour, and R5's test SHALL
   kill it with the violation that names R1 or R2. The mutation gate is graded per
   `method/mutation-testing.md` § When a review is done, in the operator's KB (AGENTS.md § Factory).
@@ -80,13 +84,16 @@ If it has gone or been mended, the retry loads every capability, each with its t
   `issues/capability-reload-after-interrupt.md` (Part I, safety).
 - Reloading a capability whose source changed between loads (hot reload). A second load after a
   successful one is also out of scope, since `installed()` caches the success.
+- Any reload in the same process after a failed load. If Part II's hosted mode needs one, it is
+  shaped there.
 
 ## Clarifications
 
 - 2026-11-12 · foreman ruling at GOAL sign-off: **Q:** must a retry's refusal carry the first
   load's cause, or only name the right distribution? **A:** (a), the refusal is identical (same
   distribution, same cause, same message): a retry behaves as a first load in a fresh process
-  would. R1 and R5 say so.
+  would. R1 and R5 say so. *Amended 2026-11-12 by the ruling after review cycle 2, below: the same
+  distribution and cause, the message followed by the instruction to restart.*
 - 2026-11-12 · foreman ruling at GOAL sign-off: **Q:** does the contract cover a load a
   `KeyboardInterrupt` cut short? **A:** (a), failures only. The interrupted case is seeded as
   `issues/capability-reload-after-interrupt.md` (Part I, safety) and is a Non-goal here.
@@ -94,7 +101,13 @@ If it has gone or been mended, the retry loads every capability, each with its t
 - 2026-11-12 · foreman ruling at plan sign-off: R1 and R2 hold for capabilities whose import can be
   repeated in one process. A retry re-imports a capability's modules, and §7 states that as a
   requirement on capability authors. The rest is seeded as
-  `issues/capability-import-side-effects-on-retry.md`.
+  `issues/capability-import-side-effects-on-retry.md`. *Lapsed 2026-11-12 with the ruling below: a
+  later load imports nothing, so no import is repeated.*
+- 2026-11-12 · ruling after review cycle 2: **Q:** two review cycles found that forgetting what a
+  failed load imported, so a retry imports it again, does not make the retry a first load in every
+  layout. Should a retry reload, or be refused? **A:** refused. After a failed load, every later
+  load in the same process is refused, naming the first failure, and its message says to restart
+  the process. R2 states it; R1 and R5 follow it, and the Outcome with them.
 
 ## Related materials
 
