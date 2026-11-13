@@ -281,7 +281,7 @@ wheels = [
 
 [[package]]
 name = "cluster-mcp"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/cluster-mcp" }
 dependencies = [
     { name = "cmdkit" },
@@ -313,7 +313,7 @@ provides-extras = ["slurm", "rcac"]
 
 [[package]]
 name = "cluster-mcp-rcac"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/cluster-mcp-rcac" }
 dependencies = [
     { name = "cluster-mcp" },
@@ -324,7 +324,7 @@ requires-dist = [{ name = "cluster-mcp", editable = "packages/cluster-mcp" }]
 
 [[package]]
 name = "cluster-mcp-slurm"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/cluster-mcp-slurm" }
 dependencies = [
     { name = "cluster-mcp" },
@@ -1121,7 +1121,7 @@ wheels = [
 
 [[package]]
 name = "rcac-mcp"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "cluster-mcp", extra = ["rcac", "slurm"] },
