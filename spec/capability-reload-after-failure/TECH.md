@@ -3,11 +3,11 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: in_review
+status: blocked
 branch: fix/capability-reload-after-failure
 base: develop
 current_phase: done
-last_updated: '2026-11-12'
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: A failed load refuses every later load in the process
@@ -36,10 +36,10 @@ phases:
   hill: uphill
   verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
-  last_reviewed_commit: 3f763abcdddeeb741f048eaa7da1bc41b5e14cfc
+  last_reviewed_commit: 43ae93af8409ffbf45bee8e9c94f3f4bbf5afa54
   verdict: changes-requested
-  blocked_reason: 'A first-load refusal replaced in the failure handler; B F1 open: retry keeps a registering library module; C hand mutants'
-  cycle: 2
+  blocked_reason: 'F-A: R5''s no-import/register/run asserts cannot fail on the planted retries; a load-then-refuse loader on the given-capabilities path survives'
+  cycle: 3
 ---
 
 # TECH.md — A capability load retried after a failure loads the healthy ones and names the broken one

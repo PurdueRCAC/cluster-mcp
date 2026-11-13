@@ -411,3 +411,129 @@ to build. The properties a remediation would carry, over their whole domain:
 - **Contract drift, pending the maintainer's confirmation (code-review Step 1.4):** `d985301` (the
   plan-sign-off clarification on repeatable imports) is still unconfirmed. This cycle graded the
   GOAL as it stands at HEAD.
+
+## Review cycle 3 — changes-requested (2026-11-13)
+
+- **Reviewed commit:** 43ae93af8409ffbf45bee8e9c94f3f4bbf5afa54  ·  **Base:** develop
+- **Mode:** a fresh blind pass over the full spec-excluded diff, at xhigh effort. The sequential
+  fallback did not run. The reviewer got GOAL's R-IDs, Non-goals and Clarifications verbatim; the
+  template header, Related materials and the sibling-overlap note were left out of its prompt.
+- **Remediation graded:** `cde0a99` (the contract change below), `2bcfa50` (the refusal design) and
+  `43ae93a` (it changes only `TECH.md`).
+- **Contract change, recorded at Step 1.4 as directed by the maintainer:** after review cycle 2 the
+  cycle was re-shaped. `cde0a99` re-scopes R2: after a failed load, every later load in the process
+  is refused, naming the first failure and saying to restart, and nothing is imported or reloaded.
+  R1, R5, the title, the Outcome and the first GOAL-sign-off clarification are amended only as far
+  as R2 forces. The earlier post-shape change `d985301` (repeatable imports) lapses with it. Cycle 2's
+  pending drift item is closed by this ruling. This cycle grades the GOAL as it stands at HEAD.
+- **Maintainer sign-off before publish: required** (Human-gate triggers).
+
+Evidence paths below are under the worktree's gitignored `.local/review3/` (`reviewer/` for the
+blind pass, `orchestrator/` for the orchestrator's runs).
+
+### Verification run
+
+- **The full gate (the profile's `verify`)**:
+  - ran green on `2bcfa50` in 27:34 at build (`.local/build3/p2-gate.log`, exit 0); `43ae93a`
+    changes only `TECH.md` (`git diff --stat 2bcfa50 43ae93a`), so that run stands for HEAD;
+  - the reviewer ran it once more at `43ae93a`: exit 0, each era's last suite command 4909 passed
+    and 14 skipped, the sandboxed `--help` printed its usage (`reviewer/verify-full.log`).
+- **P1's phase gate at `43ae93a`** (`orchestrator/p1-gate.log`, exit 0):
+  - in each era, `test_capabilities.py`, `test_mutations.py` and `test_hygiene.py` passed 2569;
+  - `test_startup.py -k capabilit` passed 46 in each era;
+  - `tests/mutants.py --self-check` killed all eight named cases, each with its expected violation,
+    and its three controls reported.
+- **Reviewer runs, with the output read:** `test_capabilities.py` and `test_mutations.py` passed
+  2427 in each era (`reviewer/narrow-{default,modern}.log`); the runner's touched cases killed in
+  both eras (`reviewer/runner-{default,modern}.log`).
+- **Drives through `bin/sandbox.sh`:** a retry with the failing capability present, with it
+  removed, and with a new capability, on HEAD and on a mutated copy (`reviewer/probe_retry.log`,
+  `reviewer/probe_refused_runs.log`); the interrupt seed's Problem (`reviewer/probe_interrupt.log`).
+- **Mutation** (`method/mutation-testing.md` § When a review is done):
+  - **Tier 2:** the cycle's touched runner cases, all killed in both eras with their expected
+    violation.
+  - **Tier 3a diff sweep: not run, because no generated-mutant tool is available.** This is an
+    unclosed gap, not a pass. A hand sweep stood in for it: 18 mutants across the guard in `load()`,
+    the recorded first failure, `_failure`'s safe read and the failure handler's order, each run in
+    both eras, kills counted only from the failure message (`reviewer/hand_mutants.py`,
+    `reviewer/hand-{default,default-2,modern}.log`). 15 killed; H14 and H15 survive as equivalent
+    unless a capability patches the class (already seeded: `issues/capability-refusal-class-patched.md`);
+    H2b survives (F-A).
+- **Seeds graded as prose:** `issues/capability-reload-after-interrupt.md` cites lines that match
+  the code, and its Problem reproduces; `issues/capability-refusal-class-patched.md` matches H14
+  and H15; the ROADMAP counts match its headings.
+- **Spec-id grep:** no ids in the added source or test lines.
+- **Tree:** `git status --porcelain` was empty after the reviewer handed back. The reviewer
+  mutated no build state; mutants ran only in scratch copies.
+
+### Cycle 2's findings
+
+- **A** (the failure handler ran a capability's leftovers before the refusal) and **B** (a retry
+  that re-imported did not reach a fresh process's verdict) are closed by the contract change:
+  a later load imports and runs nothing. The handler now builds the refusal before it cuts the
+  registry; H17 (the old order) is killed.
+- **C** (surviving mutants in the handler's helpers): the reviewer's sweep over the new decisions
+  is above. All but H2b, H14 and H15 are killed.
+
+### Requirement → evidence matrix
+
+| R-ID | Implemented | Verified by (who) |
+|---|---|---|
+| R1 | Yes | Reviewer: the probe's retry names `bbb-broken`, never `aaa-good`, with the restart text; retry test 480/480 in both eras; H5, H6, H9 killed |
+| R2 | Yes | Reviewer: the retry without the broken capability is refused, 0 imports and 0 registrations; H1, H4, H7, H10 killed. Its import/run clause is pinned only through discovery (F-A) |
+| R3 | Yes | Reviewer: the retry and own-refusal tests run through `load()`, `installed()` and `create_mcp_server()` |
+| R4 | Yes | Reviewer: full verify green; H17 and H8 killed |
+| R5 | Partly | Reviewer, orchestrator re-read: the planted cases are there; the no-import, no-register, no-run asserts cannot fail on the inputs planted (F-A) |
+| R6 | Yes | Reviewer and orchestrator: `capability-retry-imports-nothing` is killed with "a load after a failed one was not refused for that failure", both eras |
+
+No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual drift were found.
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] F-A · R5's "a retry imports, registers and runs nothing" checks cannot fail on the inputs the test plants
+
+- **Where:** `tests/test_capabilities.py`, `refused_again` and
+  `test_a_load_after_a_failed_one_is_refused_for_it`.
+- **Scenario:** both retries plant the clean capability first, and its tools module is already
+  imported. A loader that loads what it is given before it refuses fails on that capability at
+  once, imports nothing new and runs no planted code, so the asserts pass whether the guard comes
+  before the load or after it.
+- **Evidence:** H2b, a loader that loads the capabilities it is given and then raises the correct
+  refusal, passes every relevant test in both eras: retry test 0/480, own-refusal test 0/48,
+  `test_a_failed_load_is_not_cached` 0/4, fresh-process test 0/1 (`reviewer/hand-default-2.log`,
+  `reviewer/hand-modern.log`). On H2b a retry with a new capability gets the right message but
+  imports `ccc_new`, `ccc_new.capability` and `ccc_new.tools` and leaves `c_echo` registered, and a
+  retry whose failing capability sorts first runs its tools code again
+  (`reviewer/probe_refused_runs.log`). HEAD does neither. The orchestrator read both logs.
+- **Grading:** CONFIRMED, not a coverage observation. R5 states the check, and H2b breaks R2's
+  stated behaviour on reachable input. The sibling mutants H2n and H3n are killed only by a
+  discovery counter on the default path, so nothing pins the property on the path that is given
+  its capabilities. MEDIUM: a requirement met but still fragile.
+- **Alternative reading, for the maintainer:** if H2n's kill is taken to pin the load-then-refuse
+  class, H2b is a deeper layer of it and is seeded instead. The reviewer argued against that
+  reading.
+
+#### Coverage observations (already seeded)
+
+- H14 (`vars(...).get('distribution')` to attribute access) and H15 (`args[0]` to `str()`) in
+  `_failure` survive; they are equivalent unless a capability patches the class, which
+  `issues/capability-refusal-class-patched.md` already records.
+
+### Routing (cycle 3)
+
+Held for the maintainer: a MEDIUM CONFIRMED finding, on the third review cycle. The property a
+remediation would carry, over its whole domain:
+
+- **Property (R2, R5):** a refused load imports nothing, registers nothing and runs no capability's
+  code, whatever capabilities it is given and whichever entry point makes it, discovered or given
+  explicitly. Pin it on inputs where loading would be observable: a capability no earlier load
+  imported, and a failing capability that sorts before the clean one.
+- **The other side:** the refusal still names the first failure, with its cause and the restart
+  text, for every input (already pinned; keep it pinned).
+
+### Human-gate triggers
+
+- **Triggered (standing).** Cycles 1 and 2 found CONFIRMED findings against
+  `core/capabilities.py`, a path on § Invariants' high-blast-radius list. The maintainer signs off
+  before publish. F-A itself sits in a test file and guards that path.
+- **Bounded loop.** This is the third review cycle without a clean pass; it goes to the maintainer.
