@@ -3,10 +3,10 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/integration-marker-wording
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -37,7 +37,7 @@ phases:
   verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F6 F8
 - id: P3
   name: The full verify and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -260,7 +260,11 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       `issues/marker-rule-gaps.md` names the three in-use sites its fix would also flag, and its
       ROADMAP.md entry no longer calls them latent. Both seeds are this cycle's own, not yet on
       `develop`, so they are corrected in place. No entry is added, so Part I's count is unchanged.
-- [ ] Review cycle 3: the full verify on the final tree, `gate.sh full`, released by the foreman.
+- [x] Review cycle 3: the full verify on `7d9ce48`'s tree, `gate.sh full`, released by the foreman:
+      green on 2026-11-13 in 1,576 s, per era 44 + 154 + 507 + 4519 passed (4475 before, plus the
+      44 boundary rows), 14 skipped (the `need_shell` rows), and `bin/sandbox.sh uv run cluster-mcp
+      --help` ok. The rest of P3's gate (`gate.sh prepush`, `checks.sh F1 F4 F5 F6 F7 F8`) ran green
+      on the same tree before that commit, so this `full` run completes P3's gate.
 - [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
