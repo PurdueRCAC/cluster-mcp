@@ -47,9 +47,19 @@ by any other route is unread. The lists below are each route a probe found, not 
    bound by assignment (`run = subprocess.run`) or taken with `getattr(subprocess, 'run')`; a
    `Popen` subclass; `pty.spawn` and `pty.fork`; `os.fork` and `os.forkpty`;
    `multiprocessing.Process`; `posix.system`; `_posixsubprocess.fork_exec`; and an event loop's
-   `subprocess_exec`. Only the first is in use: `tests/test_ssh_exec.py`'s `_host` runs `hdiutil`
-   through `REAL_POPEN` for the macOS full-volume fixture, outside the sandbox. The rest are
-   latent.
+   `subprocess_exec`. Three of these forms are in use, at four sites:
+   - a call through `REAL_POPEN`: `tests/test_ssh_exec.py`'s `_host` runs `hdiutil` through it for
+     the macOS full-volume fixture, outside the sandbox, the only site that launches outside
+     `bin/sandbox.sh`;
+   - a launcher bound by assignment: `tests/test_hygiene.py`'s
+     `test_executes_opens_the_fence_only_to_sandboxed_launches` (`launcher = subprocess.Popen`), which the
+     `executes` fixture refuses at run time;
+   - a `Popen` subclass that launches: the two the `executes` fixture in `tests/conftest.py`
+     defines (`FencedPopen`, `SandboxOnlyPopen`), which put each argv through `bin/sandbox.sh` or
+     refuse it at run time.
+
+   The rest are latent. A fix that flags a launch by each route above flags all four sites, so the
+   last three need an allowance or a rewrite to a form the check reads.
 5. **An `XDG_*` variable other than the three the guard sets reaches a `unit` test unchanged.**
    The guard points `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_DATA_HOME` under
    `tmp_path`; an `XDG_STATE_HOME` (or `XDG_RUNTIME_DIR`, `XDG_CONFIG_DIRS`, `XDG_DATA_DIRS`) the
@@ -62,7 +72,8 @@ by any other route is unread. The lists below are each route a probe found, not 
    `os.path.expanduser`). Probed by `spec/integration-marker-wording/remediation/F7-gap-statements.py`.
 
 Whether any `unit` test reaches the first three, the fifth or the sixth today was not surveyed; the
-fourth is in use through `REAL_POPEN`. `AGENTS.md` § Testing names the guard's routes by class
+fourth is in use, outside the sandbox through `REAL_POPEN` and inside it at the three sites
+item 4 names. `AGENTS.md` § Testing names the guard's routes by class
 beside the guard, and the static check's in the commands block and the `tests/test_hygiene.py`
 entry.
 

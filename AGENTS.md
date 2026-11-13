@@ -999,17 +999,24 @@ import has no effect.
     markup, spacing, order, a missing or third marker and a clause added to a description all
     count, and the statement ends only where Markdown ends it: at the section's end, at a less
     indented list item, or at a blank line before text no deeper than its items that starts no
-    item, depth counted as Markdown counts it (only spaces and tabs indent, and a tab reaches the
-    next multiple of four columns). Two shapes are read otherwise than Markdown renders them, and
-    are open: a statement indented past its bullet's text, which a less indented item can still
-    join, and a wrap whose next line starts a block (`issues/marker-statement-deeper-carve-outs.md`).
+    item, or before such text one column deeper, still short of the items' text (two columns past
+    the dash), depth counted as Markdown counts it (only spaces and tabs indent, and a tab reaches
+    the next multiple of four columns). Some shapes are read otherwise than Markdown renders them,
+    and this list of them is not exhaustive: a statement indented past its bullet's text, which a
+    less indented item can still join, and a wrap whose next line starts a block, both of which let
+    a drift through; and some lines after the statement that start a block Markdown places after
+    the list (a quote, a fence, a thematic break, an HTML comment, a heading, another list), which
+    the check refuses though they hold no drift (`issues/marker-statement-deeper-carve-outs.md`).
     `test_marker_statement_check_catches_planted_drift` and
     `test_marker_statement_check_catches_narrower_drift` plant each, and
     `test_marker_statement_ends_where_markdown_ends_it` plants each whitespace form a line after
-    the statement can start with. `test_marker_statement_check_refuses_every_edit` holds the
-    comparison to ignoring nothing but line wrapping: every edit of one name or description in one
+    the statement can start with, and each column from one short of the items' indent to one past
+    their text, in spaces, tabs and both mixed. `test_marker_statement_check_refuses_every_edit`
+    refuses every one-place edit in its alphabet: every edit of one name or description in one
     place is refused (each character deleted or replaced, each span between word boundaries
-    dropped, each character of `EDIT_ALPHABET` inserted). A row that needs a login shell calls `conftest.need_shell`: off
+    dropped, each character of `EDIT_ALPHABET` inserted). That shows no such edit passes, not that
+    the comparison ignores nothing else: a check that folded two look-alike characters together,
+    or dropped one outside `EDIT_ALPHABET`, would still pass it (the same seed). A row that needs a login shell calls `conftest.need_shell`: off
     CI a missing shell skips the row; on CI (`CI=true`) it fails it, naming the shell
     (`test_a_missing_shell_fails_on_ci_and_skips_elsewhere`). It and `conftest.need_git` (above) are
     the suite's only skips: no other skip, `skipif`, `importorskip` or `xfail` exists in

@@ -229,23 +229,27 @@ family still reach the network, a fixture of wider scope launches before the gua
 an `XDG_*` variable other than the three the guard sets (`XDG_STATE_HOME`) arrives unchanged, as do
 other variables and values that name the real home (`GNUPGHOME`, `site.USER_BASE`); and the static
 launch check reads only a call to a launcher it lists, so `tests/test_ssh_exec.py`'s `_host`, which
-runs `hdiutil` through `REAL_POPEN` outside `bin/sandbox.sh`, goes unread, as would a fork, `pty`,
-`multiprocessing` or a launcher bound by assignment. Found by the `integration-marker-wording` plan,
+runs `hdiutil` through `REAL_POPEN` outside `bin/sandbox.sh`, goes unread, as do a launcher bound
+by assignment and two `Popen` subclasses in use inside the sandbox, and as would a fork, `pty` or
+`multiprocessing`. Found by the `integration-marker-wording` plan,
 2026-11-09, and its review, 2026-11-10.
 
 *Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (PLAN); `tests/conftest.py` (`guard`, `REAL_POPEN`); `tests/test_ssh_exec.py` (`_host`)*
 **Seed:** [`issues/marker-rule-gaps.md`](issues/marker-rule-gaps.md) · *status: unshaped*
 
-## The marker-statement check passes three shapes CommonMark renders differently
+## The marker-statement check: two shapes it reads otherwise than CommonMark, and carve-outs its rows leave unpinned
 
-The check that holds `AGENTS.md`'s statement of the markers to `pyproject.toml` is pinned over its
-whole comparison domain and over each whitespace form a following line can start with. Three deeper
-shapes pass it and render differently: two characters a normalisation could merge that no row
-names (an em dash and a hyphen), a statement indented past its bullet's text, after which a less
-indented item still joins its list, and a wrap whose next line starts a block. Found by the
-`integration-marker-wording` review cycle 2 remediation, 2026-11-12.
+The check that holds `AGENTS.md`'s statement of the markers to `pyproject.toml` refuses every
+one-place edit in its control's alphabet and is pinned over each whitespace form a following line
+can start with. Two shapes pass it and render differently: a statement indented past its bullet's
+text, after which a less indented item still joins its list, and a wrap whose next line starts a
+block. Eight deeper carve-outs are coverage gaps, drifts the check refuses that no row pins (a fold
+of two look-alike characters such as an em dash and a hyphen, a character outside the control's
+alphabet stripped, and six structural layers). Some block starters CommonMark places after the list
+are refused, a false red on layouts no file uses. Found by the `integration-marker-wording` review
+cycle 2 remediation and review cycle 3, 2026-11-12.
 
-*Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (REVIEW, cycle 2); `tests/test_hygiene.py` (`marker_statement_violations`)*
+*Horizon: 0.2.0, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (REVIEW, cycles 2 and 3); `tests/test_hygiene.py` (`marker_statement_violations`)*
 **Seed:** [`issues/marker-statement-deeper-carve-outs.md`](issues/marker-statement-deeper-carve-outs.md) · *status: unshaped*
 
 ## The image's init is pinned by its recipe, not by what it reaps

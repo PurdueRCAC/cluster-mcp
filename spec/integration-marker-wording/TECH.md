@@ -3,11 +3,11 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: blocked
+status: in_progress
 branch: test/integration-marker-wording
 base: develop
-current_phase: done
-last_updated: '2026-11-12'
+current_phase: P3
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: The descriptions and AGENTS.md state the markers
@@ -33,10 +33,11 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
+  attempts: 2
   verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F6 F8
 - id: P3
   name: The full verify and the deferral ledger
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -213,6 +214,17 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       comparison decided once and pinned over its whole domain by
       `test_marker_statement_check_refuses_every_edit`; the sweep `remediation/checks.sh F8` (220
       mutants: 215 killed, 3 equivalent, 2 seeded in `issues/marker-statement-deeper-carve-outs.md`).
+- [x] Review cycle 3, finding 1 (re-graded LOW by the maintainer's standing rule, fixed as ruled):
+      after a blank line, text that starts no item joins the statement only at or past the items'
+      text column, never at their indent plus one. `BOUNDARY_ROWS`, 44 rows of
+      `test_marker_statement_ends_where_markdown_ends_it`: text and a third marker at each column
+      from one short of the items' indent to one past their text, in spaces, tabs and both mixed,
+      at the top level and nested. `remediation/checks.sh F6` holds the boundary both ways (3,810
+      cases: every run of spaces and tabs up to six long, after each blank-line form or none);
+      `F8` re-keyed, with three mutants of the moved boundary, and `mi-tab-four-columns` named to
+      the boundary row that now kills it. § Testing says its list of shapes
+      read otherwise than Markdown is not exhaustive, and that the control shows every one-place
+      edit in its alphabet refused, not that the comparison ignores nothing else.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P2` — `wording`, `slice`, `ids`
   (junit in both eras: the live test, the 4 accept rows, exactly the 51 drift ids, and the kept rails
   `test_the_id_rule_is_stated_as_the_check_enforces_it`, `test_no_spec_ids_in_the_package_or_the_suite`,
@@ -242,6 +254,13 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       14 skipped (the `need_shell` rows), and `bin/sandbox.sh uv run cluster-mcp --help` ok. The
       rest of P3's gate (`gate.sh prepush`, `checks.sh F1 F4 F5 F6 F7 F8`) ran green on the same
       tree before that commit, so this one `full` run completes P3's gate.
+- [x] Review cycle 3, findings 2 and 3, and the survivors: `issues/marker-statement-deeper-carve-outs.md`
+      and its ROADMAP.md entry retitled (the dash fold is a coverage gap, not a rendering shape),
+      with the eight unseeded survivors and the block-starter refusals filed in it;
+      `issues/marker-rule-gaps.md` names the three in-use sites its fix would also flag, and its
+      ROADMAP.md entry no longer calls them latent. Both seeds are this cycle's own, not yet on
+      `develop`, so they are corrected in place. No entry is added, so Part I's count is unchanged.
+- [ ] Review cycle 3: the full verify on the final tree, `gate.sh full`, released by the foreman.
 - [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
@@ -299,6 +318,22 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
     the check keeps every line the frozen sweep keys on, and the frozen wording sentences stand with
     text added after them. P3's `full` is a heavy run scheduled outside this build, so P3 stays in progress.
     It ran green on 2026-11-12 (1,560 s, both eras), and P3 closed on it.
+
+- **2026-11-13, review cycle 3 remediation** (`REVIEW.md`, review cycle 3, and the maintainer's
+  ruling: (a), fix and land, with no fourth review). P2 (finding 1: R5; the control's wording: R4)
+  and P3 (findings 2 and 3 and the survivors: the ledger; the full verify) are reopened. P2 is
+  committed alone once its gate is green, `P2: review 3 F1–F3`, with P3's ledger work in the same
+  commit because both share `AGENTS.md`'s pointer to `issues/marker-statement-deeper-carve-outs.md`;
+  P3 closes on the full verify.
+  - **Checkers.** `F6` is extended in place, by the foreman's direction, to hold the boundary both
+    ways. `F8` is re-keyed in place, not superseded: the line its `END_BLANK` keys on changed, and
+    no listed mutant was graded on the column that moved. One named row moved with it:
+    `mi-tab-four-columns`'s row sat at the nested items' indent, where columns 4 and 5 are now both
+    accepted, so it is named to the boundary row at column 5 (seen red first, then green). `F1` keys on § Testing's sentence about
+    where the statement ends; the fix adds text after it, so `F1` runs unchanged.
+  - **Gates.** Unchanged: P2's is `gate.sh prepush`, then `checks.sh F1 F6 F8`; P3's is `gate.sh
+    P3`, then `checks.sh F1 F4 F5 F6 F7 F8`. One `prepush` run and one `checks.sh F1 F4 F5 F6 F7 F8`
+    run on the final tree stand in for P2's gate and for P3's parts before `full`.
 
 ## How `code-build` drives this
 

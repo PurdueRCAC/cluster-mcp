@@ -499,6 +499,9 @@ orchestrator re-read the cited logs for finding 1.
   It passes all 106 marker tests and lets no drift through under the oracle
   (`18-r5-accept-side-mutants.log`).
 - **Touches:** R5. This is the same property as cycle 2's finding 2, on the accept side.
+- **Grade, 2026-11-13:** re-graded LOW by the maintainer's standing rule (a false refusal on a
+  shape no file uses, which lets nothing invalid through, is graded LOW and seeded). Fixed anyway,
+  as ruled.
 
 #### 2. [LOW/CONFIRMED] The deeper-carve-outs seed's title and roadmap entry call a test-coverage gap a fault of the check
 - **Where:** `issues/marker-statement-deeper-carve-outs.md:8` (title) and `ROADMAP.md:239-243`.
@@ -581,3 +584,12 @@ orchestrator re-read the cited logs for finding 1.
 - This is the third and last cycle the bound allows, and it has not converged: one MEDIUM finding
   is open. It is the accept side of cycle 2's finding 2, and it lets no drift through. Whether a
   fourth build round runs, and how finding 1 is routed, is the maintainer's call.
+
+### Maintainer's ruling (2026-11-13)
+
+- **(a), fix and land, with no fourth review.** Findings 1 to 3 are fixed in one build round, the
+  eight unseeded survivors are seeded and the over-claimed control is reworded; the cycle then goes
+  to landing without a fourth review pass.
+- **A standing rule for this effort:** a false refusal on a shape no file uses, which lets nothing
+  invalid through, is graded LOW and seeded. Finding 1 is re-graded LOW under it and fixed anyway,
+  as ruled. The block-starter refusals noted under *Coverage observations* are seeded under it.

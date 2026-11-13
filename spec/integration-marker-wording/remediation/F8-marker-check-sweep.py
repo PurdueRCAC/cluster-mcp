@@ -7,6 +7,14 @@ no longer applies. This one carries that table, re-keyed, the review's own sweep
 characters, folds, clause forms, pairwise and list carve-outs), and mutants of the code this round
 added (Markdown's columns, its blank line, a tab after a wrap's indent, CommonMark's list markers).
 
+Review cycle 3, finding 1 moved where text after a blank line ends the statement, from the items'
+indent to their text column. The line END_BLANK keys on changed with it, so it is re-keyed here, in
+place: no listed mutant was graded on the column that moved. Three mutants of the new boundary are
+added (`se-blank-at-depth-only`, the rule before; `se-blank-text-col-ok`; `se-blank-plus-one-any`),
+each named to the boundary rows that kill it. `mi-tab-four-columns` is named to the boundary row
+that now tells a space and a tab (column 4) from five columns: its old row sits at the nested items'
+indent, where both columns are now accepted.
+
 Run from the worktree root, after staging, through remediation/checks.sh (or alone):
 
     uv run --no-sync python -I spec/integration-marker-wording/remediation/F8-marker-check-sweep.py
@@ -69,7 +77,7 @@ COMPARE_NEW = """        _s, _d = _carve(list(stated), list(described))
             if _cmp(said) != _cmp(meant):"""
 HOOKS = 'def _carve(s, d):\n    return s, d\n\n\ndef _cmp(x):\n    return x\n\n\n'
 CMP_OLD = '            if said != meant:\n'
-END_BLANK = 'if depth < len(indent) or (depth == len(indent) and not LIST_ITEM.match(text)):'
+END_BLANK = 'if depth < len(indent) or (depth < len(indent) + 2 and not LIST_ITEM.match(text)):'
 END_NEXT = '    if depth < len(indent) and LIST_ITEM.match(text):'
 LIST_OLD = "LIST_ITEM = re.compile(r'(?:[-*+]|[0-9]{1,9}[.)])(?:[ \\t]|$)')"
 CONT = ("        elif items and line.startswith(indent + '  ') and line[len(indent) + 2:][:1] not in ('', ' '):\n"
@@ -194,6 +202,9 @@ text('se-blank-lt-needs-nonitem', END_BLANK,
 text('se-blank-content-col', END_BLANK,
      'if depth < len(indent) + 2 and not (depth == len(indent) and LIST_ITEM.match(text)):')
 text('se-blank-same-depth-item-ok', END_BLANK, 'if depth <= len(indent):')
+text('se-blank-at-depth-only', END_BLANK, 'if depth < len(indent) or (depth == len(indent) and not LIST_ITEM.match(text)):')
+text('se-blank-text-col-ok', END_BLANK, 'if depth < len(indent) or (depth < len(indent) + 3 and not LIST_ITEM.match(text)):')
+text('se-blank-plus-one-any', END_BLANK, 'if depth < len(indent) + 2:')
 text('se-nb-lte', END_NEXT, '    if depth <= len(indent) and LIST_ITEM.match(text):')
 text('se-nb-depth-only', END_NEXT, '    if depth < len(indent):')
 text('se-nb-item-only', END_NEXT, '    if LIST_ITEM.match(text):')
@@ -334,11 +345,25 @@ NAMED: dict[str, list[str]] = {
     'se-blank-following-none': ['+a-blank-then-the-section-end'],
     'se-blank-lt-needs-nonitem': ['+a-blank-then-a-less-indented-bullet'],
     'se-blank-content-col': ['a-blank-then-a-third-marker-one-column-deeper'],
+    'se-blank-at-depth-only': ['+a-blank-then-text-at-the-items-indent+1-spaces',
+                               '+nested-a-blank-then-text-at-the-items-indent+1-spaces',
+                               '+nested-a-blank-then-text-at-the-items-indent+1-tab-then-spaces',
+                               '+nested-a-blank-then-text-at-the-items-indent+1-space-tab-then-spaces'],
+    'se-blank-text-col-ok': ['a-blank-then-text-at-the-items-indent+2-spaces',
+                             'a-blank-then-text-at-the-items-indent+2-tabs',
+                             'a-blank-then-text-at-the-items-indent+2-space-tab-then-spaces',
+                             'nested-a-blank-then-text-at-the-items-indent+2-spaces',
+                             'nested-a-blank-then-text-at-the-items-indent+2-tab-then-spaces',
+                             'nested-a-blank-then-text-at-the-items-indent+2-space-tab-then-spaces'],
+    'se-blank-plus-one-any': ['a-blank-then-a-third-marker-at-the-items-indent+0-spaces',
+                              'a-blank-then-a-third-marker-at-the-items-indent+1-spaces',
+                              'nested-a-blank-then-a-third-marker-at-the-items-indent+0-tabs',
+                              'nested-a-blank-then-a-third-marker-at-the-items-indent+1-tab-then-spaces'],
     'se-whitespace-line-is-blank': ['a-line-of-no-break-space-then-a-wrapped-line'],
     'se-following-any-whitespace': ['+a-blank-then-a-line-of-no-break-space-then-an-indented-line'],
     'se-nb-any-nonblank-shallower': ['no-space-after-the-bullet'],
     'mi-tab-one-column': ['a-tab-then-an-exception-bullet', 'a-blank-then-a-tab-indented-paragraph'],
-    'mi-tab-four-columns': ['+nested-a-blank-then-a-space-and-tab-indented-paragraph'],
+    'mi-tab-four-columns': ['+nested-a-blank-then-text-at-the-items-indent+1-space-tab-then-spaces'],
     'mi-nbsp-indents': ['a-no-break-space-then-an-exception-bullet'],
     'mi-any-space-indents': ['an-em-space-then-an-exception-bullet'],
     're-list-no-space': ['no-space-after-the-bullet'],

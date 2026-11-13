@@ -14,10 +14,12 @@
 # F5 (finding 1): every sentence in AGENTS.md about the markers' tests in general, in pyproject.toml's
 #     terms (F5-marker-meaning-sweep.py).
 # F6 (finding 2): the statement ends where CommonMark ends the last item (F6-statement-end-commonmark.py).
+#     Extended for review cycle 3, finding 1: at the items' indent and text column, the check and the
+#     parser agree both ways.
 # F7 (finding 3): the static check's and the guard's gaps, stated as classes and named in the seed,
 #     against an executed probe (F7-gap-statements.py).
 # F8 (finding 4): the mutant sweep after the whole-domain control (F8-marker-check-sweep.py), about
-#     80 s.
+#     80 s. Re-keyed for review cycle 3, finding 1, with three mutants of the moved boundary.
 # Refuses a tree with unstaged or untracked changes, as the frozen gate does. One child at a time;
 # under 200 MB; offline; nothing outlives it.
 

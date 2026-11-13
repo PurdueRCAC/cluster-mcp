@@ -1,5 +1,6 @@
 """Review cycle 2, finding 2: the marker-statement check ends the statement where CommonMark ends the
-last list item, for every whitespace form a line can start with.
+last list item, for every whitespace form a line can start with. Extended for review cycle 3,
+finding 1: at the boundary, the check and the parser agree both ways.
 
 The predicate is evaluated, not listed: a CommonMark parser (markdown-it-py, in the lock through the
 dev stack) renders each planted AGENTS.md, and the statement's list is compared with the list as
@@ -12,17 +13,27 @@ level of a bullet and one bullet deeper (2,400 cases), plus the same forms injec
 expects refused is one the parser changes, and each row it expects accepted is one the parser leaves
 alone and the check accepts.
 
+The boundary (review cycle 3, finding 1) is held both ways: for text that starts no item and for a
+`-` item, after each blank-line form in BLANKS or directly after the last item, behind every run of
+spaces and tabs up to six characters long (columns 0 to 24, so every column from the items' indent to
+past their text column, in every order of spaces and tabs that reaches it), at the top level and one
+bullet deeper, the check refuses exactly the cases the parser renders into the statement. Block
+starters other than `-` are left out of that domain: the check refuses some that CommonMark places
+after the list, a known refusal of shapes no file uses that lets no drift through.
+
 Run from the worktree root, after staging, through remediation/checks.sh (or alone):
 
     uv run --no-sync python -I spec/integration-marker-wording/remediation/F6-statement-end-commonmark.py
 
 Reads the check, its planted pair and the rows from the index (`git show :tests/test_hygiene.py`)
 and runs them in this process. Prints a count per verdict and every case the check passes that the
-parser changes; exits 1 on any. One process, git children only; under 150 MB; about 5 s.
+parser changes, and every boundary case where the two disagree; exits 1 on any. One process, git
+children only; under 150 MB; about 10 s.
 """
 from __future__ import annotations
 
 import functools
+import itertools
 import re
 import subprocess
 import sys
@@ -55,6 +66,9 @@ CONTENTS = ['except a gate', '- except a gate', '- `beta`: a third', '* except a
             '1234567890. except a gate', '-', '- ', '-except a gate', '-\texcept a gate', '-\xa0except a gate',
             '2 except a gate', '> except a gate', '# except a gate', '```', '---', '***',
             '<!-- except a gate -->', '| except | a gate |', '', '\n    except a gate', '\n  - `beta`: a third']
+BLANKS = ['', '  ', '\t', ' \t ']
+LEADS = [''.join(run) for size in range(7) for run in itertools.product(' \t', repeat=size)]
+EDGE = ['except a gate', '- except a gate', '- `beta`: a third']
 
 
 def statement_list(markdown: str, heading: str) -> list[str] | None:
@@ -106,6 +120,21 @@ def main() -> int:
                         counts[{(True, True): 'parser changes it, check refuses',
                                 (False, False): 'parser leaves it, check accepts',
                                 (False, True): 'parser leaves it, check refuses'}[(moved, refused)]] += 1
+    edge = {'parser changes it, check refuses': 0, 'parser leaves it, check accepts': 0}
+    for nested in (False, True):
+        base = ENDED('', nested)[1]
+        for blank in [None, *BLANKS]:
+            for lead in LEADS:
+                for content in EDGE:
+                    after = ('' if blank is None else blank + '\n') + lead + content + '\n'
+                    toml, agents = ENDED(after, nested)
+                    refused, moved = CHECK(toml, agents) != [], changed(toml, agents, base)
+                    if moved != refused:
+                        bad.append(f'boundary, nested={nested} after={after!r}: the parser '
+                                   f'{"changes" if moved else "leaves"} the list, the check '
+                                   f'{"refuses" if refused else "accepts"}')
+                    else:
+                        edge['parser changes it, check refuses' if moved else 'parser leaves it, check accepts'] += 1
     rows = [(p.id, p.values) for m in NS[ENDS].pytestmark if m.name == 'parametrize' for p in m.args[1]]
     if not rows:
         bad.append(f'{ENDS} has no rows')
@@ -130,6 +159,7 @@ def main() -> int:
                 real += 1
     print(f'{sum(counts.values())} planted cases: ' + '; '.join(f'{k} {v}' for k, v in counts.items())
           + f'; {len(rows)} rows of {ENDS}; {real} cases on the staged AGENTS.md')
+    print(f'{sum(edge.values())} boundary cases, held both ways: ' + '; '.join(f'{k} {v}' for k, v in edge.items()))
     for line in bad:
         print(line)
     print(f'F6: {"ok" if not bad else f"{len(bad)} failed"}')

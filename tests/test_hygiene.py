@@ -412,10 +412,11 @@ def test_unit_guard_redirects_home(tmp_path: Path) -> None:
 # lines are joined at every wrap by one space, which undoes line wrapping and nothing else, and the
 # (name, description) pairs must then equal pyproject.toml's `markers` entries exactly, in the same
 # order. Case, punctuation, markup, spacing and every character count. The statement ends at the
-# section's end, at a list item less indented than its own, or at a blank line followed by text no
-# deeper than its items that starts no item there: anything else would render as part of the last
-# description, or as another marker. Depth is counted as Markdown counts it: only spaces and tabs
-# indent, and a tab reaches the next multiple of four columns.
+# section's end, at a list item less indented than its own, or at a blank line followed by a list
+# item less indented than its own or by text that starts no item, short of its items' text column
+# (two columns past the dash): anything else would render as part of the last description, or as
+# another marker. Depth is counted as Markdown counts it: only spaces and tabs indent, and a tab
+# reaches the next multiple of four columns.
 MARKERS_STATED = 'Each marker means what its description in `pyproject.toml` says, word for word:'
 MARKER_ITEM = re.compile(r'- `([^`]*)`: (.*)')
 LIST_ITEM = re.compile(r'(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]|$)')
@@ -478,7 +479,7 @@ def statement_end_problems(after: list[str], indent: str) -> list[str]:
         if following is None:
             return []
         depth, text = markdown_indent(following)
-        if depth < len(indent) or (depth == len(indent) and not LIST_ITEM.match(text)):
+        if depth < len(indent) or (depth < len(indent) + 2 and not LIST_ITEM.match(text)):
             return []
         return [f'a line after a blank one joins the statement: {following.strip()!r}']
     depth, text = markdown_indent(after[0])
@@ -706,11 +707,39 @@ def ended(after: str, nested: bool = False) -> tuple[str, str]:
     return toml, agents.replace(old, '- The markers are real.\n' + block + after)
 
 
+def indented(column: int) -> dict[str, str]:
+    """Each whitespace form that indents a line to `column`, by name: spaces, tabs, a tab then spaces,
+    and a space, a tab, then spaces. A form that cannot reach the column is absent."""
+    forms = {'spaces': ' ' * column}
+    if column and column % 4 == 0:
+        forms['tabs'] = '\t' * (column // 4)
+    if column > 4:
+        forms['tab-then-spaces'] = '\t' + ' ' * (column - 4)
+    if column >= 4:
+        forms['space-tab-then-spaces'] = ' \t' + ' ' * (column - 4)
+    return forms
+
+
+# Where the statement ends after a blank line, at each column from one short of the items' indent to
+# one past their text column (two columns past the dash), in each whitespace form that reaches it, at
+# the top level and one bullet deeper: text that starts no item joins the last item only at or past
+# the text column, and a third marker joins the list at or past the items' indent.
+BOUNDARY_ROWS = [
+    pytest.param(f'\n{lead}{content}\n', nested, column >= items + (2 if text else 0),
+                 id=f'{"nested-" if nested else ""}a-blank-then-{"text" if text else "a-third-marker"}'
+                    f'-at-the-items-indent{column - items:+d}-{form}')
+    for nested, items in ((False, 2), (True, 4))
+    for column in range(items - 1, items + 4)
+    for form, lead in indented(column).items()
+    for text, content in ((True, 'except a gate'), (False, '- `beta`: a third'))
+]
+
+
 # Where the statement ends, for each whitespace form a line can start with: a row is refused when
 # Markdown renders its text inside the last item or as another item of the list, and accepted when
 # Markdown places it after the list. Only spaces and tabs indent, a tab reaches the next multiple of
 # four columns, a line of other whitespace is not blank, and a list marker is `-`, `*`, `+` or one to
-# nine digits and `.` or `)`, followed by a space, a tab or the line's end.
+# nine digits and `.` or `)`, followed by a space, a tab or the line's end. BOUNDARY_ROWS follow.
 @pytest.mark.unit
 @pytest.mark.parametrize(('after', 'nested', 'refused'), [
     pytest.param('- The next bullet.\n', False, False, id='a-less-indented-bullet'),
@@ -742,13 +771,16 @@ def ended(after: str, nested: bool = False) -> tuple[str, str]:
     pytest.param('-\u00a0except a gate\n', False, True, id='a-no-break-space-after-the-bullet'),
     pytest.param('2 except a gate\n', False, True, id='digits-without-a-delimiter'),
     pytest.param('\n   - `beta`: a third\n', False, True, id='a-blank-then-a-third-marker-one-column-deeper'),
+    *BOUNDARY_ROWS,
 ])
 def test_marker_statement_ends_where_markdown_ends_it(after: str, nested: bool, refused: bool) -> None:
     assert (marker_statement_violations(*ended(after, nested)) != []) == refused
 
 
-# The comparison ignores nothing but line wrapping, over the whole of its domain rather than one
-# carve-out at a time. The control's markers are the planted two and one whose description holds a
+# The comparison is held to every one-place edit in the control's alphabet at once, rather than one
+# carve-out at a time. That shows no such edit passes, not that the comparison ignores nothing else
+# but line wrapping: a fold of two look-alike characters, or a character outside EDIT_ALPHABET
+# dropped, would still pass it. The control's markers are the planted two and one whose description holds a
 # clause of each form a clause could be cut at; every edit of one name or description, made in one
 # place alone, must be refused: each character deleted, each replaced (its other case, or a letter),
 # each span between word boundaries dropped (any clause, at the start, the middle or the end), and
