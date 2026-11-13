@@ -64,7 +64,8 @@ from harness import Refused, stdio_refusal
 from cluster_mcp.core import MCPServerApp
 from cluster_mcp.core.capabilities import GROUP
 from cluster_mcp.core.startup import answer_until_eof
-from test_capabilities import MEMBER_SETS, REJECTED, UNLOADABLE, rejected_package, unloadable, write_metadata
+from test_capabilities import (MEMBER_SETS, NO_OWN_MODULE, REJECTED, UNLOADABLE, rejected_package, unloadable,
+                               write_metadata)
 from test_cli import CLI, LEGACY_CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
@@ -626,11 +627,14 @@ CLI_REJECTED = ('resource-not-a-url', 'resource-uri-collides', 'tool-not-a-tool'
 # The `UNLOADABLE` kinds the suite drives through the CLI, one of each family, at each of the five
 # times between them: an `Exception`; `SystemExit` with 0, an int and a string; a `BaseException` of
 # its own; a stray tool registered at the entry point's import; a registration that is not a tool;
-# a distribution with no `Name`; a subclass of `Capability` whose code reads its commands; and an `order`
-# of a type of its own whose comparisons exit, which composing the base would run after the load.
+# a distribution with no `Name`; a subclass of `Capability` whose code reads its commands; an `order`
+# of a type of its own whose comparisons exit, which composing the base would run after the load; a
+# subclass of `FunctionTool` whose code reads its name; and a tool whose schema holds a value of a type
+# of its own.
 CLI_UNLOADABLE = ('raises-at-entry-point', 'exits-0-at-tools', 'exits-int-at-declared', 'exits-text-at-served',
                   'raises-base-at-served-tool', 'stray-imported-by-the-entry-point', 'not-a-tool-from-the-entry-point',
-                  'nameless-no-name', 'subclass-reads-commands', 'exact-order')
+                  'nameless-no-name', 'subclass-reads-commands', 'exact-order', 'tool-subclass-reads-name',
+                  'tool-exact-parameters-value')
 
 
 @pytest.mark.unit
@@ -725,6 +729,21 @@ def test_a_capability_that_cannot_load_stops_startup(kind: str, drive: str, tmp_
     # for any capability that cannot load.
     root, named, cause = plant_unloadable(tmp_path / 'planted', kind)
     violations = refused_start_violations(root, named, cause, drive)
+    assert violations == [], '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('meta', list(NO_OWN_MODULE))
+def test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code(meta: str,
+                                                                                        tmp_path: Path) -> None:
+    # A tool's return type whose class holds no `__module__` of its own, of each metaclass the load accepts:
+    # building a server reads the class's `__module__`, which on every metaclass but `type` finds its base's,
+    # a `str` of the capability's own whose every operation exits 0. The start is refused naming the
+    # distribution, for this rule's cause, with stdout empty. Without the rule, a class of `type` or
+    # `TypedDict`'s metaclass loads (its read never reaches the base), and on the others the load's guard
+    # catches the exit at its scratch build and refuses with another cause: the cause check fails either way.
+    root, named, cause = plant_unloadable(tmp_path / 'planted', f'tool-exact-return_type-no-own-module-{meta}')
+    violations = refused_start_violations(root, named, cause, 'stdin-closed')
     assert violations == [], '\n'.join(violations)
 
 

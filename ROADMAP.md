@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-32 entries, each of which ships in the first release after it lands. **Part II** ships as
+36 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-six entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -91,11 +91,13 @@ They come in six groups, in this order:
   layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (five): a capability load retried after an interrupt, a failed load's refusal read past
-  a patched class, the site files' size, the startup update check, and the floors a git install
-  resolves against.
-- **Redesigns and trade-offs** (two): limits the timeout stop and the liveness check recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
-  maintainer's ruling.
+- **Safety** (eight): a capability load retried after an interrupt, a failed load's refusal
+  read past a patched class, a tool object changed after the load, a metaclass's code in the
+  record checks, the flag the return-type rule's exemption reads, the site files' size, the
+  startup update check, and the floors a git install resolves against.
+- **Redesigns and trade-offs** (three): limits the timeout stop, the liveness check and the tool
+  load's return-type rule recorded. Fix what can be fixed; what can't becomes
+  `accepted-behaviour` only on the maintainer's ruling.
 - **The rename finished** (two): the identity strings a client or a token sees, and the docs.
 
 ## The surface pin cannot follow a deliberate surface change
@@ -120,7 +122,7 @@ still taken by `isinstance`. The outcome: every tool exactly a `FunctionTool` wi
 decided at load, the handler excepted. Pre-existing; no code changes until its cycle.
 
 *Horizon: before Part II, safety · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (REVIEW, cycle 2 rulings); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
-**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: unshaped*
+**Seed:** [`issues/capability-tool-objects-inert.md`](issues/capability-tool-objects-inert.md) · *status: adopted:capability-tool-objects-inert*
 
 ## A retried capability load after a failure registers nothing and blames the wrong distribution
 
@@ -396,6 +398,41 @@ purpose reaches it.
 *Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (TECH P1, review cycle 2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-refusal-class-patched.md`](issues/capability-refusal-class-patched.md) · *status: unshaped*
 
+## A capability can change a tool object after the load has checked it
+
+The load serves the objects the capability built, so capability code can change one after the load;
+serving a copy rebuilt from the checked values would close it. `capability-tool-objects-inert`
+makes every registered tool exact at load, and the check holds at load only: a handler that sets a
+field of its own tool afterwards, to a value of a type of its own, runs that type's code the next
+time FastMCP lists or calls the tool. Pre-existing. Filed at that cycle's GOAL sign-off, 2026-11-12.
+
+*Horizon: Part I, safety · Depends on: capability-tool-objects-inert (the check it extends) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (GOAL, Q1); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-tool-objects-served-copy.md`](issues/capability-tool-objects-served-copy.md) · *status: unshaped*
+
+## The record checks can run a metaclass's code while they word a refusal
+
+The load names a refused record value's type with `type(value).__name__`, and `_shown` tests a type
+with `in` on a tuple of types; both run code of a metaclass the capability defines (a `__name__`
+property, a `__getattribute__`, an `__eq__`), at load and inside its guard, so the refusal still
+names the distribution but its message can lie. Naming the type through `type`'s own descriptor and
+testing with `is`, as `capability-tool-objects-inert` does for tools, closes it. Pre-existing. Found
+by that cycle's planning, seeded at its plan sign-off, 2026-11-12.
+
+*Horizon: Part I, safety · Depends on: — · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (PLAN § 5, research 02); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-record-checks-metaclass-code.md`](issues/capability-record-checks-metaclass-code.md) · *status: unshaped*
+
+## The return-type rule's static-type exemption is decided by a flag capability code can set
+
+A tool's return type must hold classes that carry their own `__module__`, except a class without the
+heap-type flag, a static type such as `str`. A capability's own native code can clear that flag on a class
+of its own (`ctypes`), and then FastMCP's read of the class's `__module__` resolves along the MRO and runs
+the capability's code; a C extension's heap type with an undotted name is refused, though nothing of the
+capability's runs. Deciding the class as FastMCP's read resolves it, or naming the exempt static types,
+closes both. Not pre-existing: that cycle's rule. Found by its review cycle 3, 2026-11-13.
+
+*Horizon: Part I, safety · Depends on: capability-tool-objects-inert (the rule it tightens) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) REVIEW cycle 3, F1 and F2; `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-return-type-heap-flag.md`](issues/capability-return-type-heap-flag.md) · *status: unshaped*
+
 ## One very large site file can cost every site rule
 
 The startup read takes each `/etc/agents.d/*.md` file whole, with no size limit, inside one 10 s
@@ -459,6 +496,19 @@ a longer bound lowers it. Not pre-existing: it is that cycle's recorded limit.
 
 *Horizon: Part I, trade-off · Depends on: ssh-half-open-link (cleared: landed on `develop` 2026-11-06) · Refs: [`spec/ssh-half-open-link/`](spec/ssh-half-open-link/) PLAN §3 Deviation 3, research 01 §5; what can't be lifted becomes `accepted-behaviour` only on the maintainer's ruling*
 **Seed:** [`issues/ssh-liveness-message-gap.md`](issues/ssh-liveness-message-gap.md) · *status: unshaped*
+
+## The load refuses some return annotations FastMCP serves
+
+`capability-tool-objects-inert` decides a tool's `return_type` by an allowlist of metaclasses and
+aliases it can show inert, so a capability whose tool returns a `NewType`, a `type X = …` alias, a
+bare `typing.Dict` or `List`, an `Annotated` with `annotated_types` metadata, or a
+`typing_extensions.TypedDict` is refused at load, where `develop` loaded it and FastMCP serves it.
+No member returns one. Accepting a shape needs its own inertness decision first (a `type X = …` alias
+evaluates capability code lazily). Not pre-existing: that cycle's rule. Found by its review cycle 1,
+2026-11-12.
+
+*Horizon: Part I, trade-off · Depends on: capability-tool-objects-inert (the rule it widens) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) REVIEW cycle 1, F4; `AGENTS.md` § Invariants §7; `core/capabilities.py`; a shape that can't be decided inertly becomes `accepted-behaviour` only on the maintainer's ruling*
+**Seed:** [`issues/capability-tool-return-type-shapes.md`](issues/capability-tool-return-type-shapes.md) · *status: unshaped*
 
 ## The rename left two identity strings a client or a token sees
 
