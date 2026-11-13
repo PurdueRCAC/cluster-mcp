@@ -3,10 +3,10 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: in_progress
+status: in_review
 branch: ci/annotation-check
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
   verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py && .venv/bin/python -I spec/annotation-check/remediation/F6-F8-review2.py && .venv/bin/python -I spec/annotation-check/remediation/F9-review3.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: in_progress
+  status: done
   satisfies:
   - R6
   - R7
@@ -223,6 +223,9 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
     `remediation/F9-review3.py` ran green on a candidate tree of this commit's content (the module
     byte-identical to the commit's); P2 stays `in_progress` until the profile's full `verify`, which
     waits on the foreman's release of the host.
+  - Run B (2026-11-13, at `2ba12c1`): `gate.sh P2`, static, docs and ledger ok, then the profile's
+    full `verify` green in both eras (fourth command 4,661 passed and 14 skipped per era, the same
+    skip count as cycle 2's run), 1,555 s wall. P2 closes.
 
 ---
 
