@@ -48,6 +48,6 @@ required-version = ">=0.12.17"
 [tool.pytest.ini_options]
 addopts = "--strict-markers"
 markers = [
-    "unit: fast and isolated; no subprocess, no network, no real cluster",
-    "integration: drives the installed CLI; run it under bin/sandbox.sh",
+    "unit: starts no process, opens no network connection (a name lookup included) and sees no real HOME; the unit guard holds it to that, except on the open routes AGENTS.md § Testing names",
+    "integration: needs what a unit test is refused (a process, a network connection or name lookup, or the real HOME), itself or through a fixture or helper; every process it launches goes through bin/sandbox.sh",
 ]

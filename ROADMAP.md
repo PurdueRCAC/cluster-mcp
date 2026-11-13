@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-42 entries, each of which ships in the first release after it lands. **Part II** ships as
+45 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Forty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
+Forty-five entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,11 +84,12 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (nineteen), because every later gate rests on them: the mutation run, the four kinds of
+- **Gates** (twenty-two), because every later gate rests on them: the mutation run, the four kinds of
   case only its hosted Linux run lets survive, its one flaky case, the two guards its shard ledger
   leaves unpinned, the pins its stop path still lacks, the two gaps the skip check still leaves and
   the pins it still lacks, the waits the timing rows still miss and the bounds two miss on hosted
-  runners, an annotation check, the test harnesses' leftovers, the marker wording, the image's init,
+  runners, an annotation check, the test harnesses' leftovers, the marker wording, its check, the
+  shapes its statement check still misreads and the gaps in what enforces it, the image's init,
   and the surface pin's deeper layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
@@ -321,7 +322,53 @@ instead of fixing it. Rewording both markers to the line the unit guard draws se
 the `absence-check-leftover-classification` plan, 2026-10-19.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/absence-check-leftover-classification/`](spec/absence-check-leftover-classification/) (PLAN §5)*
-**Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: unshaped*
+**Seed:** [`issues/integration-marker-wording.md`](issues/integration-marker-wording.md) · *status: adopted:integration-marker-wording*
+
+## Nothing checks that an `integration` test needs what a `unit` test is refused
+
+The collection hook only requires one of the two markers, and the unit guard is inactive for every
+test that is not `unit`, so a test that needs nothing the guard refuses can carry `integration` and
+run with the real HOME and the variables the guard would blank. A check that it cannot has to
+classify every kind of `integration` test (a CLI drive, another sandboxed program, a child
+interpreter, a stand-in for a host tool, the `executes` backends, a stdio server, a loopback
+connection, a sandboxed child killed on timeout), including a launch made by a fixture of wider
+scope or a helper module, which a check of the test body alone misses. Deferred from
+`integration-marker-wording` at its GOAL gate, 2026-11-09.
+
+*Horizon: Part I, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (GOAL, Q1); `tests/conftest.py` (`guard`)*
+**Seed:** [`issues/integration-marker-check.md`](issues/integration-marker-check.md) · *status: unshaped*
+
+## The checks behind the marker rules miss routes the rules forbid
+
+An executed probe against `tests/conftest.py` found routes the marker rules forbid and their checks
+leave open: in a `unit` test, a `Popen` class bound before the test (`conftest.REAL_POPEN`) still
+launches, a `_socket` connect, a UDP send, an early-bound `getaddrinfo` and the `gethostbyname`
+family still reach the network, a fixture of wider scope launches before the guard is active, and
+an `XDG_*` variable other than the three the guard sets (`XDG_STATE_HOME`) arrives unchanged, as do
+other variables and values that name the real home (`GNUPGHOME`, `site.USER_BASE`); and the static
+launch check reads only a call to a launcher it lists, so `tests/test_ssh_exec.py`'s `_host`, which
+runs `hdiutil` through `REAL_POPEN` outside `bin/sandbox.sh`, goes unread, as do a launcher bound
+by assignment and two `Popen` subclasses in use inside the sandbox, and as would a fork, `pty` or
+`multiprocessing`. Found by the `integration-marker-wording` plan,
+2026-11-09, and its review, 2026-11-10.
+
+*Horizon: Part I, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (PLAN); `tests/conftest.py` (`guard`, `REAL_POPEN`); `tests/test_ssh_exec.py` (`_host`)*
+**Seed:** [`issues/marker-rule-gaps.md`](issues/marker-rule-gaps.md) · *status: unshaped*
+
+## The marker-statement check: two shapes it reads otherwise than CommonMark, and carve-outs its rows leave unpinned
+
+The check that holds `AGENTS.md`'s statement of the markers to `pyproject.toml` refuses every
+one-place edit in its control's alphabet and is pinned over each whitespace form a following line
+can start with. Two shapes pass it and render differently: a statement indented past its bullet's
+text, after which a less indented item still joins its list, and a wrap whose next line starts a
+block. Eight deeper carve-outs are coverage gaps, drifts the check refuses that no row pins (a fold
+of two look-alike characters such as an em dash and a hyphen, a character outside the control's
+alphabet stripped, and six structural layers). Some block starters CommonMark places after the list
+are refused, a false red on layouts no file uses. Found by the `integration-marker-wording` review
+cycle 2 remediation and review cycle 3, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: integration-marker-wording · Refs: [`spec/integration-marker-wording/`](spec/integration-marker-wording/) (REVIEW, cycles 2 and 3); `tests/test_hygiene.py` (`marker_statement_violations`)*
+**Seed:** [`issues/marker-statement-deeper-carve-outs.md`](issues/marker-statement-deeper-carve-outs.md) · *status: unshaped*
 
 ## The image's init is pinned by its recipe, not by what it reaps
 
