@@ -43,6 +43,13 @@ Modes:
 - `ids ERA ID...`: the mutants named, in ERA, one at a time (a cheap re-run of survivors).
 - `report LOG...`: the table over the logs given: each mutant's verdict in each era, and the counts.
   Exits 1 unless every mutant ran in both eras, each killed or recorded equivalent.
+- `function ERA FUNC LOG`: every mutant of the function FUNC alone, in ERA, two children at a time, logged
+  as `run` logs (review cycle 2, N1: only `_return_type_violation` changed in the package since the
+  shards ran).
+- `merged REF FUNC NEWLOG... -- OLDLOG...`: the report over FUNC's mutants from the NEWLOGs and every other
+  mutant from the OLDLOGs, the shard logs of the tree at commit REF. Exits 1 unless every mutant outside
+  FUNC is generated at REF and now with the same id and the same planted text (so its old verdict stands
+  for this tree), and every mutant ran in both eras, each killed or recorded equivalent.
 
 Footprint: at most two children at a time, each one pytest process under bin/sandbox.sh, under 1 GB in
 all; a killed mutant takes about 3 to 13 s, a survivor about 40 s (the targets whole, under the sandbox):
@@ -200,8 +207,9 @@ def _walk(tree: ast.AST):
                 stack.append((value, node, name, None))
 
 
-def generated() -> list[Mutant]:
-    text = SOURCE.read_text()
+def generated(text: str | None = None) -> list[Mutant]:
+    """Every mutant of the loader's source `text` (by default, the worktree's)."""
+    text = SOURCE.read_text() if text is None else text
     module = ast.parse(text)
     found: list[Mutant] = []
     for top in module.body:
@@ -315,6 +323,40 @@ def shard_of(mutant_id: str, count: int) -> int:
     return zlib.crc32(mutant_id.encode()) % count
 
 
+def run_logged(mine: list[Mutant], era: str, log: Path | None) -> int:
+    """Run `mine` in `era`, two children at a time, a line each on stdout and in `log` (started afresh);
+    return how many were neither killed nor recorded equivalent."""
+    if log:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text('')
+    bad = 0
+
+    def one(m: Mutant) -> str:
+        verdict, detail, seconds = run_one(m.id, ((m.old, m.new),), era)
+        if verdict == 'survived' and m.id in EQUIVALENT:
+            verdict, detail = 'equivalent', EQUIVALENT[m.id]
+        return f'{era}\t{verdict}\t{m.id}\t{seconds:.0f}\t{detail}'
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for line in pool.map(one, mine):
+            print(line, flush=True)
+            if log:
+                with log.open('a') as handle:
+                    handle.write(line + '\n')
+            bad += line.split('\t')[1] not in ('killed', 'equivalent')
+    return bad
+
+
+def verdicts_of(names: list[str]) -> dict[str, dict[str, str]]:
+    """Each mutant's verdict in each era, from the logs named."""
+    verdicts: dict[str, dict[str, str]] = {}
+    for name in names:
+        for line in Path(name).read_text().splitlines():
+            era, verdict, mutant_id, _, detail = line.split('\t', 4)
+            verdicts.setdefault(mutant_id, {})[era] = verdict
+    return verdicts
+
+
 def main(argv: list[str]) -> int:
     mode = argv[0] if argv else 'list'
     found = generated()
@@ -334,27 +376,56 @@ def main(argv: list[str]) -> int:
     if mode == 'run':
         era, (k, n) = argv[1], map(int, argv[2].split('/'))
         log = Path(argv[3]) if len(argv) > 3 else None
-        if log:
-            log.parent.mkdir(parents=True, exist_ok=True)
-            log.write_text('')
         mine = [m for m in found if shard_of(m.id, n) == k - 1]
-        bad = 0
-
-        def one(m: Mutant) -> str:
-            verdict, detail, seconds = run_one(m.id, ((m.old, m.new),), era)
-            if verdict == 'survived' and m.id in EQUIVALENT:
-                verdict, detail = 'equivalent', EQUIVALENT[m.id]
-            return f'{era}\t{verdict}\t{m.id}\t{seconds:.0f}\t{detail}'
-
-        with ThreadPoolExecutor(WORKERS) as pool:
-            for line in pool.map(one, mine):
-                print(line, flush=True)
-                if log:
-                    with log.open('a') as handle:
-                        handle.write(line + '\n')
-                bad += line.split('\t')[1] not in ('killed', 'equivalent')
+        bad = run_logged(mine, era, log)
         print(f'F1 sweep {era} {k}/{n}: {len(mine)} mutants, {bad} not killed or equivalent', file=sys.stderr)
         return 1 if bad else 0
+    if mode == 'function':
+        era, function, log = argv[1], argv[2], Path(argv[3])
+        mine = [m for m in found if m.id.startswith(f'{function}:')]
+        if not mine:
+            print(f'F1 sweep: no mutant of {function}', file=sys.stderr)
+            return 1
+        bad = run_logged(mine, era, log)
+        print(f'F1 sweep {era} {function}: {len(mine)} mutants, {bad} not killed or equivalent', file=sys.stderr)
+        return 1 if bad else 0
+    if mode == 'merged':
+        ref, function, rest = argv[1], argv[2], argv[3:]
+        if '--' not in rest:
+            print('F1 sweep: merged REF FUNC NEWLOG... -- OLDLOG...', file=sys.stderr)
+            return 2
+        new_logs, old_logs = rest[:rest.index('--')], rest[rest.index('--') + 1:]
+        inside = f'{function}:'
+        then = subprocess.run(['git', 'show', f'{ref}:{SOURCE.relative_to(ROOT)}'], capture_output=True, text=True,
+                              check=True).stdout
+        before = {m.id: (m.old, m.new) for m in generated(then) if not m.id.startswith(inside)}
+        now = {m.id: (m.old, m.new) for m in found if not m.id.startswith(inside)}
+        drift = ([f'gone since {ref}: {i}' for i in sorted(set(before) - set(now))]
+                 + [f'new since {ref}: {i}' for i in sorted(set(now) - set(before))]
+                 + [f'changed since {ref}: {i}' for i in sorted(set(now) & set(before)) if now[i] != before[i]])
+        for line in drift:
+            print(f'REFUSED     {line}')
+        if drift:
+            print(f'F1 sweep: {len(drift)} mutants outside {function} differ from {ref}: their old verdicts do '
+                  'not stand for this tree', file=sys.stderr)
+            return 1
+        old, fresh = verdicts_of(old_logs), verdicts_of(new_logs)
+        verdicts = {m.id: (fresh if m.id.startswith(inside) else old).get(m.id, {}) for m in found}
+        missing = [i for i, v in verdicts.items() if set(v) != set(ERAS)]
+        bad = [(i, v) for i, v in verdicts.items() if any(x not in ('killed', 'equivalent') for x in v.values())]
+        totals: dict[str, int] = {}
+        for mutant_id, v in verdicts.items():
+            where = 'rerun' if mutant_id.startswith(inside) else ref
+            for era, x in v.items():
+                totals[f'{era} {x} ({where})'] = totals.get(f'{era} {x} ({where})', 0) + 1
+        rerun = sum(m.id.startswith(inside) for m in found)
+        print(f'{len(found)} mutants, {rerun} of {function} re-run, {len(found) - rerun} read from {ref}\'s shards; '
+              + ', '.join(f'{k}: {v}' for k, v in sorted(totals.items())))
+        for mutant_id, v in bad:
+            print(f'NOT KILLED  {mutant_id}: {v}')
+        for mutant_id in missing:
+            print(f'UNRUN       {mutant_id}: {verdicts[mutant_id]}')
+        return 1 if bad or missing else 0
     if mode == 'ids':
         era, wanted = argv[1], set(argv[2:])
         unknown = sorted(wanted - {m.id for m in found})
@@ -371,11 +442,7 @@ def main(argv: list[str]) -> int:
                 bad += verdict not in ('killed', 'equivalent')
         return 1 if bad else 0
     if mode == 'report':
-        verdicts: dict[str, dict[str, str]] = {}
-        for name in argv[1:]:
-            for line in Path(name).read_text().splitlines():
-                era, verdict, mutant_id, _, detail = line.split('\t', 4)
-                verdicts.setdefault(mutant_id, {})[era] = verdict
+        verdicts = verdicts_of(argv[1:])
         missing = [m.id for m in found if set(verdicts.get(m.id, {})) != set(ERAS)]
         bad = [(i, v) for i, v in verdicts.items() if any(x not in ('killed', 'equivalent') for x in v.values())]
         totals: dict[str, int] = {}

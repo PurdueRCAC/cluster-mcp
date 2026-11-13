@@ -24,7 +24,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 2
-  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh cases && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-handshake && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-modern
+  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-return-type-handshake && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-return-type-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report-return-type && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh cases && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-handshake && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
   status: in_progress
@@ -36,7 +36,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
+  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report-return-type && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
 review:
   last_reviewed_commit: 697dc8f572f7e7e22b37dbad09ec87ad0eacf6c3
   verdict: changes-requested
@@ -243,9 +243,23 @@ and §7, since §7 names the pins (the profile's same-commit rule), so P2's R3 p
 - [x] `AGENTS.md` §7's rule list states the rule; § Testing and §7's evidence list name the rows and the CLI
   test (same commit).
 - **Verify (retuned at remediation, cycle 2):** P1's chain, then `F5-gate.sh` `pins`, `cases`,
-  `sweep-handshake`, `sweep-modern`. `F1-tool-rule-sweep.py`'s mutant ids in `_return_type_violation` are
-  renumbered by the new decision, so the eight F1 shards re-run on this tree before `F1-gate.sh report` can
-  pass: the heavy run the foreman schedules, with the full verify.
+  `sweep-handshake`, `sweep-modern`; the eight F1 shards and `report` replaced as below.
+- **Amended (the F1 sweep's report, cycle 2).** The new decision renumbers `F1-tool-rule-sweep.py`'s mutant
+  ids in `_return_type_violation`, so `F1-gate.sh report` over the eight shard logs, which ran on `4b04dad`,
+  reads that function's new ids as unrun. Only that function changed in the package since (`git diff 4b04dad
+  -- packages/`: `_return_type_violation` and its `_HEAP_TYPE` constant); the tests changed only by adding
+  rows, a CLI test and two cases, which can kill a mutant but never spare one. So, approved as a shortcut
+  for the 85-minute re-run: `F1-gate.sh sweep-return-type-handshake` and `-modern` re-run that function's
+  116 mutants alone in each era, and `report-return-type` reports over those two logs and the eight
+  `4b04dad` shard logs for the other 345. It refuses when any mutant outside the function is gone, new, or
+  plants other text than it did at `4b04dad`, so an old verdict stands only for an unchanged mutant. Seen
+  refusing before it was trusted: with a cause in `_json_violation` changed (copied aside, restored, `cmp`),
+  44 mutants refused as changed; against a ref without the check, refused as new; with no re-run log, the
+  116 unrun and the 345 read in both eras, killed or equivalent. P1's chain runs the three modes in place of
+  the eight shards and `report`; P2's runs `report-return-type` in place of `report`.
+  Green on this tree, 2026-11-12: 116 re-run in each era, 114 killed and 2 equivalent (the two recorded
+  for that function, still equivalent); the 345 read from `4b04dad`, 343 killed and 2 equivalent an era;
+  about 13 min an era.
 
 ## Phase P2 — Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
 **Satisfies:** R3, R5 · **Depends on:** P1
@@ -290,8 +304,9 @@ the profile's full verify green once.
 - **Reopened at remediation (review cycle 2, N1), 2026-11-12.** P2 built on P1 and satisfies R3, which N1
   broke. Its R3 pin for N1 (`test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code`)
   rides in P1's commit (§7 names it). P2's gate re-runs on the remediated tree: `phase`, `ledger`,
-  `F5-gate.sh pins` (P1's run of it on the same tree stands in), `F1-gate.sh report` after the eight shards
-  re-run, then the full verify; the evidence on `4b04dad` no longer stands for this tree.
+  `F5-gate.sh pins` (P1's run of it on the same tree stands in), `F1-gate.sh report-return-type` (P1's run
+  stands in; see P1's amendment), then the full verify; the evidence on `4b04dad` no longer stands for this
+  tree.
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
 
 ---
