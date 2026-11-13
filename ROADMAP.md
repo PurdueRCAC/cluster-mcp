@@ -197,11 +197,12 @@ Mac. Pre-existing; macOS only, since the CI runner never calls `hdiutil`.
 ## The disk-image fixture's stop, cleanup and report are pinned one layer deep
 
 The stand-in rows pin each decision the full-volume fixture makes only as far as the stand-in's
-inputs reach. Eleven mutants pass every row: a stop that waits only for the
+inputs reach. Twelve mutants pass every row: a stop that waits only for the
 step's own process, a cleanup that detaches one of two devices made from an image, a failure that
 names the head of a long standard error, and defensive branches (EPERM from `killpg`, a `ps` answer
-without this process, an `info` answer of the wrong shape) no row injects. Found by
-`full-volume-fixture-leaks-hdiutil`'s review and its remediation sweep; none is a regression.
+without this process, an `info` answer of the wrong shape) no row injects, and a pin row that
+skips seen only by the rows' driver. Found by `full-volume-fixture-leaks-hdiutil`'s two reviews and
+its remediation sweep; none is a regression.
 
 *Horizon: 0.2.0, gates · Depends on: `full-volume-fixture-leaks-hdiutil` · Refs: [`spec/full-volume-fixture-leaks-hdiutil/`](spec/full-volume-fixture-leaks-hdiutil/) (REVIEW.md cycle 1; the remediation sweep); `tests/test_ssh_exec.py`; `tests/hdiutil_standin.py`*
 **Seed:** [`issues/disk-image-fixture-deeper-pins.md`](issues/disk-image-fixture-deeper-pins.md) · *status: unshaped*

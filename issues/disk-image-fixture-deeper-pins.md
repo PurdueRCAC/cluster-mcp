@@ -59,7 +59,16 @@ reproduced all six as cases, and found these survivors of the same kind besides:
 11. **An image entry with no device is skipped** (`_clean_up`). Dropping the skip passes: every entry
     the stand-in lists carries a `dev-entry`, so the cleanup never meets one without.
 
-Pre-existing in the sense that none of the eleven is a regression: each decision is correct today,
+From review cycle 2:
+
+12. **The rows' driver is the only guard against a row that skips** (`_drive_image`). Letting
+    pytest's `Skipped` and `XFailed` escape the driver leaves the run green ("1 skipped, 1 xfailed"),
+    and with a carve-out in the fixture that skips the cleanup on a skip besides, still green: the
+    carve-out goes unseen. `test_only_need_shell_skips` reads skips the suite writes, not an outcome
+    type a row raises through an argument (its documented limit), so nothing outside the driver
+    sees a pin row that skips.
+
+Pre-existing in the sense that none of the twelve is a regression: each decision is correct today,
 graded by reading the code; what is missing is a row whose input reaches it.
 
 ## Why it was deferred
@@ -93,11 +102,13 @@ Draft R-IDs, to be firmed up at promotion.
   row that injects it.
 - **R5** — A rule for items 4, 8 and 10: either a row that reaches them, or a recorded reason each
   is left unpinned.
+- **R6** — WHEN a disk-image pin row ends skipped or xfailed, by any route, the run SHALL go red,
+  by a check that does not rest on the rows' driver alone.
 
 ## Notes
 
 - Related: `spec/full-volume-fixture-leaks-hdiutil/` (REVIEW.md, cycle 1, "Coverage observations";
   the remediation sweep and its record in TECH.md); `issues/sandbox-dirs-left-on-kill.md` (another
   leftover of the same harness).
-- Found by: `full-volume-fixture-leaks-hdiutil` review cycle 1 (items 1–6) and its remediation sweep
-  (items 7–11).
+- Found by: `full-volume-fixture-leaks-hdiutil` review cycle 1 (items 1–6), its remediation sweep
+  (items 7–11) and review cycle 2 (item 12).
