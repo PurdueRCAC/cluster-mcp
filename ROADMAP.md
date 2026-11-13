@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-45 entries, each of which ships in the first release after it lands. **Part II** ships as
+49 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Forty-five entries: every open hardening, robustness and safety item, and the rest of the rename in
+Forty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,13 +84,15 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (twenty-two), because every later gate rests on them: the mutation run, the four kinds of
-  case only its hosted Linux run lets survive, its one flaky case, the two guards its shard ledger
-  leaves unpinned, the pins its stop path still lacks, the two gaps the skip check still leaves and
-  the pins it still lacks, the waits the timing rows still miss and the bounds two miss on hosted
-  runners, an annotation check, the test harnesses' leftovers, the marker wording, its check, the
-  shapes its statement check still misreads and the gaps in what enforces it, the image's init,
-  and the surface pin's deeper layers.
+- **Gates** (twenty-six), because every later gate rests on them: the mutation run, the four kinds
+  of case only its hosted Linux run lets survive, its one flaky case, the two guards its shard ledger
+  leaves unpinned, the pins its stop path still lacks and the case cleanup a signal can cut short,
+  the two gaps the skip check still leaves and the pins it still lacks, the waits the timing rows
+  still miss and the bounds two miss on hosted runners, an annotation check, the test harnesses'
+  leftovers and those of a sandbox killed outside them, the pins the sandbox sweep's listing guard
+  and its reopen's link guard lack, the marker wording, its check, the shapes its statement check
+  still misreads and the gaps in what enforces it, the image's init, and the surface pin's deeper
+  layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (eight): a capability load retried after an interrupt, a failed load's refusal
@@ -223,6 +225,58 @@ Found by that cycle's review, cycle 3, 2026-11-10.
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutant-child-outlives-timeout/`](spec/mutant-child-outlives-timeout/) (REVIEW cycle 3, mutant sweep); `tests/mutants.py` (`stop_run`, `run_members`, `_wait_gone`); `tests/test_mutations.py`*
 **Seed:** [`issues/mutant-runner-stop-pins.md`](issues/mutant-runner-stop-pins.md) · *status: unshaped*
 
+## A signal to the mutation runner during a case's cleanup cuts the cleanup short
+
+The runner cleans up each case on its way out of `run_case` (`case_scratch`: the processes listed,
+`TMPDIR` put back, the case's scratch removed, or kept and named while a sandbox in it is in use).
+The cleanup holds no signal, so any SIGTERM, SIGHUP or Ctrl-C that lands while it runs, a second one
+after a stop or a single one after a case that ended on its own, stops it part-way: the case goes
+unreported, the scratch stays in the runner's `TMPDIR` with the run's sandbox directories, unnamed,
+and a listing cut short leaves its own sandbox directory too. Pre-existing in kind: the old
+`TemporaryDirectory` cleanup was cut short the same way. Found by `sandbox-dirs-left-on-kill`'s P2
+build, 2026-11-12, for a second signal, and by its review, cycle 2, for any signal.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (TECH, P2); `tests/mutants.py` (`case_scratch`, `stop_run`)*
+**Seed:** [`issues/mutant-case-cleanup-interrupted.md`](issues/mutant-case-cleanup-interrupted.md) · *status: unshaped*
+
+## A sandbox killed outright where no run's cleanup runs leaves its directory
+
+`bin/sandbox.sh` removes its directory from a trap a SIGKILL skips. `sandbox-dirs-left-on-kill`
+cleans up after the suite and the mutation runner and leaves the wrapper as it is, so three cases
+still leave directories: a person or another tool that SIGKILLs a sandbox (a shell's `kill -9`, a
+gate script, a step cancelled outright) leaves it in that caller's `TMPDIR`; a suite run or the
+mutation runner SIGKILLed before its end leaves its run directory or case scratch, sandboxes
+included; and a suite run keeps its run directory for a sandbox still running at its end, which
+stays empty once that sandbox's trap has run (two per `verify`). That cycle's GOAL records the first
+two as known limitations, and its review, cycle 1, found the third. Clearing stale leftovers on the
+next start is a likely remedy, not yet decided.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (GOAL non-goals, Q4); `bin/sandbox.sh`*
+**Seed:** [`issues/sandbox-dirs-outside-repo-runs.md`](issues/sandbox-dirs-outside-repo-runs.md) · *status: unshaped*
+
+## Nothing pins the sandbox sweep's refusal when it cannot list processes
+
+The suite's sandbox sweep and the mutation runner's case cleanup keep what they found when the
+process listing fails (`tests/sandbox_dirs.py` `processes`), rather than read an empty table as
+"nothing in use". No test fails when that check is removed: a hand-planted mutant survived
+`tests/test_sandbox_dirs.py`. A coverage observation; the guard works today and fires only when
+`lsof` or `ps` fails. Found by `sandbox-dirs-left-on-kill`'s review, cycle 1, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (REVIEW cycle 1); `tests/sandbox_dirs.py`; `tests/test_sandbox_dirs.py`*
+**Seed:** [`issues/sandbox-sweep-listing-failure-unpinned.md`](issues/sandbox-sweep-listing-failure-unpinned.md) · *status: unshaped*
+
+## Nothing pins that the sandbox cleanup's reopen ignores a link inside a closed directory
+
+The suite's sandbox sweep and the mutation runner's case cleanup reopen directories a stopped test
+left closed, and never follow a link while they do (`tests/sandbox_dirs.py` `_open_tree`). The rows
+that pin this place their links at the top of the run directory; a hand-planted mutant that follows
+links survived `tests/test_sandbox_dirs.py` and, through a link inside a closed directory, opened a
+closed directory outside the run. A coverage observation; the code is correct today. Found by
+`sandbox-dirs-left-on-kill`'s review, cycle 2, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (REVIEW cycle 2); `tests/sandbox_dirs.py`; `tests/test_sandbox_dirs.py`*
+**Seed:** [`issues/sandbox-reopen-link-in-closed-dir-unpinned.md`](issues/sandbox-reopen-link-in-closed-dir-unpinned.md) · *status: unshaped*
+
 ## The static skip check admits a renamed skipper and a subclassed outcome type
 
 The skip check reads a skip by the word it is spelled with, so `from pytest import skip as go`
@@ -300,7 +354,7 @@ per mutation sweep, and 18,061 on one developer Mac. Pre-existing; `capability-p
 add one or two per run, through the shared SSH test server.
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (TECH P3); `bin/sandbox.sh`; `tests/ssh_server.py`*
-**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: unshaped*
+**Seed:** [`issues/sandbox-dirs-left-on-kill.md`](issues/sandbox-dirs-left-on-kill.md) · *status: adopted:sandbox-dirs-left-on-kill*
 
 ## A disk-image step that hangs outlives its test
 

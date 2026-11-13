@@ -1,0 +1,358 @@
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 99af02f..32beee6 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -33,6 +33,7 @@ import _posixsubprocess
+ import pytest
+ 
+ import cluster_mcp.core.context
++import sandbox_dirs
+ from cluster_mcp.core.capabilities import installed
+ from cluster_mcp.core.executor import launch
+ 
+@@ -195,6 +196,18 @@ def path_shim(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+                 os.environ[name] = value
+ 
+ 
++@pytest.fixture(scope='session', autouse=True)
++def sandbox_tmp(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
++    """Make every sandbox this run starts under a directory of the run's own, and sweep it at the end.
++
++    A sandbox stopped by SIGKILL leaves its directory (bin/sandbox.sh removes it from a trap); the
++    sweep removes it, and those left under the run's pytest temporary directory, unless a process
++    still uses one (`sandbox_dirs`).
++    """
++    with sandbox_dirs.own_tmp(tmp_path_factory.getbasetemp()) as run:
++        yield run
++
++
+ # The operator override every test and child runs under, whatever the calling shell exported.
+ SKIP_PROBES = 'CLUSTER_MCP_SKIP_PROBES'
+ 
+diff --git a/tests/mutants.py b/tests/mutants.py
+index de177a1..5a1dabc 100644
+--- a/tests/mutants.py
++++ b/tests/mutants.py
+@@ -30,6 +30,7 @@ it, must be reported as a wrong origin.
+ from __future__ import annotations
+ 
+ import argparse
++import contextlib
+ import os
+ import shutil
+ import subprocess
+@@ -38,11 +39,12 @@ import tempfile
+ import xml.etree.ElementTree as ET
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Sequence
++from typing import Iterator, Sequence
+ 
+ import cluster_mcp.core
+ import cluster_mcp.rcac
+ import cluster_mcp.slurm
++import sandbox_dirs
+ 
+ TESTS = Path(__file__).resolve().parent
+ SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
+@@ -5748,7 +5750,7 @@ def mutation_violations(returncode: int, junit_xml: str | None, targets: Sequenc
+ 
+ def run_case(case: Case, src_override: Path | None = None, omit: str | None = None) -> list[str]:
+     """Plant `case` in a scratch copy, run its targets, and return `mutation_violations`."""
+-    with tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-') as scratch:
++    with case_scratch(case.id) as scratch:
+         dest = Path(scratch)
+         src_root = apply(case, dest, omit)
+         repo = apply_repo(case, dest)
+@@ -5761,6 +5763,31 @@ def run_case(case: Case, src_override: Path | None = None, omit: str | None = No
+         return violations
+ 
+ 
++@contextlib.contextmanager
++def case_scratch(case_id: str) -> Iterator[str]:
++    """A case's scratch directory, which is its child run's `TMPDIR` while the block runs.
++
++    Every sandbox the child run starts, its own and its tests', makes its directory there, and so do
++    the child pytest's temporary directories: removing the scratch removes them, however the child
++    ended. A scratch holding a sandbox directory some process still uses is left in place, and named.
++    """
++    scratch = tempfile.mkdtemp(prefix=f'mutant-{case_id}-')
++    saved = os.environ.get('TMPDIR')
++    os.environ['TMPDIR'] = scratch
++    try:
++        yield scratch
++    finally:
++        if saved is None:
++            os.environ.pop('TMPDIR', None)
++        else:
++            os.environ['TMPDIR'] = saved
++        left = sandbox_dirs.leftovers([Path(scratch)])
++        if left and sandbox_dirs.in_use(left, sandbox_dirs.processes()):
++            print(f'kept {scratch}: a process of the child run still uses a sandbox directory in it', file=sys.stderr)
++        else:
++            shutil.rmtree(scratch)
++
++
+ def self_check() -> list[str]:
+     """Run the runner's controls; return a report line per control, failures prefixed `FAILED`."""
+     lines = []
+diff --git a/tests/sandbox_dirs.py b/tests/sandbox_dirs.py
+new file mode 100644
+index 0000000..6301783
+--- /dev/null
++++ b/tests/sandbox_dirs.py
+@@ -0,0 +1,127 @@
++# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
++# SPDX-License-Identifier: MIT
++
++"""Where a suite run's sandboxes make their directories, and the sweep that removes what they left.
++
++`bin/sandbox.sh` removes its directory from a trap, which a SIGKILL never runs, and the suite's
++harnesses stop sandboxes that way. So a run points `TMPDIR`, for every process it starts, at a
++directory of its own (`own_tmp`), and when the run ends it removes every sandbox directory left
++there or in the run's pytest temporary directory (`sweep`): only a directory named as
++`bin/sandbox.sh` names them, and only while no process still has its working directory in it or
++names it in its environment.
++"""
++
++from __future__ import annotations
++
++import os
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++from contextlib import contextmanager
++from pathlib import Path
++from typing import Iterable, Iterator
++
++SANDBOX = Path(__file__).resolve().parent.parent / 'bin' / 'sandbox.sh'
++
++# `bin/sandbox.sh` makes its directory with mktemp's six-character template.
++SANDBOX_NAME = re.compile(r'cluster-mcp-sandbox\.[A-Za-z0-9]{6}')
++RUN_PREFIX = 'cluster-mcp-run.'
++
++
++def leftovers(roots: Iterable[Path]) -> list[Path]:
++    """Every sandbox directory under `roots`: a real directory (not a link) with a sandbox's name."""
++    found: list[Path] = []
++    for root in roots:
++        for parent, dirs, _ in os.walk(root):
++            for name in list(dirs):
++                path = Path(parent, name)
++                if SANDBOX_NAME.fullmatch(name) and not path.is_symlink():
++                    found.append(path)
++                    dirs.remove(name)
++    return found
++
++
++def in_use(candidates: Iterable[Path], table: Iterable[tuple[str, str]]) -> set[Path]:
++    """The candidates some process still uses: its working directory is in one, or its environment names one.
++
++    `table` holds one `(cwd, environment)` pair per process, as `processes` reads them.
++    """
++    rows = list(table)
++    busy: set[Path] = set()
++    for candidate in candidates:
++        names = {str(candidate), os.path.realpath(candidate)}
++        for cwd, environment in rows:
++            if any(cwd == name or cwd.startswith(name + os.sep) or name in environment for name in names):
++                busy.add(candidate)
++                break
++    return busy
++
++
++def processes() -> list[tuple[str, str]]:
++    """The working directory and environment of every process of this account that can be read."""
++    if sys.platform.startswith('linux'):
++        return list(_proc_table())
++    cwds = subprocess.run([str(SANDBOX), '/usr/sbin/lsof', '-b', '-a', '-d', 'cwd', '-u', str(os.getuid()), '-n', '-P', '-Fn'],
++                          capture_output=True, text=True, timeout=60)
++    environments = subprocess.run([str(SANDBOX), '/bin/ps', '-E', '-ww', '-U', str(os.getuid()), '-o', 'command='],
++                                  capture_output=True, text=True, timeout=60)
++    if environments.returncode != 0 or not cwds.stdout:
++        raise RuntimeError(f'cannot list the processes using sandbox directories: lsof exited {cwds.returncode}, '
++                           f'ps exited {environments.returncode}: {(cwds.stderr + environments.stderr)[-400:]!r}')
++    table = [(line[1:], '') for line in cwds.stdout.splitlines() if line.startswith('n')]
++    return table + [('', line) for line in environments.stdout.splitlines()]
++
++
++def _proc_table() -> Iterator[tuple[str, str]]:
++    for entry in os.scandir('/proc'):
++        if not entry.name.isdigit():
++            continue
++        try:
++            cwd = os.readlink(f'/proc/{entry.name}/cwd')
++        except OSError:
++            cwd = ''
++        try:
++            environment = Path(f'/proc/{entry.name}/environ').read_bytes().decode(errors='replace')
++        except OSError:
++            environment = ''
++        yield cwd, environment
++
++
++def sweep(roots: Iterable[Path]) -> list[Path]:
++    """Remove every sandbox directory under `roots` that no process uses; return those kept."""
++    found = leftovers(roots)
++    if not found:
++        return []
++    busy = in_use(found, processes())
++    for path in found:
++        if path not in busy:
++            shutil.rmtree(path)
++    return sorted(busy)
++
++
++@contextmanager
++def own_tmp(basetemp: Path) -> Iterator[Path]:
++    """Point `TMPDIR` at a new directory of this run's while the block runs; then sweep it and `basetemp`.
++
++    In-process temporary files keep the directory they had: `tempfile` resolved it, at the latest
++    when it made the run's directory. The run's directory, which only this run's processes were
++    given, is removed afterwards with whatever they left in it (a lock file `uv` keeps there), unless
++    a sandbox directory in it is still in use.
++    """
++    run = Path(tempfile.mkdtemp(prefix=RUN_PREFIX))
++    saved = os.environ.get('TMPDIR')
++    os.environ['TMPDIR'] = str(run)
++    try:
++        yield run
++    finally:
++        try:
++            kept = sweep([run, basetemp])
++        finally:
++            if saved is None:
++                os.environ.pop('TMPDIR', None)
++            else:
++                os.environ['TMPDIR'] = saved
++        if not any(run in path.parents for path in kept):
++            shutil.rmtree(run, ignore_errors=True)
+diff --git a/tests/test_sandbox_dirs.py b/tests/test_sandbox_dirs.py
+new file mode 100644
+index 0000000..b7e9b24
+--- /dev/null
++++ b/tests/test_sandbox_dirs.py
+@@ -0,0 +1,121 @@
++# SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
++# SPDX-License-Identifier: MIT
++
++"""A suite run's sandboxes make their directories in a directory of the run's own, and the sweep at its end
++removes what a killed sandbox left there, and nothing else."""
++
++from __future__ import annotations
++
++import os
++import signal
++import subprocess
++import sys
++import time
++from pathlib import Path
++
++import pytest
++
++import sandbox_dirs
++from conftest import SANDBOX
++
++
++def sandbox_like(parent: Path, name: str) -> Path:
++    path = parent / name
++    for sub in ('.config', '.cache', '.local/share'):
++        (path / sub).mkdir(parents=True)
++    return path
++
++
++@pytest.mark.unit
++def test_leftovers_are_directories_with_a_sandbox_name(tmp_path: Path) -> None:
++    found = [sandbox_like(tmp_path, 'cluster-mcp-sandbox.Ab12Cd'), sandbox_like(tmp_path / 'a' / 'b', 'cluster-mcp-sandbox.Zz9yX8')]
++    sandbox_like(tmp_path, 'cluster-mcp-sandbox.toolong7')
++    sandbox_like(tmp_path, 'cluster-mcp-sandbox.short')
++    sandbox_like(tmp_path, 'other')
++    (tmp_path / 'cluster-mcp-sandbox.Filexx').write_text('a file')
++    (tmp_path / 'cluster-mcp-sandbox.Linkxx').symlink_to(found[0], target_is_directory=True)
++    assert sorted(sandbox_dirs.leftovers([tmp_path])) == sorted(found)
++
++
++@pytest.mark.unit
++@pytest.mark.parametrize('cwd, environment, busy', [
++    pytest.param('{d}', '', True, id='cwd-in-it'),
++    pytest.param('{d}/sub', '', True, id='cwd-below-it'),
++    pytest.param('{real}', '', True, id='cwd-by-its-real-path'),
++    pytest.param('{d}x', '', False, id='cwd-beside-it'),
++    pytest.param('/', 'HOME={d}', True, id='named-in-the-environment'),
++    pytest.param('/', 'TMPDIR={parent}', False, id='only-its-parent-named'),
++    pytest.param('/', '', False, id='unrelated'),
++])
++def test_a_directory_in_use_is_kept(tmp_path: Path, cwd: str, environment: str, busy: bool) -> None:
++    real = tmp_path / 'real'
++    real.mkdir()
++    (tmp_path / 'link').symlink_to(real, target_is_directory=True)
++    directory = sandbox_like(tmp_path / 'link', 'cluster-mcp-sandbox.Ab12Cd')
++    fill = {'d': str(directory), 'real': os.path.realpath(directory), 'parent': str(directory.parent)}
++    table = [(cwd.format(**fill), environment.format(**fill))]
++    assert sandbox_dirs.in_use([directory], table) == ({directory} if busy else set())
++
++
++@pytest.mark.integration
++def test_this_run_points_its_sandboxes_at_a_directory_of_its_own() -> None:
++    run = Path(os.environ['TMPDIR'])
++    assert run.name.startswith(sandbox_dirs.RUN_PREFIX), run
++    shown = subprocess.run([str(SANDBOX), 'sh', '-c', 'printf %s "$CLUSTER_MCP_SANDBOX"'], capture_output=True, text=True,
++                           timeout=60, check=True)
++    assert Path(shown.stdout).parent == run, shown.stdout
++
++
++@pytest.mark.integration
++def test_the_sweep_keeps_a_running_sandbox_and_removes_it_once_killed(tmp_path: Path) -> None:
++    env = {**os.environ, 'TMPDIR': str(tmp_path)}
++    proc = subprocess.Popen([str(SANDBOX), 'sh', '-c', 'mkdir -p "$HOME/.cache/x" && echo x > "$HOME/.cache/x/f" && exec sleep 60'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
++                            stderr=subprocess.DEVNULL, env=env, start_new_session=True)
++    try:
++        deadline = time.monotonic() + 20
++        while not sandbox_dirs.leftovers([tmp_path]):
++            assert time.monotonic() < deadline, 'the sandbox never made its directory'
++            time.sleep(0.05)
++        made = sandbox_dirs.leftovers([tmp_path])
++        assert sandbox_dirs.sweep([tmp_path]) == made
++        assert all(path.is_dir() for path in made)
++    finally:
++        os.killpg(proc.pid, signal.SIGKILL)
++        proc.wait(10)
++    assert all(path.is_dir() for path in made), 'the trap ran: the row did not leave a directory'
++    assert sandbox_dirs.sweep([tmp_path]) == []
++    assert not any(path.exists() for path in made)
++
++
++@pytest.mark.integration
++def test_own_tmp_redirects_children_only_and_puts_tmpdir_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    import tempfile
++    monkeypatch.setenv('TMPDIR', str(tmp_path))
++    monkeypatch.setattr(tempfile, 'tempdir', None)
++    with sandbox_dirs.own_tmp(tmp_path / 'basetemp') as run:
++        assert os.environ['TMPDIR'] == str(run) and run.parent == tmp_path
++        assert tempfile.gettempdir() == str(tmp_path)
++        sandbox_like(run, 'cluster-mcp-sandbox.Ab12Cd')
++    assert os.environ['TMPDIR'] == str(tmp_path)
++    assert not run.exists()
++
++
++@pytest.mark.integration
++def test_the_sweep_keeps_a_sandbox_whose_command_runs_on_elsewhere(tmp_path: Path) -> None:
++    env = {**os.environ, 'TMPDIR': str(tmp_path)}
++    proc = subprocess.Popen([str(SANDBOX), sys.executable, '-c', 'import os, time; os.chdir("/"); time.sleep(60)'],
++                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
++                            start_new_session=True)
++    try:
++        deadline = time.monotonic() + 20
++        while not sandbox_dirs.leftovers([tmp_path]):
++            assert time.monotonic() < deadline, 'the sandbox never made its directory'
++            time.sleep(0.05)
++        time.sleep(0.5)
++        os.kill(proc.pid, signal.SIGKILL)
++        proc.wait(10)
++        made = sandbox_dirs.leftovers([tmp_path])
++        assert sandbox_dirs.sweep([tmp_path]) == made, 'the directory of a command still running was removed'
++    finally:
++        os.killpg(proc.pid, signal.SIGKILL)
++    assert all(path.is_dir() for path in made)

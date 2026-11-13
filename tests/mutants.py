@@ -31,7 +31,9 @@ had found, and the case's line says the stop could not finish rather than that t
 A case whose child cannot be launched at all (`ChildNotStarted`) is reported `FAILED` with
 `could not start:` and the error, and the sweep goes on. A SIGTERM or SIGHUP to the runner
 (`stop_on_signals`), or a Ctrl-C, stops the run in progress the same
-way, and the runner then ends by that signal (`die_by` for TERM and HUP).
+way, and the runner then ends by that signal (`die_by` for TERM and HUP). A case's scratch directory
+is its child run's `TMPDIR` (`case_scratch`), so what the run's sandboxes leave, killed or not, goes
+with the scratch once the case is reported.
 
 This module is not collected: a child takes seconds, so the phase gates run it and its report is
 recorded with the change. `test_mutations.py` keeps the suite's part: every anchor still applies,
@@ -46,6 +48,7 @@ it, must be reported as a wrong origin.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import signal
@@ -56,11 +59,12 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Iterator, Sequence
 
 import cluster_mcp.core
 import cluster_mcp.rcac
 import cluster_mcp.slurm
+import sandbox_dirs
 
 TESTS = Path(__file__).resolve().parent
 SANDBOX = TESTS.parent / 'bin' / 'sandbox.sh'
@@ -6320,7 +6324,7 @@ def mutation_violations(returncode: int, junit_xml: str | None, targets: Sequenc
 
 def run_case(case: Case, src_override: Path | None = None, omit: str | None = None) -> list[str]:
     """Plant `case` in a scratch copy, run its targets, and return `mutation_violations`."""
-    with tempfile.TemporaryDirectory(prefix=f'mutant-{case.id}-') as scratch:
+    with case_scratch(case.id) as scratch:
         dest = Path(scratch)
         src_root = apply(case, dest, omit)
         repo = apply_repo(case, dest)
@@ -6336,6 +6340,48 @@ def run_case(case: Case, src_override: Path | None = None, omit: str | None = No
         if violations and child.returncode not in (0, 1):
             violations.append(f'child stderr: {child.stderr.strip()[-400:]!r}')
         return violations
+
+
+@contextlib.contextmanager
+def case_scratch(case_id: str) -> Iterator[str]:
+    """A case's scratch directory, which is its child run's `TMPDIR` while the block runs.
+
+    Every sandbox the child run starts, its own and its tests', makes its directory there, and so do
+    the child pytest's temporary directories: removing the scratch removes them, however the child
+    ended (its own exit, a stop past `LIMIT`, or the stop a signal to the runner makes), directories a
+    stopped test left closed included (`sandbox_dirs.reopen`, `sandbox_dirs.remove`). A scratch holding
+    a sandbox directory some process still uses is left in place and named on stderr, and so is one
+    whose processes cannot be listed, and one that cannot all be removed: the sweep never guesses that
+    a directory is free, and never raises on its own errors, so the case is still reported and the sweep
+    goes on. A signal to the runner that lands during this cleanup still cuts it short, leaving the
+    case unreported and the scratch unnamed (`issues/mutant-case-cleanup-interrupted.md`).
+    """
+    scratch = tempfile.mkdtemp(prefix=f'mutant-{case_id}-')
+    saved = os.environ.get('TMPDIR')
+    os.environ['TMPDIR'] = scratch
+    try:
+        yield scratch
+    finally:
+        # The process listing runs before `TMPDIR` is put back, so its own sandboxes land in the scratch.
+        try:
+            sandbox_dirs.reopen(Path(scratch))
+            left = sandbox_dirs.leftovers([Path(scratch)])
+            reason = None
+            if left and sandbox_dirs.in_use(left, sandbox_dirs.processes()):
+                reason = 'a process of the child run still uses a sandbox directory in it'
+        except Exception as exc:
+            reason = f'its processes could not be listed ({type(exc).__name__}: {exc})'
+        finally:
+            if saved is None:
+                os.environ.pop('TMPDIR', None)
+            else:
+                os.environ['TMPDIR'] = saved
+        if reason is None:
+            error = sandbox_dirs.remove(Path(scratch))
+            if error is not None:
+                reason = f'it could not all be removed ({type(error).__name__}: {error})'
+        if reason is not None:
+            print(f'kept {scratch}: {reason}', file=sys.stderr)
 
 
 def self_check() -> list[str]:

@@ -6,7 +6,9 @@
 The collection hook fails the run on a test carrying neither `unit` nor `integration`. The fixtures
 below it act on every test without adding or reading markers for any other purpose, so they cannot
 launder that hook: a session-wide PATH shim for `sudo` and `ssh` (re-pinned inside a login bash
-through `BASH_ENV`), the session-wide capability-probe override (`CLUSTER_MCP_SKIP_PROBES`), the unit guard (no process, no network, no real HOME), the `launches` recorder,
+through `BASH_ENV`), the session-wide capability-probe override (`CLUSTER_MCP_SKIP_PROBES`), the session's own `TMPDIR`
+for every sandbox the run starts, swept of what a killed sandbox left when the session ends
+(`sandbox_tmp`), the unit guard (no process, no network, no real HOME), the `launches` recorder,
 the `executes` launcher (real executions of the local and delegate backends, fenced and sandboxed),
 the `open_tmp` directory every account can reach, and a check that no executor leaks into the main
 context.
@@ -34,6 +36,7 @@ import pytest
 
 import cluster_mcp.core.capabilities
 import cluster_mcp.core.context
+import sandbox_dirs
 from cluster_mcp.core.capabilities import installed
 from cluster_mcp.core.executor import launch
 
@@ -195,6 +198,28 @@ def path_shim(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+@pytest.fixture(scope='session', autouse=True)
+def sandbox_tmp(tmp_path_factory: pytest.TempPathFactory, pytestconfig: pytest.Config) -> Iterator[Path]:
+    """Make every sandbox this run starts under a directory of the run's own, and sweep it at the end.
+
+    A sandbox stopped by SIGKILL leaves its directory (bin/sandbox.sh removes it from a trap); the
+    sweep removes it, and those left under the run's pytest temporary directory, unless a process
+    still uses one (`sandbox_dirs`). What it keeps for any other reason it names on stderr, past the
+    output capture, which would otherwise swallow a line written at the session's end.
+    """
+    capture = pytestconfig.pluginmanager.getplugin('capturemanager')
+
+    def tell(line: str) -> None:
+        if capture is None:
+            sandbox_dirs.say(line)
+            return
+        with capture.global_and_fixture_disabled():
+            sandbox_dirs.say(line)
+
+    with sandbox_dirs.own_tmp(tmp_path_factory.getbasetemp(), tell) as run:
+        yield run
 
 
 # The operator override every test and child runs under, whatever the calling shell exported.
