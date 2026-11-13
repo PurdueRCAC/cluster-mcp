@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-30 entries, each of which ships in the first release after it lands. **Part II** ships as
+32 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -91,7 +91,8 @@ They come in six groups, in this order:
   layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
-- **Safety** (three): the site files' size, the startup update check, and the floors a git install
+- **Safety** (five): a capability load retried after an interrupt, a failed load's refusal read past
+  a patched class, the site files' size, the startup update check, and the floors a git install
   resolves against.
 - **Redesigns and trade-offs** (two): limits the timeout stop and the liveness check recorded. Fix what can be fixed; what can't becomes `accepted-behaviour` only on the
   maintainer's ruling.
@@ -128,7 +129,7 @@ load in the same process registers nothing for a capability that had loaded clea
 names it instead of the broken one. The command line never retries, so only a library caller sees it.
 
 *Horizon: before Part II, safety · Depends on: capability-extras (cleared: landed on `develop` 2026-11-01) · Refs: [`spec/capability-extras/`](spec/capability-extras/) (REVIEW, cycle 1)*
-**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: unshaped*
+**Seed:** [`issues/capability-reload-after-failure.md`](issues/capability-reload-after-failure.md) · *status: adopted:capability-reload-after-failure*
 
 ## The on-demand mutation run no longer fits its 30-minute job
 
@@ -371,6 +372,29 @@ bash 3.2 only). Pre-existing.
 
 *Horizon: Part I, executor · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (TECH P1 remediation, F1); `core/executor/launch.py` (`SCRIPT`); `AGENTS.md` § Invariants §2*
 **Seed:** [`issues/script-function-export-tmout.md`](issues/script-function-export-tmout.md) · *status: unshaped*
+
+## A capability load retried after an interrupt may register nothing and blame the wrong distribution
+
+An interrupt that cuts a capability load short is not a failure: the load cuts the tool registry
+back but leaves what it imported imported, and leaves no refusal behind
+(`capability-reload-after-failure` refuses every load after a failed one). A library caller's retry
+therefore registers nothing for a capability that loaded cleanly before the interrupt and refuses it,
+naming it, and that refusal then refuses every later load. Observed with planted distributions. The
+command line never retries.
+
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (REVIEW cycle 1, F2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-reload-after-interrupt.md`](issues/capability-reload-after-interrupt.md) · *status: unshaped*
+
+## Nothing pins that a failed load's refusal is read past a patched class
+
+A failed capability load keeps its refusal as plain text, read through `vars()` and `args`, so no
+capability code runs (`capability-reload-after-failure`). A capability that patched the core's own
+`CapabilityLoadError` would run its code under a read through the attribute or `str()`, and no test
+tells those reads apart: two hand mutants survived that cycle's sweep. Only a capability acting on
+purpose reaches it.
+
+*Horizon: Part I, safety · Depends on: capability-reload-after-failure · Refs: [`spec/capability-reload-after-failure/`](spec/capability-reload-after-failure/) (TECH P1, review cycle 2); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-refusal-class-patched.md`](issues/capability-refusal-class-patched.md) · *status: unshaped*
 
 ## One very large site file can cost every site rule
 

@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:capability-reload-after-failure
 kind: fix
 appetite: small
 lane: public
@@ -44,3 +44,6 @@ capabilities again and names only the one that fails.
 
 - Related: `spec/capability-extras/` (REVIEW, cycle 1); `AGENTS.md` § Invariants §7.
 - Found by: `capability-extras` review cycle 1, 2026-10-31.
+- 2026-11-12: `capability-reload-after-failure` refuses every load after a failed one in the same
+  process, naming the first failure and saying to restart the process; nothing is imported or
+  reloaded. If Part II's hosted mode needs an in-process reload, it is shaped there.

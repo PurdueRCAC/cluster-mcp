@@ -16,7 +16,9 @@ Nothing here runs at import. `installed()` loads every capability the environmen
 the server starts; a capability that cannot be discovered, ordered or loaded stops the load with a
 `CapabilityLoadError` naming its distribution, whatever its code raised or exited with (but a
 `KeyboardInterrupt`, which still interrupts), and leaves the tool registry as it was before the load
-began. The load assembles each capability's tools and resources on a scratch server through
+began. What the failed load imported stays imported, where a later load would find it and run none of
+it again, so every later load in the process is refused, naming that failure and saying to restart
+the process. The load assembles each capability's tools and resources on a scratch server through
 `serve()`, the one way every server takes them, so whatever a capability declares fails at the load
 or not at all. What an entry point names must be exactly a `Capability`, and every value in it the core
 or FastMCP reads exactly a built-in type, as must its distribution's name; the load refuses anything
@@ -287,8 +289,55 @@ def _scratch() -> FastMCP:
     return server
 
 
+# The refusal of this process's first failed load, as its distribution and its message: every later
+# load is refused with it (`load()`).
+_failed: tuple[str, str] | None = None
+
+# What the refusal of a load after a failed one adds to the failed load's message.
+_RESTART: Final = 'refused by an earlier load in this process; restart the process to load capabilities again'
+
+
+def _failure(refusal: CapabilityLoadError) -> tuple[str, str]:
+    """The distribution and the message `refusal`, a failed load's, names, read with no capability code run.
+
+    Each is read through `vars()` and the exception's own `args`, and only when `refusal` is exactly a
+    `CapabilityLoadError` holding exactly a `str` of each, as every refusal the load makes does. Any
+    other is a capability's own, one its code raised and the load raised as it is; its code is not run
+    again to read it, so it is named by the group.
+    """
+    if type(refusal) is CapabilityLoadError:
+        distribution, args = vars(refusal).get('distribution'), refusal.args
+        if type(distribution) is str and len(args) == 1 and type(args[0]) is str:
+            return distribution, args[0]
+    return GROUP, f'cannot load capability {GROUP}: a capability raised a CapabilityLoadError of its own'
+
+
 def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
-    """Load the capabilities `eps` name (default: every entry point in `GROUP`), uncached.
+    """Load the capabilities `eps` name (default: every entry point in `GROUP`), uncached, but only while
+    no load in this process has failed.
+
+    A failed load cuts the registry back, but what it imported stays imported, and a later load would
+    find it so and run none of it again: a capability that loaded cleanly would register nothing and
+    be refused for it. So once a load has failed, every later load in the process, whatever it is
+    given, raises `CapabilityLoadError` before it reads or imports anything, naming the distribution
+    the first failure named, its message the first failure's followed by the instruction to restart
+    the process (`_RESTART`). A `KeyboardInterrupt` is not a failure, and leaves no refusal.
+    """
+    global _failed
+    if _failed is not None:
+        distribution, message = _failed
+        refusal = CapabilityLoadError(distribution, '')
+        refusal.args = (f'{message} ({_RESTART})',)
+        raise refusal
+    try:
+        return _load(eps)
+    except CapabilityLoadError as refusal:
+        _failed = _failure(refusal)
+        raise
+
+
+def _load(eps: Iterable[EntryPoint] | None) -> tuple[Loaded, ...]:
+    """Load the capabilities `eps` name (default: every entry point in `GROUP`).
 
     They load in order of (distribution, entry-point name), so which failure is reported never
     depends on `sys.path` or directory order; a distribution is named by its entry point's value when
@@ -303,8 +352,8 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
     and every earlier capability's, FastMCP refuses it or keys it as one it already holds. Anything
     else raised or exited with while loading a capability fails it too, but a `KeyboardInterrupt`,
     which is raised as it is. The first failure raises `CapabilityLoadError`, after `TOOL_REGISTRY` is
-    cut back to what it held before this load began; so does a distribution whose entry points cannot
-    be read while they are discovered.
+    cut back to what it held before this load began, what building the refusal registered included; so
+    does a distribution whose entry points cannot be read while they are discovered.
     """
     found = _discovered() if eps is None else tuple(eps)
     entries = [_Entry(*_identity(ep), ep) for ep in found]
@@ -381,10 +430,14 @@ def load(eps: Iterable[EntryPoint] | None = None) -> tuple[Loaded, ...]:
             uri_owners.update((uri, distribution) for uri in uris)
             loaded.append(Loaded(capability, distribution, tools))
     except BaseException as exc:
-        del TOOL_REGISTRY[start:]
-        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):
-            raise
-        raise CapabilityLoadError(distribution, _cause(exc)) from exc
+        # The refusal is built first: its text is a capability's code, and whatever that registers is
+        # cut with the rest.
+        try:
+            if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):
+                raise
+            raise CapabilityLoadError(distribution, _cause(exc)) from exc
+        finally:
+            del TOOL_REGISTRY[start:]
     return tuple(loaded)
 
 
@@ -396,7 +449,7 @@ def installed() -> tuple[Loaded, ...]:
     """Every capability this environment has, loaded on the first call and cached once it succeeds.
 
     The CLI, `create_mcp_server` and the tests share the one load, so no tool registers twice. A
-    failed load is not cached: it raises again on the next call.
+    failed load is not cached: the next call loads again, and that load is refused (`load()`).
     """
     global _installed
     if _installed is None:

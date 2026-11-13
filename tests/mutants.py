@@ -318,13 +318,16 @@ def upgrading_sentence(text: str) -> tuple[tuple[str, str, str], ...]:
     return readme(UPGRADING_END, f'{UPGRADING_END[:-1]} {text}\n')
 
 
-# The capability load's one exit for a failure: the registry cut back, then a refusal or an interrupt
-# raised as it is, anything else refused naming the capability.
-ROLLBACK = ('    except BaseException as exc:\n'
-            '        del TOOL_REGISTRY[start:]\n'
-            '        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
-            '            raise\n'
-            '        raise CapabilityLoadError(distribution, _cause(exc)) from exc\n')
+# The capability load's one exit for a failure: a refusal or an interrupt raised as it is, anything
+# else refused naming the capability, then, last, the registry cut back.
+ROLLBACK = ('        try:\n'
+            '            if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+            '                raise\n'
+            '            raise CapabilityLoadError(distribution, _cause(exc)) from exc\n'
+            '        finally:\n'
+            '            del TOOL_REGISTRY[start:]\n')
+# The registry cut, the last step of that exit.
+CUT = '            del TOOL_REGISTRY[start:]\n'
 
 # The member sets the capability loader's rows run beside, as `test_capabilities.MEMBER_SETS` names them.
 MEMBER_SETS = ('core-only', 'slurm', 'rcac', 'both')
@@ -340,6 +343,45 @@ def every_set(test: str, *cases: str) -> tuple[str, ...]:
     """`test`'s row for each case in `cases` (none: the test takes only the set) beside every member set."""
     return tuple(f'{test}[{case}-{names}]' if case else f'{test}[{names}]'
                  for case in (cases or ('',)) for names in MEMBER_SETS)
+
+
+# The rows of a load after a failed one, by the axes `test_capabilities` parametrizes them with: each
+# entry point it is made through, each failing kind, and each layout; and the test of a capability's
+# own refusal.
+RETRY_TEST = f'{CAPABILITIES}::test_a_load_after_a_failed_one_is_refused_for_it'
+OWN_TEST = f'{CAPABILITIES}::test_a_load_after_a_capabilitys_own_refusal_runs_none_of_its_code'
+RETRY_ENTRIES = ('load', 'installed', 'server')
+RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', 'tool-not-a-tool',
+           'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text', 'plants-a-module-key')
+RETRY_LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'registered-by-a-library',
+                 'failing-sorts-first')
+# What a test of a load after a failed one fails with when the refused load imported, registered or ran.
+RETRY_CHANGED = 'the refused load imported, registered or ran something'
+
+
+def retried(*layouts: str, entries: Sequence[str] = RETRY_ENTRIES) -> tuple[str, ...]:
+    """The row of a load after a failed one beside both members for each of `entries`, each failing kind
+    and each of `layouts` (none: every layout)."""
+    return tuple(f'{RETRY_TEST}[{entry}-{kind}-{layout}-both]'
+                 for entry in entries for kind in RETRIED for layout in (layouts or RETRY_LAYOUTS))
+
+
+# The guard that refuses a load after a failed one, and that guard loading what it is given (or, with
+# `given` False, what it discovers too) before it raises the right refusal.
+RETRY_GUARD = '    if _failed is not None:\n        distribution, message = _failed\n'
+
+
+def loads_then_refuses(given: bool) -> tuple[tuple[str, str], ...]:
+    """The edit making the guard load, swallowing what that raises, then refuse as before."""
+    load_it = ('        if eps is not None:\n'
+               '            try:\n'
+               '                _load(eps)\n'
+               '            except BaseException:\n'
+               '                pass\n') if given else ('        try:\n'
+                                                       '            _load(eps)\n'
+                                                       '        except BaseException:\n'
+                                                       '            pass\n')
+    return ((RETRY_GUARD, '    if _failed is not None:\n' + load_it + '        distribution, message = _failed\n'),)
 
 
 # The three files the capability sweep mutates every decision of, and the startup tests it kills with.
@@ -2626,17 +2668,40 @@ CASES: tuple[Case, ...] = (
          (('            uri_owners.update((uri, distribution) for uri in uris)\n', ''),),
          every_set(URI_TAKEN, 'earlier'), 'a duplicate resource URI loaded'),
     Case('capability-refusal-keeps-registry', 'core/capabilities.py',
-         ((ROLLBACK, ROLLBACK.replace('        del TOOL_REGISTRY[start:]\n', '').replace(
-             '            raise\n', '            raise\n        del TOOL_REGISTRY[start:]\n')),),
+         ((ROLLBACK, ROLLBACK.replace(CUT, '            if not isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+                                           '    ' + CUT)),),
          every_set(REFUSED_AT_LOAD, 'resource-not-a-url'), 'a refused load left'),
     Case('capability-other-exception-escapes', 'core/capabilities.py',
          (('        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n',
            '        if True:\n'),),
          every_set(REFUSED_AT_LOAD, 'tool-without-a-module'), 'not a CapabilityLoadError'),
     Case('capability-other-exception-keeps-registry', 'core/capabilities.py',
-         ((ROLLBACK, ROLLBACK.replace('        del TOOL_REGISTRY[start:]\n', '').replace(
-             '            raise\n', '            del TOOL_REGISTRY[start:]\n            raise\n')),),
+         ((ROLLBACK, ROLLBACK.replace(CUT, '            if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
+                                           '    ' + CUT)),),
          every_set(REFUSED_AT_LOAD, 'tool-without-a-module'), 'a refused load left'),
+    # Today's retry: no load is refused for an earlier failed one, so a retry finds the clean
+    # capability's tools module imported, registers nothing for it, and refuses it, or loads again.
+    Case('capability-retry-imports-nothing', LOADER,
+         (('    if _failed is not None:\n', '    if False:\n'),),
+         retried(), 'a load after a failed one was not refused for that failure'),
+    # A load after a failed one that loads the capabilities it is given, then raises the right refusal:
+    # given a capability no load imported, it imports and registers it, and where the failing one sorts
+    # first it runs that one's code again. Only `load()` is given capabilities.
+    Case('capability-refused-load-loads-what-it-is-given', LOADER, loads_then_refuses(given=True),
+         retried(entries=('load',)), RETRY_CHANGED),
+    # The same, loading what it discovers too: `installed()` and `create_mcp_server()` reach it.
+    Case('capability-refused-load-loads-what-it-finds', LOADER, loads_then_refuses(given=False),
+         retried(), RETRY_CHANGED),
+    # A load after a failed one refused with the first failure's message alone, never saying to restart.
+    Case('capability-retry-refusal-says-not-to-restart', LOADER,
+         (("        refusal.args = (f'{message} ({_RESTART})',)\n", '        refusal.args = (message,)\n'),),
+         retried('top-level', 'failing-sorts-first'), 'a load after a failed one was not refused for that failure'),
+    # A capability's own refusal read as the load's own when it is an instance of a subclass, whose
+    # code then runs as the failed load keeps it.
+    Case('capability-own-refusal-read-as-the-loads', LOADER,
+         (('    if type(refusal) is CapabilityLoadError:\n', '    if isinstance(refusal, CapabilityLoadError):\n'),),
+         tuple(f'{OWN_TEST}[{entry}-a-subclass-both]' for entry in RETRY_ENTRIES),
+         'the failed load ran capability code'),
     Case('capability-composition-tie-unbroken', 'core/capabilities.py',
          (('    return tuple(sorted(capabilities, key=lambda c: (c.capability.order, c.distribution)))\n',
            '    return tuple(sorted(capabilities, key=lambda c: c.capability.order))\n'),),
@@ -2967,13 +3032,7 @@ CASES: tuple[Case, ...] = (
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'the load raised SystemExit, not a CapabilityLoadError naming a capability'),
     alternative('capability-load-failure-passes-re-raises', LOADER,
-                (('    except BaseException as exc:\n'
-                  '        del TOOL_REGISTRY[start:]\n'
-                  '        if isinstance(exc, (CapabilityLoadError, KeyboardInterrupt)):\n'
-                  '            raise\n'
-                  '        raise CapabilityLoadError(distribution, _cause(exc)) from exc\n',
-                  '    except BaseException as exc:\n'
-                  '        raise\n'),),
+                ((ROLLBACK, '        raise\n'),),
                 f'{CAPABILITIES}::test_a_capability_that_cannot_load_is_refused_naming_it', 'exits-0-at-declared',
                 'the load raised SystemExit, not a CapabilityLoadError naming a capability'),
     alternative('capability-named-isinstance-strip-getattr-dist-path-without-operand-1', LOADER,
