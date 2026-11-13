@@ -483,14 +483,14 @@ blind pass, `orchestrator/` for the orchestrator's runs).
 | R2 | Yes | Reviewer: the retry without the broken capability is refused, 0 imports and 0 registrations; H1, H4, H7, H10 killed. Its import/run clause is pinned only through discovery (F-A) |
 | R3 | Yes | Reviewer: the retry and own-refusal tests run through `load()`, `installed()` and `create_mcp_server()` |
 | R4 | Yes | Reviewer: full verify green; H17 and H8 killed |
-| R5 | Partly | Reviewer, orchestrator re-read: the planted cases are there; the no-import, no-register, no-run asserts cannot fail on the inputs planted (F-A) |
+| R5 | Yes; its no-import, no-register, no-run asserts lack a control (F-A, LOW) | Reviewer, orchestrator re-read: the planted cases are there; those asserts cannot fail on the inputs planted |
 | R6 | Yes | Reviewer and orchestrator: `capability-retry-imports-nothing` is killed with "a load after a failed one was not refused for that failure", both eras |
 
 No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual drift were found.
 
 ### Findings
 
-#### [MEDIUM/CONFIRMED] F-A · R5's "a retry imports, registers and runs nothing" checks cannot fail on the inputs the test plants
+#### [LOW/CONFIRMED, re-graded from MEDIUM] F-A · R5's "a retry imports, registers and runs nothing" checks cannot fail on the inputs the test plants
 
 - **Where:** `tests/test_capabilities.py`, `refused_again` and
   `test_a_load_after_a_failed_one_is_refused_for_it`.
@@ -508,10 +508,14 @@ No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual dri
 - **Grading:** CONFIRMED, not a coverage observation. R5 states the check, and H2b breaks R2's
   stated behaviour on reachable input. The sibling mutants H2n and H3n are killed only by a
   discovery counter on the default path, so nothing pins the property on the path that is given
-  its capabilities. MEDIUM: a requirement met but still fragile.
-- **Alternative reading, for the maintainer:** if H2n's kill is taken to pin the load-then-refuse
-  class, H2b is a deeper layer of it and is seeded instead. The reviewer argued against that
-  reading.
+  its capabilities. The reviewer graded it MEDIUM: a requirement met but still fragile.
+- **Re-graded MEDIUM to LOW by the maintainer, as gate judge (2026-11-13).** HEAD behaves as R5
+  requires; the reviewer's own probes show it (`reviewer/probe_refused_runs.log`, the real-tree
+  rows). What is missing is a control on inputs where a load would show. That is the rubric's
+  "missing but non-blocking test coverage of an R-ID", which is LOW. The same re-grade was upheld
+  for another cycle's identical finding the same day. The ruling: fix it, don't seed it, since the
+  fix is cheap and pins the property properly. It stays CONFIRMED, so the verdict stays
+  changes-requested.
 
 #### Coverage observations (already seeded)
 
@@ -521,19 +525,25 @@ No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual dri
 
 ### Routing (cycle 3)
 
-Held for the maintainer: a MEDIUM CONFIRMED finding, on the third review cycle. The property a
-remediation would carry, over its whole domain:
+To build, for F-A (LOW/CONFIRMED, fixed rather than seeded, by the maintainer's ruling). The
+property, over its whole domain, both sides:
 
 - **Property (R2, R5):** a refused load imports nothing, registers nothing and runs no capability's
   code, whatever capabilities it is given and whichever entry point makes it, discovered or given
-  explicitly. Pin it on inputs where loading would be observable: a capability no earlier load
-  imported, and a failing capability that sorts before the clean one.
+  explicitly. Pin it on inputs where a load would show: a capability no earlier load imported, and
+  a failing capability that sorts before the clean one. The pin must kill a loader that loads what
+  it is given and then raises the correct refusal (H2b) on every entry point, with the violation
+  that names the import, registration or run.
 - **The other side:** the refusal still names the first failure, with its cause and the restart
-  text, for every input (already pinned; keep it pinned).
+  text, for every input, the new inputs included. It is already pinned; keep it pinned.
+- **Not to build:** H14 and H15 are already seeded (`issues/capability-refusal-class-patched.md`).
+- **Open gap, unchanged:** the tier 3a diff sweep did not run, because no generated-mutant tool is
+  available; the hand sweep above stood in for it.
 
 ### Human-gate triggers
 
 - **Triggered (standing).** Cycles 1 and 2 found CONFIRMED findings against
   `core/capabilities.py`, a path on § Invariants' high-blast-radius list. The maintainer signs off
   before publish. F-A itself sits in a test file and guards that path.
-- **Bounded loop.** This is the third review cycle without a clean pass; it goes to the maintainer.
+- **Bounded loop.** This is the third review cycle without a clean pass. The maintainer ruled on
+  it (the re-grade above) and routed F-A to build.
