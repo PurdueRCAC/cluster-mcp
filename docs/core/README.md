@@ -9,21 +9,21 @@ it in each mode.
 Install the server with uv, from git. Name the extras your cluster needs in the requirement:
 
 - `[slurm]` adds the [Slurm tools](../slurm/README.md).
-- `[rcac]` adds the [Purdue RCAC tools](../rcac/README.md). Install it with `[slurm]`.
+- `[rcac]` adds the [Purdue RCAC tools](../rcac/README.md), and the Slurm tools with them.
 - With no extra, `cluster-mcp` is the core alone: the shell, file and site-context tools.
 
 The server lists only the tools of what is installed, and its instructions name only those.
 
 In an MCP client's configuration, the requirement is one `args` element, spaces included, as in
 the [Quick Start](../../README.md#quick-start). In a shell, quote the requirement, since
-`[slurm,rcac]` is otherwise a glob:
+`[rcac]` is otherwise a glob:
 
 ```bash
-uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
+uvx --from 'cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
 ```
 
-Install with uv, not pip. The server is a uv workspace. Each extra installs one member,
-`cluster-mcp-slurm` or `cluster-mcp-rcac`, required by bare name. None of the three is registered
+Install with uv, not pip. The server is a uv workspace. The extras install its members,
+`cluster-mcp-slurm` and `cluster-mcp-rcac`, required by bare name. None of the three is registered
 on PyPI. uv builds them from the same git commit. pip, or any install that skips uv's workspace
 sources, would look for them on the package index instead, where anyone could register those names.
 

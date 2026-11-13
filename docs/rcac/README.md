@@ -1,8 +1,8 @@
 # RCAC tools (`[rcac]`)
 
 The `[rcac]` extra adds tools that wrap Purdue RCAC's own commands: storage, job details,
-partitions and accounts. Install it with `[slurm]`, as `cluster-mcp[slurm,rcac]` in the
-[Quick Start](../../README.md#quick-start).
+partitions and accounts. It installs the [Slurm tools](../slurm/README.md) with them, since every
+RCAC cluster runs Slurm: install `cluster-mcp[rcac]`, as in the [Quick Start](../../README.md#quick-start).
 
 ## Tools
 
@@ -20,8 +20,8 @@ partitions and accounts. Install it with `[slurm]`, as `cluster-mcp[slurm,rcac]`
 ## What it needs on the cluster
 
 - `findscratch` and `myquota`, found through the login shell the tools run in.
-- The Slurm extra beside it, [`[slurm]`](../slurm/README.md): several of its tools take a Slurm job
-  id.
+- The [Slurm tools](../slurm/README.md), which `[rcac]` installs: several of its tools take a Slurm
+  job id.
 
 If the cluster is missing either command, the server withholds the extra: none of its tools,
 resources or instructions are served. See

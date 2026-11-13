@@ -6,12 +6,12 @@ appetite: small
 status: in_progress
 branch: fix/rcac-extra-brings-slurm
 base: develop
-current_phase: P1
+current_phase: P2
 last_updated: '2026-11-13'
 phases:
 - id: P1
   name: The rcac extra installs the Slurm member, pinned, with every install line
-  status: pending
+  status: done
   satisfies:
   - R1
   - R2
@@ -93,23 +93,23 @@ blocked`; `satisfies` the GOAL R-IDs; `depends_on`; `parallel`; `hammerable`; `h
 declarations and the installed metadata; every text that states an RCAC install line or the old
 one-member rule says `[rcac]` alone, in the same commit.
 
-- [ ] `packages/cluster-mcp/pyproject.toml`: `rcac = ["cluster-mcp-rcac", "cluster-mcp-slurm"]`; the
+- [x] `packages/cluster-mcp/pyproject.toml`: `rcac = ["cluster-mcp-rcac", "cluster-mcp-slurm"]`; the
       comment above the table states the rule (a center's extra installs every extra its center's
       clusters need). No other `pyproject.toml` changes.
-- [ ] `uv lock`, then `uv lock --check`; the lock's diff is the two lines PLAN § 2 names. `uv sync
+- [x] `uv lock`, then `uv lock --check`; the lock's diff is the two lines PLAN § 2 names. `uv sync
       --locked` before the gate, so the installed metadata is the new one.
-- [ ] `tests/test_packaging.py` (the prototype's text, PLAN § 2): `EXTRAS` as each extra's members; `CAPABILITY_MEMBERS`;
+- [x] `tests/test_packaging.py` (the prototype's text, PLAN § 2): `EXTRAS` as each extra's members; `CAPABILITY_MEMBERS`;
       `installed_extras`; `extra_violations`; `test_core_declares_the_capability_extras` asserts the
       check on the declarations and on the installed metadata; the planted controls in
       `test_extra_check_names_the_extra_that_breaks_the_rule`; the module docstring states the rule;
       `test_compat_root_installs_every_capability` iterates the members.
-- [ ] The install lines and restatements PLAN § 2 lists, in `README.md`,
+- [x] The install lines and restatements PLAN § 2 lists, in `README.md`,
       `packages/cluster-mcp/README.md`, `packages/cluster-mcp-rcac/README.md`,
       `docs/core/README.md`, `docs/rcac/README.md` and `AGENTS.md` (opening, Direction, Repository
       map, § Testing's `test_packaging` entry, § Packaging, the release recipe's `post_verify` README
       line and its `ci-mirror-no-index` and `install-probe` caveats). The recipe's YAML still parses.
       `SECURITY.md` and every compat-root line keep their text.
-- [ ] Stage by path, then run the gate.
+- [x] Stage by path, then run the gate.
 - **Verify:** `sh spec/rcac-extra-brings-slurm/verify/gate.sh p1` (73 s on the prototype, warm uv
   cache): `files`, the lock, the install lines, the packaging/surface/core-only/deprecation-window
   tests, the install-level check from the index against the base (R1–R3), the extras mutants (R5).

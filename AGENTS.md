@@ -19,8 +19,8 @@ management, and site-specific tooling to AI agents over the Model Context Protoc
 agent can actually work on a cluster instead of guessing about one. The code is a uv workspace of
 three distributions under one `cluster_mcp` namespace: the core `cluster-mcp` (`cluster_mcp.core`)
 and the Slurm and RCAC members (`cluster_mcp.slurm`, `cluster_mcp.rcac`; § Repository map,
-§ Packaging). The members are capabilities, installed as the core's extras
-(`cluster-mcp[slurm,rcac]`); a bare `cluster-mcp` is the core alone, and the server serves the tools
+§ Packaging). The members are capabilities, installed as the core's extras (`cluster-mcp[slurm]`,
+and `cluster-mcp[rcac]`, which installs the Slurm member too); a bare `cluster-mcp` is the core alone, and the server serves the tools
 of the capabilities installed, except those whose commands the cluster lacks (the probe at startup,
 § Invariants §4, §7). The console entry point
 (`packages/cluster-mcp/pyproject.toml [project.scripts]`) is **`cluster-mcp`** →
@@ -67,9 +67,10 @@ are how it lands.
 - **Capabilities become packaging extras.** `cluster-mcp[slurm,lmod]` installs the schedulers and
   module systems you actually have; a site extra like `cluster-mcp[rcac]` is shorthand for the right
   capability extras *plus* that center's specific tools and context. Others follow
-  (`cluster-mcp[alcf]`, `[ncsa]`, `[tacc]`). *Landed so far:* the extras `[slurm]` and `[rcac]`, each
-  one member registered through the entry-point group (§ Packaging, § Invariants §7); `[rcac]` is
-  an ordinary capability, not yet the site bundle described here.
+  (`cluster-mcp[alcf]`, `[ncsa]`, `[tacc]`). *Landed so far:* the extras `[slurm]` and `[rcac]`, their
+  members registered through the entry-point group (§ Packaging, § Invariants §7); `[rcac]` installs
+  the RCAC member with the Slurm member, since every RCAC cluster runs Slurm, but is not yet the rest
+  of the site bundle described here.
 - **The long game is any HPC cluster** — not necessarily Slurm, not necessarily LMOD, not necessarily
   a Lustre scratch. Today's Slurm and RCAC members (`cluster_mcp.slurm`, `cluster_mcp.rcac`) are
   the *first* implementations of what become pluggable capability groups, not the shape of the
@@ -154,7 +155,8 @@ portion of the `cluster_mcp` namespace package, which is a pure PEP 420 namespac
 | `packages/cluster-mcp-rcac/` | `cluster-mcp-rcac` | `cluster_mcp.rcac` | `capability.py`: the capability its `cluster_mcp.capabilities` entry point names; `tools.py`: the Purdue RCAC tools; `instructions.py`: the RCAC-specific overlay on the served instructions |
 
 Each member keeps its code under `src/cluster_mcp/<member>/`, beside its own `pyproject.toml` and a
-short `README.md`. The Slurm and RCAC members are the core's extras `[slurm]` and `[rcac]`. The root
+short `README.md`. The core's extras install the members: `[slurm]` the Slurm member, `[rcac]` the RCAC
+member with the Slurm member. The root
 `pyproject.toml` is the workspace root and the code-less compat distribution `rcac-mcp`, which
 installs `cluster-mcp[slurm,rcac]` (§ Packaging).
 
@@ -622,10 +624,12 @@ import has no effect.
     (`test_every_distribution_carries_one_version`: uv does not check it), and `__version__` reads
     it from the installed metadata; the core installs only `cluster-mcp` and the root only
     `rcac-mcp` (`test_console_scripts_are_cluster_mcp_and_the_legacy_alias`). The core depends on
-    no member unconditionally and declares exactly the extras `slurm` and `rcac`, each one member
-    through its workspace source, in the source and in the installed metadata (`Provides-Extra`, each
-    member required under its own extra), and each member depends on the core alone
-    (`test_core_declares_the_capability_extras`); the root depends on exactly
+    no member unconditionally and declares exactly the extras `slurm` (the Slurm member) and `rcac`
+    (the RCAC member and the Slurm member), each member through its workspace source, in the source
+    and in the installed metadata (`Provides-Extra`, each extra's members required under it), and
+    each member depends on the core alone (`test_core_declares_the_capability_extras`); a break in
+    either extra fails naming the extra (`extra_violations`, `installed_extras`, with planted
+    controls in `test_extra_check_names_the_extra_that_breaks_the_rule`); the root depends on exactly
     `cluster-mcp[slurm,rcac]` (installed: `cluster-mcp[rcac,slurm]`), and the development
     environment it syncs holds both members (`test_compat_root_installs_every_capability`).
   - `tests/test_core_only.py` (`integration`): a real core-only install. A session fixture builds
@@ -1693,10 +1697,13 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   `packages/cluster-mcp-rcac` (`cluster-mcp-rcac`, `cluster_mcp.rcac`).
 - **The capabilities are the core's extras.** The core depends on no member unconditionally: its
   `[project.optional-dependencies]` are `slurm = ["cluster-mcp-slurm"]` and
-  `rcac = ["cluster-mcp-rcac"]`, and each member depends on the core alone (the RCAC member does not
-  require the Slurm member; the README says to install `[rcac]` with `[slurm]`). Every internal
+  `rcac = ["cluster-mcp-rcac", "cluster-mcp-slurm"]`. A center's extra installs every extra its
+  center's clusters need (maintainer decision, 2026-11-12): every RCAC cluster runs Slurm, so `[rcac]`
+  installs the Slurm member beside the RCAC member, and `[slurm]` never installs the RCAC member. The
+  rule lives in the core's extras alone: each member depends on the core alone, so a member named
+  by itself brings no other. Every internal
   requirement is a bare name with a `{ workspace = true }` source, so a git install of
-  `cluster-mcp[slurm,rcac]` with `#subdirectory=packages/cluster-mcp` builds the named members from
+  `cluster-mcp[rcac]` with `#subdirectory=packages/cluster-mcp` builds the named members from
   the same commit, and a bare `cluster-mcp` with that subdirectory installs the core alone, which
   starts and serves the core's tools. An installed member registers through its entry point
   (§ Invariants §7); one not installed is never imported. `tests/test_packaging.py` pins the
@@ -1749,8 +1756,8 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   and build checks for each push to any branch and each pull request into `develop` or `main`
   (§ Conventions binds the step lists). There is **no publish workflow and no published container
   image**, and the project is not on PyPI — users install with uv from
-  `cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp`
-  (naming the extras they need), never with pip:
+  `cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp`
+  (naming the extra they need), never with pip:
   the internal requirements are bare names unregistered on PyPI (the release recipe's `pypi`
   caveat). The release recipe cuts a tag and a GitHub release and says so plainly.
 - A **container build does exist locally**: `Dockerfile` + `compose.yml` (+ `nginx-dev.conf` for the
@@ -1911,7 +1918,7 @@ release:
       push: [HEAD:develop, HEAD:main, "{v}"]   # each its own approval
       publish: gh release create {v} --verify-tag
   post_verify:
-    - bin/sandbox.sh uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help   # the README line
+    - bin/sandbox.sh uvx --from 'cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help   # the README line
     - bin/sandbox.sh uvx --from 'git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp' cluster-mcp --help   # the core alone
     - bin/sandbox.sh uvx --from 'git+https://github.com/PurdueRCAC/cluster-mcp@{v}' rcac-mcp --help   # the old install line runs the deprecated command
   caveats:
@@ -1925,8 +1932,8 @@ release:
       main starts CI runs; the tag push starts none. There is no publish workflow, no published
       container image, and no PyPI project. A release is a signed tag plus a GitHub release, and
       users install from
-      `cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`,
-      naming the extras they need (the bare form is the core alone).
+      `cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp@{v}#subdirectory=packages/cluster-mcp`,
+      naming the extra they need (the bare form is the core alone).
     repo-rename: >-
       The repository was renamed from PurdueRCAC/rcac-mcp to PurdueRCAC/cluster-mcp on 2026-10-31,
       after release 0.1.5. GitHub redirects the old name, so every install line and clone that
@@ -1974,11 +1981,13 @@ release:
       release's notes start at the tag before it.
     install-probe: >-
       post_verify runs under bin/sandbox.sh so the probe cannot pick up the working tree or reach a
-      real cluster. Its first line is the README's: the core with the extras [slurm,rcac] in the
-      #subdirectory= form, which builds the Slurm and RCAC members from the same tag; its second
+      real cluster. Its first line is the README's: the core with the extra [rcac] in the
+      #subdirectory= form, which builds the RCAC member and the Slurm member it brings from the same
+      tag; its second
       installs the core alone, with no extra, which must install and run without either member; its third
-      installs the root compat distribution, the old install line, which carries every capability,
-      and runs the deprecated rcac-mcp command. --help proves install and import only: the
+      installs the root compat distribution, the old install line, which carries every capability
+      through cluster-mcp[slurm,rcac] (so that form stays exercised), and runs the deprecated rcac-mcp
+      command. --help proves install and import only: the
       capabilities load when the server starts, not at --help.
     repo-rename-first: >-
       post_verify installs from PurdueRCAC/cluster-mcp, which resolves only once the GitHub

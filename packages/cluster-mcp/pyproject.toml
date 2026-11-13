@@ -14,11 +14,12 @@ dependencies = [
     "paramiko>=3.2",
 ]
 
-# The capabilities, each its own workspace member, installed by naming its extra
-# (`cluster-mcp[slurm,rcac]`); each registers through its entry point. A bare install is the core.
+# The capabilities, each its own workspace member, installed by naming an extra; each registers
+# through its entry point. A center's extra installs every extra its center's clusters need: every
+# RCAC cluster runs Slurm, so `rcac` installs the Slurm member too. A bare install is the core.
 [project.optional-dependencies]
 slurm = ["cluster-mcp-slurm"]
-rcac = ["cluster-mcp-rcac"]
+rcac = ["cluster-mcp-rcac", "cluster-mcp-slurm"]
 
 [project.scripts]
 cluster-mcp = "cluster_mcp.core:main"

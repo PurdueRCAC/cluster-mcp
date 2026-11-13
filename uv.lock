@@ -294,6 +294,7 @@ dependencies = [
 [package.optional-dependencies]
 rcac = [
     { name = "cluster-mcp-rcac" },
+    { name = "cluster-mcp-slurm" },
 ]
 slurm = [
     { name = "cluster-mcp-slurm" },
@@ -302,6 +303,7 @@ slurm = [
 [package.metadata]
 requires-dist = [
     { name = "cluster-mcp-rcac", marker = "extra == 'rcac'", editable = "packages/cluster-mcp-rcac" },
+    { name = "cluster-mcp-slurm", marker = "extra == 'rcac'", editable = "packages/cluster-mcp-slurm" },
     { name = "cluster-mcp-slurm", marker = "extra == 'slurm'", editable = "packages/cluster-mcp-slurm" },
     { name = "cmdkit", specifier = ">=2.7.7" },
     { name = "fabric", specifier = ">=3.0" },

@@ -3,7 +3,7 @@
 cluster-mcp is an MCP server that gives AI agents shell, files, jobs and storage on HPC clusters.
 It runs commands on a cluster over SSH for one user, or serves many users from a shared host. Its
 core works on any cluster, and extras add the Slurm tools (`[slurm]`) and the Purdue RCAC tools
-(`[rcac]`).
+with the Slurm tools (`[rcac]`).
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ pointing at your cluster:
   "mcpServers": {
     "cluster": {
       "command": "uvx",
-      "args": ["--from", "cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp",
+      "args": ["--from", "cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp",
                "cluster-mcp", "--ssh-host", "cluster.rcac.purdue.edu"]
     }
   }
@@ -25,12 +25,12 @@ pointing at your cluster:
 The client then runs the server on your machine in `stdio` mode. The server runs commands on the
 cluster over SSH, with your existing `~/.ssh/config` and keys.
 
-Name the extras your cluster needs in the requirement: `[slurm]` adds the Slurm tools, and `[rcac]`
-the Purdue RCAC tools, which go with `[slurm]`. With no extra you get the core alone. To install and
-run it from a shell:
+Name the extra your cluster needs in the requirement: `[slurm]` adds the Slurm tools, and `[rcac]`
+the Purdue RCAC tools together with the Slurm tools. With no extra you get the core alone. To install
+and run it from a shell:
 
 ```bash
-uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
+uvx --from 'cluster-mcp[rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
 ```
 
 Claude Code cuts long server instructions, so the server trims its own to fit. To serve the
@@ -42,7 +42,7 @@ cluster's rules in full, [raise both limits](docs/core/README.md#the-instruction
 |---|---|---|---|
 | Core | `cluster-mcp` | Shell, file and site-context tools, on any cluster | [docs/core](docs/core/README.md) |
 | Slurm | `cluster-mcp[slurm]` | Slurm job and cluster-status tools | [docs/slurm](docs/slurm/README.md) |
-| RCAC | `cluster-mcp[slurm,rcac]` (`[rcac]` goes with `[slurm]`) | Purdue RCAC storage, job, partition and account tools. To search RCAC documentation, add the [RCAC documentation service](docs/rcac/README.md#rcac-documentation) | [docs/rcac](docs/rcac/README.md) |
+| RCAC | `cluster-mcp[rcac]` | Purdue RCAC storage, job, partition and account tools, with the Slurm tools. To search RCAC documentation, add the [RCAC documentation service](docs/rcac/README.md#rcac-documentation) | [docs/rcac](docs/rcac/README.md) |
 
 The server serves an extra only where the cluster has the commands it needs.
 

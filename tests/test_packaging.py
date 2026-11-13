@@ -12,11 +12,13 @@ alike. The four distributions carry one version (uv does not check it), the core
 and `__version__` reads it from the installed metadata. The core installs `cluster-mcp`; the root
 installs the deprecated `rcac-mcp`; no member installs both.
 
-The capabilities are the core's extras: the core depends on no member unconditionally, and its
-extras `slurm` and `rcac` each install one member, resolved through a workspace source from the same
-commit. Each member depends on the core alone. The root depends on exactly `cluster-mcp[slurm,rcac]`,
-so the old install line, and `uv sync`, install every capability. Pinned in the sources and in the
-installed metadata.
+The capabilities are the core's extras, each member resolved through a workspace source from the
+same commit, and the core depends on no member unconditionally. A center's extra installs every
+extra its center's clusters need: `slurm` installs the Slurm member, and `rcac` the RCAC member with
+the Slurm member, since every RCAC cluster runs Slurm. Each member depends on the core alone, so that
+rule lives in the core's extras and nowhere else. The root depends on exactly
+`cluster-mcp[slurm,rcac]`, so the old install line, and `uv sync`, install every capability. Pinned
+in the sources and in the installed metadata, and a break names the extra that breaks it.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import re
 import tomllib
 from importlib.metadata import distribution, entry_points, version
 from pathlib import Path
+from typing import Iterable, Mapping
 
 import pytest
 
@@ -37,8 +40,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MEMBERS = {'cluster-mcp': 'core', 'cluster-mcp-slurm': 'slurm', 'cluster-mcp-rcac': 'rcac'}
 COMPAT = 'rcac-mcp'
 
-# Each capability extra of the core, and the member distribution it installs.
-EXTRAS = {'slurm': 'cluster-mcp-slurm', 'rcac': 'cluster-mcp-rcac'}
+# Each capability extra of the core, and the member distributions it installs.
+# A center's extra installs every extra its center's clusters need: every RCAC cluster runs Slurm.
+EXTRAS = {'slurm': ('cluster-mcp-slurm',), 'rcac': ('cluster-mcp-rcac', 'cluster-mcp-slurm')}
+CAPABILITY_MEMBERS = sorted({dist for dists in EXTRAS.values() for dist in dists})
 
 
 def pyprojects(root: Path) -> dict[str, dict]:
@@ -151,21 +156,73 @@ def internal(requirements: list[str]) -> list[str]:
     return [r for r in requirements if canonical(re.split(r'[\s\[;<>=!~]', r, maxsplit=1)[0]) in {*MEMBERS, COMPAT}]
 
 
+# An installed requirement on a workspace distribution under one extra: its name, then its marker.
+UNDER_EXTRA = re.compile(r'''([A-Za-z0-9][\w.-]*)\s*;\s*extra\s*==\s*['"]([\w.-]+)['"]''')
+
+
+def installed_extras(requires: list[str]) -> dict[str, list[str]]:
+    """The workspace distributions each extra installs, read from installed `Requires-Dist` lines.
+
+    A requirement on a workspace distribution that names no extra is listed under the empty name.
+    """
+    found: dict[str, list[str]] = {}
+    for requirement in internal(requires):
+        match = UNDER_EXTRA.fullmatch(requirement.strip())
+        extra, dist = (match[2], match[1]) if match else ('', requirement)
+        found.setdefault(extra, []).append(dist)
+    return found
+
+
+def extra_violations(installs: Mapping[str, Iterable[str]]) -> list[str]:
+    """Every way `installs` (each extra and the distributions it installs) breaks `EXTRAS`, naming the extra."""
+    got = {extra: {canonical(dist) for dist in dists} for extra, dists in installs.items()}
+    found = [f'the {extra} extra is missing' for extra in EXTRAS if extra not in got]
+    found += [f'{sorted(got[extra])} installed under {f"the {extra} extra" if extra else "no extra"}, '
+              f'which is not a capability extra' for extra in sorted(got.keys() - EXTRAS.keys())]
+    for extra, want in EXTRAS.items():
+        have = got.get(extra, set())
+        found += [f'the {extra} extra does not install {dist}' for dist in want if dist not in have]
+        found += [f'the {extra} extra installs {dist}, which it must not' for dist in sorted(have - set(want))]
+    return found
+
+
 @pytest.mark.unit
 def test_core_declares_the_capability_extras() -> None:
-    core = pyprojects(ROOT)['cluster-mcp']
+    docs = pyprojects(ROOT)
+    core = docs['cluster-mcp']
     assert internal(core['project']['dependencies']) == [], 'the core depends on a member unconditionally'
-    assert core['project'].get('optional-dependencies') == {extra: [dist] for extra, dist in EXTRAS.items()}
-    assert core['tool']['uv']['sources'] == {dist: {'workspace': True} for dist in EXTRAS.values()}
-    for dist in EXTRAS.values():
-        member = pyprojects(ROOT)[dist]['project']
+    declared = core['project'].get('optional-dependencies') or {}
+    assert extra_violations(declared) == [], 'the declared extras break the rule'
+    assert core['tool']['uv']['sources'] == {dist: {'workspace': True} for dist in CAPABILITY_MEMBERS}
+    for dist in CAPABILITY_MEMBERS:
+        member = docs[dist]['project']
         assert member['dependencies'] == ['cluster-mcp'], f'{dist} depends on {member["dependencies"]}'
         assert 'optional-dependencies' not in member, dist
-    # The installed metadata: each member is required under its own extra and no other.
+    # The installed metadata: each extra requires exactly its members, and no member is required bare.
     meta = distribution('cluster-mcp').metadata
     assert sorted(meta.get_all('Provides-Extra') or []) == sorted(EXTRAS)
-    required = internal(distribution('cluster-mcp').requires or [])
-    assert sorted(required) == sorted(f"{dist}; extra == '{extra}'" for extra, dist in EXTRAS.items()), required
+    installed = installed_extras(distribution('cluster-mcp').requires or [])
+    assert extra_violations(installed) == [], 'the installed extras break the rule'
+
+
+@pytest.mark.unit
+def test_extra_check_names_the_extra_that_breaks_the_rule() -> None:
+    # The rcac extra without the Slurm member, and the slurm extra with the RCAC member, each in the
+    # declarations' form and in the installed metadata's.
+    rcac_alone = {'slurm': ['cluster-mcp-slurm'], 'rcac': ['cluster-mcp-rcac']}
+    assert extra_violations(rcac_alone) == ['the rcac extra does not install cluster-mcp-slurm']
+    slurm_with_rcac = {'slurm': ['cluster-mcp-slurm', 'cluster-mcp-rcac'], 'rcac': ['cluster-mcp-rcac', 'cluster-mcp-slurm']}
+    assert extra_violations(slurm_with_rcac) == ['the slurm extra installs cluster-mcp-rcac, which it must not']
+    rule = ["cluster-mcp-rcac; extra == 'rcac'", "cluster-mcp-slurm; extra == 'rcac'", "cluster-mcp-slurm; extra == 'slurm'"]
+    assert extra_violations(installed_extras(['fastmcp<5,>=4', *rule])) == []
+    assert extra_violations(installed_extras(rule[:1] + rule[2:])) == ['the rcac extra does not install cluster-mcp-slurm']
+    assert extra_violations(installed_extras([*rule, "cluster-mcp-rcac; extra == 'slurm'"])) == \
+        ['the slurm extra installs cluster-mcp-rcac, which it must not']
+    assert extra_violations(installed_extras([*rule, 'cluster-mcp-rcac'])) == \
+        ["['cluster-mcp-rcac'] installed under no extra, which is not a capability extra"]
+    assert extra_violations(installed_extras(rule[2:])) == ['the rcac extra is missing',
+                                                            'the rcac extra does not install cluster-mcp-rcac',
+                                                            'the rcac extra does not install cluster-mcp-slurm']
 
 
 @pytest.mark.unit
@@ -175,7 +232,7 @@ def test_compat_root_installs_every_capability() -> None:
     assert root['tool']['uv']['sources'] == {'cluster-mcp': {'workspace': True}}
     assert distribution(COMPAT).requires == ['cluster-mcp[rcac,slurm]']
     # The development environment the root syncs carries every capability through those extras.
-    for dist in EXTRAS.values():
+    for dist in CAPABILITY_MEMBERS:
         assert distribution(dist).version == version('cluster-mcp'), dist
 
 
