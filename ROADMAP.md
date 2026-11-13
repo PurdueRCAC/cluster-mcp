@@ -85,7 +85,7 @@ They come in six groups, in this order:
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
 - **Gates** (fifteen), because every later gate rests on them: the mutation run, the pins its
-  stop path still lacks and the case cleanup a second signal can cut short, the two gaps the skip check still leaves and the pins it still lacks, the
+  stop path still lacks and the case cleanup a signal can cut short, the two gaps the skip check still leaves and the pins it still lacks, the
   waits the timing rows still miss, an annotation check, the test harnesses' leftovers and those of a sandbox killed outside them, the pins the sandbox sweep's listing guard and its reopen's link guard lack, the marker
   wording, and the image's init.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
@@ -153,14 +153,16 @@ Found by that cycle's review, cycle 3, 2026-11-10.
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutant-child-outlives-timeout/`](spec/mutant-child-outlives-timeout/) (REVIEW cycle 3, mutant sweep); `tests/mutants.py` (`stop_run`, `run_members`, `_wait_gone`); `tests/test_mutations.py`*
 **Seed:** [`issues/mutant-runner-stop-pins.md`](issues/mutant-runner-stop-pins.md) · *status: unshaped*
 
-## A second signal to the mutation runner can cut a case's cleanup short
+## A signal to the mutation runner during a case's cleanup cuts the cleanup short
 
-The runner cleans up each case on its way out of `run_case` (`case_scratch`: `TMPDIR` put back, the
-case's scratch removed, or kept and named while a sandbox in it is in use). A SIGTERM, SIGHUP or
-Ctrl-C reaches that cleanup after the stop, which holds those signals; the cleanup holds none, so a
-second one while it runs stops it part-way and leaves the scratch, with the run's sandbox
-directories, in the runner's `TMPDIR`. Pre-existing: the old `TemporaryDirectory` cleanup was cut
-short the same way. Found by `sandbox-dirs-left-on-kill`'s P2 build, 2026-11-12.
+The runner cleans up each case on its way out of `run_case` (`case_scratch`: the processes listed,
+`TMPDIR` put back, the case's scratch removed, or kept and named while a sandbox in it is in use).
+The cleanup holds no signal, so any SIGTERM, SIGHUP or Ctrl-C that lands while it runs, a second one
+after a stop or a single one after a case that ended on its own, stops it part-way: the case goes
+unreported, the scratch stays in the runner's `TMPDIR` with the run's sandbox directories, unnamed,
+and a listing cut short leaves its own sandbox directory too. Pre-existing in kind: the old
+`TemporaryDirectory` cleanup was cut short the same way. Found by `sandbox-dirs-left-on-kill`'s P2
+build, 2026-11-12, for a second signal, and by its review, cycle 2, for any signal.
 
 *Horizon: Part I, gates · Depends on: sandbox-dirs-left-on-kill · Refs: [`spec/sandbox-dirs-left-on-kill/`](spec/sandbox-dirs-left-on-kill/) (TECH, P2); `tests/mutants.py` (`case_scratch`, `stop_run`)*
 **Seed:** [`issues/mutant-case-cleanup-interrupted.md`](issues/mutant-case-cleanup-interrupted.md) · *status: unshaped*

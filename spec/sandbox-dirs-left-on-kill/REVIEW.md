@@ -328,6 +328,7 @@ Severity per the rubric. CONFIRMED: MEDIUM 1, LOW 1. PLAUSIBLE: 0.
   reads the clarification as allowing the keep, the finding drops. Either way it is fix or drop,
   never defer: it cites an R-ID's own wording.
 - **Touches:** R2.
+- **Maintainer's call:** dropped: D3 allows the keep (maintainer, 2026-11-12).
 
 #### [LOW/CONFIRMED] F-B — the seed `issues/mutant-case-cleanup-interrupted.md` understates its defect
 
@@ -343,6 +344,9 @@ Severity per the rubric. CONFIRMED: MEDIUM 1, LOW 1. PLAUSIBLE: 0.
 - **Scope:** the behaviour itself is outside the GOAL (the runner does not run to its end, a known
   limitation). The finding is the seed's misstatement. The fix is the seed's Problem widened to
   its whole domain, not a code change.
+- **Maintainer's call:** fix in the seed and land, with no further review (maintainer, 2026-11-12).
+  Fixed by the build after this record: the seed's Problem, Outcome and criteria now cover any
+  signal during a case's cleanup, first or second, and its `ROADMAP.md` entry follows.
 
 ### Coverage observations
 
@@ -423,6 +427,26 @@ send it to build, the properties, both ways, each with a pin:
 - **Contract drift, still pending the maintainer's confirmation:** `GOAL.md` changed after its
   shape commit `1189406` in `9ed8715`, `b414c89` and `14c33f1`. This review graded the GOAL as it
   stands at `dafc608`.
+  - 2026-11-12: confirmed by the maintainer. The three post-shape changes are the contract both
+    cycles graded; this settles cycle 1's drift note too.
 - **Landing note, updated:** `origin/develop` is still `302bd10` past the base (Part I 29, gates
   twelve). The branch now has Part I at 32 and gates at fifteen, so at landing `ROADMAP.md`
   resolves to 33 entries and sixteen gates.
+
+## Maintainer ruling — land (2026-11-12)
+
+- **Ruling (b).** F-A is dropped: D3 allows the keep. F-B is fixed in the seed, and the cycle lands
+  with no further review. The GOAL's post-shape changes `9ed8715`, `b414c89` and `14c33f1` are
+  confirmed (Human-gate triggers, above). `review.verdict` stays `changes-requested` and no review
+  cycle is added; this section is the record of the override, and the landing names it.
+- **F-B.** `issues/mutant-case-cleanup-interrupted.md` now states the whole class: any SIGTERM,
+  SIGHUP or SIGINT that lands while a case's cleanup runs, a second one after a stop or a single one
+  after a case whose child ended on its own, stops the cleanup part-way; the case goes unreported, the
+  scratch is left unnamed, and a process listing cut short leaves its own sandbox directory. It cites
+  this cycle's F-B evidence. Its `ROADMAP.md` entry and Part I's gates line follow.
+- **The `files` gate.** `remediation/fork-base.py`'s `ALSO_ALLOWED` takes this cycle's seed,
+  `issues/sandbox-reopen-link-in-closed-dir-unpinned.md` (seen red without it, as routed).
+- **What lands.** The reviewed head `dafc608` (pinned as `0014491`), plus spec-only commits and the
+  seed fix (`ROADMAP.md` and the seed file). No code or test changed after the review:
+  `git diff --stat 0014491..HEAD -- . ':(exclude)spec/' ':(exclude)ROADMAP.md' ':(exclude)issues/'`
+  is empty.

@@ -3,11 +3,11 @@ slug: sandbox-dirs-left-on-kill
 title: The suite and the mutation runner leave no sandbox directory behind
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/sandbox-dirs-left-on-kill
 base: develop
 current_phase: done
-last_updated: '2026-11-12'
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: A suite run sweeps what its killed sandboxes left, and nothing else
@@ -270,6 +270,11 @@ skips exactly what develop skips; the ledger is clean.
       `/tmp`; `verify`'s last command passed; the 28 skips are develop's. Two empty run directories
       remain, case 3 of `issues/sandbox-dirs-outside-repo-runs.md`, which now also records the
       pytest temporary directory's closed directories the sweep does not scan.
+- [x] Review cycle 2, on the maintainer's ruling (b), 2026-11-12: F-B, a docs change under this
+      phase, no phase reopened. `issues/mutant-case-cleanup-interrupted.md` states its whole domain
+      (any signal during a case's cleanup, first or second), with its `ROADMAP.md` entry and Part I's
+      gates line; `remediation/fork-base.py` takes cycle 2's seed in `ALSO_ALLOWED`. F-A is dropped
+      (REVIEW.md, Maintainer ruling).
 - **Verify:** the frontmatter `verify:`.
 - **Touches:** `spec/sandbox-dirs-left-on-kill/verify/mutants.json`, `spec/sandbox-dirs-left-on-kill/PLAN.md`,
   `spec/sandbox-dirs-left-on-kill/TECH.md`, `spec/sandbox-dirs-left-on-kill/remediation/fork-base.py`,
@@ -362,6 +367,19 @@ skips exactly what develop skips; the ledger is clean.
   (`--from 97750cc`). `bin/sandbox.sh` is unchanged (R5). One commit for P1-P3: P3's plant list
   re-anchors text this same change moves, so its `mutants` mode cannot run on any split. P1 and P2
   are done; P3 stays in progress until the foreman's full verify runs its `suite` mode.
+
+- **2026-11-13, review cycle 2: the maintainer's ruling (b), 2026-11-12.** F-A (a kept case scratch
+  keeps its free sandbox directories) is dropped: the GOAL's D3 allows the keep. F-B is fixed in the
+  seed it names, `issues/mutant-case-cleanup-interrupted.md`: its Problem, Outcome and criteria now
+  cover any SIGTERM, SIGHUP or SIGINT that lands during a case's cleanup, not only a second one, as
+  the review's probe showed, and its `ROADMAP.md` entry and Part I's gates line follow. The seed is
+  this cycle's own, not on `develop`, so it is corrected in place. The fix touches no code or test,
+  so no phase reopens: it is a docs change under P3. `remediation/fork-base.py` widens `files` by
+  cycle 2's seed, `issues/sandbox-reopen-link-in-closed-dir-unpinned.md` (seen red without it). The
+  light gates ran on the staged tree (`fork-base.py files ledger`); the full `verify` runs on the
+  landing squash. The cycle goes to publish with no further review: `status` is `in_review`, and
+  `review` is left as the cycle 2 record (`changes-requested`, cycle 2), since build never passes
+  `--verdict`; REVIEW.md's Maintainer ruling section is the override publish reads.
 
 ## How `code-build` drives this
 

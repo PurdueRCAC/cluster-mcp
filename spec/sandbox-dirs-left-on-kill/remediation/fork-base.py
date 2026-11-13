@@ -9,8 +9,8 @@ wrapper restores the precondition the gate was written under, that BASE is the c
 2. bin/sandbox.sh is also unchanged from 0bfacae to the fork point, so step 3's R5 check is the same check;
 3. the gate's own modes, as given on the command line, with BASE set to the fork point
    (`git merge-base HEAD origin/develop`), and the `files` mode's allowed paths widened by ALSO_ALLOWED:
-   the seeds P3's ledger files on the foreman's rulings (2026-11-12), and the seed review cycle 1 filed
-   for its coverage observation (2026-11-12), which the frozen ALLOWED predates.
+   the seeds P3's ledger files on the foreman's rulings (2026-11-12), and the seeds review cycles 1 and 2
+   filed for their coverage observations (2026-11-12), which the frozen ALLOWED predates.
 
 Run from the cycle worktree, staged, as
 `uv run python -I spec/sandbox-dirs-left-on-kill/remediation/fork-base.py MODE…`.
@@ -26,7 +26,8 @@ from pathlib import Path
 PLANNED = '0bfacae'
 GATE = Path(__file__).resolve().parent.parent / 'verify' / 'cleanup.py'
 ALSO_ALLOWED = ('issues/mutant-case-cleanup-interrupted.md', 'issues/sandbox-dirs-outside-repo-runs.md',
-                'issues/sandbox-sweep-listing-failure-unpinned.md')
+                'issues/sandbox-sweep-listing-failure-unpinned.md',
+                'issues/sandbox-reopen-link-in-closed-dir-unpinned.md')
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
