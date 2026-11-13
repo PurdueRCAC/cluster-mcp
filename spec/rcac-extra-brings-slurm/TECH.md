@@ -36,10 +36,10 @@ phases:
   hill: uphill
   verify: sh spec/rcac-extra-brings-slurm/verify/gate.sh p2
 review:
-  last_reviewed_commit: ''
-  verdict: none
+  last_reviewed_commit: 38871fcad25326414325b74653918a5073b79754
+  verdict: approved
   blocked_reason: ''
-  cycle: 0
+  cycle: 1
 ---
 
 # TECH.md — cluster-mcp[rcac] alone brings the Slurm tools
