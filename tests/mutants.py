@@ -6015,7 +6015,9 @@ def case_scratch(case_id: str) -> Iterator[str]:
     stopped test left closed included (`sandbox_dirs.reopen`, `sandbox_dirs.remove`). A scratch holding
     a sandbox directory some process still uses is left in place and named on stderr, and so is one
     whose processes cannot be listed, and one that cannot all be removed: the sweep never guesses that
-    a directory is free, and never raises, so the case is still reported and the sweep goes on.
+    a directory is free, and never raises on its own errors, so the case is still reported and the sweep
+    goes on. A signal to the runner that lands during this cleanup still cuts it short, leaving the
+    case unreported and the scratch unnamed (`issues/mutant-case-cleanup-interrupted.md`).
     """
     scratch = tempfile.mkdtemp(prefix=f'mutant-{case_id}-')
     saved = os.environ.get('TMPDIR')

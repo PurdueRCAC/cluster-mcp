@@ -380,6 +380,10 @@ skips exactly what develop skips; the ledger is clean.
   landing squash. The cycle goes to publish with no further review: `status` is `in_review`, and
   `review` is left as the cycle 2 record (`changes-requested`, cycle 2), since build never passes
   `--verdict`; REVIEW.md's Maintainer ruling section is the override publish reads.
+  - 2026-11-13: on the foreman's routing, a docs correction under F-B's class. `AGENTS.md` § Testing
+    and `case_scratch`'s docstring now limit "never raises" to the cleanup's own errors and name the
+    seed for a signal that lands during it. The `tests/mutants.py` change is the docstring alone (its
+    AST without docstrings is identical to `0014491`'s). Both paths are already in `files`' allowed set.
 
 ## How `code-build` drives this
 

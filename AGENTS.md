@@ -1659,9 +1659,11 @@ it raises if the connect succeeds. Delegate mode runs over an in-process ASGI ro
   `LIMIT`, or the stop on SIGTERM, SIGHUP or Ctrl-C), directories a stopped test left closed included
   (`tests/sandbox_dirs.py`'s `reopen` and `remove`). A scratch holding a sandbox directory some
   process still uses (`in_use`), one whose processes cannot be listed, and one that cannot all be
-  removed are kept and named on stderr (`kept <path>: <why>`); the cleanup never raises, so the case
-  is still reported, later cases still run, and a signal still ends the runner by that signal. A
-  SIGKILL to the runner leaves its scratch in the runner's `TMPDIR`.
+  removed are kept and named on stderr (`kept <path>: <why>`); the cleanup never raises on its own
+  errors, so the case is still reported, later cases still run, and a signal still ends the runner by
+  that signal. A SIGTERM, SIGHUP or Ctrl-C that lands during the cleanup itself still cuts it short:
+  the case goes unreported and the scratch is left, unnamed (`issues/mutant-case-cleanup-interrupted.md`).
+  A SIGKILL to the runner leaves its scratch in the runner's `TMPDIR`.
 
   A red `test_mutation_anchor_applies[<case>]` in the suite means a change moved the code that
   case edits: re-plant the case against the new code in the same commit and re-run it. A retarget

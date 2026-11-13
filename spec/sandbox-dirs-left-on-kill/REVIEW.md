@@ -446,7 +446,14 @@ send it to build, the properties, both ways, each with a pin:
   this cycle's F-B evidence. Its `ROADMAP.md` entry and Part I's gates line follow.
 - **The `files` gate.** `remediation/fork-base.py`'s `ALSO_ALLOWED` takes this cycle's seed,
   `issues/sandbox-reopen-link-in-closed-dir-unpinned.md` (seen red without it, as routed).
-- **What lands.** The reviewed head `dafc608` (pinned as `0014491`), plus spec-only commits and the
-  seed fix (`ROADMAP.md` and the seed file). No code or test changed after the review:
-  `git diff --stat 0014491..HEAD -- . ':(exclude)spec/' ':(exclude)ROADMAP.md' ':(exclude)issues/'`
-  is empty.
+- **Docs correction under F-B's class (foreman-routed, 2026-11-13).** `AGENTS.md` § Testing's
+  mutation-runner bullet and `case_scratch`'s docstring in `tests/mutants.py` said the cleanup never
+  raises, so the case is still reported. That holds for the cleanup's own errors, not for a signal
+  that lands during it, which F-B's class covers. Both now say so and name
+  `issues/mutant-case-cleanup-interrupted.md`.
+- **What lands.** The reviewed head `dafc608` (pinned as `0014491`), plus spec-only commits, the seed
+  fix (`ROADMAP.md` and the seed file) and the docs correction above. No behaviour changed after the
+  review. `git diff --stat 0014491..HEAD -- . ':(exclude)spec/' ':(exclude)ROADMAP.md' ':(exclude)issues/'`
+  lists only `AGENTS.md` and `tests/mutants.py`. The `tests/mutants.py` change is the
+  `case_scratch` docstring alone: the module's AST with docstrings stripped is identical to
+  `0014491`'s.
