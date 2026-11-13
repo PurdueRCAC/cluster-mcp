@@ -3,11 +3,11 @@ slug: annotation-check
 title: Nothing would catch the next silently wrong annotation
 kind: ci
 appetite: small
-status: blocked
+status: in_progress
 branch: ci/annotation-check
 base: develop
-current_phase: done
-last_updated: '2026-11-12'
+current_phase: P2
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: The annotation check and its controls, seen red in each kind of position
@@ -23,10 +23,10 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py && .venv/bin/python -I spec/annotation-check/remediation/F6-F8-review2.py
+  verify: sh spec/annotation-check/verify/gate.sh P1 && .venv/bin/python -I spec/annotation-check/verify/sweep.py && .venv/bin/python -I spec/annotation-check/remediation/F6-F8-review2.py && .venv/bin/python -I spec/annotation-check/remediation/F9-review3.py
 - id: P2
   name: AGENTS.md names the check, and the full gate in both eras
-  status: done
+  status: in_progress
   satisfies:
   - R6
   - R7
@@ -180,6 +180,49 @@ As the KB template words it (`$KB/skill/_templates/TECH.md` → Frontmatter fiel
     expectations held (the seed-only commit after it touches no file the checker reads);
     `gate.sh P2`, static, docs and ledger ok, then the profile's full `verify` green in both eras
     (fourth command 4,637 passed and 14 `need_shell` skipped per era), 1,565 s wall.
+- **2026-11-13, review cycle 3 remediation** (`REVIEW.md`, changes-requested at `011c31f`, the loop's
+  bound reached and escalated). The maintainer's ruling (route b): fix N10 and N12; seed N9 and N11
+  into the cycle's existing seed, `issues/annotation-check-pin-gaps.md`, with `ROADMAP.md` in step;
+  land with no further review. Standing rule for this effort: a false refusal on a shape no file
+  uses, which lets nothing invalid through, is graded LOW and seeded; N9 falls under it (noted in
+  `REVIEW.md`). P1 and P2 are reopened and land in one P1 commit, as in cycles 1 and 2. P1's
+  `verify:` is retuned to run, after the cycle 2 checker, `remediation/F9-review3.py`, the kill
+  evidence of review cycle 3's N10 (checker F9). `gate.sh`, `seen_red.sh`, `sweep.py` and
+  `F6-F8-review2.py` are unchanged; every anchor of the last two still holds.
+  - N10 (F9): the check refused `__annotations__` and `__annotate__` as a string, a keyword, an
+    attribute or a name, never as the name a statement binds, so `def __annotate__` in a class body
+    passed. The class is every node that spells the name it binds in a field of its own:
+    `NAME_FIELDS` lists them (a keyword, a name, a `def`, an `async def`, a `class`, an import's name
+    and alias, a `match` capture, star and mapping rest), and `_spelled` reads each; a `def` or
+    `class` is asked before its body is walked, and is shown by its first line. An `except ... as`
+    name is not among them: Python unbinds it when its handler ends. Twelve new rows of
+    `test_an_unreadable_functional_form_is_refused`, in both modes: `def __annotate__` in a class at
+    module level, in a class inside a function (the review's case), at module level, as a
+    `staticmethod`; `async def` and `class` named `__annotate__`; `from dataclasses import
+    __annotate__`; `__annotations__` bound by `from ... import ... as`, `import ... as`, and a
+    `match` capture, star and mapping rest. Each row's refusal is on one line.
+  - The `AGENTS.md` § Testing entry and the reader's docstring list exactly those spellings; the
+    sentence that said "spelled anywhere" is gone.
+  - Kill evidence (`remediation/F9-review3.py`, both eras, committed state): the rows at REV pass, the
+    tree test among them (the control: the unmutated tree passes, so the new refusal refuses nothing
+    the tree holds); the twelve new rows are each red against the check at `011c31f`; eleven mutants
+    that undo part of the fix (F9a to F9k) are each red on their named rows; review cycle 3's N11
+    survivor AK2 (`__annotate__` dropped from the keys) is now red on seven of them. The sweep over
+    the new decision adds four carve-outs, each red on its row (C1 module level, C2 a decorated
+    `def`, C3 a class inside a function, C4 a plain `import`), and records one survivor, C5 (a
+    `def __annotate__` whose parameters are not one positional name), which the checker requires to
+    survive the whole module; it is seeded in `issues/annotation-check-pin-gaps.md`.
+  - N12: the seed's "Not read today" now says what the review reproduced. A namespace lookup, and a
+    namespace given to a metaclass or a renamed `type`, are refused wherever the name or key is
+    written in `src/`; only names built at run time pass. It names `def __annotate__` as refused.
+  - Seeded in `issues/annotation-check-pin-gaps.md`, with its `ROADMAP.md` entry rewritten in step:
+    N9 (the tree test's oracle red on a `TypedDict` subclassing another, a functional form bound to
+    another name, and one assigned in a class body; it fails closed and no file uses them), N11's
+    five other survivors (U6, UC6, UC10, UFi10, UFi2), and C5, with acceptance criteria R7 and R8.
+  - Runs: `gate.sh P1`, `verify/sweep.py`, `remediation/F6-F8-review2.py` and
+    `remediation/F9-review3.py` ran green on a candidate tree of this commit's content (the module
+    byte-identical to the commit's); P2 stays `in_progress` until the profile's full `verify`, which
+    waits on the foreman's release of the host.
 
 ---
 
@@ -217,10 +260,12 @@ of position in the core and in other members.
   the figure PLAN § 5 quotes), then `verify/sweep.py` (review cycle 1 remediation: 102 mutants in
   both eras, about 12 min, reading committed state; its record is `verify/sweep-record.md`), then
   `remediation/F6-F8-review2.py` (review cycle 2 remediation: the kill evidence of N1, N2 and the
-  oracle, both eras, about 4 min, reading committed state).
+  oracle, both eras, about 4 min, reading committed state), then `remediation/F9-review3.py` (review
+  cycle 3 remediation: the kill evidence of N10 and the sweep over its decision, both eras, about
+  2 min, reading committed state).
 - **Touches:** `tests/test_annotations.py`; `spec/annotation-check/verify/sweep.py` and its record
   (review cycle 1 remediation); `spec/annotation-check/remediation/F6-F8-review2.py` (review cycle 2
-  remediation).
+  remediation); `spec/annotation-check/remediation/F9-review3.py` (review cycle 3 remediation).
 
 ## Phase P2 — AGENTS.md names the check, and the full gate in both eras
 **Satisfies:** R6, R7 · **Depends on:** P1
@@ -242,7 +287,7 @@ profile's full `verify` passes with the check in its fourth command of each era.
   full `verify`, read from AGENTS.md § Factory at run time). R6's CI-budget clause is graded at
   publish on the cycle branch's CI run, not here.
 - **Touches:** `AGENTS.md` (§ Testing only); `issues/annotation-check-pin-gaps.md` and its
-  `ROADMAP.md` entry (review cycle 2 remediation).
+  `ROADMAP.md` entry (review cycle 2 remediation; extended in review cycle 3's).
 
 ---
 

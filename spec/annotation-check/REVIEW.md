@@ -587,3 +587,15 @@ the maintainer. The properties, for whichever route he picks:
   cause), and the seed's survivor counts reproduce exactly, but the oracle fix brought a false red on
   valid code (N9), and the unreadable-form detection has a gap (N10) and six survivors (N11). The
   loop's bound is reached: STOP for the maintainer.
+
+### Maintainer ruling (2026-11-13)
+
+Route (b): fix N10 (refuse `def __annotate__` as unreadable, and correct the `AGENTS.md` line that
+describes it) and N12 (the seed's "Not read today"); seed N9 and N11 into the cycle's existing seed,
+`issues/annotation-check-pin-gaps.md`, with `ROADMAP.md` kept in step; land with no further review.
+Standing rule for this effort: a false refusal on a shape no file uses, which lets nothing invalid
+through, is graded LOW and seeded.
+
+**N9 falls under the rule**, and is graded LOW and seeded: the oracle's red on the three valid
+shapes fails closed (nothing invalid passes), and no file holds any of them (the tree test is green
+on the tree at `011c31f`, and at the cycle 3 remediation commit).

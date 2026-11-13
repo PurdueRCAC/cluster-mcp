@@ -87,6 +87,14 @@ FORM_KEYWORDS = {'TypedDict': frozenset({'total', 'closed'}),
                                               'module', 'decorator'})}
 # The keys of a class namespace that set its annotations.
 ANNOTATION_KEYS = frozenset({'__annotations__', '__annotate__'})
+# The fields that spell a name a node binds or reads, other than an attribute's or a string's: a
+# keyword's, a name's, and the name a `def`, `class`, import or `match` pattern binds in the scope it
+# runs in. An `except ... as` name is unbound when its handler ends, so it never reaches a namespace.
+NAME_FIELDS: dict[type[ast.AST], tuple[str, ...]] = {
+    ast.keyword: ('arg',), ast.Name: ('id',), ast.FunctionDef: ('name',), ast.AsyncFunctionDef: ('name',),
+    ast.ClassDef: ('name',), ast.alias: ('name', 'asname'), ast.MatchAs: ('name',), ast.MatchStar: ('name',),
+    ast.MatchMapping: ('rest',),
+}
 UNREADABLE = 'a functional class form the check cannot read'
 TYPE_PARAMETER_KINDS = {'TypeVar': typing.TypeVar, 'ParamSpec': typing.ParamSpec,
                         'TypeVarTuple': typing.TypeVarTuple}
@@ -238,10 +246,11 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
     or class level, with its fields written out as a literal. Every other call of one (in a function
     body, as a base class, with a chained, tuple or attribute target, its fields in a variable or
     unpacked), every reference to one that is not a call or a class statement's base (the factory
-    bound to another name or passed as a value), a factory's name as a string, and every spelling of
-    `__annotations__` or `__annotate__` outside a read `type` call's namespace, is returned as a
-    position whose `unreadable` says why: the check cannot find the annotations it builds, so it
-    refuses it.
+    bound to another name or passed as a value), a factory's name as a string, and
+    `__annotations__` or `__annotate__` outside a read `type` call's namespace (as a string, a name,
+    an attribute, a keyword, or what a `def`, `class`, import or `match` pattern binds), is returned
+    as a position whose `unreadable` says why: the check cannot find the annotations it builds, so
+    it refuses it.
     """
     tree = ast.parse(source, str(path))
     forms = {name: name for name in FUNCTIONAL_FORMS}
@@ -340,6 +349,8 @@ def annotation_positions(source: str, module: str, path: str | Path = '<unknown>
     body(tree.body, [], 'module')
     for node, name, why in _unread_forms(tree, forms, read):
         text = ast.get_source_segment(source, node) or ast.unparse(node)
+        # A `def` or `class` is shown by its first line, not its body.
+        text = text.splitlines()[0] if isinstance(node, ast.stmt) else text
         found.append(Position(module, node.lineno, name, ATTRIBUTE, _shortened(text), '', unreadable=why))
     return found
 
@@ -427,12 +438,19 @@ def _unread_forms(tree: ast.Module, forms: dict[str, str], read: set[int]) -> li
                 return node.attr
         return None
 
+    def refused(node: ast.AST, prefix: str, spelled: str) -> tuple[ast.AST, str, str]:
+        return (node, f'{prefix}{spelled}', f'{UNREADABLE}: {spelled} is spelled outside a call the check reads, so '
+                'the annotations set or built through it cannot be found')
+
     def visit(node: ast.AST, prefix: str) -> None:
         if isinstance(node, ast.If) and _is_type_checking(node.test):
             for statement in node.orelse:
                 visit(statement, prefix)
             return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # `def __annotate__` in a class body sets that class's annotations.
+            if (spelled := _spelled(node)) is not None:
+                found.append(refused(node, prefix, spelled))
             if isinstance(node, ast.ClassDef):
                 allowed.update(id(base) for base in node.bases)
             inside = {id(statement) for statement in node.body}
@@ -456,9 +474,7 @@ def _unread_forms(tree: ast.Module, forms: dict[str, str], read: set[int]) -> li
                           f'{UNREADABLE}: {form} is referenced other than by a call or as a base class, so a class '
                           'built through that reference cannot be found; call it by its own name'))
         elif id(node) not in read and id(node) not in allowed and (spelled := _spelled(node)) is not None:
-            found.append((node, f'{prefix}{spelled}',
-                          f'{UNREADABLE}: {spelled} is spelled outside a call the check reads, so the annotations '
-                          'set or built through it cannot be found'))
+            found.append(refused(node, prefix, spelled))
         for child in ast.iter_child_nodes(node):
             visit(child, prefix)
 
@@ -469,16 +485,16 @@ def _unread_forms(tree: ast.Module, forms: dict[str, str], read: set[int]) -> li
 
 def _spelled(node: ast.AST) -> str | None:
     """The name a node spells that sets a class's annotations or reaches a factory by a string:
-    `__annotations__` or `__annotate__` as a string, a keyword, an attribute or a name, and a
-    functional form's name as a string (`getattr(typing, 'TypedDict')`)."""
+    `__annotations__` or `__annotate__` as a string, an attribute, or a name in one of `NAME_FIELDS`
+    (a keyword, a name, or what a `def`, `class`, import or `match` pattern binds), and a functional
+    form's name as a string (`getattr(typing, 'TypedDict')`)."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         named = node.value
         return named if named in ANNOTATION_KEYS or named in FUNCTIONAL_FORMS - {'type'} else None
-    named = (node.arg if isinstance(node, ast.keyword) else node.attr if isinstance(node, ast.Attribute)
-             else node.id if isinstance(node, ast.Name) else None)
-    if named not in ANNOTATION_KEYS:
-        return None
-    return ast.unparse(node) if isinstance(node, ast.Attribute) else named
+    if isinstance(node, ast.Attribute):
+        return ast.unparse(node) if node.attr in ANNOTATION_KEYS else None
+    return next((named for field in NAME_FIELDS.get(type(node), ())
+                 if (named := getattr(node, field)) in ANNOTATION_KEYS), None)
 
 
 def _field_pairs(fields: ast.expr) -> list[tuple[str, ast.expr]]:
@@ -1224,6 +1240,28 @@ UNREADABLE_FORMS = [
     ('assigned-alias', f'Shape = typing.TypedDict\nPlanted = Shape("Planted", {{"held": {SLICE}}})\n', 'typing.TypedDict'),
     ('passed-as-a-value', f'Build = functools.partial(NamedTuple, "Planted")\nPlanted = Build([("held", {SLICE})])\n',
      'NamedTuple'),
+    # A name bound by a statement or pattern in a class body, rather than assigned.
+    ('annotate-def-local-class', 'def make():\n    class Planted:\n        def __annotate__(format):\n'
+     f'            return {{"held": {SLICE}}}\n    return Planted\n', 'make.Planted.__annotate__'),
+    ('annotate-def', f'class Planted:\n    def __annotate__(format):\n        return {{"held": {SLICE}}}\n',
+     'Planted.__annotate__'),
+    ('annotate-def-module', f'def __annotate__(format):\n    return {{"held": {SLICE}}}\n', '__annotate__'),
+    ('annotate-staticmethod', 'class Planted:\n    @staticmethod\n    def __annotate__(format):\n'
+     f'        return {{"held": {SLICE}}}\n', 'Planted.__annotate__'),
+    ('annotate-async-def', f'class Planted:\n    async def __annotate__(format):\n        return {{"held": {SLICE}}}\n',
+     'Planted.__annotate__'),
+    ('annotate-class', 'class Planted:\n    class __annotate__(dict):\n        def __new__(cls, format):\n'
+     f'            return {{"held": {SLICE}}}\n', 'Planted.__annotate__'),
+    ('annotate-imported', 'class Planted:\n    from dataclasses import __annotate__\n', 'Planted.__annotate__'),
+    ('annotations-imported-as', 'class Planted:\n    from builtins import dict as __annotations__\n',
+     'Planted.__annotations__'),
+    ('annotations-import-as', 'class Planted:\n    import builtins as __annotations__\n', 'Planted.__annotations__'),
+    ('annotations-match-capture', f'class Planted:\n    match {{"held": {SLICE}}}:\n        case __annotations__:\n'
+     '            pass\n', 'Planted.__annotations__'),
+    ('annotations-match-star', 'class Planted:\n    match [1]:\n        case [*__annotations__]:\n            pass\n',
+     'Planted.__annotations__'),
+    ('annotations-match-rest', f'class Planted:\n    match {{"held": {SLICE}}}:\n        case {{**__annotations__}}:\n'
+     '            pass\n', 'Planted.__annotations__'),
 ]
 
 
@@ -1236,6 +1274,8 @@ def test_an_unreadable_functional_form_is_refused(scratch: Scratch, source: str,
     assert len(violations) == 1, violations
     assert violations[0].startswith(f'{module}:') and f': {where}: ' in violations[0], violations
     assert UNREADABLE in violations[0].split(f': {where}: ', 1)[1], violations
+    # What is refused is shown on one line: a `def` or `class` by its first.
+    assert '\\n' not in violations[0], violations
 
 
 @pytest.mark.unit

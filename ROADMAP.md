@@ -179,12 +179,16 @@ it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carr
 defect of their shape goes unrefused; its remediation's tree-test oracle kills the nine whose shape
 the tree holds. Thirty remain: block kinds and `self`/`cls` in the reader, qualifier and generic
 arguments in the walker, binding forms in shadow detection, exception classes at resolution and at
-import, and the refusal line's text. The check behaves correctly on each; the fix is a planted row
-per shape and a sweep over each domain. It also holds the forms the check does not read today: a
-factory or annotations reached only through names built at run time, which pass unrefused (none
-occurs today). Seeded by the cycle 2 remediation, 2026-11-12.
+import, and the refusal line's text. The third review found six survivors in the unreadable-form
+detection, one of which its remediation kills, and that remediation's sweep one more (a
+`def __annotate__` with other parameters). The check behaves correctly on each; the fix is a planted row per shape and a sweep over each domain. The
+tree test's oracle also goes red on three valid shapes no file uses today (a `TypedDict` subclassing
+another, a functional form bound to another name or assigned in a class body): it fails closed. It
+also holds the forms the check does not read today: a factory or annotations reached only through
+names built at run time, which pass unrefused (none occurs today). Seeded by the cycle 2
+remediation, 2026-11-12; extended by the cycle 3 remediation, 2026-11-13.
 
-*Horizon: 0.2.0, gates · Depends on: annotation-check · Refs: [`spec/annotation-check/`](spec/annotation-check/) (REVIEW cycle 2, N3–N7)*
+*Horizon: 0.2.0, gates · Depends on: annotation-check · Refs: [`spec/annotation-check/`](spec/annotation-check/) (REVIEW cycle 2, N3–N7; cycle 3, N9, N11)*
 **Seed:** [`issues/annotation-check-pin-gaps.md`](issues/annotation-check-pin-gaps.md) · *status: unshaped*
 
 ## A sandbox killed with SIGKILL leaves its directory behind

@@ -955,11 +955,12 @@ import has no effect.
     function body or as a base class, a chained, tuple or attribute target, fields in a variable or
     unpacked, the factory bound to another name or passed as a value, a `types.new_class` body
     callback), a factory's name as a string (`getattr(typing, 'TypedDict')`), and `__annotations__`
-    or `__annotate__` spelled anywhere but a read `type` call's namespace, is refused as unreadable,
-    never passed. Not read: a function body's own variable annotations, which Python never
-    evaluates. Not read today, and not refused: a class whose factory or annotations the source
-    reaches only through names built at run time; `issues/annotation-check-pin-gaps.md` holds them.
-    `workspace_violations(root)` returns
+    or `__annotate__` outside a read `type` call's namespace, as a string, a name, an attribute, a
+    keyword, or the name a `def`, `class`, import or `match` pattern binds (`def __annotate__` in a
+    class body), is refused as unreadable, never passed. Not read: a function body's own variable
+    annotations, which Python never evaluates. Not read today, and not refused: a class whose
+    factory or annotations the source reaches only through names built at run time;
+    `issues/annotation-check-pin-gaps.md` holds them. `workspace_violations(root)` returns
     the check's refusal lines for a workspace: it takes the members from the root `pyproject.toml`'s
     `[tool.uv.workspace]` and their modules from each member's `src/`, so a member or module added
     later is checked with no edit to the check. A refused annotation's line names its module, line,
