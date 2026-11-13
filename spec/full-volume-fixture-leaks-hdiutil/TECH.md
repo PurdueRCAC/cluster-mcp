@@ -3,10 +3,10 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -39,7 +39,7 @@ phases:
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh p2
 - id: P3
   name: The mutant sweep, the docs, the ledger and the full gate
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -346,11 +346,19 @@ Cycle-specific, every phase:
     no process left; `hdiutil info` names no image of the rows. Red on the way, each fixed in the run
     and rerun from the start of its mode: `prior-legacy-a` and `prior-modern-a` (the re-aims above),
     `new-legacy-b` (`made-failure-dropped`, its own `why` matched only in the source, re-aimed to its
-    message). Not run here: `p3.sh full`, the foreman's.
+    message). `p3.sh full` ran last, on the committed tree (`7db4fee`), below.
   - **Suite cost:** 25 more tests in the `-k 'not silent'` part (193 to 218 per era). The disk-image
     tests, base (HEAD's tests) and branch back to back, twice per era, load about 2.5: 18.0 s and
     30.4 s each time, about 12.4 s more per era (the part's 163 s and 174 s above, about 7%). Most is
     the cut rows: each interrupt also waits out `communicate`'s own 0.25 s. No figure changes.
+  - **The full gate** (`p3.sh full`, the profile's verify, on `7db4fee`, 2026-11-12, load about 2.6,
+    26.6 min wall): green, every command exit 0. `uv lock --check`; per era `-k silent` 44 passed
+    (212 s, 212 s), `-k 'not silent'` 218 passed (173 s legacy, 175 s modern; 193 passed in 163 s
+    and 174 s at review cycle 1's gate), the timeout/startup/launch trio 507 passed, the rest 4369
+    passed with 14 skipped (modules this cycle does not touch) and one warning from
+    `tests/test_tokens.py` (a short HMAC key, outside the cycle); the CLI printed its usage. No
+    stand-in process left; `hdiutil info` names no image of the rows. With the light gates and sweep
+    modes above, every step of P3's `verify:` is green on this tree.
 
 ---
 
