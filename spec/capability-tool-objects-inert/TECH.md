@@ -3,15 +3,15 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: P1
-last_updated: '2026-11-12'
+current_phase: done
+last_updated: '2026-11-13'
 phases:
 - id: P1
   name: The load decides every registered tool object inert, refusing it naming the distribution
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -27,7 +27,7 @@ phases:
   verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-return-type-handshake && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-return-type-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report-return-type && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh cases && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-handshake && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: in_progress
+  status: done
   satisfies:
   - R3
   - R5
@@ -306,7 +306,11 @@ the profile's full verify green once.
   rides in P1's commit (§7 names it). P2's gate re-runs on the remediated tree: `phase`, `ledger`,
   `F5-gate.sh pins` (P1's run of it on the same tree stands in), `F1-gate.sh report-return-type` (P1's run
   stands in; see P1's amendment), then the full verify; the evidence on `4b04dad` no longer stands for this
-  tree.
+  tree. Green on `eca465d`, 2026-11-12/13, P1's light modes and the shortcut sweep before it (P1's chain;
+  `.local/remed2/summary.txt`, `summary-shortcut.txt`): the full verify, one mode at a time, each era 44,
+  154, 518, and 4969 passed with 14 skipped (the login-shell rows for a shell this host lacks; CI installs
+  every shell), one warning outside this cycle (`test_tokens.py`, PyJWT's short-HMAC-key warning);
+  `full-ends` green; 1644 s wall for the nine modes (`summary-full.txt`).
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
 
 ---
