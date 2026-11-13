@@ -3,7 +3,7 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/integration-marker-wording
 base: develop
 current_phase: done
@@ -51,10 +51,10 @@ phases:
   attempts: 2
   verify: sh spec/integration-marker-wording/verify/gate.sh P3 && sh spec/integration-marker-wording/remediation/checks.sh F1 F4 F5 F6 F7 F8
 review:
-  last_reviewed_commit: 89f34b8e70093011ceef5e4bc43f6a6950f7e3c4
+  last_reviewed_commit: 3dcf07ee61d6c2ebd5f57755f9d5887583ebfdc5
   verdict: changes-requested
-  blocked_reason: 'review cycle 2: R4 line left (F1); R5 tab/NBSP indent (F2); static-check gap wording (F3); R5 survivors (F4)'
-  cycle: 2
+  blocked_reason: 'review cycle 3: R5 check refuses a clean end one column past the items (F1, MEDIUM); two seed misstatements (F2, F3, LOW); 8 deeper-layer survivors to seed'
+  cycle: 3
 ---
 
 # TECH.md — The test markers say what the unit guard enforces

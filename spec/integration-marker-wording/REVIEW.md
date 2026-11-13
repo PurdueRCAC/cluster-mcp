@@ -392,3 +392,192 @@ orchestrator re-read the cited logs.
   open-ended character class asks whether R5's "every such carve-out is killed by a named row"
   should be met by one whole-domain property rather than per-carve-out rows. That is a contract
   reading, so it is his call.
+
+## Review cycle 3 — changes-requested (2026-11-12)
+
+- **Reviewed commit:** 3dcf07ee61d6c2ebd5f57755f9d5887583ebfdc5 · **Base:** develop · **Date:** 2026-11-12
+- **Verdict:** changes-requested · **Cycle:** 3 of ≤3
+- **Contract:** `GOAL.md` at HEAD, as in cycles 1 and 2. The only commit after the shape commit is
+  `2258691`, the GOAL-gate clarifications.
+- **Maintainer's readings applied to this cycle:**
+  - R5 is one property over its whole domain: the comparison ignores nothing but line wrapping.
+  - Mutants are graded by the mutation method's rule for a finished review. A survivor that pins a
+    deeper layer of a class already pinned is a coverage observation, and it is seeded. Where R5's
+    per-row wording is stricter than that rule, the rule governs.
+- **Mode:** a fresh blind pass over the full spec-excluded diff by one reviewer at effort xhigh. It
+  also re-checked cycle 2's findings 1–3 as properties. The gap statements were checked by an
+  executed probe of the routes they name, not by a sweep. Evidence:
+  - the reviewer's, in the gitignored `.local/review3/reviewer/`;
+  - the orchestrator's gate log, in `.local/review3/orchestrator/gates.log`.
+
+### Verification run
+
+- **The orchestrator's spec-held gates** ran on `3dcf07e` before the reviewer started. Both exited 0:
+  - `verify/gate.sh prepush` ran wording, slice (248 passed in each era), ids, sweep, scope and
+    ledger. The sweep had 51 drift rows, 4 accept rows and 34 mutants, none left alive.
+  - `remediation/checks.sh F1 F4 F5 F6 F7 F8` reported, by checker:
+    - F5: 7 sentences read;
+    - F6: 2,600 planted cases;
+    - F8: 220 mutants (215 killed, 3 equivalent, 2 seeded, 0 not accounted for).
+- **The profile's full `verify`** was not re-run in this cycle. It ran green on both eras in
+  1,560 s (`.local/build3/full.log`, each era 4475 passed and 14 skipped). That run was on
+  `7529196`'s tree. `3dcf07e` changes only this spec's `TECH.md`, so the tree outside `spec/` is
+  the same.
+- **The reviewer's runs:**
+  - `uv lock --check`;
+  - `tests/test_hygiene.py` in both eras, 248 passed each;
+  - `-m unit` over the other files that read `AGENTS.md` or `pyproject.toml`, 849 passed;
+  - a whole-suite collect under `--strict-markers` (5194 collected);
+  - `bin/sandbox.sh uv run cluster-mcp --help`, exit 0;
+  - the 106 marker tests (`01-marker-tests.log`).
+
+  It did not use its one full-suite run.
+- **CommonMark oracle:** markdown-it-py 4.0.0 in strict CommonMark mode. 45,600 cases cover each
+  whitespace form, content, blank and nesting (`09-p2-oracle.log`, `10-p2-summary.log`). All 27 rows
+  of `test_marker_statement_ends_where_markdown_ends_it` agree with it (`25-p2-rows-vs-commonmark.log`).
+- **Probes of the claimed gaps** (`07-p3-static-probe.log`, `08-p3-guard-probe.log`):
+  - static check: 12 forms are claimed unread and all 12 are unread; 13 are claimed read and all
+    13 are flagged;
+  - unit guard: 26 routes are claimed to pass and all 26 pass; 14 are claimed refused and all 14
+    are refused.
+- **Mutant sweep of the R5 check:** 119 mutants plus a baseline, at most 2 workers
+  (`r5_mutants.py`, `13-r5-mutants.log`, `22-r5-killed-by.log`). 107 were killed, every one by a
+  real test failure, and 12 survived. One "kill" in the first run was an artifact of the harness's
+  `-k` filter; the reviewer fixed the runner and re-ran the whole sweep.
+- **Spec ids:** none in the added lines of `tests/`, `pyproject.toml` or `AGENTS.md`
+  (`06-spec-id-grep.log`).
+- **Tree:** `git status --porcelain` was empty on hand-back. The temporary guard probe in `tests/`
+  was removed and left no bytecode. No build state was mutated.
+
+### Requirement → evidence matrix
+
+No R-ID's deliverable is a `spec/` artifact. The blind reviewer verified every row, and the
+orchestrator re-read the cited logs for finding 1.
+
+| R-ID | Status | Verified how (by the reviewer) |
+|------|--------|--------------------------------|
+| R1 | ✅ | `pyproject.toml:51` names no process, no connection (a name lookup included) and no real HOME, and says nothing of "fast". The "except on the open routes" clause holds under the guard probe (`08`, `16-collect-only.log`). |
+| R2 | ✅ | `pyproject.toml:52`: "needs what a unit test is refused"; keeps the sandbox rule; says nothing of a CLI. |
+| R3 | ✅ | Kinds 1–6 and 9 each need a process; kind 7 needs a connection; kind 8 is "itself or through a fixture or helper". There is no exception clause, and a test needing none of these fits `unit`. |
+| R4 | ✅ | § Testing, the commands block, § Conventions and `AGENTS.md:1670-1673` restate the markers. No text left in the file defines an `integration` test as a CLI drive (whole-file greps `02`–`04`). The "drives no CLI" note is gone. |
+| R5 | ⚠️ finding 1 | `tests/test_hygiene.py:409-826`, a `unit` test with every row R5 names. The unmutated check accepts no drift CommonMark renders into the statement. It refuses one clean end CommonMark accepts. |
+
+### Cycle-2 findings
+
+| Cycle 2 | Status at `3dcf07e` | Evidence |
+|---|---|---|
+| 1. `AGENTS.md` still defines `integration` as a CLI drive | **Closed.** The remaining mentions describe particular tests truly (`:608`, `:659`, `:1105`). | `02`–`04-*.log` |
+| 2. The statement end misreads tab and no-break-space indent | **Drift side closed. Accept side open** (finding 1). | `09`, `10`, `11`, `12`, `25` |
+| 3. The gap statements name one gap where many exist | **Closed.** Every claimed route behaves as claimed, and each gap statement says it is not exhaustive and points at the seed. One ledger sentence is still inexact (finding 3). | `07`, `08` |
+| 4. Narrower carve-outs survive | **Closed under the maintainer's reading.** No survivor is CONFIRMED. Ten are deeper layers of pinned classes; two of those are already seeded and eight are still to be seeded. The other two survivors are equivalent for drift. | `13`, `17`, `19`, `22`, `24` |
+
+### Findings
+
+#### 1. [MEDIUM/CONFIRMED] The R5 check refuses a clean statement end that CommonMark accepts: text one column deeper than the items after a blank line
+- **Where:** `tests/test_hygiene.py:481-483`, `statement_end_problems`, the branch for a line after a
+  blank one. It accepts text that starts no item only when that text is no deeper than the items.
+- **Failure scenario.** After a blank line, take text that starts no item and sits exactly one
+  column deeper than the statement's items:
+  - 3 spaces at the top level;
+  - 5 columns nested, written as 5 spaces, `' \t '`, `'\t '` or `'    '`.
+
+  CommonMark renders it as a paragraph of the enclosing bullet, after the list. The check refuses
+  it with "a line after a blank one joins the statement". No drift gets through. The error is a
+  false red on a valid layout.
+- **What it contradicts.**
+  - The accept side of the property cycle 2 routed ("text that CommonMark places outside the item
+    is accepted").
+  - The test's own comment at `tests/test_hygiene.py:709-711`.
+  - `AGENTS.md:1003-1006`, whose "Two shapes are read otherwise than Markdown renders them" reads
+    as the whole list and is not.
+- **Evidence:**
+  - `12-p2-one-deeper.log`: the rendered HTML beside the check's verdict, re-read by the
+    orchestrator;
+  - `09-p2-oracle.log`, `10-p2-summary.log`, `11-p2-nbsp-over.log`.
+
+  Mutant `end-blank-plus-one` accepts up to the items' depth plus one for text that starts no item.
+  It passes all 106 marker tests and lets no drift through under the oracle
+  (`18-r5-accept-side-mutants.log`).
+- **Touches:** R5. This is the same property as cycle 2's finding 2, on the accept side.
+
+#### 2. [LOW/CONFIRMED] The deeper-carve-outs seed's title and roadmap entry call a test-coverage gap a fault of the check
+- **Where:** `issues/marker-statement-deeper-carve-outs.md:8` (title) and `ROADMAP.md:239-243`.
+- **Failure scenario.** Both say the check "passes three shapes CommonMark renders differently".
+  The first shape, an em dash against a hyphen, is refused by the unmutated check. Only a
+  dash-folding mutant passes it, and it is not a rendering difference. The seed's body states it
+  correctly ("a check that folds…").
+- **Evidence:** `17-r5-survivor-drifts.log` (`cmp-dash-fold`: the unmutated check refuses).
+- **Touches:** the ledger. This is a seed that misstates its defect (rubric, *What the reviewer sees*).
+
+#### 3. [LOW/CONFIRMED] The marker-rule-gaps seed says only one unread launch form is in use
+- **Where:** `issues/marker-rule-gaps.md:50-52`, "Only the first is in use … The rest are latent".
+- **Failure scenario.** Two more unread forms are in use outside a `unit` function:
+  - a launcher bound by assignment (`tests/test_hygiene.py:971-973`), which the `executes` fixture
+    refuses at run time;
+  - `Popen` subclasses that launch (`tests/conftest.py:483`, `:491`), which enforce the sandbox at
+    run time.
+
+  None of them launches outside `bin/sandbox.sh`, so the seed's point holds: only `_host` does.
+  But the seed's own fix, flagging a launch by each route it lists, would flag these three sites
+  too, and the seed does not say so.
+- **Evidence:** `05-unread-forms-in-use.log`, `07-p3-static-probe.log`.
+- **Touches:** the ledger, as cycle 2's finding 3 did.
+
+### Surviving mutants (none CONFIRMED)
+
+| Survivor | Drift it passes | Classification |
+|---|---|---|
+| `cmp-dash-fold` | an em dash against a hyphen | deeper layer of the Unicode-fold class; seeded (`issues/marker-statement-deeper-carve-outs.md` item 1) |
+| `sm-rstrip` | trailing spaces on the statement line move the items' indent | seeded (same seed, item 2) |
+| `cmp-strip-arrows` | `→` inserted | deeper layer of the insertion class `EDIT_ALPHABET` pins (a character outside the alphabet); to seed |
+| `cmp-strip-cjk-punct` | `、` inserted | same as `cmp-strip-arrows`; to seed |
+| `desc-name-only-skipped` | a bare `"beta"` added to `markers` | deeper layer of the third-marker rows; to seed |
+| `sm-strip-quote-marker` | the statement line inside a blockquote | deeper layer of `statement-line-quoted`; to seed |
+| `sm-blank-wrap-ok` | a line of spaces splitting a description | deeper layer of the blank-wrap and whitespace rows; to seed |
+| `end-follow-next-line-only` | two blank lines, then a clause in the last item | deeper layer of `clause-after-a-blank-in-last-item`; to seed |
+| `li-no-eol` | a bare `-` line that renders a third item | deeper layer of the third-marker-after-a-blank rows; to seed |
+| `sec-any-level` | a second, drifted statement under a `###` in § Testing | deeper layer of `stated-twice`; to seed |
+| `end-blank-plus-one` | none | equivalent for drift; it is finding 1's fix |
+| `li-dot-only` | none | equivalent for drift; it only moves accept-side refusals |
+
+### Coverage observations (not findings)
+
+- **Over-claimed control.** `AGENTS.md:1013-1016` says
+  `test_marker_statement_check_refuses_every_edit` "holds the comparison to ignoring nothing but line
+  wrapping". The unmutated comparison does ignore nothing else. The control, though, does not kill
+  every mutant that ignores something: the fold survivor and the two out-of-alphabet survivors
+  show it. The wording should say what the control proves when those survivors are seeded.
+- **Block-starter refusals.** Some block starters that CommonMark places outside the list are
+  refused by the check: `> x`, a fence, a thematic break, an HTML comment, ` # x`, and `* item` at
+  the items' indent. These fall outside the whitespace property, and in part the
+  `third-marker-other-bullet` row asks for them.
+
+### Unmapped changes
+
+- The dated line added to `issues/stalled-reconnect-test-timing.md`.
+- The new seeds and their `ROADMAP.md` entries: filing only. `issues/integration-marker-check.md`
+  is the one Q1 requires.
+
+### Routing (to the maintainer; MEDIUM stops for routing)
+
+- **Finding 1 (property).** The statement ends exactly where CommonMark ends the last item. A line
+  after a blank one that starts no item joins the statement only at or past the items' text
+  column (indent + 2 for `- `), never at indent + 1. Pin the accept side for every whitespace form
+  at that depth, nested and top level. Then correct `AGENTS.md:1003-1006` so that its list of open
+  shapes is exact or says it is not exhaustive.
+- **Findings 2 and 3 (ledger).** Retitle the seed and its roadmap entry: one coverage gap and two
+  rendering shapes. Name the three in-use sites the seed's fix would also flag.
+- **Survivors.** Seed the eight unseeded deeper layers, either into
+  `issues/marker-statement-deeper-carve-outs.md` or into a sibling seed with its own `ROADMAP.md`
+  entry. Reword the over-claimed control at the same time.
+
+### Human-gate triggers
+
+- **Not triggered.** No CONFIRMED finding touches a path on § Invariants' high-blast-radius list,
+  and none violates a section tagged `[human gate]`.
+
+### Escalation
+
+- This is the third and last cycle the bound allows, and it has not converged: one MEDIUM finding
+  is open. It is the accept side of cycle 2's finding 2, and it lets no drift through. Whether a
+  fourth build round runs, and how finding 1 is routed, is the maintainer's call.
