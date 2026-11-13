@@ -3,10 +3,10 @@ slug: integration-marker-wording
 title: The test markers say what the unit guard enforces
 kind: test
 appetite: small
-status: in_progress
+status: in_review
 branch: test/integration-marker-wording
 base: develop
-current_phase: P3
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -36,7 +36,7 @@ phases:
   verify: sh spec/integration-marker-wording/verify/gate.sh prepush && sh spec/integration-marker-wording/remediation/checks.sh F1 F6 F8
 - id: P3
   name: The full verify and the deferral ledger
-  status: in_progress
+  status: done
   satisfies:
   - R1
   - R2
@@ -237,6 +237,11 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
       (this cycle's own seed, not yet on `develop`); the deeper layers the sweep and the CommonMark
       probe left filed as `issues/marker-statement-deeper-carve-outs.md`, with its ROADMAP.md entry
       and Part I's counts.
+- [x] Review cycle 2: the full verify on `7529196`'s tree, `gate.sh full` (the profile's `verify` word
+      for word, both eras), green on 2026-11-12 in 1,560 s: per era 44 + 154 + 507 + 4475 passed,
+      14 skipped (the `need_shell` rows), and `bin/sandbox.sh uv run cluster-mcp --help` ok. The
+      rest of P3's gate (`gate.sh prepush`, `checks.sh F1 F4 F5 F6 F7 F8`) ran green on the same
+      tree before that commit, so this one `full` run completes P3's gate.
 - [x] Run the gate in the background (the full verify runs past the 10-minute cap of one foreground
       call) and wait for its exit; `prepush` runs the same without `full` when only that is needed.
 - **Verify:** `sh spec/integration-marker-wording/verify/gate.sh P3` — `wording`, `slice`, `ids`,
@@ -293,6 +298,7 @@ named killer of a mutant; 34 mutants, decisions and additive carve-outs, all kil
     and P2's gates and for P3's parts before `full`. The frozen gate runs unchanged and unwrapped:
     the check keeps every line the frozen sweep keys on, and the frozen wording sentences stand with
     text added after them. P3's `full` is a heavy run scheduled outside this build, so P3 stays in progress.
+    It ran green on 2026-11-12 (1,560 s, both eras), and P3 closed on it.
 
 ## How `code-build` drives this
 
