@@ -1,0 +1,164 @@
+# Comparison, recorder and command sweep (PLAN section 6)
+
+killed     comparison-ignores-added: an added key is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     comparison-ignores-removed: a removed key is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     list-walk-first-two: every list index is compared, not the first two
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     depth-capped-below-the-fixture: every depth is compared, below the fixture's deepest too
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     key-set-from-the-expected-side: the keys compared are the union of both sides
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recursion-capped-at-depth-3: every depth is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     meta-key-skipped: no key name is skipped (`_meta`)
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     prompts-skipped: no listing is skipped (prompts)
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     templates-skipped: no listing is skipped (resource templates)
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     unknown-top-level-skipped: a top-level key outside a known set is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     loose-equality: leaves compare type-strict
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     lists-as-sets: lists compare by position
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     lists-zipped: a longer or shorter list is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     leaf-changes-ignored: a changed leaf value is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     server-info-skipped: the server info is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     server-info-skipped-but-version: every server-info field is compared, not only the version
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     capabilities-ignored: the capabilities are compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     version-literal-accepted: a literal version in the fixture is a problem, never a pass
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     version-resolved-anywhere: the version carve-out resolves its one path only
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     capabilities-resolved-anywhere: the era carve-out resolves its one path only
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     expected-ignores-era: each era is compared with its own capabilities
+           legacy: test_surface.py::test_era_carve_out_accepts_only_the_capabilities[accepted]: passed, so the mutant survived it; test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; the mutant survived: every target passed; modern: each target failed for its reason
+killed     era-check-excepts-server-info: the era check refuses every difference but the capabilities
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     set-skips-entries-the-fixture-lacks: a set serving an entry the fixture lacks differs
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     set-drops-server-info: the per-set check compares the server info
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     set-drops-capabilities: the per-set check compares the capabilities
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     set-loop-sliced: every set in SETS is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     delta-omits-added: the delta lists added paths
+           drive: failed with 'delta: expected exactly one line'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     scan-skips-workflows: the no-run scan reads workflow run: commands
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     scan-skips-imports: the no-run scan reads imports
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-drops-meta: the recorder keeps every key (`_meta`)
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-fixed-keys: the recorder keeps every key, not a fixed list
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-lists-no-prompts: the recorder lists prompts
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-lists-no-templates: the recorder lists resource templates
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-collapses-duplicates: a name served twice is refused
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-first-page-only: every page of a listing is read
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     recorder-parsed-server-info: the server info is read raw, not from a parsed model
+           legacy: each target failed for its reason; modern: each target failed for its reason
+equivalent recorder-records-parsed-models: the listings are read raw, not as parsed models
+           the server and the recorder share the SDK models in one process, so no server can be planted to send a tool key the model drops; the pure step shows the raw route keeps one (test_record_keeps_keys_no_model_declares) (observed: legacy: test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; the mutant survived: every target passed; modern: test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; the mutant survived: every target passed)
+killed     recorder-ignores-era-argument: the recorder records the era it is asked for
+           legacy: each target failed for its reason; modern: test_surface.py::test_recorder_serves_each_eras_own_surface[modern]: passed, so the mutant survived it; the mutant survived: every target passed
+killed     served-surface-drops-era: served_surface passes its era on
+           legacy: each target failed for its reason; modern: test_surface.py::test_recorder_serves_each_eras_own_surface[modern]: passed, so the mutant survived it; the mutant survived: every target passed
+killed     identity-always-handshake: the identity is read per era
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     modern-server-info-from-the-wrong-place: the 2026-07-28 server info is the discover stamp
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     capabilities-not-recorded: the capabilities are recorded
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     instructions-not-recorded: the instructions are recorded
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     identity-kept-in-the-entry: an entry's identity becomes its key, not a field
+           legacy: each target failed for its reason; modern: each target failed for its reason
+equivalent set-report-discards-one-set: every set's report is asserted
+           it mutates the test's own assertion, not a decision of the code under test; the plausible fault, a set missing from the loop, is killed (set-loop-sliced) (observed: legacy: test_surface.py::test_every_capability_set_serves_the_fixtures_entries: passed, so the mutant survived it; the mutant survived: every target passed; modern: test_surface.py::test_every_capability_set_serves_the_fixtures_entries: passed, so the mutant survived it; the mutant survived: every target passed)
+killed     command-era-check-against-itself: the command refuses eras that differ
+           drive: failed with 'eras: the refusal'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-skips-era-check: the command refuses eras that differ
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-skips-self-check: the command checks the fixture it writes
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-delta-against-itself: the command lists the delta against its base
+           drive: failed with 'delta: expected exactly one line'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-no-pytest-guard: the command refuses under pytest
+           drive: failed with 'pytest: the command ran'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-skips-its-refusal: the command acts on its refusal
+           drive: failed with 'sandbox: the command ran'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-ignores-against: the delta is listed against --against when given
+           drive: failed with 'against: the delta is not listed against --against'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-ignores-head: without --against the base is the fixture at HEAD
+           drive: failed with 'head: without --against'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-head-always-present: a HEAD with no fixture is an empty base
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-fences-after-recording: the fence comes before anything is recorded
+           drive: failed with 'run exited'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-prints-no-delta: the command prints the delta list
+           drive: failed with 'delta: expected exactly one line'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-names-head-always: the summary names the base the delta is listed against
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-file-chooses: the command file makes no choice of its own
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     command-skips-the-fence: the command fences process launches before recording
+           drive: failed with 'run exited'
+killed     command-records-one-era: the command records each era
+           drive: failed with 'a fresh run differs from the staged'
+killed     command-git-outside-its-checkout: the command reads HEAD of its own checkout
+           drive: failed with 'run exited'
+killed     command-prints-nothing: the command prints what it is handed
+           drive: failed with 'delta: expected exactly one line'
+killed     command-unsorted: the command writes one canonical byte form
+           drive: failed with 'a fresh run differs from the staged'
+killed     command-writes-default-too: the command writes only --out
+           drive: failed with 'at its default path'
+killed     tolerate-argument-description-gained: an argument description gained is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-argument-description-drift: an argument description changed is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-additional-properties-gained: additionalProperties gained is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-derived-title-gained: a tool title gained is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-derived-title-lost: a tool title lost is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-output-model-description-gained: an output model description gained is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     tolerate-output-definitions: output `$defs` and `$ref` are compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-default: an argument default is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-enum: an enum is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-anyOf: an anyOf is compared
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-icon-src-gained: a server icon's src gained is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-version-source-gained: the version source is compared in the delta between fixtures
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     exempt-subscribe-lost: a capability flag lost is a difference
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     set-exempts-a-key: the per-set check reports every key
+           legacy: each target failed for its reason; modern: each target failed for its reason
+killed     version-source-first-candidate: the version source is the one candidate installed at the served version
+           drive: failed with 'run exited'; legacy: each target failed for its reason; modern: each target failed for its reason
+killed     baseline-writes-fixture: the suite never writes the fixture
+           legacy: the fixture was written; modern: the fixture was written
+
+80 mutants: 78 killed, 0 survived, 2 equivalent

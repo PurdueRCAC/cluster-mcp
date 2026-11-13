@@ -364,12 +364,13 @@ def readme(old: str, new: str) -> tuple[tuple[str, str, str], ...]:
 
 
 # Tool annotations: the decorator's registration line, a `ToolAnnotations` built where it is planted,
-# and the served-surface fixture's `run_command` entry, where a plant records annotations as if 0.1.4
-# had served them.
+# and the served-surface fixture's `run_command` copy under the `legacy` era and the `both` set (its
+# first key, `_meta`, in the fixture's sorted form), where a plant records annotations as if the
+# server had served them there.
 REGISTER = '    tool = Tool.from_function(func, description=inspect.getdoc(func))\n'
 ANNOTATIONS = "__import__('mcp.types', fromlist=['ToolAnnotations']).ToolAnnotations"
 SURFACE = 'tests/fixtures/served_surface.json'
-RUN_COMMAND_ENTRY = '  "run_command": {\n   "description":'
+RUN_COMMAND_ENTRY = '  "run_command": {\n   "legacy": {\n    "both": {\n     "_meta": {'
 SURFACE_TEST = ('test_surface.py::test_served_surface_matches_baseline',)
 
 
@@ -385,8 +386,10 @@ def annotate(condition: str, hints: str) -> tuple[tuple[str, str], ...]:
 
 
 def recorded(hints: str) -> tuple[tuple[str, str, str], ...]:
-    """The fixture recording `run_command` as served with annotations `hints` (JSON)."""
-    return ((SURFACE, RUN_COMMAND_ENTRY, f'  "run_command": {{\n   "annotations": {hints},\n   "description":'),)
+    """The fixture recording `run_command` as served with annotations `hints` (JSON) in the `legacy`
+    era and the `both` set."""
+    return ((SURFACE, RUN_COMMAND_ENTRY,
+             f'  "run_command": {{\n   "legacy": {{\n    "both": {{\n     "annotations": {hints},\n     "_meta": {{'),)
 
 
 CASES: tuple[Case, ...] = (
@@ -1728,7 +1731,7 @@ CASES: tuple[Case, ...] = (
          (('    tool = Tool.from_function(func, description=inspect.getdoc(func))\n',
            '    tool = Tool.from_function(func)\n'),),
          ('test_surface.py::test_served_surface_matches_baseline',),
-         'description differs'),
+         'description: changed'),
     # The ssh executor maps the remote exit status into its CommandResult.
     Case('ssh-exit-status-dropped', 'core/executor/ssh.py',
          (("            return bytes(out), bytes(err), chan.recv_exit_status(), b''\n",
@@ -3779,29 +3782,31 @@ CASES: tuple[Case, ...] = (
     Case('readme-replacements-swapped', '', (), (README_TEST,),
          "gives 'rcac://context' the replacement 'cluster://storage'",
          readme('`cluster://context` and `cluster://storage` |', '`cluster://storage` and `cluster://context` |')),
-    # Every tool's annotations, each hint's presence and value, are 0.1.4's: none. A tool served with
-    # annotations, or a hint added, dropped or changed against what the fixture records, fails the
-    # served-surface comparison. 0.1.4 served no annotations, so a hint can only be dropped or changed
-    # against a fixture planted to record some.
+    # Every tool's annotations, each hint's presence and value, are the fixture's: none. A tool served
+    # with annotations, or a hint added, dropped or changed against what the fixture records, fails
+    # the served-surface comparison at the hint's path. No tool is served annotations, so a hint can
+    # only be dropped or changed against a fixture planted to record some: the plant reaches one era
+    # and set (`legacy`, `both`), and the code change every era and set, so the line named is that
+    # copy's.
     Case('annotations-on-every-tool', 'core/tools/__init__.py', annotate('True', 'readOnlyHint=True'),
-         SURFACE_TEST, "tool entry gained 'annotations'"),
+         SURFACE_TEST, 'annotations: added'),
     Case('empty-annotations-on-every-tool', 'core/tools/__init__.py', annotate('True', ''),
-         SURFACE_TEST, "tool entry gained 'annotations'"),
+         SURFACE_TEST, 'annotations: added'),
     Case('annotations-on-one-tool', 'core/tools/__init__.py', annotate("func.__name__ == 'sacct'", 'readOnlyHint=True'),
-         SURFACE_TEST, "sacct: tool entry gained 'annotations'"),
-    Case('annotations-removed', '', (), SURFACE_TEST, "run_command: tool entry lost 'annotations'",
+         SURFACE_TEST, 'tools.sacct.legacy.both.annotations: added'),
+    Case('annotations-removed', '', (), SURFACE_TEST, 'tools.run_command.legacy.both.annotations: removed',
          recorded('{"readOnlyHint": true}')),
     Case('annotation-hint-flipped', 'core/tools/__init__.py',
          annotate("func.__name__ == 'run_command'", 'readOnlyHint=True, destructiveHint=False'),
-         SURFACE_TEST, 'run_command: annotation readOnlyHint differs: False -> True',
+         SURFACE_TEST, 'tools.run_command.legacy.both.annotations.readOnlyHint: changed: false -> true',
          recorded('{"destructiveHint": false, "readOnlyHint": false}')),
     Case('annotation-hint-dropped', 'core/tools/__init__.py',
          annotate("func.__name__ == 'run_command'", 'readOnlyHint=True'),
-         SURFACE_TEST, "run_command: annotations lost hint 'destructiveHint'",
+         SURFACE_TEST, 'tools.run_command.legacy.both.annotations.destructiveHint: removed',
          recorded('{"destructiveHint": false, "readOnlyHint": true}')),
     Case('annotation-hint-added', 'core/tools/__init__.py',
          annotate("func.__name__ == 'run_command'", 'readOnlyHint=True, idempotentHint=True'),
-         SURFACE_TEST, "run_command: annotations gained hint 'idempotentHint'",
+         SURFACE_TEST, 'tools.run_command.legacy.both.annotations.idempotentHint: added',
          recorded('{"readOnlyHint": true}')),
     # README's upgrade section pairs each deprecated name with exactly one replacement, whatever the
     # order of its rows; names no version but the window's two ends; and states the window as the
@@ -3832,16 +3837,18 @@ CASES: tuple[Case, ...] = (
            "    legacy_warning('removed in 0.3.0; the rcac-mcp command', 'cluster-mcp')\n"),),
          (*COMMAND_WARNED, 'test_cli.py::test_legacy_command_keeps_stdout_clean_on_stdio'),
          'the deprecation warning'),
-    # Every tool's top-level title is 0.1.4's: the one FastMCP 4 derives from its name. A title set on
-    # one tool, on every tool, or where the server adds each tool fails the served-surface comparison.
+    # Every tool's top-level title is the fixture's: the one FastMCP 4 derives from its name, which the
+    # fixture records. A title set on one tool, on every tool, or where the server adds each tool is a
+    # changed title in every era and set and fails the served-surface comparison; the line named is
+    # the `legacy`, `both` copy's.
     Case('title-on-one-tool', 'core/tools/__init__.py',
          titled("'Run a command' if func.__name__ == 'run_command' else None"),
-         SURFACE_TEST, "run_command: tool entry gained the title 'Run a command'"),
+         SURFACE_TEST, 'tools.run_command.legacy.both.title: changed: "Run Command" -> "Run a command"'),
     Case('title-on-every-tool', 'core/tools/__init__.py', titled('func.__name__'),
-         SURFACE_TEST, "run_command: tool entry gained the title 'run_command'"),
+         SURFACE_TEST, 'tools.run_command.legacy.both.title: changed: "Run Command" -> "run_command"'),
     Case('title-at-add-tool', 'core/capabilities.py',
          (('        server.add_tool(tool)\n', "        server.add_tool(tool.model_copy(update={'title': tool.name}))\n"),),
-         SURFACE_TEST, "run_command: tool entry gained the title 'run_command'"),
+         SURFACE_TEST, 'tools.run_command.legacy.both.title: changed: "Run Command" -> "run_command"'),
     # README's upgrade section, read from its source: every `|` line is the header, the delimiter or a
     # two-cell row of code spans; each variable and URI is named once, markup removed; versions are read
     # with markup removed, and outside the window only the rename's 0.2.0 appears, once; and the

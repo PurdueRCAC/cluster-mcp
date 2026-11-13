@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-29 entries, each of which ships in the first release after it lands. **Part II** ships as
+30 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Twenty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Thirty entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,10 +84,11 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (twelve), because every later gate rests on them: the mutation run and the pins its
+- **Gates** (thirteen), because every later gate rests on them: the mutation run and the pins its
   stop path still lacks, the two gaps the skip check still leaves and the pins it still lacks, the
   waits the timing rows still miss and the bounds two miss on hosted runners, an annotation check,
-  the test harnesses' leftovers, the marker wording, and the image's init.
+  the test harnesses' leftovers, the marker wording, the image's init, and the surface pin's deeper
+  layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (three): the site files' size, the startup update check, and the floors a git install
@@ -106,7 +107,7 @@ it, unchecked. A maintained snapshot command on the current stack, with a one-ti
 retires the tolerated-difference list, settles it. Found by `stack-upgrade` P3, 2026-10-17.
 
 *Horizon: before Part II, the last gate before the first cycle that changes the served surface · Depends on: — · Refs: `AGENTS.md` § Invariants §9 says the question is open; `safe-execution` changed the surface first and hand-edited its deltas into the fixture (`AGENTS.md` § Testing); every Part II family changes the surface*
-**Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: unshaped*
+**Seed:** [`issues/surface-fixture-after-a-surface-change.md`](issues/surface-fixture-after-a-surface-change.md) · *status: adopted:surface-fixture-after-a-surface-change*
 
 ## A capability's registered tool objects can run its code when they are read
 
@@ -263,6 +264,22 @@ development host).
 
 *Horizon: Part I, gates · Depends on: — · Refs: [`spec/timeout-process-cleanup/`](spec/timeout-process-cleanup/) (REVIEW cycle 3, B6); `Dockerfile`; `tests/test_packaging.py`*
 **Seed:** [`issues/image-init-reaping.md`](issues/image-init-reaping.md) · *status: unshaped*
+
+## The surface pin's recorder has two layers no row plants, and its report three details
+
+The served-surface recorder keeps every key a server serves, but two of its layers are not
+planted: no recorder row serves a tool's `execution` key, and no row serves a listing that repeats
+its cursor, so a recorder that lost its guard would hang until the harness's 30 s timeout instead
+of refusing. Three details of a failure's text are not pinned either: the error for an
+uninstalled version candidate, a leaf's text when dict keys inside a list are out of order, and the
+documented 60-character cut of a value. None is a wrong verdict today. The fix adds the `execution`
+row, a repeated-cursor row the guard must refuse, and a row for each detail.
+(Re-checked 2026-11-12 against the snapshot-test re-shape: the seed's other items, on the
+comparison's depth bound, the version source, the check of each capability set and the scan for
+runs of the command, lost their ground and were dropped.)
+
+*Horizon: Part I, gates · Depends on: surface-fixture-after-a-surface-change · Refs: [`spec/surface-fixture-after-a-surface-change/`](spec/surface-fixture-after-a-surface-change/) (REVIEW cycle 2 and the re-shape's review 1, coverage observations)*
+**Seed:** [`issues/surface-pin-completeness.md`](issues/surface-pin-completeness.md) · *status: unshaped*
 
 ## A write whose host is lost after staging leaves its staging directory behind
 

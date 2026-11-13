@@ -117,6 +117,11 @@ bin/sandbox.sh sh -c "uv run cluster-mcp -e local --generate-token"
 # otherwise set rootdir to the throwaway dir and never load pyproject.toml (losing
 # --strict-markers and every registered marker). HOME/auth/SSH isolation is unaffected.
 bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && uv run pytest -v -m integration'
+
+# Re-take the served-surface fixture after a deliberate surface change (§9): the snapshot test's
+# update mode writes tests/fixtures/served_surface.json from the live server and never reads the
+# old one; `git diff` on the fixture is the change's delta list, which its commit body carries.
+bin/sandbox.sh sh -c 'cd "$CLUSTER_MCP_REPO" && UPDATE_SURFACE=1 uv run pytest -q tests/test_surface.py::test_served_surface_matches_baseline'
 ```
 
 **Supported Python is 3.14+** (`requires-python = ">=3.14"`). Do not reintroduce compatibility shims
@@ -1005,46 +1010,56 @@ import has no effect.
     (`test_server_identifies_as_cluster_mcp[<era>]`, `identity_violations` with its drift control):
     in a handshake's `InitializeResult` serverInfo, with no stamp on results, and under 2026-07-28
     in the `_meta` serverInfo stamp of every result, which the client's session identity is read
-    from. The name is not in the surface fixture's shape, so this test is what pins it (§9).
-  - `tests/test_surface.py` (`unit`): `surface_violations`, `TOLERATED`, `tolerated_differences`.
-    What a harness client in the selected era is served (`served_surface`) matches
-    `tests/fixtures/served_surface.json`: the tool set, each description, each argument's name,
-    type and default, each `required` list, each output schema, each tool's annotations and title,
-    every resource's URI, name, description and MIME type, and the instructions (§9).
-    `served_surface` records a tool's `annotations` only when the server sends some, each hint sent
-    with its value and no other; no fixture entry has the key, as 0.1.4 served no annotations, so
-    the comparison needed no fixture change. Annotations on one side only (a key missing on one
-    side), a hint on one side only, or a hint's value differing is a violation
-    (`test_surface_check_catches_annotation_drift`, each way, either side). It records a tool's
-    top-level `title` whenever one is served. FastMCP 4, which 0.1.4 ran on too, serves every tool
-    that sets none a title derived from its name (`run_command` is "Run Command"), and the
-    fixture's shape has no title, so where the snapshot has none the comparison accepts only that
-    derived title (`TOLERATED['derived-title']`, the derivation written out as `derived_title`);
-    any other title gained, a title lost or changed, or a tool served with no title is a violation
-    (`test_surface_check_catches_title_drift`; the baseline test fails a tool served untitled). The fixture was written by
-    `spec/stack-upgrade/verify/snapshot.py` run in an archive of `3d010ec` in that commit's own
-    locked FastMCP 2 environment, never on the current stack, and
-    `test_surface_fixture_is_the_baseline_shape` rejects one that carries FastMCP 4's metadata.
-    A deliberate surface change follows by a scripted hand-edit of the named deltas only, copied
-    from the served surface in the fixture's 2.x shape (argument `description`s dropped); each is
-    listed in its commit body and here. Deltas so far (`safe-execution`): `run_command.description`,
-    `write_file.description`, `write_file.properties.encoding`, `sbatch.properties.args`, and
-    `description` and `properties.extra_args` on each of `sbatch`, `squeue`, `scancel`, `sacct`
-    and `sinfo`; (`agents-d-instructions`) `instructions`, the base composed with the harness's
-    site context (`harness.SITE`); `tools.cluster_context`, the new tool in `myquota`'s schema
-    shape (no argument, a `str` result) with its docstring as the description; and
-    `resources.rcac://context.description`, the resource's new description;
-    `sbatch-script-name-collision` changed `sbatch.description`; `rename-to-cluster-mcp` added
-    `resources.cluster://context` and `resources.cluster://storage`, each a copy of its `rcac://`
-    entry, which stays as it was (the `rcac://` URIs are served on as derived aliases, §8), and
-    changed `instructions`, the base (now the generic core, the Slurm snippet and the RCAC-specific
-    overlay, §9) composed with `harness.SITE`; the server's name (`cluster-mcp`), the third delta,
-    is not in the fixture's shape and is pinned by `test_server_identifies_as_cluster_mcp`.
-    `TOLERATED` names the five differences FastMCP 4 introduces, each with its cause and accepted
-    only in its own shape: a tool's derived title where the snapshot has none, an argument
-    `description` where there was none, `additionalProperties`
-    added as exactly `false`, output `$defs` inlined, and a `description` on an inlined output node
-    only where the snapshot had a `$ref`. `tolerated_differences` lists them per tool.
+    from. The surface fixture records the server info too, read from the handshake's
+    `initialize` and 2026-07-28's `server/discover`; this test pins the per-result stamp, which the
+    fixture does not record (§9).
+  - `tests/test_surface.py` (`unit`): the served-surface snapshot test (`served_surfaces`,
+    `serialization`, `canonical`, `surface_check`, `differences`, `version_source`).
+    `tests/fixtures/served_surface.json` is the serialization of what the server serves, in both
+    protocol eras (`legacy`, `modern`) and under every capability set in `test_capabilities.SETS`
+    (`both`, `both-reversed`, `core-only`, `rcac`, `slurm`), under `harness.SITE` and auth mode
+    `none`, as `served_surface` records it, the raw JSON a client receives, so a key no SDK model
+    declares is kept: the instructions; every entry of the `tools`, `resources`, `resourceTemplates`
+    and `prompts` listings, every key at any depth (titles, annotations, `_meta`, argument
+    descriptions, schemas); the `serverInfo`; and the advertised `capabilities`. It is laid out
+    field first: each listing entry by its name, URI or URI template, then era, then set
+    (`tools.run_command.legacy.both`), and every other top-level key by era, then set; a set that
+    does not serve an entry has no key for it, and a key or entry the server begins to serve appears
+    with no serializer change. It is written indented with its keys sorted (`canonical`), one
+    served surface always the same bytes. Listing order is not recorded (`tests/test_capabilities.py`
+    pins it), nor is a listing's own envelope. One normalization, named beside the serializer with
+    its cause: `serverInfo.version` is recorded as `{"distribution": …}`, the one installed
+    distribution of `VERSION_SOURCES` (FastMCP's `fastmcp-slim` today, the core's once the server
+    serves its own) whose version the server serves, since that value moves with every lock bump
+    and release; only an equal version matches (one that extends the served value, or is a prefix
+    or a part of it, does not), and none or several matching fail the serialization naming every
+    candidate (`test_version_source_names_exactly_one_distribution`). `test_served_surface_matches_baseline`
+    compares the serialization with the fixture by plain equality of bytes, in each era's suite
+    pass, both eras serialized each time: no tolerated-difference list, no exemption, type-strict
+    (`false` is not `0`), and a fixture out of canonical form fails too. On a difference it fails
+    with one line per differing field naming the entry, era, set and field path
+    (`- tools.run_command.legacy.both.annotations.readOnlyHint: changed: false -> true`, `- <path>:
+    added`, `- <path>: removed`), each value cut to 60 characters
+    (`test_a_field_changed_at_depth_fails_naming_its_entry_and_field`: a type twin, a gained key and
+    a lost key, planted at depth in two eras and two sets; a doubled space inside a string, which
+    fails though no token differs; and two differences in two entries, reported as exactly those
+    two lines; the unplanted fixture passes). `UPDATE_SURFACE=1` turns the same test
+    into the update mode: it writes the fixture from the live server and never reads the old one,
+    so a fixture holding merge-conflict markers, a missing one or one naming an uninstalled
+    distribution is regenerated (§ Commands gives the invocation); with the variable unset or
+    anything but `1` it compares and writes nothing (`test_update_mode_regenerates_a_conflicted_fixture`).
+    No workflow under `.github/workflows/` and no `bin/` script sets or exports it
+    (`test_no_workflow_or_script_turns_the_update_mode_on`, with planted lines). What a server starts
+    serving reaches the serialization with no recorder or serializer change, every page of a
+    paginated listing included and the listings empty today among them
+    (`test_recorder_sees_what_the_server_starts_serving`, `test_recorder_follows_every_page`,
+    `test_recorder_refuses_a_name_served_twice`, `test_record_keeps_keys_no_model_declares`, the pure
+    step `surface_record`). A deliberate surface change lands as the update mode's fixture diff, in
+    the same commit as the change, with `git diff` on the fixture as its delta list in the commit
+    body, reviewed as a surface change under the high-blast-radius gate; a lock bump that changes
+    what FastMCP serves is one too. `serverInfo.icons[0].src` follows `MCP_BASE_URL`, read when
+    `server.py` is imported: the fixture holds the unset value (`bin/sandbox.sh` unsets it), so a
+    shell exporting it fails the baseline test at that path.
   - `tests/test_launch.py` (`unit`, `integration`): `launch_violations`, `bootstrap_violations`,
     `separation_violations`. The launcher (`executor/launch.py`) on its own, below the backends. Unit
     rows read rendered programs against the plan's fixed texts (the prologue, the sentinel line, the
@@ -1519,11 +1534,15 @@ import has no effect.
   (`httpx2`)** (`test_only_the_harness_imports_the_stack` fails on any other). Its docstring lists
   the FastMCP 4 / MCP SDK 2 touchpoints it relies on. The contract-test modules speak only its
   verbs (`drive`, `serving`, `http_client`, `in_memory`, `call`, `call_http`, `negotiate`, `mint`,
-  `user_map`, `served_tools`, `served_instructions`, `served_surface`, `installed_auth`, `protocol_error`,
+  `user_map`, `served_tools`, `served_instructions`, `served_surface`, `surface_record`, `installed_auth`, `protocol_error`,
   `RecordingExecutor`, `Rendezvous`, `Raises`, `MethodLog`, `StateProbe`, `tool_names`, `launched_script`, `read_resource`, `read_verbatim`, `delegate_server`,
   `shared_server`, `bare_server`, `stdio_tools`, `stdio_refusal`, `url_tools`; the builders take extra middleware, such as a `Rendezvous` (which holds tool calls and resource reads at one barrier) or a `Raises` (which raises its exception on every tool call and every read), added inside the
   executor middleware, and add a `MethodLog` last; each serves the site context `site=` names, by
-  default `SITE`, a host without `/etc/agents.d`) and the `JWTVerifier` type it re-exports. A read that fails
+  default `SITE`, a host without `/etc/agents.d`) and the `JWTVerifier` type it re-exports. `served_surface(server,
+era=None)` records the whole surface a client in `era` (default: the selected era) is served, raw;
+`surface_record(listings, identity, era)` is its pure step from the raw listings and the raw
+`initialize` (handshake) or `server/discover` (2026-07-28) result to the record, and
+`SURFACE_LISTINGS` names the listings it reads (§9; `tests/test_surface.py`). A read that fails
   with a protocol error comes back from `read_resource` with that error's code in `Outcome.code`. `read_resource` reads
   through FastMCP's client, which normalises a URI before sending it (lowercasing the scheme, stripping
   surrounding space); `read_verbatim` sends the string exactly as given, as any other client may, and
@@ -2085,6 +2104,8 @@ A CONFIRMED finding in any of these files needs a human decision before the cycl
   module, its text and the text's place in the base (§9), and declares the commands it needs (§7)
 - `packages/cluster-mcp/src/cluster_mcp/core/probes.py` — decides which loaded capabilities the
   cluster can serve, from one lookup it runs on the cluster (§7)
+- `tests/fixtures/served_surface.json` — the served-surface pin (§9); a change here re-pins what
+  every client is served
 
 The `src/rcac_mcp/` entries are these files' homes before the workspace move, kept because the list
 only widens. These are the files where a mistake executes someone else's command, executes as the wrong user, or
@@ -2093,7 +2114,9 @@ and place them (`capabilities.py` and the two `capability.py`): they hold or com
 text, which left `server.py` for them, so the list widened to follow it, and a mistake there
 misleads every model rather than running anything. `probes.py` runs one fixed lookup on the
 cluster, and decides which capabilities' tools and text are served: a mistake there hides working
-tools or advertises ones that cannot run. Everything else in the tree is a leaf.
+tools or advertises ones that cannot run. `tests/fixtures/served_surface.json` runs nothing either:
+it is the pin of what every client is served (§9), so a change to it, a re-baseline included, is a
+surface change that takes the human gate. Everything else in the tree is a leaf.
 
 #### Footguns (quick reference)
 
@@ -3138,25 +3161,26 @@ What each mode means:
   they are API surface, not internal notes. The whole docstring is served as the description (§7),
   and each `Args:` line is served a second time as its argument's `description` in the input
   schema. Keep the `Args:` / `Returns:` / `Examples:` shape the existing tools use.
-- **The served surface is pinned** against `tests/fixtures/served_surface.json`, the snapshot of
-  what the server served before the FastMCP 4 move (`tests/test_surface.py`, § Testing): tool names,
-  descriptions, argument names, required lists, types and defaults, tool annotations (none, each
-  hint's presence and value compared), tool titles (FastMCP 4's, derived from each name; giving a
-  tool a title of its own is a surface change), resources and instructions.
-  Any change to them, a reworded docstring line included, fails `test_served_surface_matches_baseline`.
-  The fixture is 2.x-shaped by design (re-taken on the current stack it carries FastMCP 4's
-  metadata, which the fixture's shape test rejects). Until its long-term method is settled
-  (`issues/surface-fixture-after-a-surface-change.md`), a deliberate surface change follows by a
-  scripted hand-edit limited to the named deltas, each listed in its commit body and in § Testing
-  (`tests/test_surface.py`); `safe-execution` changed `run_command.description`,
-  `write_file.description`, `write_file.properties.encoding`, `sbatch.properties.args`, and the
-  `description` and `properties.extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo`
-  this way, `agents-d-instructions` changed `instructions`, `tools.cluster_context` and
-  `resources.rcac://context.description`, `sbatch-script-name-collision` changed
-  `sbatch.description`, and `rename-to-cluster-mcp` changed `instructions` (the base became the core's,
-  the Slurm member's and the RCAC member's texts) and added the `resources.cluster://context` and `resources.cluster://storage`
-  keys, each a copy of its `rcac://` entry (§8); its third delta, the server name, is not in the
-  fixture's shape and is pinned by `test_server_identifies_as_cluster_mcp`.
+- **The served surface is pinned** by a plain snapshot test against
+  `tests/fixtures/served_surface.json` (`tests/test_surface.py`, § Testing): the whole surface a
+  client is served, as the raw JSON it receives, in both protocol eras and under every capability
+  set in `test_capabilities.SETS`, laid out field first (entry, then era, then set) — the
+  instructions, every entry of the `tools`, `resources`, `resourceTemplates` and `prompts` listings
+  with every key at any depth (names, descriptions, argument names, types, defaults and
+  descriptions, required lists, output schemas, annotations, titles, `_meta`), the `serverInfo`
+  and the advertised `capabilities`. The serialization is compared with the fixture by
+  plain equality of bytes, with no tolerated-difference list and no exemption, so any change to
+  them, a reworded docstring line included, fails `test_served_surface_matches_baseline`, naming
+  the entry, era, set and field path. One normalization, named beside the serializer with its cause:
+  `serverInfo.version` is recorded as the installed distribution whose version the server serves.
+  The fixture is written only by the test's update mode, `UPDATE_SURFACE=1` (§ Commands), which
+  writes it from the live server and never reads the old one; no workflow or `bin/` script sets
+  the variable. A deliberate surface change lands as the update mode's fixture diff in the same
+  commit as the change, `git diff` on the fixture its delta list in the commit body, and is
+  reviewed as a surface change. The server's name is in `serverInfo`;
+  `test_server_identifies_as_cluster_mcp` also pins the 2026-07-28 per-result stamp. The fixture is
+  on the high-blast-radius list (§ Invariants), so any change to it, a re-baseline included, takes
+  the review's human gate.
 
 ### Conventions (same-commit rules)
 

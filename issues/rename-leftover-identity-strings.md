@@ -67,3 +67,10 @@ version.
 - 2026-10-30: the request-state keys `rcac_user` and `rcac_local_user` (set in `middleware.py` for
   a delegate call or read) still carry the old name too. They are never served, so nothing outside
   the process sees them; rename them with the strings above (`rename-to-cluster-mcp` review 1).
+- 2026-11-12: the served-surface snapshot test (`tests/test_surface.py`) records
+  `serverInfo.version` as the installed distribution it comes from, among `VERSION_SOURCES`
+  (`cluster-mcp`, `fastmcp-slim`). Setting it here switches the source to `cluster-mcp`: a one-field
+  fixture diff, re-taken with the update mode. A mutant that drops `cluster-mcp` from the candidates
+  (`ver-sources-drop-core`) survives today and fails loudly, naming the candidates, only once the
+  server serves its own version; this cycle's sweep should show it killed
+  (`surface-fixture-after-a-surface-change`, the re-shape's review 1).

@@ -1,0 +1,74 @@
+# The aimed sweep of the comparison and the normalization (PLAN section 6), both eras
+
+killed     switch-not-equal: the update mode is on only when the variable is exactly 1
+           killed in both eras
+killed     switch-default-on: the update mode is off when the variable is unset
+           killed in both eras
+killed     switch-presence: a set variable that is not 1 leaves the update mode off
+           killed in both eras
+killed     verdict-always-equal: the verdict is the bytes
+           killed in both eras
+killed     verdict-parsed: the verdict is type-strict (bytes, not parsed values)
+           killed in both eras
+equivalent verdict-stripped: surrounding whitespace is part of the verdict
+           canonical bytes start with `{` and end in exactly one newline, so the update mode never writes a fixture whose stripped bytes equal another's; only a hand-edit reaches it (observed: legacy: test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[changed-type]: passed, so the mutant survived it; test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[gained]: passed, so the mutant survived it; test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[lost]: passed, so the mutant survived it; test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; test_surface.py::test_update_mode_regenerates_a_conflicted_fixture: passed, so the mutant survived it; the mutant survived: every target passed; modern: test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[changed-type]: passed, so the mutant survived it; test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[gained]: passed, so the mutant survived it; test_surface.py::test_a_field_changed_at_depth_fails_naming_its_entry_and_field[lost]: passed, so the mutant survived it; test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; test_surface.py::test_update_mode_regenerates_a_conflicted_fixture: passed, so the mutant survived it; the mutant survived: every target passed)
+killed     report-skips-added: a key only in the served surface is reported
+           killed in both eras
+killed     report-skips-removed: a key only in the fixture is reported
+           killed in both eras
+killed     report-python-leaves: leaves are compared as JSON text, type-strict
+           killed in both eras
+killed     report-no-descent: the report descends dicts to the field
+           killed in both eras
+killed     report-labels-swapped: added and removed are labelled as they are
+           killed in both eras
+killed     report-drops-era-and-set: the path names the era and the set
+           killed in both eras
+killed     report-quoted-key-empty: a quoted key is rendered as itself
+           killed in both eras
+killed     normalization-skipped: the served version is recorded as its source
+           killed in both eras
+killed     normalization-bare-name: the source is recorded as {"distribution": ...}
+           killed in both eras
+killed     version-first-match: several matching candidates fail
+           killed in both eras
+killed     version-no-match-accepted: no matching candidate fails
+           killed in both eras
+killed     version-match-not-equal: the match is equality
+           killed in both eras
+killed     version-match-in: the match is exact, not containment
+           killed in both eras
+killed     version-match-startswith: the match is exact, not a prefix
+           killed in both eras
+killed     version-match-endswith: the match is exact, not a suffix
+           killed in both eras
+killed     version-none-matches-none: an uninstalled candidate never matches
+           killed in both eras
+killed     sources-lose-fastmcp-slim: the source FastMCP reads its version from is a candidate
+           killed in both eras
+equivalent sources-lose-cluster-mcp: the core is a candidate
+           the core's version is not served until the rename cycle, whose one-field fixture diff would show the source switch (observed: legacy: test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; the mutant survived: every target passed; modern: test_surface.py::test_served_surface_matches_baseline: passed, so the mutant survived it; the mutant survived: every target passed)
+killed     error-omits-candidates: the failure names every candidate
+           killed in both eras
+killed     serializer-drops-an-era: every era is serialized
+           killed in both eras
+killed     serializer-drops-a-set: every set is serialized
+           killed in both eras
+killed     serializer-one-server: each set is served by a server of its own
+           killed in both eras
+killed     serializer-drops-empty-listing: an empty listing is serialized as {}
+           killed in both eras
+killed     serializer-listing-era-first: a listing is keyed by identity first
+           killed in both eras
+killed     cmp-verdict-ignores-whitespace: whitespace inside a string is part of the verdict
+           killed in both eras
+killed     report-first-line-only: the report names every differing field
+           killed in both eras
+killed     diff-first-only: every differing field of a dict is reported
+           killed in both eras
+killed     ver-prefix-match: the match is exact, not a prefix of the served value
+           killed in both eras
+killed     ver-substring-match: the match is exact, not a part of the served value
+           killed in both eras
+
+35 mutants: 33 killed, 0 survived, 2 equivalent

@@ -9,8 +9,13 @@ the contract tests alone. It relies on these FastMCP 4 and MCP SDK 2 touchpoints
 whose factory must build an `httpx2.AsyncClient` (the SDK's HTTP client; plain `httpx` is no longer
 in the stack); `fastmcp.Client` over a server object or a transport, with its `mode` (`'legacy'`
 forces the `initialize` handshake, `'auto'` probes `server/discover`) and its negotiated
-`protocol_version` and `initialize_result`; `fastmcp.Client.list_tools()`, `.list_resources()` and
-`.instructions`, with the MCP SDK 2 field names `input_schema`, `output_schema` and `mime_type`; the
+`protocol_version` and `initialize_result`; `fastmcp.Client.list_tools()` and `.instructions`; the
+connected `Client.session`'s `send_request` with a `pydantic.TypeAdapter` of a plain dict, which returns
+a result as the server sent it, every key kept, for `mcp.types.ListToolsRequest`,
+`ListResourcesRequest`, `ListResourceTemplatesRequest`, `ListPromptsRequest` (each with
+`PaginatedRequestParams` for a cursor) and `InitializeRequest`, and its `send_discover(version)`,
+which returns the raw `server/discover` result whose `_meta` carries the server info under
+`mcp.types.SERVER_INFO_META_KEY`; the
 `Middleware.on_call_tool`, `on_read_resource`, `on_message` and `on_request` hooks that
 `Rendezvous` and `Raises` (the first two), `MethodLog` and `StateProbe` implement, and the
 `asyncio.Barrier.n_waiting` a `Rendezvous` reports as `waiting`; `MiddlewareContext.fastmcp_context` and its async
@@ -43,11 +48,17 @@ that connection>`, read from the server's `MethodLog`; the phase gates read that
 pass ran in its era. A connect in an era chosen with `era=` is not logged: it does not test the
 selector.
 
-**The served surface.** `served_surface` reads what a client in the selected era is served (every
-tool's description, input and output schemas and, when it has them, annotations and title, every
-resource's name, description and MIME type, and the instructions) in the shape of
-`tests/fixtures/served_surface.json`, the snapshot taken from the server before the stack move, so
-a test compares the two directly.
+**The served surface.** `served_surface` records the whole surface a client in an era is served, as
+the raw JSON the server sends, so a key no SDK model declares is kept: the instructions; every entry
+of the tool, resource, resource template and prompt listings, every key at any depth, each listing
+followed through `nextCursor` to its end and keyed by the entry's name, URI or URI template (which
+the entry then omits; one served twice raises); the server info; and the advertised capabilities
+object. In the handshake era the server info, capabilities and instructions are read from a raw
+`initialize` re-sent on the connected session; in revision 2026-07-28, from a raw `server/discover`,
+whose `_meta` carries the server info. A listing's own envelope (`nextCursor`, the per-result `_meta`
+stamp, cache hints) is protocol, not surface, and is not recorded. `surface_record` is the pure step
+from the raw results to the record. `tests/fixtures/served_surface.json` holds this record for each
+protocol era and capability set, as `tests/test_surface.py` serializes and compares it.
 
 **Both eras, observed from both ends.** `negotiate` connects in a given era without the
 post-connect check and reports what happened: the negotiated version, whether an `InitializeResult`
@@ -112,6 +123,8 @@ from fastmcp.client.transports import SSETransport, StdioTransport, StreamableHt
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from mcp import MCPError
+from mcp import types as wire
+from pydantic import TypeAdapter
 
 from cluster_mcp.core.executor import launch
 from cluster_mcp.core.executor.base import CommandResult, Executor
@@ -122,9 +135,9 @@ from cluster_mcp.core.token import ALGORITHM, AUDIENCE, ISSUER
 
 __all__ = ['Outcome', 'drive', 'serving', 'http_client', 'in_memory', 'call', 'call_http', 'mint',
            'user_map', 'RecordingExecutor', 'Rendezvous', 'Raises', 'MethodLog', 'delegate_server',
-           'shared_server', 'bare_server', 'JWTVerifier', 'ERA', 'ERA_VARIABLE', 'MODERN_VERSION',
+           'shared_server', 'bare_server', 'JWTVerifier', 'ERA', 'ERAS', 'ERA_VARIABLE', 'MODERN_VERSION',
            'select_era', 'era_mismatch', 'session_era', 'rejection_status', 'served_tools',
-           'served_instructions', 'served_surface', 'protocol_error', 'Negotiated', 'negotiate', 'Listed',
+           'served_instructions', 'served_surface', 'surface_record', 'SURFACE_LISTINGS', 'protocol_error', 'Negotiated', 'negotiate', 'Listed',
            'stdio_tools', 'url_tools', 'Refused', 'stdio_refusal', 'SANDBOX', 'LOOPBACK', 'installed_auth', 'StateProbe', 'tool_names',
            'launched_script', 'read_resource', 'read_verbatim', 'SITE', 'DEPRECATION_WINDOW', 'ProbeExecutor']
 
@@ -431,46 +444,90 @@ def served_instructions(server: FastMCP) -> str | None:
     return drive(_served(server))[1]
 
 
-def _tool_entry(tool: Any) -> dict[str, Any]:
-    entry = {'description': tool.description, 'inputSchema': tool.input_schema, 'outputSchema': tool.output_schema}
-    # A tool served with annotations records them, each hint the server sent with its value and no
-    # other: a tool served without them keeps the snapshot's shape, and a hint added, dropped or
-    # changed shows as a difference.
-    if tool.annotations is not None:
-        entry['annotations'] = tool.annotations.model_dump(mode='json', by_alias=True, exclude_unset=True)
-    # Its top-level display title, which a client shows in place of the name, whenever one is served
-    # (FastMCP 4 serves one derived from the name when the tool sets none), so a title gained, lost or
-    # changed shows as a difference.
-    if tool.title is not None:
-        entry['title'] = tool.title
-    return entry
+# Each listing the surface records: its key in the record (the listing's own result key), the request
+# that lists it, and the entry field that identifies an entry, which becomes its key in the record.
+SURFACE_LISTINGS: tuple[tuple[str, Any, str], ...] = (
+    ('tools', wire.ListToolsRequest, 'name'),
+    ('resources', wire.ListResourcesRequest, 'uri'),
+    ('resourceTemplates', wire.ListResourceTemplatesRequest, 'uriTemplate'),
+    ('prompts', wire.ListPromptsRequest, 'name'),
+)
+
+# A result as the server sent it: a plain dict, so no SDK model drops a key it does not declare.
+_RAW = TypeAdapter(dict[str, Any])
 
 
-async def _surface(server: FastMCP) -> dict[str, Any]:
-    async with in_memory(server) as client:
-        tools = await client.list_tools()
-        resources = await client.list_resources()
-        instructions = client.instructions
-    surface = {
-        'instructions': instructions,
-        'tools': {tool.name: _tool_entry(tool) for tool in tools},
-        'resources': {str(resource.uri): {'name': resource.name, 'description': resource.description,
-                                          'mimeType': resource.mime_type} for resource in resources},
-    }
-    # Through JSON, as the snapshot was written, so the two compare as plain data.
-    return json.loads(json.dumps(surface))
+async def _raw_listing(client: Client, request: Any, key: str) -> list[Any]:
+    """Every entry of one listing, raw, each page requested in turn until no `nextCursor` comes back."""
+    entries: list[Any] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    while True:
+        params = None if cursor is None else wire.PaginatedRequestParams(cursor=cursor)
+        result = await client.session.send_request(request(params=params), _RAW)
+        entries.extend(result.get(key) or [])
+        cursor = result.get('nextCursor')
+        if cursor is None:
+            return entries
+        if cursor in seen:
+            raise ValueError(f'served_surface: the {key} listing returned the cursor {cursor!r} twice')
+        seen.add(cursor)
 
 
-def served_surface(server: FastMCP) -> dict[str, Any]:
-    """What a client in the selected era is served by `server`, in the snapshot's shape.
+async def _raw_identity(client: Client, era: str) -> dict[str, Any]:
+    """The raw result that carries the server info, the capabilities and the instructions in `era`."""
+    if era == 'legacy':
+        params = wire.InitializeRequestParams(protocol_version=client.protocol_version,
+                                                   capabilities=wire.ClientCapabilities(),
+                                                   client_info=wire.Implementation(name='harness', version='0'))
+        return await client.session.send_request(wire.InitializeRequest(params=params), _RAW)
+    return dict(await client.session.send_discover(client.protocol_version))
 
-    `{'instructions': …, 'tools': {name: {'description', 'inputSchema', 'outputSchema'[, 'annotations'][, 'title']}},
-    'resources': {uri: {'name', 'description', 'mimeType'}}}`, the shape of
-    `tests/fixtures/served_surface.json`. A tool's `annotations` key is there only when the server
-    sends annotations for it, holding exactly the hints it sent; its `title` key whenever the server
-    sends a title for it.
+
+def surface_record(listings: Mapping[str, Sequence[Any]], identity: Mapping[str, Any], era: str) -> dict[str, Any]:
+    """The surface record of raw results: `listings` maps each `SURFACE_LISTINGS` key to its entries,
+    and `identity` is the raw `initialize` result (`legacy`) or `server/discover` result (`modern`).
+
+    `{'instructions': …, 'tools': {name: entry}, 'resources': {uri: entry}, 'resourceTemplates':
+    {uriTemplate: entry}, 'prompts': {name: entry}, 'serverInfo': {…}, 'capabilities': {…}}`, each
+    entry every key it was served with but its identity field, in served order. An identity served
+    twice raises `ValueError` naming it.
     """
-    return drive(_surface(server))
+    era = _era(era)
+    record: dict[str, Any] = {'instructions': identity.get('instructions')}
+    for key, _, field in SURFACE_LISTINGS:
+        entries: dict[str, Any] = {}
+        for served in listings.get(key) or []:
+            entry = dict(served)
+            name = entry.pop(field)
+            if name in entries:
+                raise ValueError(f'served_surface: the {key} listing serves {field} {name!r} twice')
+            entries[name] = entry
+        record[key] = entries
+    if era == 'legacy':
+        record['serverInfo'] = identity.get('serverInfo')
+    else:
+        record['serverInfo'] = (identity.get('_meta') or {}).get(wire.SERVER_INFO_META_KEY)
+    record['capabilities'] = identity.get('capabilities')
+    # Through JSON, as the fixture is written, so the two compare as plain data.
+    return json.loads(json.dumps(record))
+
+
+async def _surface(server: FastMCP, era: str | None) -> dict[str, Any]:
+    era = _era(era)
+    async with in_memory(server, era) as client:
+        listings = {key: await _raw_listing(client, request, key) for key, request, _ in SURFACE_LISTINGS}
+        identity = await _raw_identity(client, era)
+    return surface_record(listings, identity, era)
+
+
+def served_surface(server: FastMCP, era: str | None = None) -> dict[str, Any]:
+    """The whole surface a client in `era` (default: the selected era) is served by `server`.
+
+    See `surface_record` for its shape; `tests/fixtures/served_surface.json` holds it, serialized by
+    `tests/test_surface.py`.
+    """
+    return drive(_surface(server, era))
 
 
 @dataclass(frozen=True)

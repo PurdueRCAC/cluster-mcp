@@ -1,487 +1,564 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""The served surface matches the snapshot taken from the server before the stack move.
+"""The served surface is pinned by a plain snapshot test.
 
-`tests/fixtures/served_surface.json` is what the server at `3d010ec` (FastMCP 2.x) served to a
-handshake-era client: every tool's description and input and output schemas, every resource's URI,
-name, description and MIME type, and the instructions. It was written by
-`spec/stack-upgrade/verify/snapshot.py` run in an archive of that commit, in that commit's own
-locked environment, never on the current stack; the cycle's gates re-derive it there and require
-the committed file to be identical. A deliberate surface change since then is a scripted hand-edit
-of the named deltas only, in the snapshot's shape, listed in AGENTS.md § Testing: so far
-`run_command.description`, `write_file.description`, `write_file.properties.encoding`,
-`sbatch.description`, `sbatch.properties.args`, and `description` and `properties.extra_args` on
-each of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` (`safe-execution`); `instructions`, the
-base composed with the harness's site context, `tools.cluster_context`, the new tool in `myquota`'s
-schema shape with its docstring as the description, and `resources.rcac://context.description`
-(`agents-d-instructions`); `resources.cluster://context` and `resources.cluster://storage`, each a
-copy of its `rcac://` entry, which stays as it was: the `rcac://` URIs are served on as deprecated
-aliases; and `instructions`, the base (now the generic core, the Slurm snippet and the RCAC-specific
-overlay) composed with the harness's site context (`rename-to-cluster-mcp`). The server's name is
-not in the snapshot's shape; `test_protocol.py` pins it.
+`tests/fixtures/served_surface.json` is the serialization of everything the server serves, in both
+protocol eras and under every capability set in `test_capabilities.SETS`, under the harness's site
+context and auth mode `none`, as `served_surface` records it: the instructions; every entry of the
+tool, resource, resource template and prompt listings, every key at any depth; the server info; and
+the advertised capabilities object. `serialization` lays it out field first, then era, then set
+(`{listing: {identity: {era: {set: entry}}}}` and `{key: {era: {set: value}}}`), so a change to one
+entry shows in `git diff` under that entry's name, and `canonical` writes it indented with its keys
+sorted, so one served surface is always the same bytes.
 
-No tool entry in the snapshot has an `annotations` key: neither `3d010ec` nor 0.1.4 served tool
-annotations, and `served_surface` records the key only for a tool served with them. So the
-comparison covers annotations with no fixture change: a tool that gains them shows as an entry with
-a key the snapshot's lacks. Nor has any a `title` key, the snapshot's shape having none. FastMCP 4,
-the stack 0.1.4 already ran on, serves every tool without a title of its own a display title
-derived from its name (`run_command` is "Run Command"); `served_surface` records a tool's title
-whenever one is served, so that derived title is the one tolerated difference in titles, and the
-fixture needs no change.
+`test_served_surface_matches_baseline` compares those bytes with the fixture's by plain equality:
+no tolerated-difference list, no exemption, and a fixture out of canonical form fails too. On a
+difference it fails with `report`, one line per differing field, each naming the entry, the era,
+the set and the field path (`differences`). The serializer holds the one normalization, named
+beside it with its cause (`VERSION_SOURCES`, `version_source`).
 
-`surface_violations` compares what a client in the selected era is served now (`served_surface`)
-with the snapshot. No tool, argument, required argument, argument type or default, description,
-annotation, title, resource or instruction may differ: a tool's annotations differ when either side
-has them and the other has not, or when a hint is on one side only or has another value; its title
-differs when the snapshot has one and the served tool has none or another, or when the served tool
-has one the snapshot lacks other than the title derived from its name. Five kinds of generated
-metadata differ on FastMCP 4, each for a stated cause (`TOLERATED`), and each is accepted only in
-its own shape: a tool's title derived from its name, only where the snapshot has none; a
-`description` added to an argument that had none;
-`additionalProperties` added to an input schema, and only as exactly `false`; an output schema's
-`$defs` inlined where they were referenced; and a `description` added on an inlined output node,
-only where the snapshot had a `$ref`. Anything else is a violation. `tolerated_differences` lists
-the accepted differences per tool, for the record of the change.
+`UPDATE_SURFACE=1` turns the same test into the update mode: it writes the fixture from the live
+server and never reads the old one, so a conflicted, missing or stale fixture is regenerated. Run it
+after a deliberate surface change (`UPDATE_INVOCATION`); the change lands as that fixture diff,
+`git diff` on the fixture its delta list in the commit body, reviewed as a surface change. Nothing
+else in the suite writes the fixture, and no workflow or `bin/` script turns the update mode on.
 """
 
 from __future__ import annotations
 
 import copy
+import functools
+import importlib.metadata
 import json
+import os
+import re
+import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Mapping
 
 import pytest
 
-from harness import CONTEXT_URIS, SITE, STORAGE_URIS, scheme, served_surface
+from harness import ERA, ERAS, SITE, SURFACE_LISTINGS, FastMCP, Middleware, served_surface, surface_record
+import test_capabilities
 from cluster_mcp.core.server import create_mcp_server
-from test_registry import EXPECTED_TOOLS
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'served_surface.json'
+REPO = FIXTURE.parents[2]
+UPDATE = 'UPDATE_SURFACE'
+UPDATE_INVOCATION = (f"bin/sandbox.sh sh -c 'cd \"$CLUSTER_MCP_REPO\" && {UPDATE}=1 uv run pytest -q "
+                     "tests/test_surface.py::test_served_surface_matches_baseline'")
 
-# Each accepted difference kind, with its cause.
-TOLERATED: dict[str, str] = {
-    'derived-title': 'FastMCP 4 serves a tool with no title of its own a display title derived from its name, '
-                     'which 0.1.4 served too',
-    'argument-description': "FastMCP 4 copies each docstring `Args:` line into that argument's schema as its "
-                            '`description`',
-    'additional-properties': 'FastMCP 4 advertises `additionalProperties: false`, the rejection of an unknown '
-                             'argument that both stacks already enforce',
-    'output-defs-inlined': "FastMCP 4 dereferences an output schema's `$defs`, inlining each model where it "
-                           'was referenced',
-    'output-model-description': "inlining carries a model class's docstring onto the node that was its `$ref`",
-}
-
-DEFS_PREFIX = '#/$defs/'
+Surface = dict[str, Any]
+FieldPath = tuple[str, ...]
+LISTING_KEYS = tuple(key for key, _, _ in SURFACE_LISTINGS)
 
 
-def derived_title(name: str) -> str:
-    """The display title FastMCP 4 derives from tool name `name`: each `_` or `-` a space, each word capitalised."""
-    return name.replace('_', ' ').replace('-', ' ').title()
+def served_surfaces() -> dict[tuple[str, str], Surface]:
+    """What a server built from each capability set in `test_capabilities.SETS` serves, in each era."""
+    loaded = test_capabilities.by_name()
+    surfaces: dict[tuple[str, str], Surface] = {}
+    for param in test_capabilities.SETS:
+        (names,) = param.values
+        server = create_mcp_server('none', site=SITE, capabilities=tuple(loaded[name] for name in names))
+        for era in ERAS:
+            surfaces[(era, param.id)] = served_surface(server, era=era)
+    return surfaces
 
-NodePath = tuple[Any, ...]
+
+# The one normalization. `serverInfo.version` is the version of an installed distribution: FastMCP's
+# today (it reads its version from `fastmcp-slim`), the core's once the server serves its own. It
+# moves with every lock bump and release, so it is recorded as the distribution it comes from: a
+# version bump is no surface change, and a switch of source is a one-field diff. `fastmcp` is not a
+# candidate: it is installed at the same version as `fastmcp-slim`, so it could never be told apart.
+VERSION_SOURCES = ('cluster-mcp', 'fastmcp-slim')
 
 
-def load_fixture() -> dict[str, Any]:
-    """The snapshot of the surface served before the stack move."""
-    return json.loads(FIXTURE.read_text())
+def installed_versions() -> dict[str, str | None]:
+    """Each of `VERSION_SOURCES` with its installed version, or None when it is not installed."""
+    found: dict[str, str | None] = {}
+    for name in VERSION_SOURCES:
+        try:
+            found[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            found[name] = None
+    return found
 
 
-def inline_defs(schema: Any) -> tuple[Any, set[NodePath]]:
-    """`schema` with each local `$ref` replaced by its `$defs` entry and `$defs` dropped.
+def version_source(served: Any, installed: Mapping[str, str | None]) -> str:
+    """The one candidate in `installed` whose version is exactly `served`; none or several raise.
 
-    Also returns the paths (key and index tuples from the root) of the nodes that were a `$ref`. A
-    schema without `$defs` comes back as a copy, with no paths. A model that refers to itself keeps
-    its inner `$ref`.
+    An uninstalled candidate (None) never matches, and a served value that is not a string matches
+    nothing.
     """
-    if not isinstance(schema, dict) or '$defs' not in schema:
-        return copy.deepcopy(schema), set()
-    defs = schema['$defs']
-    targets: set[NodePath] = set()
-
-    def walk(node: Any, path: NodePath, active: frozenset[str]) -> Any:
-        if isinstance(node, dict):
-            ref = node.get('$ref')
-            if isinstance(ref, str) and ref.startswith(DEFS_PREFIX):
-                name = ref[len(DEFS_PREFIX):]
-                if name in defs and name not in active:
-                    targets.add(path)
-                    merged = {**defs[name], **{k: v for k, v in node.items() if k != '$ref'}}
-                    return walk(merged, path, active | {name})
-            return {k: walk(v, path + (k,), active) for k, v in node.items() if not (path == () and k == '$defs')}
-        if isinstance(node, list):
-            return [walk(v, path + (i,), active) for i, v in enumerate(node)]
-        return copy.deepcopy(node)
-
-    return walk(schema, (), frozenset()), targets
+    found = [name for name, version in installed.items()
+             if isinstance(served, str) and version is not None and version == served]
+    if len(found) != 1:
+        candidates = ', '.join(f'{name} {version if version is not None else "(not installed)"}'
+                               for name, version in installed.items())
+        raise ValueError(f'serverInfo.version: the served version {served!r} is the installed version of '
+                         f'{len(found)} of the candidates ({candidates}), so its source cannot be recorded')
+    return found[0]
 
 
-def _where(path: NodePath) -> str:
-    return '.'.join(str(p) for p in path) or '(root)'
+def normalized(surface: Mapping[str, Any], installed: Mapping[str, str | None]) -> Surface:
+    """`surface` with `serverInfo.version` recorded as `{"distribution": …}`, and nothing else changed."""
+    out = dict(surface)
+    info = dict(out.get('serverInfo') or {})
+    info['version'] = {'distribution': version_source(info.get('version'), installed)}
+    out['serverInfo'] = info
+    return out
 
 
-class _Comparison:
-    """Every violation, and every tolerated difference per tool, between a snapshot and a served surface."""
-
-    def __init__(self) -> None:
-        self.violations: list[str] = []
-        self.tolerated: dict[str, list[str]] = {}
-
-    def tolerate(self, tool: str, kind: str, detail: str = '') -> None:
-        assert kind in TOLERATED, kind
-        self.tolerated.setdefault(tool, []).append(f'{kind}: {detail}' if detail else kind)
-
-    def surface(self, snapshot: dict[str, Any], served: dict[str, Any]) -> None:
-        if snapshot.get('instructions') != served.get('instructions'):
-            self.violations.append('instructions differ')
-        base_tools, head_tools = snapshot.get('tools', {}), served.get('tools', {})
-        for name in sorted(set(base_tools) - set(head_tools)):
-            self.violations.append(f'tool missing: {name}')
-        for name in sorted(set(head_tools) - set(base_tools)):
-            self.violations.append(f'tool added: {name}')
-        for name in sorted(set(base_tools) & set(head_tools)):
-            self.tool(name, base_tools[name], head_tools[name])
-        self.resources(snapshot.get('resources', {}), served.get('resources', {}))
-
-    def tool(self, name: str, base: dict[str, Any], head: dict[str, Any]) -> None:
-        for key in sorted((set(base) ^ set(head)) - {'title'}):
-            self.violations.append(f'{name}: tool entry {"lost" if key in base else "gained"} {key!r}')
-        self.title(name, base.get('title'), head.get('title'))
-        if base.get('description') != head.get('description'):
-            self.violations.append(f'{name}: description differs')
-        self.annotations(name, base.get('annotations'), head.get('annotations'))
-        self.input_schema(name, base.get('inputSchema') or {}, head.get('inputSchema') or {})
-        self.output_schema(name, base.get('outputSchema'), head.get('outputSchema'))
-
-    def title(self, tool: str, base: Any, head: Any) -> None:
-        if base is None and head is None:
-            return
-        if base is None and head == derived_title(tool):
-            self.tolerate(tool, 'derived-title', repr(head))
-        elif base is None:
-            self.violations.append(f'{tool}: tool entry gained the title {head!r}, not the derived {derived_title(tool)!r}')
-        elif head is None:
-            self.violations.append(f'{tool}: tool entry lost the title {base!r}')
-        elif base != head:
-            self.violations.append(f'{tool}: title differs: {base!r} -> {head!r}')
-
-    def annotations(self, tool: str, base: Any, head: Any) -> None:
-        if not (isinstance(base, dict) and isinstance(head, dict)):
-            if base != head:
-                self.violations.append(f'{tool}: annotations differ: {base!r} -> {head!r}')
-            return
-        for hint in sorted(set(base) | set(head)):
-            if hint not in base:
-                self.violations.append(f'{tool}: annotations gained hint {hint!r}')
-            elif hint not in head:
-                self.violations.append(f'{tool}: annotations lost hint {hint!r}')
-            elif base[hint] != head[hint]:
-                self.violations.append(f'{tool}: annotation {hint} differs: {base[hint]!r} -> {head[hint]!r}')
-
-    def input_schema(self, tool: str, base: dict[str, Any], head: dict[str, Any]) -> None:
-        for key in sorted(set(base) | set(head)):
-            if key in ('properties', 'required'):
-                continue
-            if key == 'additionalProperties' and key not in base:
-                if head[key] is False:
-                    self.tolerate(tool, 'additional-properties')
-                else:
-                    self.violations.append(f'{tool}: additionalProperties is {head[key]!r}, expected false')
-            elif key not in base:
-                self.violations.append(f'{tool}: input schema gained untolerated key {key!r}')
-            elif key not in head:
-                self.violations.append(f'{tool}: input schema lost key {key!r}')
-            elif base[key] != head[key]:
-                self.violations.append(f'{tool}: input schema {key} differs: {base[key]!r} -> {head[key]!r}')
-        if base.get('required', []) != head.get('required', []):
-            self.violations.append(f'{tool}: required differs: {base.get("required", [])} -> {head.get("required", [])}')
-        base_props, head_props = base.get('properties', {}), head.get('properties', {})
-        for arg in sorted(set(base_props) - set(head_props)):
-            self.violations.append(f'{tool}: argument dropped: {arg}')
-        for arg in sorted(set(head_props) - set(base_props)):
-            self.violations.append(f'{tool}: argument added: {arg}')
-        described: list[str] = []
-        for arg in [a for a in head_props if a in base_props]:
-            old, new = base_props[arg], head_props[arg]
-            for key in sorted(set(old) | set(new)):
-                if key == 'description' and key not in old and isinstance(new[key], str):
-                    described.append(arg)
-                elif key not in old:
-                    self.violations.append(f'{tool}: argument {arg} gained untolerated key {key!r}')
-                elif key not in new:
-                    self.violations.append(f'{tool}: argument {arg} lost {key!r}')
-                elif old[key] != new[key]:
-                    self.violations.append(f'{tool}: argument {arg} {key} differs: {old[key]!r} -> {new[key]!r}')
-        if described:
-            self.tolerate(tool, 'argument-description', ', '.join(described))
-
-    def output_schema(self, tool: str, base: Any, head: Any) -> None:
-        if base is None or head is None:
-            if base != head:
-                self.violations.append(f'{tool}: output schema differs: {base!r} -> {head!r}')
-            return
-        inlined, targets = inline_defs(base)
-        served, _ = inline_defs(head)
-        if '$defs' in base and '$defs' not in head:
-            self.tolerate(tool, 'output-defs-inlined', ', '.join(sorted(base['$defs'])))
-        self.output_node(tool, inlined, served, (), targets)
-
-    def output_node(self, tool: str, base: Any, head: Any, path: NodePath, targets: set[NodePath]) -> None:
-        if isinstance(base, dict) and isinstance(head, dict):
-            for key in sorted(set(base) | set(head)):
-                if key not in base:
-                    if key == 'description' and path in targets and isinstance(head[key], str):
-                        self.tolerate(tool, 'output-model-description', _where(path))
-                    else:
-                        self.violations.append(f'{tool}: output schema at {_where(path)} gained untolerated key {key!r}')
-                elif key not in head:
-                    self.violations.append(f'{tool}: output schema at {_where(path)} lost {key!r}')
-                else:
-                    self.output_node(tool, base[key], head[key], path + (key,), targets)
-        elif isinstance(base, list) and isinstance(head, list) and len(base) == len(head):
-            for i, (old, new) in enumerate(zip(base, head)):
-                self.output_node(tool, old, new, path + (i,), targets)
-        elif base != head:
-            self.violations.append(f'{tool}: output schema at {_where(path)} differs: {base!r} -> {head!r}')
-
-    def resources(self, base: dict[str, Any], head: dict[str, Any]) -> None:
-        for uri in sorted(set(base) - set(head)):
-            self.violations.append(f'resource missing: {uri}')
-        for uri in sorted(set(head) - set(base)):
-            self.violations.append(f'resource added: {uri}')
-        for uri in sorted(set(base) & set(head)):
-            for key in sorted(set(base[uri]) | set(head[uri])):
-                if base[uri].get(key) != head[uri].get(key):
-                    self.violations.append(f'resource {uri}: {key} differs')
+def serialization(surfaces: Mapping[tuple[str, str], Mapping[str, Any]]) -> Surface:
+    """The field-first layout of every `(era, set)` surface: each listing keyed by identity, then era,
+    then set; every other top-level key by era, then set. Every key of every surface appears, an
+    empty listing as `{}`."""
+    out: Surface = {}
+    for (era, set_id), surface in surfaces.items():
+        for key, value in surface.items():
+            if key in LISTING_KEYS:
+                listing = out.setdefault(key, {})
+                for identity, entry in value.items():
+                    listing.setdefault(identity, {}).setdefault(era, {})[set_id] = entry
+            else:
+                out.setdefault(key, {}).setdefault(era, {})[set_id] = value
+    return out
 
 
-def _compare(snapshot: dict[str, Any], served: dict[str, Any]) -> _Comparison:
-    comparison = _Comparison()
-    comparison.surface(snapshot, served)
-    return comparison
+def canonical(obj: Any) -> bytes:
+    """The one byte form of a serialization: indented, keys sorted, one trailing newline."""
+    return (json.dumps(obj, indent=1, sort_keys=True) + '\n').encode()
 
 
-def surface_violations(snapshot: dict[str, Any], served: dict[str, Any]) -> list[str]:
-    """Every way `served` differs from `snapshot` that no `TOLERATED` kind accounts for."""
-    return _compare(snapshot, served).violations
+@functools.cache
+def serialized() -> bytes:
+    """The canonical serialization of what the server serves now, built once per process."""
+    installed = installed_versions()
+    return canonical(serialization({at: normalized(surface, installed) for at, surface in served_surfaces().items()}))
 
 
-def tolerated_differences(snapshot: dict[str, Any], served: dict[str, Any]) -> dict[str, list[str]]:
-    """Per tool, each accepted difference between `snapshot` and `served`: `<kind>[: <detail>]`."""
-    return _compare(snapshot, served).tolerated
+IDENTIFIER = re.compile(r'[A-Za-z_][\w-]*')
+SHORT = 60
+
+
+def render_path(path: FieldPath) -> str:
+    """`tools.run_command.legacy.both.annotations.readOnlyHint`; a key that is not a plain name is
+    quoted, `resources['cluster://storage'].modern.slurm`."""
+    text = ''
+    for key in path:
+        if IDENTIFIER.fullmatch(key):
+            text += f'.{key}' if text else key
+        else:
+            text += f"['{key}']"
+    return text or '<root>'
+
+
+def _short(text: str) -> str:
+    return text if len(text) <= SHORT else text[:SHORT - 3] + '...'
+
+
+def differences(old: Any, new: Any, path: FieldPath = ()) -> list[str]:
+    """One line per field that differs from `old` to `new`, descending dicts only: a key only in
+    `new` is added, only in `old` removed, and any other leaf (a list included) changed when its JSON
+    text differs."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        lines: list[str] = []
+        for key in sorted(set(old) | set(new)):
+            if key not in old:
+                lines.append(f'- {render_path(path + (key,))}: added')
+            elif key not in new:
+                lines.append(f'- {render_path(path + (key,))}: removed')
+            else:
+                lines.extend(differences(old[key], new[key], path + (key,)))
+        return lines
+    was, now = json.dumps(old, sort_keys=True), json.dumps(new, sort_keys=True)
+    return [] if was == now else [f'- {render_path(path)}: changed: {_short(was)} -> {_short(now)}']
+
+
+def report(fixture: Path, expected: bytes | None, served: bytes) -> str:
+    """Why `fixture` fails: a header line naming it and the update invocation, then each differing field."""
+    header = (f'{fixture} is not the served surface; after a deliberate surface change, re-take it with '
+              f'{UPDATE_INVOCATION}')
+    if expected is None:
+        return f'{header}\n- the fixture does not exist'
+    try:
+        old = json.loads(expected)
+    except ValueError:
+        return f'{header}\n- the fixture is not JSON'
+    lines = differences(old, json.loads(served))
+    return '\n'.join([header, *(lines or ['- the fixture is not in canonical form (no field differs)'])])
+
+
+def surface_check(fixture: Path, served: bytes, update: bool) -> None:
+    """With `update`, write `served` to `fixture` without reading it; otherwise fail unless the
+    fixture's bytes are `served`."""
+    if update:
+        fixture.write_bytes(served)
+        return
+    expected = fixture.read_bytes() if fixture.exists() else None
+    if expected != served:
+        raise AssertionError(report(fixture, expected, served))
 
 
 @pytest.mark.unit
 def test_served_surface_matches_baseline() -> None:
-    served = served_surface(create_mcp_server('none', site=SITE))
-    assert served['tools'], 'the server listed no tools'
-    violations = surface_violations(load_fixture(), served)
-    assert violations == [], '\n'.join(violations)
-    # 0.1.4 served every tool a title, FastMCP 4's derived one. The snapshot's shape has none, so this
-    # is what fails on one lost.
-    untitled = sorted(name for name, tool in served['tools'].items() if 'title' not in tool)
-    assert untitled == [], f'served without the title 0.1.4 served: {untitled}'
+    surface_check(FIXTURE, serialized(), update=os.environ.get(UPDATE) == '1')
+
+
+# A field changed at depth fails, one line per differing field naming its entry, era, set and field,
+# and no line for a field that does not differ. The fixture holds the real serialization, which
+# passes as it is; the served bytes carry the row's plants, chosen from the serialization itself. One
+# row per way a field can differ, since one plant cannot tell a verdict that ignores JSON types from a
+# report that drops added or removed keys; a row whose only difference is whitespace inside a string,
+# since a verdict that compares tokens instead of bytes passes it; and a row with two differences in
+# two entries, since a report that stops at the first line names one. Each row writes its expected
+# lines by hand, never through `render_path`, so a line pins the path's form: the era and set named,
+# a key that is not a plain name quoted.
+
+def _deepest(node: Any, keep: Any, path: FieldPath = ()) -> tuple[int, FieldPath] | None:
+    """The deepest path, descending dicts only, whose value `keep` accepts; the first in sort order."""
+    best = (len(path), path) if path and keep(node) else None
+    if isinstance(node, dict):
+        for key in sorted(node):
+            found = _deepest(node[key], keep, path + (key,))
+            if found is not None and (best is None or found[0] > best[0]):
+                best = found
+    return best
+
+
+def _holder(tree: Any, path: FieldPath) -> Any:
+    for key in path:
+        tree = tree[key]
+    return tree
+
+
+def _in_tools(tree: Surface, era: str, set_id: str, keep: Any) -> FieldPath:
+    """The deepest path `keep` accepts inside any tool's copy under `era` and `set_id`."""
+    found = []
+    for name in sorted(tree['tools']):
+        held = tree['tools'][name].get(era, {}).get(set_id)
+        hit = _deepest(held, keep) if held is not None else None
+        if hit is not None:
+            found.append((hit[0], ('tools', name, era, set_id) + hit[1]))
+    assert found, f'no plant site under {era}, {set_id}'
+    return max(found, key=lambda f: f[0])[1]
+
+
+def _dotted(path: FieldPath) -> str:
+    """The path written out by hand, not by `render_path`: each key a plain name, joined with `.`."""
+    assert all(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', key) for key in path), f'not a plain-name path: {path}'
+    return '.'.join(path)
+
+
+def _type_twin(tree: Surface) -> list[str]:
+    at = _in_tools(tree, ERAS[-1], 'slurm', lambda v: isinstance(v, (bool, int)))
+    value = _holder(tree, at)
+    _holder(tree, at[:-1])[at[-1]] = int(value) if isinstance(value, bool) else float(value)
+    return [f'- {_dotted(at)}: changed: {json.dumps(value)} -> {json.dumps(_holder(tree, at))}']
+
+
+def _gained(tree: Surface) -> list[str]:
+    at = _in_tools(tree, ERAS[0], 'both', lambda v: isinstance(v, dict))
+    _holder(tree, at)['x-planted'] = 1
+    return [f'- {_dotted(at)}.x-planted: added']
+
+
+def _lost(tree: Surface) -> list[str]:
+    del tree['resources']['cluster://context']['modern']['slurm']['mimeType']
+    return ["- resources['cluster://context'].modern.slurm.mimeType: removed"]
+
+
+def _whitespace(tree: Surface) -> list[str]:
+    # A doubled space inside a string at depth, in this pass's era. The values are shown as the
+    # report cuts them: the row pins the verdict and the field, not the cut.
+    at = _in_tools(tree, ERA, 'both', lambda v: isinstance(v, str) and ' ' in v)
+    value = _holder(tree, at)
+    _holder(tree, at[:-1])[at[-1]] = value.replace(' ', '  ', 1)
+    return [f'- {_dotted(at)}: changed: {_short(json.dumps(value))} -> {_short(json.dumps(_holder(tree, at)))}']
+
+
+def _two_entries(tree: Surface) -> list[str]:
+    # A key gained by one tool and a key lost by another, in this pass's era: two lines, in the
+    # report's order (sorted by name), and none for the entries between or around them.
+    first, second = [name for name in sorted(tree['tools']) if 'both' in tree['tools'][name].get(ERA, {})][:2]
+    tree['tools'][first][ERA]['both']['x-planted'] = 1
+    del tree['tools'][second][ERA]['both']['description']
+    return [f'- {_dotted(("tools", first, ERA, "both", "x-planted"))}: added',
+            f'- {_dotted(("tools", second, ERA, "both", "description"))}: removed']
 
 
 @pytest.mark.unit
-def test_surface_fixture_is_the_baseline_shape() -> None:
-    snapshot = load_fixture()
-    assert sorted(snapshot) == ['instructions', 'resources', 'tools']
-    assert isinstance(snapshot['instructions'], str) and snapshot['instructions']
-    assert sorted(snapshot['tools']) == sorted(EXPECTED_TOOLS)
-    assert sorted(snapshot['resources']) == sorted((*CONTEXT_URIS, *STORAGE_URIS))
-    for name, tool in snapshot['tools'].items():
-        # No `annotations` key: no tool was served with annotations; and no `title` key, which the
-        # snapshot's shape lacks.
-        assert sorted(tool) == ['description', 'inputSchema', 'outputSchema'], name
-        assert isinstance(tool['description'], str) and tool['description'], name
-        # The metadata FastMCP 4 adds is absent: the snapshot was not taken on the new stack.
-        assert 'additionalProperties' not in tool['inputSchema'], name
-        assert all('description' not in arg for arg in tool['inputSchema'].get('properties', {}).values()), name
-    # The output models are referenced through `$defs`, as FastMCP 2.x served them.
-    assert any('$defs' in (tool['outputSchema'] or {}) for tool in snapshot['tools'].values())
+@pytest.mark.parametrize('plant', [
+    pytest.param(_type_twin, id='changed-type'),
+    pytest.param(_gained, id='gained'),
+    pytest.param(_lost, id='lost'),
+    pytest.param(_whitespace, id='whitespace'),
+    pytest.param(_two_entries, id='two-entries'),
+])
+def test_a_field_changed_at_depth_fails_naming_its_entry_and_field(plant: Any, tmp_path: Path) -> None:
+    fixture = tmp_path / 'served_surface.json'
+    fixture.write_bytes(serialized())
+    surface_check(fixture, serialized(), update=False)
+    tree = json.loads(serialized())
+    lines = plant(tree)
+    with pytest.raises(AssertionError) as failed:
+        surface_check(fixture, canonical(tree), update=False)
+    assert str(failed.value).splitlines()[1:] == lines, str(failed.value)
 
 
-def _plant(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
-    planted = load_fixture()
-    change(planted)
-    return planted
+@pytest.mark.unit
+def test_update_mode_regenerates_a_conflicted_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    served = serialized()
+    # A fixture holding merge-conflict markers around two JSON halves is written, never read.
+    text = served.decode()
+    half = len(text) // 2
+    conflicted = tmp_path / 'conflicted.json'
+    conflicted.write_text(f'<<<<<<< ours\n{text[:half]}\n=======\n{text[half:]}>>>>>>> theirs\n')
+    surface_check(conflicted, served, update=True)
+    assert conflicted.read_bytes() == served
+    surface_check(conflicted, served, update=False)
+    # A missing fixture fails with the mode off and creates nothing; the mode writes it.
+    missing = tmp_path / 'missing.json'
+    with pytest.raises(AssertionError, match='the fixture does not exist'):
+        surface_check(missing, served, update=False)
+    assert not missing.exists()
+    surface_check(missing, served, update=True)
+    assert missing.read_bytes() == served
+    # Unless the variable is exactly `1`, the baseline compares, fails on a difference and writes nothing.
+    planted = tmp_path / 'planted.json'
+    planted_bytes = served.replace(b'"cluster-mcp: tools for', b'"planted: tools for', 1)
+    assert planted_bytes != served
+    planted.write_bytes(planted_bytes)
+    monkeypatch.setattr(sys.modules[__name__], 'FIXTURE', planted)
+    for value in (None, '0', ''):
+        if value is None:
+            monkeypatch.delenv(UPDATE, raising=False)
+        else:
+            monkeypatch.setenv(UPDATE, value)
+        with pytest.raises(AssertionError, match='instructions'):
+            test_served_surface_matches_baseline()
+        assert planted.read_bytes() == planted_bytes, f'{UPDATE}={value!r} wrote the fixture'
 
 
-def _rename(s: dict[str, Any]) -> None:
-    s['tools']['run_command_v2'] = s['tools'].pop('run_command')
+# Only a version equal to the served one matches. The decoys are near misses both ways: versions
+# that hold the served value as a prefix, a suffix or a part (`4.1.40`, `14.1.4`), and versions that
+# are themselves a prefix, a part or a suffix of it (`4.1`, `.1.`, `1.4`).
+@pytest.mark.unit
+@pytest.mark.parametrize(('served', 'installed', 'source'), [
+    pytest.param('4.1.4', {'a': '4.1.40', 'b': '4.1.4', 'c': '14.1.4', 'd': None, 'e': '4.1', 'f': '.1.', 'g': '1.4'},
+                 'b', id='one'),
+    pytest.param(None, {'a': '4.1.40', 'b': '14.1.4', 'd': None, 'e': '4.1', 'f': '.1.', 'g': '1.4'}, None, id='none'),
+    pytest.param('4.1.4', {'a': '4.1.4', 'b': '4.1.4', 'c': '4.1.40', 'd': None}, None, id='several'),
+])
+def test_version_source_names_exactly_one_distribution(served: Any, installed: dict[str, str | None],
+                                                       source: str | None) -> None:
+    if source is not None:
+        assert version_source(served, installed) == source
+        return
+    with pytest.raises(ValueError) as refused:
+        version_source(served, installed)
+    message = str(refused.value)
+    assert repr(served) in message, message
+    for name, version in installed.items():
+        assert f'{name} {version if version is not None else "(not installed)"}' in message, message
 
 
-def _input(s: dict[str, Any]) -> dict[str, Any]:
-    return s['tools']['run_command']['inputSchema']
+@pytest.mark.unit
+def test_no_workflow_or_script_turns_the_update_mode_on() -> None:
+    # A line that names the variable sets or exports it, but for a shell `unset` of it.
+    names = re.compile(rf'\b{UPDATE}\b')
+    unsets = re.compile(rf'^\s*unset\b[^#\n]*\b{UPDATE}\b')
+
+    def turns_on(text: str) -> list[str]:
+        return [line for line in text.splitlines() if names.search(line) and not unsets.match(line)]
+
+    for sample in (f'export {UPDATE}=1', f'      {UPDATE}: "1"', f'{UPDATE}=1 uv run pytest',
+                   f"os.environ['{UPDATE}'] = '1'"):
+        assert turns_on(sample) == [sample], sample
+    assert turns_on(f'unset MCP_BASE_URL {UPDATE}') == []
+    files = [p for d in ('.github/workflows', 'bin') for p in sorted((REPO / d).glob('*')) if p.is_file()]
+    assert any(p.parent.name == 'workflows' for p in files) and any(p.parent.name == 'bin' for p in files), files
+    found = {str(p.relative_to(REPO)): hits for p in files
+             if (hits := turns_on(p.read_text(encoding='utf-8', errors='replace')))}
+    assert found == {}, found
 
 
-def _summary_only(s: dict[str, Any]) -> None:
-    tool = s['tools']['run_command']
-    tool['description'] = tool['description'].split('\n\n')[0]
+# What the server starts serving reaches the serialization with no change to the recorder or the
+# serializer. Each row plants through FastMCP's public API (a component registered with the key, a
+# server option) or a listing middleware that serves an existing entry with a key added, never by
+# touching the recorder; the row names where the planted value is recorded and the one line it adds
+# to the serialization, under the selected era and a set id of the rows' own.
+
+def planted_echo(text: str) -> str:
+    """Echo `text` back."""
+    return text
 
 
-# Annotations as a server would send them for one tool: two hints.
-HINTS = {'readOnlyHint': True, 'destructiveHint': False}
+def planted_text() -> str:
+    """A planted resource."""
+    return 'planted'
 
 
-def _annotate(s: dict[str, Any], tool: str = 'run_command', hints: dict[str, Any] | None = None) -> None:
-    s['tools'][tool]['annotations'] = dict(HINTS if hints is None else hints)
+def planted_item(item: str) -> str:
+    """A planted resource template."""
+    return item
 
 
-def _annotate_all(s: dict[str, Any]) -> None:
-    for name in s['tools']:
-        _annotate(s, name)
+def planted_prompt(topic: str) -> str:
+    """A planted prompt."""
+    return topic
 
 
-def _both_annotated(head: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The snapshot and `head`, each with `run_command` served with `HINTS` beforehand."""
-    return _plant(_annotate), head
+ICON = {'src': 'https://planted.invalid/icon.png'}
+PLANTED_TEMPLATE = 'cluster://planted/{item}'
+PLANTED_SET = 'planted'
 
 
-# Each way a tool's annotations can differ, as (snapshot, served): annotations on one side only,
-# either side; a hint on one side only, either side; a hint's value; and empty annotations against none.
-ANNOTATION_DRIFT = [
-    pytest.param(lambda: (load_fixture(), _plant(_annotate_all)), "tool entry gained 'annotations'",
-                 id='annotations-added-to-every-tool'),
-    pytest.param(lambda: (load_fixture(), _plant(_annotate)), "run_command: tool entry gained 'annotations'",
-                 id='annotations-added-to-one-tool'),
-    pytest.param(lambda: (_plant(_annotate), load_fixture()), "run_command: tool entry lost 'annotations'",
-                 id='annotations-removed'),
-    pytest.param(lambda: (load_fixture(), _plant(lambda s: _annotate(s, hints={}))),
-                 "run_command: tool entry gained 'annotations'", id='empty-annotations-added'),
-    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'readOnlyHint': False}))),
-                 'run_command: annotation readOnlyHint differs: True -> False', id='hint-flipped'),
-    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={'readOnlyHint': True}))),
-                 "run_command: annotations lost hint 'destructiveHint'", id='hint-removed'),
-    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'idempotentHint': True}))),
-                 "run_command: annotations gained hint 'idempotentHint'", id='hint-added'),
-    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={**HINTS, 'readOnlyHint': None}))),
-                 'run_command: annotation readOnlyHint differs: True -> None', id='hint-nulled'),
-    pytest.param(lambda: _both_annotated(_plant(lambda s: _annotate(s, hints={}))),
-                 "run_command: annotations lost hint 'readOnlyHint'", id='hints-emptied'),
+class Relisted(Middleware):
+    """Serve each listed tool and resource with `update` applied to those named in it (`{name: fields}`):
+    what a server starting to serve a key looks like."""
+
+    def __init__(self, update: dict[str, dict[str, Any]]) -> None:
+        super().__init__()
+        self.update = update
+
+    def _relist(self, items: Any, key: Any) -> list[Any]:
+        return [item.model_copy(update=self.update[key(item)]) if key(item) in self.update else item for item in items]
+
+    async def on_list_tools(self, context: Any, call_next: Any) -> Any:
+        return self._relist(await call_next(context), lambda tool: tool.name)
+
+    async def on_list_resources(self, context: Any, call_next: Any) -> Any:
+        return self._relist(await call_next(context), lambda resource: str(resource.uri))
+
+
+class Reordered(Middleware):
+    """List the tools in the opposite order on every second listing: a listing that changed between
+    two pages, so a paginating client is served the same tool on both."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    async def on_list_tools(self, context: Any, call_next: Any) -> Any:
+        tools = list(await call_next(context))
+        self.calls += 1
+        return tools if self.calls % 2 else tools[::-1]
+
+
+def _full(plant: Any) -> Any:
+    def build() -> Any:
+        server = create_mcp_server('none', site=SITE)
+        plant(server)
+        return server
+    return build
+
+
+def _middleware(update: dict[str, dict[str, Any]]) -> Any:
+    return _full(lambda server: server.add_middleware(Relisted(update)))
+
+
+# (server builder, path of the planted value in the record, the value, the path removed to unplant
+# it, the one line the plant adds to the serialization).
+RECORDER = [
+    pytest.param(_middleware({'run_command': {'icons': [ICON]}}), ('tools', 'run_command', 'icons'), [ICON],
+                 ('tools', 'run_command', 'icons'), f'- tools.run_command.{ERA}.{PLANTED_SET}.icons: added',
+                 id='tool-icons'),
+    pytest.param(_middleware({'run_command': {'meta': {'planted': True}}}), ('tools', 'run_command', '_meta', 'planted'),
+                 True, ('tools', 'run_command', '_meta', 'planted'),
+                 f'- tools.run_command.{ERA}.{PLANTED_SET}._meta.planted: added', id='tool-meta'),
+    pytest.param(_full(lambda s: s.tool(planted_echo, annotations={'readOnlyHint': True})),
+                 ('tools', 'planted_echo', 'annotations'), {'readOnlyHint': True}, ('tools', 'planted_echo'),
+                 '- tools.planted_echo: added', id='tool-annotations'),
+    pytest.param(_middleware({'cluster://storage': {'title': 'Storage'}}), ('resources', 'cluster://storage', 'title'),
+                 'Storage', ('resources', 'cluster://storage', 'title'),
+                 f"- resources['cluster://storage'].{ERA}.{PLANTED_SET}.title: added", id='resource-title'),
+    pytest.param(_full(lambda s: s.resource('cluster://planted', annotations={'priority': 0.5})(planted_text)),
+                 ('resources', 'cluster://planted', 'annotations'), {'priority': 0.5},
+                 ('resources', 'cluster://planted'), "- resources['cluster://planted']: added",
+                 id='resource-annotations'),
+    pytest.param(_full(lambda s: s.prompt(planted_prompt)), ('prompts', 'planted_prompt', 'description'),
+                 'A planted prompt.', ('prompts', 'planted_prompt'), '- prompts.planted_prompt: added', id='prompt'),
+    pytest.param(_full(lambda s: s.resource(PLANTED_TEMPLATE)(planted_item)),
+                 ('resourceTemplates', PLANTED_TEMPLATE, 'description'), 'A planted resource template.',
+                 ('resourceTemplates', PLANTED_TEMPLATE), f"- resourceTemplates['{PLANTED_TEMPLATE}']: added",
+                 id='resource-template'),
+    pytest.param(_full(lambda s: s.experimental_capabilities.update(planted={'level': 1})),
+                 ('capabilities', 'experimental', 'planted'), {'level': 1}, ('capabilities', 'experimental'),
+                 f'- capabilities.{ERA}.{PLANTED_SET}.experimental: added', id='experimental-capability'),
+    pytest.param(lambda: FastMCP(name='cluster-mcp', version='9.9.9+planted'), ('serverInfo', 'version'),
+                 '9.9.9+planted', ('serverInfo', 'version'), f'- serverInfo.{ERA}.{PLANTED_SET}.version: added',
+                 id='server-version'),
+    pytest.param(lambda: FastMCP(name='cluster-mcp', website_url='https://planted.invalid'),
+                 ('serverInfo', 'websiteUrl'), 'https://planted.invalid', ('serverInfo', 'websiteUrl'),
+                 f'- serverInfo.{ERA}.{PLANTED_SET}.websiteUrl: added', id='server-website-url'),
 ]
 
 
-def _title(s: dict[str, Any], tool: str = 'run_command', title: str = 'Run a command') -> None:
-    s['tools'][tool]['title'] = title
-
-
-def _title_all(s: dict[str, Any]) -> None:
-    for name in s['tools']:
-        _title(s, name, name)
-
-
-# Each way a tool's top-level title can differ, as (snapshot, served): a title other than the derived
-# one, on one tool or every tool, an empty one, the derived one's case changed; a title the snapshot
-# has, lost, replaced by the derived one, or changed.
-TITLE_DRIFT = [
-    pytest.param(lambda: (load_fixture(), _plant(_title_all)), "tool entry gained the title 'run_command'",
-                 id='title-added-to-every-tool'),
-    pytest.param(lambda: (load_fixture(), _plant(_title)),
-                 "run_command: tool entry gained the title 'Run a command', not the derived 'Run Command'",
-                 id='title-added-to-one-tool'),
-    pytest.param(lambda: (load_fixture(), _plant(lambda s: _title(s, title=''))), "run_command: tool entry gained the title ''",
-                 id='empty-title-added'),
-    pytest.param(lambda: (load_fixture(), _plant(lambda s: _title(s, title='Run command'))),
-                 "run_command: tool entry gained the title 'Run command'", id='derived-title-recased'),
-    pytest.param(lambda: (_plant(_title), load_fixture()), "run_command: tool entry lost the title 'Run a command'",
-                 id='title-removed'),
-    pytest.param(lambda: (_plant(_title), _plant(lambda s: _title(s, title='Run Command'))),
-                 "run_command: title differs: 'Run a command' -> 'Run Command'", id='title-replaced-by-derived'),
-    pytest.param(lambda: (_plant(_title), _plant(lambda s: _title(s, title='Run command'))),
-                 "run_command: title differs: 'Run a command' -> 'Run command'", id='title-changed'),
-]
-
-
-def _drift_violations(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]]) -> list[str]:
-    snapshot, served = pair()
-    assert snapshot != served, 'the planted difference did not land'
-    assert surface_violations(snapshot, snapshot) == [] and surface_violations(served, served) == []
-    return surface_violations(snapshot, served)
+@pytest.mark.unit
+@pytest.mark.parametrize(('build', 'path', 'value', 'unplant', 'line'), RECORDER)
+def test_recorder_sees_what_the_server_starts_serving(build: Any, path: FieldPath, value: Any, unplant: FieldPath,
+                                                      line: str) -> None:
+    served = served_surface(build())
+    assert _holder(served, path[:-1]).get(path[-1], KeyError) == value, \
+        f'{render_path(path)} is not recorded as served: {_holder(served, path[:1])!r}'
+    unplanted = copy.deepcopy(served)
+    del _holder(unplanted, unplant[:-1])[unplant[-1]]
+    assert differences(serialization({(ERA, PLANTED_SET): unplanted}),
+                       serialization({(ERA, PLANTED_SET): served})) == [line]
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(('pair', 'fragment'), ANNOTATION_DRIFT)
-def test_surface_check_catches_annotation_drift(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
-                                                fragment: str) -> None:
-    violations = _drift_violations(pair)
-    assert any(fragment in v for v in violations), violations
+def test_recorder_follows_every_page() -> None:
+    server = FastMCP(name='paged', list_page_size=1)
+    for name in ('planted_a', 'planted_b', 'planted_c'):
+        server.tool(planted_echo, name=name)
+    for uri in ('cluster://planted/a', 'cluster://planted/b'):
+        server.resource(uri)(planted_text)
+    for template in ('cluster://planted/x/{item}', 'cluster://planted/y/{item}'):
+        server.resource(template)(planted_item)
+    for name in ('planted_p', 'planted_q'):
+        server.prompt(planted_prompt, name=name)
+    served = served_surface(server)
+    assert list(served['tools']) == ['planted_a', 'planted_b', 'planted_c']
+    assert list(served['resources']) == ['cluster://planted/a', 'cluster://planted/b']
+    assert list(served['resourceTemplates']) == ['cluster://planted/x/{item}', 'cluster://planted/y/{item}']
+    assert list(served['prompts']) == ['planted_p', 'planted_q']
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(('pair', 'fragment'), TITLE_DRIFT)
-def test_surface_check_catches_title_drift(pair: Callable[[], tuple[dict[str, Any], dict[str, Any]]],
-                                           fragment: str) -> None:
-    violations = _drift_violations(pair)
-    assert any(fragment in v for v in violations), violations
+def test_recorder_refuses_a_name_served_twice() -> None:
+    server = FastMCP(name='paged', list_page_size=1, middleware=[Reordered()])
+    for name in ('planted_a', 'planted_b'):
+        server.tool(planted_echo, name=name)
+    with pytest.raises(ValueError, match="the tools listing serves name 'planted_a' twice"):
+        served_surface(server)
+
+
+SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo'
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(('change', 'fragment'), [
-    pytest.param(_rename, 'tool missing: run_command', id='renamed-tool'),
-    pytest.param(lambda s: _input(s)['properties'].pop('cwd'), 'run_command: argument dropped: cwd',
-                 id='dropped-argument'),
-    pytest.param(lambda s: _input(s).update(required=[]), 'run_command: required differs', id='required-changed'),
-    pytest.param(lambda s: _input(s)['properties']['command'].update(type='integer'),
-                 'run_command: argument command type differs', id='type-changed'),
-    pytest.param(lambda s: _input(s)['properties']['cwd'].update(default='~'),
-                 'run_command: argument cwd default differs', id='default-changed'),
-    pytest.param(_summary_only, 'run_command: description differs', id='description-changed'),
-    *(pytest.param(lambda s, uri=uri: s['resources'].pop(uri), f'resource missing: {uri}',
-                   id=f'resource-dropped-{scheme(uri)}') for uri in STORAGE_URIS),
-    pytest.param(lambda s: s.update(instructions=s['instructions'] + '\nUse the docs tool.'), 'instructions differ',
-                 id='instructions-changed'),
-    pytest.param(lambda s: s['tools']['run_command']['outputSchema']['properties']['exit_code'].update(type='string'),
-                 'run_command: output schema at properties.exit_code.type differs', id='output-changed'),
-    pytest.param(lambda s: _input(s).update(title='run_commandArguments'),
-                 "run_command: input schema gained untolerated key 'title'", id='untolerated-key'),
-    pytest.param(lambda s: _input(s).update(additionalProperties=True),
-                 'run_command: additionalProperties is True, expected false', id='additional-properties-true'),
-    pytest.param(lambda s: s['tools']['run_command']['outputSchema']['properties']['stdout'].update(description='Out.'),
-                 "run_command: output schema at properties.stdout gained untolerated key 'description'",
-                 id='output-description-on-a-plain-node'),
-])
-def test_surface_check_catches_drift(change: Callable[[dict[str, Any]], None], fragment: str) -> None:
-    snapshot = load_fixture()
-    assert surface_violations(snapshot, load_fixture()) == []
-    violations = surface_violations(snapshot, _plant(change))
-    assert any(fragment in v for v in violations), violations
-
-
-def _describe_argument(s: dict[str, Any]) -> None:
-    _input(s)['properties']['command']['description'] = 'The shell command to execute.'
-
-
-def _inline_listing(s: dict[str, Any]) -> None:
-    tool = s['tools']['list_directory']
-    tool['outputSchema'] = inline_defs(tool['outputSchema'])[0]
-
-
-def _describe_model(s: dict[str, Any]) -> None:
-    _inline_listing(s)
-    s['tools']['list_directory']['outputSchema']['properties']['result']['items']['description'] = 'One entry.'
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(('change', 'tool', 'kind'), [
-    pytest.param(_describe_argument, 'run_command', 'argument-description: command', id='argument-description'),
-    pytest.param(lambda s: _input(s).update(additionalProperties=False), 'run_command', 'additional-properties',
-                 id='additional-properties'),
-    pytest.param(_inline_listing, 'list_directory', 'output-defs-inlined: FileInfo', id='output-defs-inlined'),
-    pytest.param(_describe_model, 'list_directory', 'output-model-description: properties.result.items',
-                 id='output-model-description'),
-    pytest.param(lambda s: _title(s, title='Run Command'), 'run_command', "derived-title: 'Run Command'", id='derived-title'),
-    pytest.param(lambda s: _title(s, 'scontrol_show_job', 'Scontrol Show Job'), 'scontrol_show_job',
-                 "derived-title: 'Scontrol Show Job'", id='derived-title-of-three-words'),
-])
-def test_surface_check_tolerates_listed_differences(change: Callable[[dict[str, Any]], None], tool: str,
-                                                    kind: str) -> None:
-    snapshot = load_fixture()
-    planted = _plant(change)
-    assert planted != snapshot, 'the planted difference did not land'
-    assert surface_violations(snapshot, planted) == []
-    tolerated = tolerated_differences(snapshot, planted)
-    assert kind in tolerated.get(tool, []), tolerated
-    assert all(entry.split(':')[0] in TOLERATED for entries in tolerated.values() for entry in entries)
+@pytest.mark.parametrize('era', ERAS)
+def test_record_keeps_keys_no_model_declares(era: str) -> None:
+    # No server can be made to send a key the SDK's models lack (the server and the client share them),
+    # so the pure step from raw results is fed one, at every place the record reads.
+    info = {'name': 'cluster-mcp', 'version': '1', 'plantedInfo': {'deep': [1]}}
+    capabilities = {'tools': {'listChanged': True, 'plantedInTools': 1}, 'plantedCapability': {}}
+    identity = ({'serverInfo': info, 'capabilities': capabilities, 'instructions': 'i'} if era == 'legacy' else
+                {'_meta': {SERVER_INFO_META: info}, 'capabilities': capabilities, 'instructions': 'i'})
+    listings = {'tools': [{'name': 't', 'plantedTool': 1, 'inputSchema': {'type': 'object', 'x-planted': [2]}}],
+                'resources': [{'uri': 'cluster://u', 'plantedResource': {'a': None}}],
+                'resourceTemplates': [{'uriTemplate': 'cluster://u/{x}', 'plantedTemplate': True}],
+                'prompts': [{'name': 'p', 'plantedPrompt': 0}]}
+    record = surface_record(listings, identity, era)
+    assert record == {
+        'instructions': 'i',
+        'tools': {'t': {'plantedTool': 1, 'inputSchema': {'type': 'object', 'x-planted': [2]}}},
+        'resources': {'cluster://u': {'plantedResource': {'a': None}}},
+        'resourceTemplates': {'cluster://u/{x}': {'plantedTemplate': True}},
+        'prompts': {'p': {'plantedPrompt': 0}},
+        'serverInfo': info,
+        'capabilities': capabilities,
+    }

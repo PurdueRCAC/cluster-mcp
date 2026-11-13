@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:surface-fixture-after-a-surface-change
 kind: test
 appetite: small
 lane: public
