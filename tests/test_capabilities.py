@@ -1396,6 +1396,31 @@ TASK_CONFIG_STATE = ('import datetime\nconfig = type(planted_echo.task_config)()
                      "object.__setattr__(config, '__dict__', {{{mode}: 'forbidden', '{poll}': "
                      'datetime.timedelta(seconds=5)}})\nplanted_echo.task_config = config')
 
+# A return type whose class holds no `__module__` of its own, of each metaclass the load accepts (`type`'s
+# is made from a namespace with no `__name__`, which is the only way it has none; the others delete it).
+# Its base's `__module__` is a `str` of a type of its own: on every metaclass but `type`, a read of the
+# class's `__module__` through it finds the base's. A `TypedDict`'s bases are `dict`'s, so it has none.
+NO_OWN_MODULE = {
+    'type': ('', 'object', 'pass', 'Returned = eval("type(\'Returned\', (Base,), {})", {"Base": Base})'),
+    'abc': ('import abc\n', 'abc.ABC', 'pass', ''),
+    'model': ('import pydantic\n', 'pydantic.BaseModel', 'x: int = 0', ''),
+    'enum': ('import enum\n', 'enum.Enum', "RED = 'red'", ''),
+    'typed-dict': ('import typing\n', None, 'x: int', ''),
+}
+NO_OWN_MODULE_CAUSE = 'a tool whose return_type holds a class with no __module__ of its own'
+
+
+def no_own_module(meta: str) -> str:
+    """The source a tools module runs to return a class of `meta` holding no `__module__` of its own."""
+    imports, base, body, made = NO_OWN_MODULE[meta]
+    if base is None:
+        returned = f'class Returned(typing.TypedDict):\n    {body}\n\n\ndel Returned.__module__\n'
+    else:
+        returned = (f'class Base({base}):\n    pass\n\n\nBase.__module__ = PlantedStr(__name__)\n\n\n'
+                    + (made + '\n' if made else f'class Returned(Base):\n    {body}\n\n\ndel Returned.__module__\n'))
+    return imports + returned + 'planted_echo.return_type = Returned'
+
+
 # The rows at depth and in the instance state: the change (source text) and the cause after `loading it
 # registered `.
 TOOL_DEPTH = {
@@ -1492,6 +1517,9 @@ TOOL_DEPTH = {
                                             'typing._GenericAlias(PlantedObject(), (int,))', ORIGIN_CAUSE),
     'tool-exact-return_type-generic-alias-origin': ('import types\nplanted_echo.return_type = '
                                                     'types.GenericAlias(PlantedObject(), (int,))', ORIGIN_CAUSE),
+    # A return type whose class holds no `__module__` of its own, of each metaclass the load accepts.
+    **{f'tool-exact-return_type-no-own-module-{meta}': (no_own_module(meta), NO_OWN_MODULE_CAUSE)
+       for meta in NO_OWN_MODULE},
 }
 
 # A subclass of `FunctionTool` whose code runs when `{field}` is read (`nothing`: one that adds no code,

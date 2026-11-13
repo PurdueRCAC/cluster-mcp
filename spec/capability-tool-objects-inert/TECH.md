@@ -3,15 +3,15 @@ slug: capability-tool-objects-inert
 title: A capability's registered tool objects run none of its code when they are read
 kind: fix
 appetite: small
-status: blocked
+status: in_progress
 branch: fix/capability-tool-objects-inert
 base: develop
-current_phase: done
+current_phase: P1
 last_updated: '2026-11-12'
 phases:
 - id: P1
   name: The load decides every registered tool object inert, refusing it naming the distribution
-  status: done
+  status: in_progress
   satisfies:
   - R1
   - R2
@@ -24,10 +24,10 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 2
-  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report
+  verify: sh spec/capability-tool-objects-inert/verify/p1.sh phase && sh spec/capability-tool-objects-inert/verify/p1.sh cli-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh cli-modern && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh replanted-modern && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-legacy && sh spec/capability-tool-objects-inert/verify/p1.sh mutants-modern && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh control && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-handshake-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-1 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-2 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-3 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh sweep-modern-4 && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh cases && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-handshake && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh sweep-modern
 - id: P2
   name: Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
-  status: done
+  status: in_progress
   satisfies:
   - R3
   - R5
@@ -205,6 +205,47 @@ handler and the module cache (the sibling `capability-reload-after-failure`'s) a
 - **Verify (retuned at remediation):** P1's chain, then `F1-gate.sh` `pins`, `control`, the eight sweep shards
   and `report`. The sweep's shards run once on the final tree; P2's gate reads their `report` rather than
   re-running them.
+
+### Remediation, review cycle 2 (N1) — reopened 2026-11-12
+
+`REVIEW.md` cycle 2's N1 (CRITICAL): the class branch of `_return_type_violation` took a class's `__module__`
+from its own namespace, `''` when it held none, while FastMCP reads `getattr(cls, '__module__', '')`; on every
+accepted metaclass but `type` that read finds a base's, so a server build ran capability code. Routed to the
+maintainer, who ruled the simpler rule: refuse, not resolve (wherever this round's text or `REVIEW.md` sets a
+"refuse vs resolve" choice, refusing is the design). P1 and P2 reopened; one commit carries the code, its pins
+and §7, since §7 names the pins (the profile's same-commit rule), so P2's R3 pin rides in P1's commit.
+
+- [x] `core/capabilities.py`, `_return_type_violation`: every class a return type holds, at any depth, must
+  carry its own `__module__` in its own namespace (`'__module__' in` the namespace read through `type`'s own
+  descriptor), exactly a `str`; one that does not is refused, `… holds a class with no __module__ of its own`,
+  naming the distribution and the field, before anything reads it. Nothing of the class runs in deciding: no
+  `getattr` through a metaclass, the namespace's keys already decided exact `str`. **Amended at build:** a
+  class defined in C (`str`, `dict`, `int`: no `Py_TPFLAGS_HEAPTYPE`, read through `type`'s own `__flags__`
+  descriptor) holds no `__module__` in its namespace, `type` reading its module from its C name, so the rule
+  as worded would refuse every member (their tools return `str` and `dict`) and the R3 test's `str`; such a
+  class passes. No class statement or `type()` call makes one.
+- [x] Rows beside each member set (`TOOL_DEPTH`, `tool-exact-return_type-no-own-module-<metaclass>`, 5 kinds):
+  a return type of each accepted metaclass (`type`, `abc`'s, pydantic's, `enum`'s, `TypedDict`'s) with no
+  `__module__` of its own, its base's a `PlantedStr` (`TypedDict`'s bases are `dict`'s); refused with that
+  cause, `_RAN` empty, the registry cut back. Red on `10f77b1`'s source (copied aside and restored, `cmp`):
+  all 20 rows; `abc`, pydantic's and `enum`'s ran the base's `__eq__` in the load's scratch build
+  (`its tool 'planted_echo' cannot be served: SystemExit: 0`), `type` and `TypedDict` loaded.
+- [x] The R3 pin through the CLI: `test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code`
+  (`tests/test_startup.py`, one per metaclass, stdin closed): exit `runtime_error`, the distribution named with
+  the cause, stdout empty. Red on `10f77b1`'s source, all five: `type` and `TypedDict` exit 0 and serve;
+  the other three refused for the `SystemExit` their base's `__eq__` raised. Five starts, about 4 s an era.
+- [x] `tests/mutants.py`: `capability-tool-return-type-own-module-unrequired` (the refusal dropped; killed by
+  the 20 rows) and `capability-tool-return-type-c-class-refused` (classes defined in C refused; killed by the
+  accepted shapes beside each member set), each killed in both eras.
+- [x] The class checker `remediation/F5-gate.sh` (review cycle 2, N1; checkers number on after cycle 1's F4):
+  `pins`, `cases`, and the sweep extended over the new decision: `F1-tool-rule-sweep.py` generates its mutants
+  with the rest (461 now), and `sweep-<era>` runs the 14 that touch the class branch in each era.
+- [x] `AGENTS.md` §7's rule list states the rule; § Testing and §7's evidence list name the rows and the CLI
+  test (same commit).
+- **Verify (retuned at remediation, cycle 2):** P1's chain, then `F5-gate.sh` `pins`, `cases`,
+  `sweep-handshake`, `sweep-modern`. `F1-tool-rule-sweep.py`'s mutant ids in `_return_type_violation` are
+  renumbered by the new decision, so the eight F1 shards re-run on this tree before `F1-gate.sh report` can
+  pass: the heavy run the foreman schedules, with the full verify.
 
 ## Phase P2 — Serving runs none of a capability's code but its handler; the cycle's checks, the ledger, the full verify
 **Satisfies:** R3, R5 · **Depends on:** P1

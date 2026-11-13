@@ -395,9 +395,14 @@ import has no effect.
     `TaskConfig` of a type of its own at depth, keyed by one, or with a key renamed, and a `tags` set
     that is not its default; a return type whose class, alias state, key of that state, arguments,
     module, `Annotated` metadata or `Literal` argument is of a type of its own, or whose alias's origin
-    is no class or alias the rule accepts, of each alias kind; and each kind of instance state that is
-    not pydantic's, each slot but `__dict__` missing, a fields set naming no field, and private state
-    on a model that declares none (`TOOL_DEPTH`); a `fn.__module__` of a type of its own; and a tool changed by a
+    is no class or alias the rule accepts, of each alias kind; a return type whose class holds no
+    `__module__` of its own, of each metaclass the load accepts, its base's `__module__` a `str` of a
+    type of its own (`tool-exact-return_type-no-own-module-<metaclass>`; each also driven through the
+    CLI with stdin closed, refused naming its distribution with stdout empty, in
+    `test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code`); and each
+    kind of instance state that is not pydantic's, each slot but `__dict__` missing, a fields set
+    naming no field, and private state on a model that declares none (`TOOL_DEPTH`); a `fn.__module__`
+    of a type of its own; and a tool changed by a
     resource handler's annotation or by a later capability's import (`tool-changed-*`). The planted
     types (`PLANTED_TYPES`, adding `list`, `set`, `float`, `timedelta`, a metaclass and a plain object)
     live in the capability module, which the tools module imports. Each is refused in one line naming its distribution, and a failed load leaves
@@ -2863,10 +2868,14 @@ What each mode means:
     one, JSON-like at every depth (exactly None, `bool`, `int`, `float` or `str`, or exactly a `list`
     or a `dict` keyed exactly by `str`, no container twice); `return_type` None, no annotation,
     `typing.Any`, `...`, a class of a metaclass the load names (`type`, pydantic's, `enum`'s, `abc`'s,
-    `TypedDict`'s) or an alias it names (a generic, a union, `Annotated`, `Literal`) whose parts pass
-    in turn; `fn` exactly a function whose `__module__` is exactly a `str` (what it does when a request
-    calls it is the capability's code, by design); every other field its declared default, node for
-    node, as `@mcp_tool` leaves it. A field the installed FastMCP adds that no rule names is decided by
+    `TypedDict`'s) that holds its own `__module__`, exactly a `str`, in its own namespace (a class
+    defined in C, such as `str` or `dict`, has none there, and passes: its module is its C name), or
+    an alias it names (a generic, a union, `Annotated`, `Literal`) whose parts pass in turn, every class
+    at any depth held to the same rule (a class without its own `__module__` is refused,
+    `… holds a class with no __module__ of its own`); `fn` exactly a function whose `__module__` is
+    exactly a `str` (what it does when a request calls it is the capability's code, by design); every
+    other field its declared default, node for node, as `@mcp_tool` leaves it. A field the installed
+    FastMCP adds that no rule names is decided by
     one generic rule, never skipped: a value JSON-like at every depth, or its own default, passes; any
     other is served undecided, with one warning on stderr per field per process naming the field and
     FastMCP's version, and never refuses a capability. A re-lock to a FastMCP whose model has a field
@@ -2950,7 +2959,9 @@ What each mode means:
   `test_a_served_capability_runs_none_of_its_code_but_its_handler`; and `subclass-reads-commands`,
   `exact-order`, `tool-subclass-reads-name` and `tool-exact-parameters-value` driven through the CLI
   over each transport in `test_a_capability_that_cannot_load_stops_startup`, every kind with
-  `CLUSTER_MCP_TEST_EVERY_KIND=1`).
+  `CLUSTER_MCP_TEST_EVERY_KIND=1`; and a return type whose class holds no `__module__` of its own, of
+  each metaclass the load accepts, driven through the CLI in
+  `test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code`).
 - **A capability with no entry point in the group is never loaded.** An editable member whose entry
   point was added without a `uv sync` has none, so the server silently serves without it;
   `test_installed_finds_every_workspace_member` fails loudly in that state.

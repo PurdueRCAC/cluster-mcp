@@ -64,7 +64,8 @@ from harness import Refused, stdio_refusal
 from cluster_mcp.core import MCPServerApp
 from cluster_mcp.core.capabilities import GROUP
 from cluster_mcp.core.startup import answer_until_eof
-from test_capabilities import MEMBER_SETS, REJECTED, UNLOADABLE, rejected_package, unloadable, write_metadata
+from test_capabilities import (MEMBER_SETS, NO_OWN_MODULE, REJECTED, UNLOADABLE, rejected_package, unloadable,
+                               write_metadata)
 from test_cli import CLI, LEGACY_CLI, SANDBOX
 
 INTERNAL_ERROR = -32603
@@ -728,6 +729,19 @@ def test_a_capability_that_cannot_load_stops_startup(kind: str, drive: str, tmp_
     # for any capability that cannot load.
     root, named, cause = plant_unloadable(tmp_path / 'planted', kind)
     violations = refused_start_violations(root, named, cause, drive)
+    assert violations == [], '\n'.join(violations)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize('meta', list(NO_OWN_MODULE))
+def test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code(meta: str,
+                                                                                        tmp_path: Path) -> None:
+    # A tool's return type whose class holds no `__module__` of its own, of each metaclass the load accepts:
+    # building a server reads the class's `__module__`, which on every metaclass but `type` finds its base's,
+    # a `str` of the capability's own whose every operation exits 0. The start is refused naming the
+    # distribution, with stdout empty: had any of that code run, the start would have ended with exit 0.
+    root, named, cause = plant_unloadable(tmp_path / 'planted', f'tool-exact-return_type-no-own-module-{meta}')
+    violations = refused_start_violations(root, named, cause, 'stdin-closed')
     assert violations == [], '\n'.join(violations)
 
 

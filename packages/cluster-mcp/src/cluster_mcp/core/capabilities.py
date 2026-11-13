@@ -375,6 +375,8 @@ def _default_violation(value: object, info: FieldInfo) -> str | None:
 _RETURN_CLASSES: Final = (type, type(BaseModel), enum.EnumType, abc.ABCMeta, typing._TypedDictMeta)
 _RETURN_ALIASES: Final = (types.GenericAlias, typing.Union, typing._GenericAlias, typing._UnionGenericAlias,
                           typing._AnnotatedAlias, typing._LiteralGenericAlias)
+# `Py_TPFLAGS_HEAPTYPE`: set on every class a class statement or `type()` makes, never on one defined in C.
+_HEAP_TYPE: Final = 1 << 9
 
 
 def _return_type_violation(value: object, info: FieldInfo) -> str | None:
@@ -382,8 +384,9 @@ def _return_type_violation(value: object, info: FieldInfo) -> str | None:
 
     FastMCP reads it as it registers the tool (`isinstance`, its `__module__`, its origin and arguments).
     Accepted: None, no annotation, `typing.Any` and `...`; a class whose metaclass is exactly one of
-    `_RETURN_CLASSES`, its namespace (read through `type`'s own descriptor) keyed exactly by `str`, its
-    `__module__`, when it holds one, exactly a `str`; and exactly one of `_RETURN_ALIASES`, its state read
+    `_RETURN_CLASSES`, its namespace (read through `type`'s own descriptor) keyed exactly by `str` and
+    holding its own `__module__`, exactly a `str` (a class defined in C has none there: `type` reads its
+    module from its C name); and exactly one of `_RETURN_ALIASES`, its state read
     through its instance dictionary when it has one, whose origin and arguments are accepted in turn, a
     `Literal`'s arguments exact scalars and an `Annotated`'s metadata exactly pydantic's `FieldInfo` or
     JSON-like. A class is not walked further: at a call, serializing the result through it is the call.
@@ -400,9 +403,12 @@ def _return_type_violation(value: object, info: FieldInfo) -> str | None:
             for label in namespace:
                 if type(label) is not str:
                     return f'holds a class with a {_type_name(type(label))} attribute name, not a str'
-            module = namespace.get('__module__', '')
-            if type(module) is not str:
-                return f'holds a class whose __module__ is a {_type_name(type(module))}, not a str'
+            if '__module__' in namespace:
+                module = namespace['__module__']
+                if type(module) is not str:
+                    return f'holds a class whose __module__ is a {_type_name(type(module))}, not a str'
+            elif type.__dict__['__flags__'].__get__(node) & _HEAP_TYPE:
+                return 'holds a class with no __module__ of its own'
             continue
         if not any(kind is alias for alias in _RETURN_ALIASES):
             return f'holds a {_type_name(kind)}, not a class or an alias it accepts'

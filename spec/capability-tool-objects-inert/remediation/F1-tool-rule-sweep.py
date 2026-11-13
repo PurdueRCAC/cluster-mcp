@@ -1,7 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Purdue RCAC and Contributors
 # SPDX-License-Identifier: MIT
 
-"""Review cycle 1, F1 and F3: every refusal the tool rules can make is held by the suite.
+"""Review cycle 1, F1 and F3: every refusal the tool rules can make is held by the suite. Extended at review
+cycle 2, N1: the return type's class branch requires the class's own `__module__` (a class defined in C
+excepted), a decision of `_return_type_violation`, so its mutants are generated with the rest; `ids` runs
+them alone.
 
     uv run python -I spec/capability-tool-objects-inert/remediation/F1-tool-rule-sweep.py MODE [ARGS]
                                                                                from the worktree root
@@ -43,7 +46,8 @@ Modes:
 
 Footprint: at most two children at a time, each one pytest process under bin/sandbox.sh, under 1 GB in
 all; a killed mutant takes about 3 to 13 s, a survivor about 40 s (the targets whole, under the sandbox):
-453 mutants, about 40 min an era with two children on a shared host (2026-11-12).
+453 mutants, about 40 min an era with two children on a shared host (2026-11-12); 461 once review
+cycle 2's N1 decision was added (2026-11-12).
 """
 
 from __future__ import annotations

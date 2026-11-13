@@ -4039,6 +4039,7 @@ SET_SCALARS = ('            scalars = all(type(item) is str or type(item) is int
 LITERAL_ITEM = ('                if not (item is None or type(item) is bool or type(item) is int or type(item) is float\n'
                 '                        or type(item) is str):\n')
 EXTRA = '    if extra is not None and (not allowed or type(extra) is not dict or _json_violation(extra)):\n'
+OWN_MODULE = "            elif type.__dict__['__flags__'].__get__(node) & _HEAP_TYPE:\n"
 
 
 def same_row(case_id: str, edits: tuple[tuple[str, str], ...], *rows: str) -> Case:
@@ -4080,6 +4081,13 @@ CASES += (
                 REFUSED_NAMING, 'tool-exact-return_type-literal-argument', NOT_REFUSED),
     alternative('capability-tool-return-type-literal-float-refused', LOADER,
                 ((LITERAL_ITEM, LITERAL_ITEM.replace(' or type(item) is float', '')),),
+                SHAPES_ROWS, '', 'an inert tool of a shape the load accepts was refused'),
+    # A class with no `__module__` of its own: refused, of each metaclass the load accepts, unless it is defined
+    # in C, whose module `type` reads from its C name (the members' `str` and `dict`).
+    Case('capability-tool-return-type-own-module-unrequired', LOADER, ((OWN_MODULE, '            elif False:\n'),),
+         every_set(REFUSED_NAMING, *(f'tool-exact-return_type-no-own-module-{meta}'
+                                     for meta in ('type', 'abc', 'model', 'enum', 'typed-dict'))), NOT_REFUSED),
+    alternative('capability-tool-return-type-c-class-refused', LOADER, ((OWN_MODULE, '            elif True:\n'),),
                 SHAPES_ROWS, '', 'an inert tool of a shape the load accepts was refused'),
     Case('capability-tool-return-type-origin-unwalked', LOADER,
          (("        if '__origin__' in state:\n            stack.append(state['__origin__'])",
