@@ -1,14 +1,14 @@
 # cluster-mcp
 
-An MCP server for HPC clusters: shell, files, jobs and storage for AI agents. It runs commands on a
-cluster over SSH for one user, or serves many users from a shared host. Its core serves shell and
-file tools on any cluster; the rest are capabilities you install as extras, for what your cluster
-has: the Slurm tools (`[slurm]`) and the Purdue RCAC-specific tools (`[rcac]`).
+cluster-mcp is an MCP server that gives AI agents shell, files, jobs and storage on HPC clusters.
+It runs commands on a cluster over SSH for one user, or serves many users from a shared host. Its
+core works on any cluster, and extras add the Slurm tools (`[slurm]`) and the Purdue RCAC tools
+(`[rcac]`).
 
-## Quick Start (Desktop Clients)
+## Quick Start
 
-For MCP-enabled desktop applications like Claude Desktop, Cursor, or Warp, add this server
-to your MCP configuration with an SSH host pointing at your cluster:
+Add the server to your MCP client (Claude Desktop, Cursor, Warp or another), with an SSH host
+pointing at your cluster:
 
 ```json
 {
@@ -22,83 +22,40 @@ to your MCP configuration with an SSH host pointing at your cluster:
 }
 ```
 
-This runs the server locally in `stdio` mode, executing commands on the cluster over SSH
-using your existing `~/.ssh/config` and keys.
+The client then runs the server on your machine in `stdio` mode. The server runs commands on the
+cluster over SSH, with your existing `~/.ssh/config` and keys.
 
-Install with uv, from git, as above, naming the extras your cluster needs in the requirement (one
-`args` element, spaces included): `[slurm]` adds the Slurm tools, `[rcac]` the Purdue RCAC-specific
-tools, which go with `[slurm]`, so a Purdue cluster takes `cluster-mcp[slurm,rcac]`, as above.
-`cluster-mcp` with no extra is the core alone: the shell, file and site-context tools. The server
-lists only the tools of what is installed, and its instructions name only those. In a shell, quote
-the requirement, since `[slurm,rcac]` is otherwise a glob:
+Name the extras your cluster needs in the requirement: `[slurm]` adds the Slurm tools, and `[rcac]`
+the Purdue RCAC tools, which go with `[slurm]`. With no extra you get the core alone. To install and
+run it from a shell:
 
 ```bash
 uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
 ```
 
-The server is a uv workspace: each extra installs one member, `cluster-mcp-slurm` or
-`cluster-mcp-rcac`, required by bare name, and none of the three is registered on PyPI. uv builds
-them from the same git commit; pip, or any install that skips uv's workspace sources, would look for
-them on the package index instead, where anyone could register those names.
+Claude Code cuts long server instructions, so the server trims its own to fit. To serve the
+cluster's rules in full, [raise both limits](docs/core/README.md#the-instructions-budget).
 
-Alternatively, set `CLUSTER_MCP_SSH_HOST` in your environment and omit `--ssh-host` from the args.
+## Capabilities
 
-If the server cannot connect, your client shows the reason as the error to its first request:
-`cannot connect to <host>: <cause>` (unknown host or SSH alias, connection refused, authentication
-failed, connection closed during authentication, or timed out after 15 seconds per step unless your
-SSH config sets `ConnectTimeout`). Check
-that `--ssh-host` names the SSH host or `~/.ssh/config` alias you use with `ssh`, not the MCP
-server's name.
+| Capability | Install | What it adds | Docs |
+|---|---|---|---|
+| Core | `cluster-mcp` | Shell, file and site-context tools, on any cluster | [docs/core](docs/core/README.md) |
+| Slurm | `cluster-mcp[slurm]` | Slurm job and cluster-status tools | [docs/slurm](docs/slurm/README.md) |
+| RCAC | `cluster-mcp[slurm,rcac]` (`[rcac]` goes with `[slurm]`) | Purdue RCAC storage, job, partition and account tools. To search RCAC documentation, add the [RCAC documentation service](docs/rcac/README.md#rcac-documentation) | [docs/rcac](docs/rcac/README.md) |
 
-Once running, the server keeps one connection to the cluster. A call that finds it lost reconnects,
-and gives up with the same `cannot connect to <host>: <cause>` at most 45 s after it began (three
-times the connect bound; a longer `ConnectTimeout` raises it). A link that dies silently, with no
-reset (a laptop asleep through a network change, an expired NAT entry, a login node powered off),
-is noticed too: the server probes the cluster after 15 s of quiet, and at once when a call starts,
-and takes the link for dead when a probe goes unanswered with nothing heard since, 15 s after a
-call's start or 29 s after a background probe. A call that starts on it then reconnects, or gives
-up as above; a command running on it returns `-1003` at most 44.45 s after the last message heard.
-A quiet command or a slow transfer is never cut while the cluster answers: at the default bound it
-must answer a probe within 29 s, and a transfer must hear some reply at least every 44 s (an upload
-above about 0.75 KB/s). A file transfer the lost link cuts short fails with an error naming the
-host that says the transfer may be partly made and what may remain: an upload's target or a
-download's local file may be truncated; a `write_file` (or an `sbatch` job script) leaves its target
-unchanged while staging, or, once it was being put in place, the old file or the new one, and may
-leave its private staging directory (`.cluster-mcp-…`) beside it
-([`issues/ssh-write-staging-leftover.md`](issues/ssh-write-staging-leftover.md)).
+The server serves an extra only where the cluster has the commands it needs.
 
-### The cluster's rules, in the instructions
+## Run modes
 
-Cluster administrators can publish rules for agents as Markdown files in `/etc/agents.d`. At
-startup the server reads every `*.md` file directly in that directory except the assembled
-`AGENTS.md` (which repeats the others), once (on the cluster in `ssh` mode, on the server's own host
-in `local` and `delegate` modes), and serves them after its own instructions, so the agent sees the
-site's rules without asking. Files go in whole, each under a
-`<!-- Source: name.md -->` header, in the byte order of their names (`LC_ALL=C sort`): an
-administrator who wants a file first gives it a name that sorts first, such as one starting `00-`.
-An edit takes effect at the next start. A control character in a file name (a line break, for
-instance) is shown as an escape such as `\x0a`, and a backslash as `\x5c`, so a name always stays
-on its one line. Names are shown by their decoded text, so two names that differ only in bytes that
-are not valid UTF-8 (each read as U+FFFD) can show alike; they are still two files.
+| Mode | For | How it runs |
+|---|---|---|
+| [`ssh`](SECURITY.md#mode-1-ssh-execution-stdio) | One user, from a desktop client (the default for stdio) | Runs commands on the cluster over SSH |
+| [`local`](SECURITY.md#mode-2-local-execution-http-with-authnone) | Development and testing only | Runs commands on the server's own host, under bash |
+| [`delegate`](SECURITY.md#mode-3-delegated-execution-http-with-auth) | Many users, from a shared host | Runs each user's commands as that user, through `sudo`; needs JWT or OIDC |
 
-In `delegate` mode one server serves many accounts, so it serves only what every account could
-read: the owner, the group and others must each be able to read every file, read and search the
-directory, and search every directory above it (through any symlink on the way), and none of these
-may carry an ACL entry. Otherwise the server serves a line saying the rules could not be read
-instead of any of them. In `local` and `ssh` modes the server reads as the user it serves, and the
-file system decides.
-
-The instructions stay within 4,096 characters by default, because Claude Code cuts server
-instructions there. Whatever does not fit is named, and the `cluster_context` tool (and the
-`cluster://context` resource) returns all of it. To serve everything to Claude Code, raise both
-limits, the server's and Claude Code's:
-
-- add `"--instructions-budget", "16384"` to the server's `args` (or set
-  `CLUSTER_MCP_INSTRUCTIONS_BUDGET=16384`);
-- set `CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=16384` in the shell that starts Claude Code, or in
-  the `env` block of its `settings.json`. It raises Claude Code's limits on server instructions and
-  on tool descriptions together (the variable needs Claude Code 2.1.280 or later; before 2.1.296 the
-  default cut is 2,048 characters). `/context` shows what was loaded.
+[SECURITY.md](SECURITY.md) says how to run each mode, including a hosted HTTP server, and what each
+mode trusts.
 
 ## Upgrading from rcac-mcp
 
@@ -119,170 +76,6 @@ distribution that carries every capability (`cluster-mcp[slurm,rcac]`) and runs 
 `rcac-mcp` command. Update your MCP client
 configuration to the Quick Start form above.
 
-## Execution Modes
-
-The server supports three execution modes:
-
-- **`ssh`** (default for stdio) — Execute commands on a remote HPC cluster via SSH.
-- **`local`** — Execute commands locally under bash. For development/testing only.
-- **`delegate`** — Multi-user mode; run as a privileged process and delegate commands to
-  authenticated users via `sudo`. Requires JWT or OIDC authentication.
-
-In every mode a command runs in a login bash (`/bin/bash -l`), whatever the user's login shell, so
-`module` and the site's tools behave the same for everyone. No startup file reads a file's content
-or changes where a command starts, and nothing the login initialisation prints is returned, with
-one exception: over ssh, a background job started by the remote login shell's own rc file (zsh's
-`.zshenv`, say) can write into a result while the command runs
-([`issues/startup-background-jobs.md`](issues/startup-background-jobs.md)). A result holds all of
-the command's output, however slowly it arrives: the launcher reports the command's end on both
-streams, and the call returns there, so a background job the command or a startup file leaves
-running never holds it, and what such a job prints afterwards is not returned. A command killed by
-signal N (or exiting 128+N) has exit code `-N`. `write_file` and `sbatch`'s job script are written
-byte for byte; over ssh their content never rides a command's stdin but goes by SFTP to a private
-temporary file beside the target, which is checked against the bytes sent (its size and checksum)
-and then moved into place, so the file is replaced whole and keeps its permissions (but setuid and
-setgid, as `cat >` leaves them). A transfer that fails or falls short (a full filesystem, a spent
-quota) leaves the file untouched and says why, and a write refuses what `cat >` refuses (a file you
-may not write, a link whose target's directory is missing). A command that exceeds its `timeout`
-returns what it printed so far with exit code `-1001`, within 2 seconds of the deadline, and is
-stopped, with everything it started, within the same 2 seconds: each process gets at most one TERM signal, so a command that
-handles it has a second to finish, and then KILL (in `delegate` mode under a server that is not
-root, only the launch gets the TERM, and the command's processes get KILL a second later); a
-command whose deadline passes while a login startup file still runs is not started in `local` or
-`delegate` mode (unless the server's wall clock steps meanwhile: a step forward reports a command
-whose deadline has not come as not started, `-1002`, and a step back lets a late one start, which in
-`delegate` mode under a server that is not root then runs on). A command with no timeout, or one that has not reached it, is never signalled by
-the stop, unless a login startup file shadows the shell builtins the launch runs in a way it cannot
-undo (a readonly function, a function named `enable` beside a disabled `unset`), which can stop a
-command early, as such a file can already break the launch itself. A command that has finished
-while what reads its output went away (the server killed, the link lost) has what it left running
-stopped too, since its launch dies before it can report the end. What is not stopped: a process that
-has left the command's process group (`setsid`, a daemon); a login startup file that hangs before
-the command starts, in `delegate` mode under a server that is not root, and in every mode a process
-it started that ignores the TERM signal and holds none of the command's output (over ssh, one that
-holds it too, once the login shell has died of the TERM); over ssh, a command on a server that
-ignores the SSH `signal` request; and, under such a startup file, whatever ignores TERM and holds
-none of the command's output ([`issues/timeout-stop-limits.md`](issues/timeout-stop-limits.md)). Over
-ssh, a connection lost before the command's end was reported, a link gone silent included, gives
-`-1003`: the command may have run, and may still be running.
-
-### Which capabilities are served
-
-An installed capability is served only where the cluster has what it needs. At startup in `ssh` and
-`local` modes the server looks up, once, the commands each installed capability declares (the Slurm
-capability's `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo` and `scontrol`; the RCAC capability's
-`findscratch` and `myquota`) on the cluster, through the same login shell its tools run in, before it
-answers any request. A capability missing one of its commands is served as if it were not installed:
-none of its tools, resources or instructions. The server says so on stderr, one line for each:
-
-```
-Capability cluster-mcp-slurm withheld: the cluster is missing sbatch, squeue, scancel, sacct, sinfo, scontrol
-```
-
-The lookup takes 10 s at most. If it gives no answer in that time, or cannot run, every capability is
-served, with one line each saying why (`Capability <name> served without a probe answer: the probe
-did not answer within 10 s`). To serve every installed capability without looking, pass
-`--skip-probes`, or set `CLUSTER_MCP_SKIP_PROBES` to any non-empty value (`0` included); the server
-then says the probes were skipped. `delegate` mode never probes: it serves every installed
-capability, and says so.
-
-See [SECURITY.md](SECURITY.md) for detailed architecture and configuration.
-
-## Hosted HTTP Server
-
-For a shared hosted instance with authentication, run `cluster-mcp` installed with the extras the
-cluster needs (the Quick Start's requirement):
-
-### Basic HTTP Server
-
-```bash
-cluster-mcp -t http --ssh-host cluster.rcac.purdue.edu
-```
-
-### With JWT Authentication
-
-```bash
-export JWT_SECRET="your-secret-key-at-least-32-characters"
-cluster-mcp -t http -a jwt -e delegate
-
-# Generate a token for clients
-cluster-mcp --generate-token --lifetime 86400
-```
-
-### Docker Compose with TLS
-
-For production-like deployments with HTTPS:
-
-```bash
-# Install mkcert if needed
-brew install mkcert
-mkcert -install
-
-# Generate certificates
-mkdir -p certs
-mkcert -cert-file certs/cert.pem -key-file certs/key.pem mcp.rcac.dev localhost 127.0.0.1
-
-# Add to /etc/hosts
-echo "127.0.0.1 mcp.rcac.dev" | sudo tee -a /etc/hosts
-
-# Run
-docker compose up
-```
-
-The server will be available at `https://mcp.rcac.dev:8443`.
-
-## RCAC Documentation
-
-This server does not search RCAC documentation. The separate `rcac-docs-mcp` service at
-`https://docs.rcac.purdue.edu/mcp` does: add it to your MCP client alongside this server.
-
-## Available Tools
-
-The tools come in three groups, as the server's instructions list them: the core, which every
-install serves; the Slurm tools, served with the `[slurm]` extra; and the RCAC-specific tools,
-served with the `[rcac]` extra (install it with `[slurm]`: several of its tools take a Slurm job id).
-A server serves only the groups installed.
-
-### Core
-
-Shell and files:
-
-- `run_command(command, cwd, timeout)` — Execute a shell command on the remote system
-- `list_directory(path, show_hidden)` — List contents of a directory
-- `read_file(path, encoding, max_size)` — Read contents of a file
-- `write_file(path, content, append, create_dirs, encoding)` — Write content to a file, byte for byte (`encoding="base64"` for binary)
-- `upload_file(local_path, remote_path)` — Upload a file to the remote system
-- `download_file(remote_path, local_path)` — Download a file from the remote system
-
-Site context:
-
-- `cluster_context()` — The cluster's rules from `/etc/agents.d`, in full, as read at startup
-
-### Slurm (`[slurm]`)
-
-- `sbatch(...)` — Submit a batch job (from script path or inline content, written byte for byte); `args` are the job script's arguments, `extra_args` more sbatch options, each a list with one argument per element
-- `squeue(...)` — View the job queue
-- `scancel(...)` — Cancel jobs
-- `sacct(...)` — Query job accounting history
-- `sinfo(...)` — Cluster and partition status
-- `scontrol_show_job(job_id)` — Detailed Slurm job info
-- `scontrol_show_node(node)` — Detailed node info
-
-The `extra_args` of `sbatch`, `squeue`, `scancel`, `sacct` and `sinfo` is a list of options, one argument per element (`extra_args=["--long"]`); a string is refused.
-
-### RCAC-specific (`[rcac]`, with `[slurm]`)
-
-- `myquota()` — Show storage usage and quota limits
-- `storage_paths()` — Get resolved paths for home, scratch, and depot
-- `jobinfo(job_id)` — Detailed job information
-- `jobcmd(job_id)` — Command submitted for a job
-- `jobenv(job_id)` — Environment variables for a job
-- `jobscript(job_id)` — Full submission script for a job
-- `showpartitions()` — Available partitions and their status
-- `average_wait(partition, account)` — Queue wait time statistics
-- `slist()` — Slurm accounts and usage
-- `sfeatures()` — Node hardware features and constraints
-
 ## Development
 
 ```bash
@@ -295,6 +88,8 @@ Run the test suite:
 ```bash
 pytest
 ```
+
+The rules for changing the code are in [AGENTS.md](AGENTS.md).
 
 ## License
 

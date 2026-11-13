@@ -13,4 +13,4 @@ serves the core's tools only. The capabilities are its extras: `[slurm]` install
 uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help
 ```
 
-The full documentation is the repository's README: https://github.com/PurdueRCAC/cluster-mcp
+Documentation: [docs/core/README.md](https://github.com/PurdueRCAC/cluster-mcp/blob/main/docs/core/README.md), with how to install and configure the server, its tools, and how it behaves.

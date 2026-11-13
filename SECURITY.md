@@ -13,6 +13,18 @@ The server supports three execution modes, each with different security characte
 | `local` | http/sse | none | Development/testing only |
 | `delegate` | http/sse | jwt/oidc | Multi-user production deployment |
 
+How to run each:
+
+- **`ssh`** is the default for stdio. It runs commands on a remote HPC cluster over SSH. Add it to
+  a desktop client as the [Quick Start](README.md#quick-start) shows; see
+  [Mode 1](#mode-1-ssh-execution-stdio).
+- **`local`** runs commands locally under bash, for development/testing only; see
+  [Mode 2](#mode-2-local-execution-http-with-authnone).
+- **`delegate`** is the multi-user mode. The server runs as a privileged process and delegates each
+  command to its authenticated user through `sudo`. It requires JWT or OIDC authentication; see
+  [Mode 3](#mode-3-delegated-execution-http-with-auth) and
+  [Hosted HTTP server](#hosted-http-server).
+
 ## Mode 1: SSH Execution (stdio)
 
 **Intended use:** Desktop MCP clients (Claude Desktop, Cursor, etc.) connecting to
@@ -249,6 +261,49 @@ the user map file.
 ```
 
 This would be mapped using the `alice@purdue.edu` key from the user map.
+
+## Hosted HTTP server
+
+For a shared hosted instance with authentication, run `cluster-mcp` installed with the extras the
+cluster needs (the requirement of the [Quick Start](README.md#quick-start)).
+
+### Basic HTTP Server
+
+```bash
+cluster-mcp -t http --ssh-host cluster.rcac.purdue.edu
+```
+
+### With JWT Authentication
+
+```bash
+export JWT_SECRET="your-secret-key-at-least-32-characters"
+cluster-mcp -t http -a jwt -e delegate
+
+# Generate a token for clients
+cluster-mcp --generate-token --lifetime 86400
+```
+
+### Docker Compose with TLS
+
+For production-like deployments with HTTPS:
+
+```bash
+# Install mkcert if needed
+brew install mkcert
+mkcert -install
+
+# Generate certificates
+mkdir -p certs
+mkcert -cert-file certs/cert.pem -key-file certs/key.pem mcp.rcac.dev localhost 127.0.0.1
+
+# Add to /etc/hosts
+echo "127.0.0.1 mcp.rcac.dev" | sudo tee -a /etc/hosts
+
+# Run
+docker compose up
+```
+
+The server is then at `https://mcp.rcac.dev:8443`.
 
 ## Recommendations
 

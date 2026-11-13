@@ -1,0 +1,314 @@
+# The fact map of readme-front-door (GOAL R4, R5, R6; Review mode).
+#
+# Every fact README.md and SECURITY.md state at the baseline (`2719b7a`), and the one file that
+# states it on the branch. `src` is the baseline lines that state it; `dest` is its home on the
+# branch; `phrases` are short pieces of the baseline text that carry the fact. docs-gate.py `facts`
+# checks, with backticks and `*` removed, link syntax read as its text and its target, whitespace
+# collapsed:
+#   - every phrase occurs in its fact's baseline lines (the map quotes the baseline, it invents nothing);
+#   - every baseline line but a blank line, a heading, a fence marker or a table delimiter falls in
+#     some fact's `src` (every fact is mapped);
+#   - every phrase of a fact occurs in its `dest`, all of them inside one level-2 section of it;
+#   - an `issues/` dest is linked from a docs page;
+#   - every line inside a baseline fence that a fact maps appears, stripped, as a line of its dest
+#     (code moves verbatim).
+# A phrase matches whole: not inside a longer word or number (`45 s` is not found in `44.45 s`). A
+# phrase holding two capitals in a row (`TERM`, `MIT`, `JWT or OIDC`) matches case and all; any other
+# phrase ignores case.
+# A phrase is kept verbatim on the branch: rewrite around it, never through it. The maintainer reads
+# the pages; this map is the net under that read, not a proof that each sentence says the same.
+
+facts:
+
+# --- README.md: the opening ----------------------------------------------------------------------
+- id: opening
+  src: README.md:1-6
+  dest: README.md
+  phrases: [HPC clusters, AI agents, over SSH, shared host]
+- id: opening-extras
+  src: README.md:4-6
+  dest: README.md
+  phrases: ['[slurm]', '[rcac]', any cluster]
+
+# --- README.md: Quick Start ----------------------------------------------------------------------
+- id: quickstart-clients
+  src: README.md:8-11
+  dest: README.md
+  phrases: [Claude Desktop, Cursor, Warp]
+- id: quickstart-config
+  src: README.md:13-23
+  dest: README.md
+  phrases: [mcpServers, 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp',
+            '--ssh-host', cluster.rcac.purdue.edu]
+- id: quickstart-stdio
+  src: README.md:25-26
+  dest: README.md
+  phrases: [stdio, '~/.ssh/config']
+- id: install-extras
+  src: README.md:28-31
+  dest: README.md
+  phrases: ['[slurm]', '[rcac]', 'with [slurm]', core alone]
+- id: install-core-alone
+  src: README.md:31-32
+  dest: docs/core/README.md
+  phrases: ['shell, file and site-context tools', lists only the tools of what is installed]
+- id: install-quote
+  src: README.md:32-33
+  dest: docs/core/README.md
+  phrases: [otherwise a glob]
+- id: install-line
+  src: README.md:35-37
+  dest: README.md
+  phrases: ["uvx --from 'cluster-mcp[slurm,rcac] @ git+https://github.com/PurdueRCAC/cluster-mcp#subdirectory=packages/cluster-mcp' cluster-mcp --help"]
+- id: install-workspace
+  src: README.md:39-42
+  dest: docs/core/README.md
+  phrases: [uv workspace, cluster-mcp-slurm, cluster-mcp-rcac, registered on PyPI, pip, anyone could register]
+- id: ssh-host-env
+  src: README.md:44
+  dest: docs/core/README.md
+  phrases: [CLUSTER_MCP_SSH_HOST, '--ssh-host']
+
+# --- README.md: the connection (R4) ---------------------------------------------------------------
+- id: connect-errors
+  src: README.md:46-51
+  dest: docs/core/README.md
+  phrases: ['cannot connect to <host>: <cause>', unknown host or SSH alias, connection refused, authentication failed,
+            connection closed during authentication, 15 seconds per step, ConnectTimeout, "not the MCP server's name"]
+- id: reconnect
+  src: README.md:53-55
+  dest: docs/core/README.md
+  phrases: [keeps one connection, reconnects, 45 s, three times the connect bound]
+- id: silent-link
+  src: README.md:55-60
+  dest: docs/core/README.md
+  phrases: [a laptop asleep through a network change, an expired NAT entry, a login node powered off, 15 s of quiet,
+            "15 s after a call's start", 29 s after a background probe, '-1003', 44.45 s]
+- id: never-cut
+  src: README.md:61-63
+  dest: docs/core/README.md
+  phrases: [never cut while the cluster answers, within 29 s, every 44 s, 0.75 KB/s]
+- id: transfer-cut
+  src: README.md:63-68
+  dest: docs/core/README.md
+  phrases: [the transfer may be partly made, may be truncated, the old file or the new one, '.cluster-mcp-',
+            issues/ssh-write-staging-leftover.md]
+
+# --- README.md: the cluster's rules, in the instructions (R4, Q2) --------------------------------
+- id: site-rules
+  src: README.md:70-82
+  dest: docs/core/README.md
+  phrases: [/etc/agents.d, except the assembled AGENTS.md, '<!-- Source: name.md -->', LC_ALL=C sort, '00-',
+            next start, '\x0a', '\x5c', U+FFFD]
+- id: site-delegate
+  src: README.md:84-89
+  dest: docs/core/README.md
+  phrases: [every account could read, ACL, the rules could not be read, the file system decides]
+- id: budget
+  src: README.md:91-101
+  dest: docs/core/README.md
+  phrases: ['4,096 characters', cuts server instructions, cluster_context, 'cluster://context', '--instructions-budget',
+            CLUSTER_MCP_INSTRUCTIONS_BUDGET=16384, CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH=16384, settings.json,
+            2.1.280, 2.1.296, '2,048 characters', /context shows what was loaded]
+
+# --- README.md: Upgrading (kept in place) --------------------------------------------------------
+- id: upgrading
+  src: README.md:103-120
+  dest: README.md
+  phrases: ['deprecated in 0.2.0, removed no earlier than 0.4.0', RCAC_SSH_HOST, 'rcac://storage',
+            compatibility distribution, Quick Start form above]
+
+# --- README.md: Execution Modes (R1's run-modes table, R4, R5) -----------------------------------
+- id: modes-readme
+  src: README.md:122-129
+  dest: README.md
+  phrases: [ssh, local, delegate, default, development, sudo]
+- id: modes-security
+  src: README.md:126-129
+  dest: SECURITY.md
+  phrases: [development/testing only, multi-user, JWT or OIDC, sudo]
+- id: login-bash
+  src: README.md:131-136
+  dest: docs/core/README.md
+  phrases: [/bin/bash -l, module, "a background job started by the remote login shell's own rc file", .zshenv,
+            issues/startup-background-jobs.md]
+- id: output-end
+  src: README.md:136-140
+  dest: docs/core/README.md
+  phrases: ["all of the command's output", both streams, never holds it]
+- id: signal-exit
+  src: README.md:140
+  dest: docs/core/README.md
+  phrases: [signal N, 128+N, '-N']
+- id: writes
+  src: README.md:140-146
+  dest: docs/core/README.md
+  phrases: [byte for byte, by SFTP to a private temporary file, size and checksum, replaced whole, keeps its permissions,
+            setuid, a full filesystem, a spent quota, refuses what cat > refuses]
+- id: timeout-stop
+  src: README.md:146-154
+  dest: docs/core/README.md
+  phrases: ['-1001', 2 seconds, TERM, KILL, a second to finish, only the launch gets the TERM, is not started, '-1002',
+            wall clock, a step forward, a step back lets a late one start]
+- id: never-signalled
+  src: README.md:154-159
+  dest: docs/core/README.md
+  phrases: [never signalled by the stop, the server killed, the link lost]
+- id: shadowed-builtins
+  src: README.md:155-157
+  dest: issues/timeout-stop-limits.md
+  phrases: [readonly function, a function named enable beside a disabled unset]
+- id: not-stopped
+  src: README.md:159-165
+  dest: issues/timeout-stop-limits.md
+  phrases: [setsid, a daemon, signal request, ignores TERM]
+- id: not-stopped-link
+  src: README.md:165
+  dest: docs/core/README.md
+  phrases: [issues/timeout-stop-limits.md]
+- id: lost-1003
+  src: README.md:165-167
+  dest: docs/core/README.md
+  phrases: ['-1003', may still be running]
+
+# --- README.md: Which capabilities are served (R4) -----------------------------------------------
+- id: probe
+  src: README.md:169-180
+  dest: docs/core/README.md
+  phrases: [findscratch, myquota, the same login shell, before it answers any request, served as if it were not installed,
+            'Capability cluster-mcp-slurm withheld: the cluster is missing sbatch, squeue, scancel, sacct, sinfo, scontrol']
+- id: probe-timeout
+  src: README.md:182-187
+  dest: docs/core/README.md
+  phrases: [10 s, served without a probe answer, '--skip-probes', CLUSTER_MCP_SKIP_PROBES, 0 included, never probes]
+- id: see-security
+  src: README.md:189
+  dest: README.md
+  phrases: [SECURITY.md]
+
+# --- README.md: Hosted HTTP Server (R5) ----------------------------------------------------------
+- id: hosted-intro
+  src: README.md:191-194
+  dest: SECURITY.md
+  phrases: [installed with the extras the cluster needs]
+- id: hosted-basic
+  src: README.md:196-200
+  dest: SECURITY.md
+  phrases: [Basic HTTP Server, cluster-mcp -t http --ssh-host cluster.rcac.purdue.edu]
+- id: hosted-jwt
+  src: README.md:202-210
+  dest: SECURITY.md
+  phrases: [With JWT Authentication, cluster-mcp --generate-token --lifetime 86400]
+- id: hosted-compose
+  src: README.md:212-232
+  dest: SECURITY.md
+  phrases: [Docker Compose with TLS, production-like, brew install mkcert, mkcert -install,
+            mkcert -cert-file certs/cert.pem -key-file certs/key.pem mcp.rcac.dev localhost 127.0.0.1,
+            'echo "127.0.0.1 mcp.rcac.dev" | sudo tee -a /etc/hosts', docker compose up, 'https://mcp.rcac.dev:8443']
+
+# --- README.md: RCAC Documentation (Q3) ----------------------------------------------------------
+- id: rcac-docs
+  src: README.md:234-237
+  dest: docs/rcac/README.md
+  phrases: [does not search RCAC documentation, rcac-docs-mcp, 'https://docs.rcac.purdue.edu/mcp', alongside this server]
+
+# --- README.md: Available Tools (R3) -------------------------------------------------------------
+- id: tool-groups
+  src: README.md:239-244
+  dest: docs/rcac/README.md
+  phrases: [several of its tools take a Slurm job id]
+- id: tool-groups-core
+  src: README.md:241-242
+  dest: docs/core/README.md
+  phrases: [every install serves]
+- id: core-tools
+  src: README.md:246-259
+  dest: docs/core/README.md
+  phrases: ['run_command(command, cwd, timeout)', 'list_directory(path, show_hidden)', 'read_file(path, encoding, max_size)',
+            'write_file(path, content, append, create_dirs, encoding)', 'encoding="base64"',
+            'upload_file(local_path, remote_path)', 'download_file(remote_path, local_path)', 'cluster_context()',
+            as read at startup]
+- id: slurm-tools
+  src: README.md:261-271
+  dest: docs/slurm/README.md
+  phrases: ['sbatch(...)', from script path or inline content, one argument per element, 'squeue(...)', 'scancel(...)',
+            'sacct(...)', 'sinfo(...)', 'scontrol_show_job(job_id)', 'scontrol_show_node(node)', extra_args,
+            a string is refused]
+- id: rcac-tools
+  src: README.md:273-284
+  dest: docs/rcac/README.md
+  phrases: ['myquota()', 'storage_paths()', 'jobinfo(job_id)', 'jobcmd(job_id)', 'jobenv(job_id)', 'jobscript(job_id)',
+            'showpartitions()', 'average_wait(partition, account)', 'slist()', 'sfeatures()', 'home, scratch, and depot']
+
+# --- README.md: Development, License -------------------------------------------------------------
+- id: development
+  src: README.md:286-297
+  dest: README.md
+  phrases: [uv sync, editable, cluster-mcp -e local, pytest]
+- id: license
+  src: README.md:299-301
+  dest: README.md
+  phrases: [MIT]
+
+# --- SECURITY.md (R5: kept) ----------------------------------------------------------------------
+- id: sec-intro
+  src: SECURITY.md:1-4
+  dest: SECURITY.md
+  phrases: [security model, isolated across different deployment modes]
+- id: sec-modes
+  src: SECURITY.md:6-14
+  dest: SECURITY.md
+  phrases: [three execution modes, Local MCP client → remote HPC cluster, Development/testing only,
+            Multi-user production deployment, http/sse]
+- id: sec-ssh
+  src: SECURITY.md:16-46
+  dest: SECURITY.md
+  phrases: [Desktop MCP clients, No authentication at the MCP layer, stdio is inherently single-user,
+            Security boundary is the SSH connection itself, cluster-mcp --ssh-host cluster.example.edu,
+            export CLUSTER_MCP_SSH_HOST=cluster.example.edu, The local user is trusted,
+            standard Unix file/process ownership]
+- id: sec-local
+  src: SECURITY.md:48-70
+  dest: SECURITY.md
+  phrases: [NOT FOR PRODUCTION, local bash, anyone who can reach the HTTP endpoint can execute commands,
+            Single shared executor, cluster-mcp -t http -e local, Never expose]
+- id: sec-delegate
+  src: SECURITY.md:72-114
+  dest: SECURITY.md
+  phrases: [runs as root, sudo -u alice, 'sub, email, or preferred_username', sudo -n -H -u <local_user>,
+            "start in that user's home", "reads and writes no file on a user's behalf", PAM,
+            export CLUSTER_MCP_USER_MAP=/etc/cluster-mcp/users.map, cluster-mcp -t http -a jwt -e delegate,
+            'Lines starting with # are comments', alice@purdue.edu alice, service-account-1 svc_batch]
+- id: sec-oidc
+  src: SECURITY.md:116-131
+  dest: SECURITY.md
+  phrases: [OIDC_CONFIG_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, MCP_BASE_URL, refuses to start,
+            client secret as optional, CIMD, resource parameter, DiskStore, <home>/oauth-proxy/cache.db,
+            FileTreeStore, must register again]
+- id: sec-isolation
+  src: SECURITY.md:133-206
+  dest: SECURITY.md
+  phrases: [contextvars.ContextVar, task-local, 'executor_var: ContextVar[Executor] = ContextVar(''executor'', default=None)',
+            on_read_resource, 'cluster://storage', OPEN_RESOURCES, matched as the exact URI string sent, deprecated URI,
+            No shared state, Automatic isolation, No cross-request leakage, Clean teardown, _current_executor = None,
+            get_access_token(), decimal]
+- id: sec-sudoers
+  src: SECURITY.md:208-227
+  dest: SECURITY.md
+  phrases: [without a password prompt, /etc/sudoers.d/cluster-mcp, 'cluster-mcp ALL=(ALL) NOPASSWD: ALL',
+            'cluster-mcp ALL=(alice,bob,svc_batch) NOPASSWD: ALL', NOEXEC, AppArmor, Limit which users can be delegated to]
+- id: sec-claims
+  src: SECURITY.md:229-251
+  dest: SECURITY.md
+  phrases: [order of preference, preferred_username, Keycloak, first non-empty claim, '"sub": "alice@purdue.edu"',
+            '"iss": "rcac-mcp"', '1706650000']
+- id: sec-recommendations
+  src: SECURITY.md:253-278
+  dest: SECURITY.md
+  phrases: [Use local mode with auth=none, Leverage existing SSH key infrastructure, dedicated service account,
+            "relays the deadline's TERM to the login shell alone", issues/timeout-stop-limits.md,
+            Configure restrictive sudoers rules, nginx, Audit log all commands, rotate JWT secrets]
+- id: sec-reporting
+  src: SECURITY.md:280-283
+  dest: SECURITY.md
+  phrases: [report it privately, rcac-help@purdue.edu]
