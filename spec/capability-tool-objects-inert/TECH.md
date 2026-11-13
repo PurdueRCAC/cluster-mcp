@@ -36,7 +36,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
+  verify: sh spec/capability-tool-objects-inert/verify/p2.sh phase && sh spec/capability-tool-objects-inert/verify/p2.sh ledger && sh spec/capability-tool-objects-inert/remediation/F5-gate.sh pins && sh spec/capability-tool-objects-inert/remediation/F1-gate.sh report && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-legacy-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-1 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-2 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-3 && sh spec/capability-tool-objects-inert/verify/p2.sh full-modern-4 && sh spec/capability-tool-objects-inert/verify/p2.sh full-ends
 review:
   last_reviewed_commit: 697dc8f572f7e7e22b37dbad09ec87ad0eacf6c3
   verdict: changes-requested
@@ -287,6 +287,11 @@ the profile's full verify green once.
   `report` (453 mutants, 449 killed and 4 equivalent an era); the full verify, each era: 44, 154, 513, and
   4947 passed with 14 skipped (the login-shell rows for a shell this host lacks; CI installs every shell);
   `full-ends` green.
+- **Reopened at remediation (review cycle 2, N1), 2026-11-12.** P2 built on P1 and satisfies R3, which N1
+  broke. Its R3 pin for N1 (`test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_its_code`)
+  rides in P1's commit (§7 names it). P2's gate re-runs on the remediated tree: `phase`, `ledger`,
+  `F5-gate.sh pins` (P1's run of it on the same tree stands in), `F1-gate.sh report` after the eight shards
+  re-run, then the full verify; the evidence on `4b04dad` no longer stands for this tree.
 - **Touches:** `tests/test_capabilities.py`, `AGENTS.md` § Testing (the R3 test named).
 
 ---
