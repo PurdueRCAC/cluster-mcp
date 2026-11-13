@@ -405,11 +405,15 @@ import has no effect.
     one is, discovered once (`test_a_failed_load_is_not_cached`); a load after a failed one, through
     each library entry point, with a clean capability before the failing one in each package layout
     (top-level, either one's package imported first, a portion of the `cluster_mcp` namespace, the
-    clean one's tool registered by a library's module), is refused with the first load's message and
-    the instruction to restart, naming the failing distribution, never the clean one, with the
-    failing one there and without it, importing, registering and running nothing, whether the
-    failing one left a `sys.modules` key whose comparison raises or not
-    (`test_a_load_after_a_failed_one_is_refused_for_it`); a capability's own `CapabilityLoadError`
+    clean one's tool registered by a library's module) and with the failing one sorting first, so no
+    earlier load reached the clean one, is refused with the first load's message and the instruction
+    to restart, naming the failing distribution, never the clean one, with the failing one there,
+    without it, and given a capability no load imported, importing, registering and running nothing,
+    whether the failing one left a `sys.modules` key whose comparison raises or not
+    (`test_a_load_after_a_failed_one_is_refused_for_it`; those inputs are where a load that loads what
+    it is given before it refuses would import, register or run, and the mutation cases
+    `capability-refused-load-loads-what-it-is-given` and `capability-refused-load-loads-what-it-finds`
+    keep that kill); a capability's own `CapabilityLoadError`
     (a subclass, its `args` emptied, a text or a distribution of a type of its own) is raised as it is
     and none of its code runs, then or in a later load, which is refused naming the group
     (`test_a_load_after_a_capabilitys_own_refusal_runs_none_of_its_code`); an interrupted load

@@ -338,14 +338,35 @@ OWN_TEST = f'{CAPABILITIES}::test_a_load_after_a_capabilitys_own_refusal_runs_no
 RETRY_ENTRIES = ('load', 'installed', 'server')
 RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', 'tool-not-a-tool',
            'stray-through-a-helper', 'non-tool-from-a-helper', 'registers-in-its-text', 'plants-a-module-key')
-RETRY_LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'registered-by-a-library')
+RETRY_LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'registered-by-a-library',
+                 'failing-sorts-first')
+# What a test of a load after a failed one fails with when the refused load imported, registered or ran.
+RETRY_CHANGED = 'the refused load imported, registered or ran something'
 
 
-def retried(*layouts: str) -> tuple[str, ...]:
-    """The row of a load after a failed one beside both members for each entry point, each failing kind
+def retried(*layouts: str, entries: Sequence[str] = RETRY_ENTRIES) -> tuple[str, ...]:
+    """The row of a load after a failed one beside both members for each of `entries`, each failing kind
     and each of `layouts` (none: every layout)."""
     return tuple(f'{RETRY_TEST}[{entry}-{kind}-{layout}-both]'
-                 for entry in RETRY_ENTRIES for kind in RETRIED for layout in (layouts or RETRY_LAYOUTS))
+                 for entry in entries for kind in RETRIED for layout in (layouts or RETRY_LAYOUTS))
+
+
+# The guard that refuses a load after a failed one, and that guard loading what it is given (or, with
+# `given` False, what it discovers too) before it raises the right refusal.
+RETRY_GUARD = '    if _failed is not None:\n        distribution, message = _failed\n'
+
+
+def loads_then_refuses(given: bool) -> tuple[tuple[str, str], ...]:
+    """The edit making the guard load, swallowing what that raises, then refuse as before."""
+    load_it = ('        if eps is not None:\n'
+               '            try:\n'
+               '                _load(eps)\n'
+               '            except BaseException:\n'
+               '                pass\n') if given else ('        try:\n'
+                                                       '            _load(eps)\n'
+                                                       '        except BaseException:\n'
+                                                       '            pass\n')
+    return ((RETRY_GUARD, '    if _failed is not None:\n' + load_it + '        distribution, message = _failed\n'),)
 
 
 # The three files the capability sweep mutates every decision of, and the startup tests it kills with.
@@ -2645,10 +2666,18 @@ CASES: tuple[Case, ...] = (
     Case('capability-retry-imports-nothing', LOADER,
          (('    if _failed is not None:\n', '    if False:\n'),),
          retried(), 'a load after a failed one was not refused for that failure'),
+    # A load after a failed one that loads the capabilities it is given, then raises the right refusal:
+    # given a capability no load imported, it imports and registers it, and where the failing one sorts
+    # first it runs that one's code again. Only `load()` is given capabilities.
+    Case('capability-refused-load-loads-what-it-is-given', LOADER, loads_then_refuses(given=True),
+         retried(entries=('load',)), RETRY_CHANGED),
+    # The same, loading what it discovers too: `installed()` and `create_mcp_server()` reach it.
+    Case('capability-refused-load-loads-what-it-finds', LOADER, loads_then_refuses(given=False),
+         retried(), RETRY_CHANGED),
     # A load after a failed one refused with the first failure's message alone, never saying to restart.
     Case('capability-retry-refusal-says-not-to-restart', LOADER,
          (("        refusal.args = (f'{message} ({_RESTART})',)\n", '        refusal.args = (message,)\n'),),
-         retried('top-level'), 'a load after a failed one was not refused for that failure'),
+         retried('top-level', 'failing-sorts-first'), 'a load after a failed one was not refused for that failure'),
     # A capability's own refusal read as the load's own when it is an instance of a subclass, whose
     # code then runs as the failed load keeps it.
     Case('capability-own-refusal-read-as-the-loads', LOADER,

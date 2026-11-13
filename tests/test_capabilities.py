@@ -10,7 +10,8 @@ base of the core's text and theirs in composition order that lists exactly the t
 
 A capability that cannot be loaded is refused with one line naming its distribution, and the tool
 registry is left as it was; every later load in the process is refused for that failure, saying to
-restart, with nothing imported, registered or run, and a fresh process loads as a first load. The failures are planted as distributions in a scratch directory (a
+restart, with nothing imported, registered or run, even given a capability no load imported or a
+failing one that sorts first, and a fresh process loads as a first load. The failures are planted as distributions in a scratch directory (a
 `*.dist-info` beside its package, read with `Distribution.at`), so no test edits the tree; a planted
 capability with a tool and a resource is served beside the members with no core edit. The core's
 modules name no member.
@@ -1603,6 +1604,7 @@ def test_a_failed_load_is_not_cached(names: tuple[str, ...], monkeypatch: pytest
 RESTART = 'refused by an earlier load in this process; restart the process to load capabilities again'
 FIRST_LOAD = 'a failed first load changed'
 REFUSED_LOAD = 'a load after a failed one was not refused for that failure'
+CHANGED = 'the refused load imported, registered or ran something'
 
 # A load is retried after a failure through each library entry point: `load()` itself, `installed()`,
 # which never caches a failure, and `create_mcp_server()` given no capabilities, which reads it.
@@ -1618,15 +1620,23 @@ RETRIED = ('raises-at-tools', 'raises-at-declared', 'stray-imported-by-tools', '
 
 # Where the two are planted, and what a caller imported first: both top-level with nothing imported,
 # the clean one's package imported first, the failing one's imported first, the clean one a portion
-# of the `cluster_mcp` namespace package, as every member is, or the clean one's tool registered by a
-# library's submodule its tools module imports, the library's package imported first.
-LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'registered-by-a-library')
+# of the `cluster_mcp` namespace package, as every member is, the clean one's tool registered by a
+# library's submodule its tools module imports, the library's package imported first, or the failing
+# one's distribution sorting before the clean one's, so no load before the retries reaches the clean one.
+LAYOUTS = ('top-level', 'clean-imported-first', 'failing-imported-first', 'namespace', 'registered-by-a-library',
+           'failing-sorts-first')
 
 # That library, outside every capability, and its submodule.
 LIBRARY, REGISTRAR = 'planted_library', 'planted_library.registrar'
 
-# The clean capability's tool.
+# The clean capability's tool, and its distribution: sorting before every failing one's, or, where the
+# failing one sorts first, after it.
 FIRST_TOOL = 'planted_first_echo'
+CLEAN, CLEAN_LAST = 'planted-a-first', 'planted-zz-last'
+
+# A capability no load before the retries imports, its distribution sorting before every other planted
+# one, so a load that loads what it is given reaches it first.
+NEW, NEW_MODULE, NEW_TOOL = 'planted-0-new', 'planted_new', 'planted_new_echo'
 
 # A tools module's tail that raises an exception whose text, asked for, imports a module that
 # registers a tool.
@@ -1761,15 +1771,20 @@ def refused_again(entry: str, found: list[EntryPoint], planted: Path, first: Cap
         sys.settrace(held)
     if again is None:
         pytest.fail(f'{REFUSED_LOAD}: {fragment}, it loaded {[each.distribution for each in loaded]}')
+    # Modules and tools are compared by identity, never by value: a planted key's comparison raises.
+    now = list(sys.modules)
+    kept, still = {id(name) for name in modules}, {id(name) for name in now}
+    imported = [name for name in now if id(name) not in kept]
+    forgotten = [name for name in modules if id(name) not in still]
+    had = {id(tool) for tool in registry}
+    registered = [tool.name for tool in TOOL_REGISTRY if id(tool) not in had]
+    changed = imported or forgotten or registered or called or list(map(id, now)) != list(map(id, modules)) \
+        or list(map(id, TOOL_REGISTRY)) != list(map(id, registry))
+    assert not changed, f'{REFUSED_LOAD}: {fragment}, {CHANGED}: it imported {imported}, forgot {forgotten}, ' \
+                        f'registered {registered} and ran {called}'
     assert str(again) == f'{first} ({RESTART})', f'{REFUSED_LOAD}: {fragment}, it raised {str(again)!r}'
     assert again.distribution == first.distribution, \
         f'{REFUSED_LOAD}: {fragment}, it named {again.distribution!r}, not {first.distribution!r}'
-    # Compared as a list, never as a set: a list compares each key with itself, and a set would compare
-    # a planted key with `'sys'`.
-    assert list(sys.modules) == modules, f'{REFUSED_LOAD}: {fragment}, the refused load imported or forgot modules'
-    assert TOOL_REGISTRY == registry, \
-        f'{REFUSED_LOAD}: {fragment}, the refused load registered {TOOL_REGISTRY[len(registry):]}'
-    assert called == [], f'{REFUSED_LOAD}: {fragment}, the refused load ran capability code: {called}'
 
 
 @pytest.mark.unit
@@ -1782,12 +1797,19 @@ def test_a_load_after_a_failed_one_is_refused_for_it(entry: str, kind: str, layo
                                                      monkeypatch: pytest.MonkeyPatch,
                                                      request: pytest.FixtureRequest) -> None:
     # A failed load leaves what it imported imported, so every later load in the process is refused
-    # for it: with the failing capability still there and without it, naming the first failure, never
-    # the clean capability before it, and saying to restart; nothing is imported, registered or run.
+    # for it: with the failing capability still there, without it, and given a capability no load
+    # imported, naming the first failure, never the clean capability, and saying to restart; nothing
+    # is imported, registered or run, though a load of what it is given would show.
     module, files = clean_first(layout)
-    clean = plant('planted-a-first', f'first = {module}.capability:CAPABILITY', files)
+    clean_dist = CLEAN_LAST if layout == 'failing-sorts-first' else CLEAN
+    clean = plant(clean_dist, f'first = {module}.capability:CAPABILITY', files)
     dist, line, failing_files, refusal = retried_failure(kind)
     failing = plant(dist, line, failing_files)
+    assert (dist < clean_dist) == (layout == 'failing-sorts-first'), \
+        f'the failing capability {dist} does not sort as the layout {layout} plants it'
+    new = plant(NEW, f'new = {NEW_MODULE}.capability:CAPABILITY',
+                package(NEW_MODULE, tool=NEW_TOOL, text=echo_text(NEW_TOOL)))
+    assert NEW < min(dist, clean_dist), f'the new capability {NEW} does not sort first'
     found = [*members(names), clean, failing]
     if entry != 'load':
         monkeypatch.setattr(cluster_mcp.core.capabilities, 'entry_points', lambda group: tuple(found))
@@ -1811,10 +1833,15 @@ def test_a_load_after_a_failed_one_is_refused_for_it(entry: str, kind: str, layo
     assert first is not None and str(first) == refusal, \
         f'{FIRST_LOAD} its refusal: expected {refusal!r}, got {first and str(first)!r}'
     assert TOOL_REGISTRY == before, f'{FIRST_LOAD} the registry: it left {TOOL_REGISTRY[len(before):]} registered'
+    if layout == 'failing-sorts-first':
+        assert module not in sys.modules, f'{FIRST_LOAD} the clean capability: it reached it after the failing one'
 
     refused_again(entry, found, tmp_path, first, 'with the failing capability still there')
     found.remove(failing)
     refused_again(entry, found, tmp_path, first, 'with the failing capability removed')
+    assert NEW_MODULE not in sys.modules, f'the new capability {NEW} was imported before its retry'
+    found.append(new)
+    refused_again(entry, found, tmp_path, first, 'given a capability no load imported')
 
 
 # A failing capability's own `CapabilityLoadError`, which the load raises as it is, made so that any

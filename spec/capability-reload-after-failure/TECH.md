@@ -3,7 +3,7 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: blocked
+status: in_review
 branch: fix/capability-reload-after-failure
 base: develop
 current_phase: done
@@ -23,7 +23,7 @@ phases:
   hammerable: false
   hill: uphill
   attempts: 1
-  verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
+  verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-refused-load-loads-what-it-is-given capability-refused-load-loads-what-it-finds capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
   status: done
@@ -34,7 +34,7 @@ phases:
   parallel: false
   hammerable: false
   hill: uphill
-  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+  verify: export UV_PYTHON=3.14 && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-refused-load-loads-what-it-is-given capability-refused-load-loads-what-it-finds capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
 review:
   last_reviewed_commit: 43ae93af8409ffbf45bee8e9c94f3f4bbf5afa54
   verdict: changes-requested
@@ -232,6 +232,42 @@ and the docs say what is now true.
         HEAD (an interrupted load leaves its modules imported and no refusal); the cycle's seed gains
         a dated line that a reload, if Part II's hosted mode needs one, is shaped there; PLAN carries a
         supersession note.
+- [x] **Remediation, review cycle 3 (2026-11-13): F-A (LOW, fixed rather than seeded).** P1 and P2
+      reopened together and committed as one, as in cycles 1 and 2: the test's new layout and the
+      mutation cases built on its rows ride together (`tests/mutants.py` mirrors `LAYOUTS`, and the
+      `test_mutation_anchor_applies` lockstep holds the new cases' anchors).
+      - **The property, both sides:** a refused load imports nothing, registers nothing and runs no
+        capability's code, on inputs where a load would show it; and it is still refused naming the
+        first failure, its cause and the restart text, for the new inputs too.
+      - `tests/test_capabilities.py`, `test_a_load_after_a_failed_one_is_refused_for_it`: a sixth
+        layout, `failing-sorts-first` (the clean capability's distribution `planted-zz-last`, so the
+        first load stops before it and never imports it; asserted), 480 → 576 rows; and a third retry
+        in every row, given a capability no load imported (`planted-0-new`, sorting before every other
+        planted one, its absence from `sys.modules` asserted first). `refused_again` now reports what
+        the refused load changed in one violation, `the refused load imported, registered or ran
+        something: it imported […], forgot […], registered […] and ran […]`, comparing modules and
+        tools by identity (a planted key's comparison raises), the order of each included; the message
+        and distribution asserts follow it, unchanged.
+      - `tests/mutants.py`: `RETRY_LAYOUTS` gains the layout. New permanent cases, `why` the violation
+        above: `capability-refused-load-loads-what-it-is-given` (the review's H2b: the guard loads the
+        capabilities it is given, swallows what that raises, then raises the right refusal), its
+        targets the 48 `load` rows beside `both`; and its discovered twin
+        `capability-refused-load-loads-what-it-finds` (the review's H2n), the 144 rows beside `both`.
+        `installed()` and `create_mcp_server()` always call `load()` with no capabilities, so on those
+        entry points H2b runs exactly HEAD's code and no test can tell them apart; the twin is H2b's
+        behaviour there. `capability-retry-refusal-says-not-to-restart` also targets the new layout.
+      - **Red under H2b, green on HEAD** (`.local/build4/h2b-rows-default.log`, `rows-modern.log`, every
+        row of the retry test, both eras): H2b fails all 192 `load` rows with the violation above (the
+        new-capability retry naming its imports and its run, 160 rows; the `failing-sorts-first`
+        layout naming the failing capability's tools code run again, 12 rows, or the clean one's
+        imports, registration and run, 20 rows); its `installed`/`server` rows pass, being HEAD's
+        code. H2n fails all 576 rows the same way, through every entry point. HEAD passes all 576.
+        Before this change H2b passed the test 0/480 (`.local/review3/reviewer/hand-default-2.log`).
+      - Docs: AGENTS.md § Testing names the new layout, the new retry, and the two mutation cases.
+      - Gate (2026-11-13, the retuned `verify:`, 3 min 27 s): 2667 passed in each era (no skips;
+        2569 before, 96 new rows and the two new cases' anchor rows), `test_startup.py -k capabilit`
+        46 in each, and all ten cases killed with the runner's three controls reported. The retry test
+        runs about 3 s longer per era (6.7 s → 9.8 s, under the full gate's concurrent load).
 - **Verify:** both eras of `test_capabilities.py`, `test_mutations.py` and `test_hygiene.py`; the
   new test by node id; `test_startup.py -k capabilit` (the CLI path still stops with exit 5) in
   both eras; the four re-planted mutation cases with the runner's controls.
@@ -299,6 +335,15 @@ contract; every deferral is recorded; the profile's full `verify` is green.
       wall: the eight cases killed with the runner's three controls reported, the lock check, both
       eras' four suite commands (44, 154, 507 and 4909 passed, 14 skipped, in each), and the
       sandboxed `cluster-mcp --help`.
+- [x] **Remediation, review cycle 3:** P2's `verify:` self-checks the two new cases too (P1's
+      amendment). The ledger is walked again: the remediation adds no deferral, and the seeds stand as
+      cycle 2 left them (`capability-reload-after-interrupt`, `capability-refusal-class-patched`).
+- [x] Run the full `verify:` on the remediated tree. Green on the cycle-3 remediation tree (the
+      commit that carries this line, but for this line and the phase states), 2026-11-13, 28 min 2 s
+      wall with another heavy run on the host (load average about 5): the ten cases killed with the
+      runner's three controls reported, the lock check, both eras' four suite commands (44, 154, 507
+      and 5007 passed, 14 skipped, in each; 5007 is 4909 and 98 new), and the sandboxed
+      `cluster-mcp --help`, which printed its usage.
 - **Verify:** the new case and the four re-planted ones with the runner's controls, then the
   profile's full `verify`, both eras and the sandboxed `cluster-mcp --help`.
 - **Touches:** `tests/mutants.py`; by the amendment, `tests/test_capabilities.py`, `AGENTS.md` and
