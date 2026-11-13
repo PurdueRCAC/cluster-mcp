@@ -3,7 +3,7 @@ slug: full-volume-fixture-leaks-hdiutil
 title: A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind
 kind: test
 appetite: small
-status: in_review
+status: blocked
 branch: test/full-volume-fixture-leaks-hdiutil
 base: develop
 current_phase: done
@@ -55,10 +55,10 @@ phases:
   hill: uphill
   verify: sh spec/full-volume-fixture-leaks-hdiutil/remediation/scoped-leftovers.sh --around sh spec/full-volume-fixture-leaks-hdiutil/remediation/seed-in-scope.sh sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh pre && sh spec/full-volume-fixture-leaks-hdiutil/remediation/F1-every-test-module-named.sh && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py rows && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-a && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh sweep-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py frozen-legacy && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py frozen-modern && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py prior-modern-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-legacy-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-legacy-b && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-modern-a && UV_PYTHON=3.14 uv run python -I spec/full-volume-fixture-leaks-hdiutil/remediation/F3-F5-fixture-sweep.py new-modern-b && sh spec/full-volume-fixture-leaks-hdiutil/verify/p3.sh full
 review:
-  last_reviewed_commit: 660b64b8e5bbef20acc54b3232e5d21b95bd2310
+  last_reviewed_commit: 76123740b8378f57da720a99826d0773517ab765
   verdict: changes-requested
-  blocked_reason: 'Review cycle 2: F3 an interrupted step is not stopped (own session, TimeoutExpired-only handler); F4 the fill''s failure (R5) has no row, OSError carve-out survives; F5 report names an image that is not there after a failed cleanup info'
-  cycle: 2
+  blocked_reason: 'Review cycle 3: F6 an interrupt during a failed or hung step''s cleanup or stop drops the step''s failure and what is left (failure-path sibling of cycle 2''s F3); not converged at cycle 3, escalated'
+  cycle: 3
 ---
 
 # TECH.md — A disk-image step that hangs or fails is stopped, and the full-volume fixture leaves nothing behind

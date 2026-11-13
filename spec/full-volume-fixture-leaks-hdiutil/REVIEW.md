@@ -507,3 +507,207 @@ conduct notes are as returned.
 > **Conduct.** Tree clean; `.venv` freeze diff empty; `hdiutil info` no images before or after, none
 > attached or detached; no process left; mutants only in archive copies, restored; evidence in
 > `.local/review2/ev/`; `DONE` written.
+
+## Review cycle 3 — changes-requested (2026-11-12)
+
+- **Reviewed commit:** 7612374  ·  **Base:** develop (`origin/develop` 8e6f198)  ·  **Date:** 2026-11-12
+- **Verdict:** changes-requested (one CONFIRMED finding, MEDIUM)
+- **Cycle:** 3 of ≤3, not converged: escalated to the maintainer (`code-review` Step 6)
+- **Mode:** a fresh blind pass over the full spec-excluded diff, aimed at what this round was routed
+  to fix (cycle 2's F3 as a property, the cleanup under an interrupt, F4, F5). One fresh blind
+  reviewer (subagent, effort xhigh), given the GOAL and the rubric inline, the spec-excluded diff and
+  log, and `AGENTS.md` by path. No sequential fallback, no debate (no coupled-core path in the diff).
+- **Commits since cycle 2:** `d7cb13f` (F3–F5), `7db4fee` (the pin rows' skip guard, seeded) and
+  `7612374` (`TECH.md` only: P3 done, the full gate recorded).
+- **Contract drift:** none since cycle 1. `GOAL.md` still moved only once after the shape commit
+  (`679a052`, the GOAL-gate clarifications); graded against `GOAL.md` at HEAD.
+
+### Grading rule
+
+`method/mutation-testing.md` § When a review is done, as in cycle 2, with one sharpening: a mutant
+is killed only when its expected reason is in the failure's message as a violation the test
+rendered, never only in the traceback (pytest prints the test's source there, so every violation's
+wording would match). A deeper layer of a class already pinned is a coverage observation and is
+seeded, not CONFIRMED.
+
+### Verification run
+
+#### Orchestrator: the spec-held light gates, before the reviewer started
+
+Run from the worktree, `UV_PYTHON=3.14`, one at a time; logs under the worktree's gitignored
+`.local/review3/orchestrator/`. `hdiutil info` recorded first: no image.
+
+| Gate | Command | Result |
+|---|---|---|
+| P3 `pre`, bare | `sh spec/…/verify/p3.sh pre` | exit 1, 48 s: every step green but `scope`, which names `issues/disk-image-fixture-deeper-pins.md` and `ROADMAP.md`, the seed review cycle 1 routed (the known red; `pre-bare.log`) |
+| P3 `pre`, as recorded | `sh spec/…/remediation/scoped-leftovers.sh --around sh spec/…/remediation/seed-in-scope.sh sh spec/…/verify/p3.sh pre` | exit 0, 41 s: `rows.sh all` ok (hygiene 142 passed), ledger ok, the seed admitted, leftovers scoped |
+| F3–F5 `rows` | `uv run python -I spec/…/remediation/F3-F5-fixture-sweep.py rows` | exit 0, 129 s: `coverage` ok (99 of 99 decision lines in 11 functions; 11 kinds × (7 body + 7 cut) families, 9 places; 40 frozen + 123 prior + 118 new cases, 13 expected survivors); 144 ids with the opt-in (99 cut rows), 64 in the suite (19 cut rows); 144 passed in each era, none skipped |
+| P3 `full` | not run this cycle | cited: green on `7db4fee`, 1598 s, every command exit 0 (`.local/review3/logs/final/full.log`); `7612374` changes `TECH.md` only. The reviewer also ran the profile's full verify once on `7612374` (below) |
+| F3–F5 sweep modes | not run by the orchestrator | **not observed** here; the reviewer's own 29-mutant sweep ran in both eras (below) |
+
+After the gates: `git status --porcelain` empty, no stand-in process, `hdiutil info` no image.
+
+#### Reviewer (blind)
+
+- The disk-image tests, both eras: 64 of 64 passed with `-rA`, 0 skipped; with
+  `CLUSTER_MCP_TEST_EVERY_KIND=1`, 144 of 144 in each era.
+- The real room rows `[8k-free|32k-free|edquot]` on macOS, both eras: passed; `hdiutil info` clean
+  afterwards.
+- The profile's full verify, once, every command exit 0: `uv lock --check`; per era `-k silent` 44
+  passed, `-k 'not silent'` 218 passed, the timeout/startup/launch trio 507 passed, the rest 4369
+  passed and 14 skipped (`need_shell`/`need_git`, modules this diff does not touch); the CLI printed
+  its usage.
+- 29 hand-planted mutants on two scratch clones at `7612374`, two workers, each over the 64
+  disk-image tests in both eras, aimed at `_step`'s cut path, `_cut_short`, `_clean_up_after`
+  (bounds, second-interrupt abandon, its notes), `_clean_up`'s report, `_in_use` and `_stop`: 28
+  killed by message in both eras, 1 survived (`after-cut-unbounded`, below), 0 unviable, 0 timed
+  out; every clone restored clean.
+- Stand-in probes of an interrupt during the cleanup after a failed or hung `create`/`attach`, and
+  during a stop's wait (F6).
+
+**Orchestrator re-grade of the kills.** The reviewer's own strict re-grade on file
+(`regrade.txt`) predates its last mutant and cut each message at the first embedded traceback, so it
+read `cut-swallowed`, `after-cut-again-swallowed` and `body-oserror-detach-fail-body-only` as 0
+killed. Re-read from the final junit XML (`orchestrator/regrade-items.txt`): each failing row
+carries the expected reason as a violation item the test rendered (a line beginning with the
+violation text, not a source line): 20/20, 3/3 and 1/1 in each era. So the reviewer's count stands:
+28 killed by message, 1 survived.
+
+- **CI:** run 43347900847 on `7612374`: red. "suite (modern era, 4 of 4)" failed on
+  `tests/test_probes.py::test_every_ending_without_an_answer_serves_the_capability[interrupt-rcac]`
+  ("decided only at the deadline (0.17 s)"); `gate` skipped. The diff touches no file that test
+  reads, and the same part passed locally in both eras; recorded as a fact about merge-readiness,
+  not a finding of this diff. A green run is still owed before publish.
+
+### Requirement → evidence matrix
+
+No R-ID is a `spec/` artifact; the reviewer graded all seven, and the orchestrator cross-checked
+through the light gates and re-ran the F6 probe.
+
+| R-ID | Implemented by (file/commit) | Verified how | Verified by | Status |
+|------|------------------------------|--------------|-------------|--------|
+| R1 | `_step` → `_stop` (`killpg` KILL, 5 s wait, survivors named); `_cut_short` on any exception | hang and cut rows both eras; `test_a_stopped_step_still_running_is_named`; `test_the_disk_image_figures`; stop and cut mutants killed | reviewer; orchestrator (`rows`) | ✅ except an interrupt during a stop's wait after a timeout: the group is not named (F6, case C) |
+| R2 | `_step`'s texts | ordered text checks in every row | reviewer; orchestrator | ❌ an interrupt during the cleanup after a failed or hung `create`/`attach` drops that step's failure (F6, cases A, B) |
+| R3 | `_clean_up`; `_clean_up_after` after a cut | rows 1–8, 12, `cleanup-*`, `info-*`, the cut-site rows; eight `cleanup-*` and six `after-cut-*` mutants killed | reviewer; orchestrator | ✅ (the cleanup after a cut meeting its bound is unpinned: coverage observation C1) |
+| R4 | `_in_use`; no retry | `detach-*`, the body-and-detach rows; `cut-detach-stays-unnamed` killed | reviewer | ✅ |
+| R5 | `raise … from body` | `body-and-detach-fail` and every kind; the fill's rows `body-fill`, `body-fill-and-detach-fail`; the three body mutants killed | reviewer; orchestrator (`rows`) | ✅ (cycle 2's F4 closed) |
+| R6 | `full_volume` → `attached_image` | real macOS rows both eras; Linux CI part 2 green in both eras on 43347900847 | reviewer | ✅ |
+| R7 | `DISK_IMAGE_ROWS`, `tests/hdiutil_standin.py` through `bin/sandbox.sh`, 1 s short bound | 64 ids per era, 144 with the opt-in, none skipped | reviewer; orchestrator | ✅ |
+
+Unmapped changes: none in the code. The cut path implements the Outcome's "however one of the
+fixture's steps ends". The seed and `ROADMAP.md`, graded as prose: the functions the seed names
+exist and its items 1–12 match the code, `status: unshaped` is right, its links resolve, Part I
+counts 29 and Gates 13; the adopted seed's status matches. `AGENTS.md` § Testing matches the code
+(new tests, the stand-in, the figures, the opt-in); no § Invariants section touched; the spec-id
+grep over the added test lines is empty.
+
+### Cycle 2's findings
+
+- **F3 — closed as routed for the cut path.** However a step's wait ends, its group is stopped and
+  waited for and the exception goes on as itself: the cut mutants (`cut-no-stop`,
+  `cut-exception-only`, `cut-swallowed`, `cut-replaced`, `cut-only-leader`, `cut-kill-no-wait`)
+  are killed in both eras. The cleanup after a cut runs at the per-step bounds, and a second
+  interrupt abandons it naming what is left (`after-cut-again-*` killed). Its sibling on the
+  failure path is open: F6.
+- **F4 — closed.** The fill's own failure has its rows; the `OSError` carve-out and the body-only
+  raise are killed.
+- **F5 — closed.** After a failed or garbled cleanup `info`, the image is named only when it is
+  there (`cleanup-info-fail-*`, `after-cut-again-image-*` killed).
+
+### Findings
+
+#### [MEDIUM/CONFIRMED] F6 — An interrupt during the post-failure work of a step drops what the step's failure and its stop would have said
+- **Where:** `tests/test_ssh_exec.py:1003-1004`, `attached_image`'s
+  `raise HostFailure('\n'.join([failure, *_clean_up(hdiutil, bound, image)]))`: the cleanup after
+  a failed or hung `create`/`attach` runs inside the `raise` expression, unguarded, unlike the cut
+  path's `_clean_up_after` (`:934-947`). The same root on the timeout path at `:884` (the stop's
+  wait after `TimeoutExpired`) and, by reading, the failure path at `:889`.
+- **Failure scenario:** `attach` fails or runs past its bound; its cleanup `detach` then hangs (up
+  to 120 s at the real bound), and the developer presses Ctrl-C. The `KeyboardInterrupt` goes on
+  carrying only `detach: cut short by KeyboardInterrupt and stopped`, with no context: the report
+  never says that `attach` failed or how (R2), nor that the device stays attached and the image is
+  kept, though both are. The cut path, for the same event, says "the cleanup was abandoned" and
+  names what is left. Likewise an interrupt during the 5 s stop wait after a `create` that ran past
+  its bound goes on with the processes still running and unnamed, where the cut path names the group
+  ("process group N may still be running").
+- **Evidence:** reviewer: `.local/review3/reviewer/probe_interrupt_after_failure.py` driving
+  `attached_image` with the rows' helpers and the stand-in, both eras
+  (`logs/probe_interrupt_after_failure{,-modern}.log`). Case A (`attach` fails with a device,
+  cleanup `detach` interrupted) and case B (`attach` hangs, same): `/dev/standin2` attached and the
+  image present; the report carries none of `attach: exited with status 1`, `attach: ran past its
+  bound`, `stays attached`, `is kept at`. Case C (`create` past its bound, the interrupt in the
+  stop's wait, a process that outlives KILL as the repo's `STOP_SIGNAL` convention plants it): three
+  stand-in processes running, none named. Orchestrator re-ran A, B and C on the reviewer's clean
+  clone at `7612374` with the same result (`.local/review3/orchestrator/probe-rerun.log`), then
+  confirmed no stand-in process and no image left; read `:995-1006` and `:930-947`.
+- **Class:** the property this round was routed with, "an interrupt during the cleanup abandons it
+  and the report names what is left", and "however a step's wait ends, its group is stopped and what
+  may still run is named", reached through the failure and timeout paths rather than the cut path.
+  Not a deeper layer: no row pins any part of it on those paths.
+- **Touches invariant / requirement:** R2 (the failed step is not named), R1/R3's naming of what is
+  left; an edge path (an interrupt during post-failure work). No § Invariants section.
+
+### PLAUSIBLE findings
+
+- None.
+
+### Coverage observations (to be seeded)
+
+Deeper layers of classes a row already pins. Not findings; they join
+`issues/disk-image-fixture-deeper-pins.md` with the next build round.
+
+- **C1 `after-cut-unbounded`** — `_clean_up_after` calling `_clean_up` with every bound `None`
+  survives both eras (64 passed). Every cut-site row whose cleanup step hangs cuts it with a second
+  interrupt; none lets a cleanup step after a cut meet its bound. Reachable: under the mutant a cut
+  `attach` whose cleanup `detach` hangs waits without end (`logs/probe_cut_cleanup_bound-mutant.log`,
+  still waiting at 20 s); the real code stops it at its 1 s bound and names what is left
+  (`logs/probe_cut_cleanup_bound-real.log`, 1.5 s). The cleanup `detach` meeting its bound is pinned
+  at the `_clean_up` layer (`cleanup-detach-hangs`); the cut path's call site is the deeper layer.
+
+### Human-gate triggers
+
+- Not triggered. F6 is in `tests/test_ssh_exec.py`, which is not on the high-blast-radius list in
+  `AGENTS.md` § Invariants, and violates no section tagged *[human gate]*. The diff touches no path
+  on that list. No earlier cycle recorded a trigger.
+
+### Routing
+
+Cycle 3 is the bound and did not converge: F6 is the failure-path sibling of the property routed
+after cycle 2. Escalated to the maintainer; no fourth build round starts without the maintainer's
+call. If one is ruled, it routes the property and its whole domain:
+
+- **F6:** however a step's post-failure work ends (the stop's wait after a timeout or a failure, the
+  R3 cleanup after a failed or hung `create`/`attach`, or both cut short by any exception), the
+  exception goes on as itself and the report carries the step's own failure first (R2) and what is
+  left: processes that may still run, the image if it is there, and any device made from it. One
+  handler for every path, not a second copy beside `_clean_up_after`. Completeness side, both
+  ways: the interrupt still propagates as itself, never swallowed or replaced; and a cleanup that is
+  not cut keeps its bounds and runs to its end. Pin it with rows across the domain (each step, fail
+  and hang, each kind of cut, the cleanup's `info` and `detach`), in both eras.
+- **Seed:** C1 joins `issues/disk-image-fixture-deeper-pins.md`, with its `ROADMAP.md` entry's
+  count updated.
+- **Timing:** this cycle's rows add about 12.4 s per era to the `-k 'not silent'` part; that and any
+  F6 rows are the maintainer's timing call.
+
+### Reviewer conduct (verified by the orchestrator)
+
+- `git status --porcelain` empty after the hand-back; HEAD `7612374`.
+- Mutants ran only in two clones under `.local/review3/reviewer/`, each restored clean (`git status`
+  empty, HEAD `7612374`, checked by the orchestrator).
+- No stand-in, `hdiutil` or pytest process left; `hdiutil info` no image, as before the cycle's runs
+  and after the orchestrator's probe re-run.
+- No build or `.venv` state in the worktree mutated for a negative control.
+- Evidence in `.local/review3/reviewer/`; `DONE` written last.
+
+### Reviewer hand-back (summary)
+
+The reviewer's findings, observations and matrix are as recorded above (F6 is its F-a, C1 its
+coverage observation). Its mutant table, as returned: `_step` (no stop on the cut, `Exception`
+only, swallow, replace with `HostFailure`, no stop on timeout, no stop on failure), `_cut_short`
+(no wait, leader only, no group note, no survivors), `_clean_up_after` (no cleanup, **unbounded:
+survived**, second interrupt swallowed, no notes, image always/never named kept, retry), `_clean_up`
+(info-fail always/never kept, garbled as empty, detach-fail unnamed/goes on, no unlink, foreign
+device detached), `_in_use` (`OSError` carve-out, body-only raise, `from None`), `attached_image`
+(no stays note on a cut detach), `_stop` (TERM before KILL): every one killed by message in both
+eras but the one marked. It dropped as speculative a Ctrl-C inside `Popen()` before `proc` is bound
+and a `ps` failing during a stop.
