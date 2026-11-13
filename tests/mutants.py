@@ -6,6 +6,9 @@
 Usage, from the repository root:
 
     uv run python tests/mutants.py [--self-check] CASE_ID...
+    uv run python tests/mutants.py --matrix
+    uv run python tests/mutants.py [--self-check] --shard NUMBER/COUNT
+    uv run python tests/mutants.py --ledger REPORT --shard NUMBER/COUNT
 
 Each `Case` copies the imported `cluster_mcp` namespace, every member's portion of it (never a
 member's `src/` itself, and with no `cluster_mcp/__init__.py`), applies exact source edits that
@@ -53,7 +56,7 @@ import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Iterable, Sequence
 
 import cluster_mcp.core
 import cluster_mcp.rcac
@@ -6352,12 +6355,131 @@ def self_check() -> list[str]:
     return lines
 
 
+# The most cases one shard of a dispatched run holds. A job is sized so that one case stopped at the
+# per-case limit still leaves it inside the `mutants budget` row's 10 minutes (AGENTS.md § Factory).
+SHARD_SIZE = 15
+
+# What `self_check` prints after its verdict word, one line per control: a shard's ledger requires each once.
+CONTROLS = ('surviving mutant reported', 'wrong origin reported', 'member missing from the copy reported')
+
+
+def shard_count(ids: Sequence[str], size: int = SHARD_SIZE) -> int:
+    """The fewest shards that hold `ids` at most `size` to a shard; 0 for none."""
+    return -(-len(ids) // size)
+
+
+def shard_ids(ids: Sequence[str], number: int, count: int) -> list[str]:
+    """Shard `number` of `count`: the sorted ids dealt round-robin, so every job splits them alike.
+
+    Sorting makes the split independent of the order `CASES` was built in; dealing spreads a family
+    of neighbouring ids across the shards. Shard sizes differ by at most one.
+    """
+    if not 1 <= number <= count:
+        raise ValueError(f'shard {number} is not one of 1 to {count}')
+    return sorted(ids)[number - 1::count]
+
+
+def parse_shard(text: str, ids: Sequence[str]) -> tuple[int, int]:
+    """Read `NUMBER/COUNT`, refusing a COUNT other than the shards `ids` make: a job told another count
+    would split them differently, and a case would run twice or never. `shard_ids` refuses the NUMBER."""
+    number, slash, count = text.partition('/')
+    if not (slash and number.isdigit() and count.isdigit()):
+        raise ValueError(f'a shard is NUMBER/COUNT, not {text!r}')
+    if int(count) != shard_count(ids):
+        raise ValueError(f'shard count {count} is not the {shard_count(ids)} shards of the {len(ids)} cases defined here')
+    return int(number), int(count)
+
+
+def report_violations(expected: Sequence[str], lines: Iterable[str]) -> list[str]:
+    """Every reason a shard's report does not hold one `killed` line per expected case and one passed line per control.
+
+    Names each case with no verdict, reported more than once or not killed, each id the shard does not
+    hold, and each control missing, failed or doubled. Other lines (tracebacks, pytest output) are
+    ignored: they cannot make a case pass.
+    """
+    if not expected:
+        return ['no mutation cases found']
+    verdicts: dict[str, list[str]] = {}
+    controls: dict[str, list[str]] = {}
+    for line in lines:
+        word, _, rest = line.partition('  ')
+        name = rest.split(': ', 1)[0]
+        if word not in ('killed', 'FAILED', 'control') or not name:
+            continue
+        if name in CONTROLS:
+            controls.setdefault(name, []).append(word)
+        elif word != 'control':
+            verdicts.setdefault(name, []).append(word)
+    found = []
+    for case_id in expected:
+        words = verdicts.get(case_id, [])
+        if not words:
+            found.append(f'{case_id}: no verdict reported')
+        elif len(words) > 1:
+            found.append(f'{case_id}: reported {len(words)} times')
+        elif words != ['killed']:
+            found.append(f'{case_id}: not killed (its FAILED line in the report says why)')
+    found += [f'{case_id}: not a case of this shard' for case_id in verdicts if case_id not in expected]
+    for text in CONTROLS:
+        words = controls.get(text, [])
+        if words != ['control']:
+            how = 'not reported' if not words else f'reported {len(words)} times' if len(words) > 1 else 'failed'
+            found.append(f'control {text}: {how}')
+    return found
+
+
+def sharded(parser: argparse.ArgumentParser, args: argparse.Namespace, ids: list[str]) -> int | None:
+    """Act on `--matrix`, `--shard` and `--ledger`: an exit status, or None for `main` to run `args.cases`.
+
+    `--matrix` prints the run's shard numbers as a JSON list on stdout, and each shard's cases on
+    stderr. `--shard` replaces the named cases with the shard's. `--ledger` with it runs nothing: it
+    checks the shard's report, a missing one read as empty.
+    """
+    if args.matrix:
+        if not ids:
+            print('no mutation cases found in tests/mutants.py', file=sys.stderr)
+            return 1
+        count = shard_count(ids)
+        numbers = list(range(1, count + 1))
+        for number in numbers:
+            print(f'shard {number} of {count}: {" ".join(shard_ids(ids, number, count))}', file=sys.stderr)
+        print(numbers)
+        return 0
+    if args.shard is None:
+        if args.ledger is not None:
+            parser.error('--ledger checks one shard: pass --shard NUMBER/COUNT with it')
+        return None
+    if args.cases:
+        parser.error('name cases or a shard, not both')
+    try:
+        number, count = parse_shard(args.shard, ids)
+        shard = shard_ids(ids, number, count)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.ledger is not None:
+        report = Path(args.ledger)
+        found = report_violations(shard, report.read_text().splitlines() if report.exists() else [])
+        for reason in found:
+            print(f'FAILED  {reason}')
+        if not found:
+            print(f'ledger  shard {number} of {count}: {len(shard)} cases killed, {len(CONTROLS)} controls passed')
+        return 1 if found else 0
+    args.cases = shard
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description='Run planted violations against a copy of the package.')
     parser.add_argument('--self-check', action='store_true', help="also run the runner's own controls")
+    parser.add_argument('--matrix', action='store_true', help="print the run's shard numbers (JSON) and each shard's cases")
+    parser.add_argument('--shard', metavar='NUMBER/COUNT', help='run the cases of one shard of the run')
+    parser.add_argument('--ledger', metavar='REPORT', help="check the shard's report instead of running it")
     parser.add_argument('cases', nargs='*', metavar='CASE_ID')
     args = parser.parse_args(argv)
     known = {case.id: case for case in CASES}
+    status = sharded(parser, args, list(known))
+    if status is not None:
+        return status
     failed = False
     for case_id in args.cases:
         case = known.get(case_id)

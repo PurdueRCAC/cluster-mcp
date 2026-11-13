@@ -1,0 +1,539 @@
+---
+slug: mutants-workflow-timeout
+title: A dispatched mutation run finishes and reports every case
+kind: ci
+appetite: small
+status: done
+branch: ci/mutants-workflow-timeout
+base: develop
+current_phase: done
+last_updated: '2026-11-13'
+phases:
+- id: P1
+  name: The runner splits the cases into shards and checks a shard report
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  depends_on: []
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 1 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 1 && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run pytest -q tests/test_mutations.py tests/test_mutant_shards.py tests/test_hygiene.py
+- id: P2
+  name: The workflow runs every shard to a ledger; the documents follow
+  status: done
+  satisfies:
+  - R1
+  - R2
+  - R3
+  - R5
+  depends_on:
+  - P1
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py rows 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 2 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs && uv run -q python -I spec/mutants-workflow-timeout/remediation/F1-controls-anchor.py && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py runner && uv run -q python -I spec/mutants-workflow-timeout/verify/shard-mutants.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py drive && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv lock --check && uv run pytest -q tests/test_ssh_exec.py -k silent && uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k silent && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_ssh_exec.py -k 'not silent' && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_timeout_stop.py tests/test_startup.py tests/test_launch.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q --ignore=tests/test_ssh_exec.py --ignore=tests/test_timeout_stop.py --ignore=tests/test_startup.py --ignore=tests/test_launch.py && bin/sandbox.sh uv run cluster-mcp --help
+- id: P3
+  name: The first hosted run (Run A dispatches, Run B reads)
+  status: done
+  satisfies: &id001
+  - R1
+  - R2
+  depends_on:
+  - P2
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 3 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
+- id: P4
+  name: The second hosted run (Run A dispatches, Run B reads)
+  status: done
+  satisfies: *id001
+  depends_on:
+  - P3
+  parallel: false
+  hammerable: false
+  hill: uphill
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 4 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt
+- id: P5
+  name: The third hosted run, the budget row and the ledger (Run A dispatches, Run B records)
+  status: done
+  satisfies:
+  - R4
+  - R3
+  - R1
+  - R2
+  depends_on:
+  - P4
+  parallel: false
+  hammerable: false
+  hill: uphill
+  attempts: 1
+  verify: export UV_PYTHON=3.14 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py prepush && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py untouched 5 && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py workflow && uv run -q python -I spec/mutants-workflow-timeout/remediation/F2-docs-controls-prefill.py && uv run -q python -I spec/mutants-workflow-timeout/remediation/F3-budget-row-figures.py && uv run -q python -I spec/mutants-workflow-timeout/verify/mutants-gate.py docs --final
+review:
+  last_reviewed_commit: 2d23fc83cceb88605222755dbdc657151aff2b0e
+  verdict: approved
+  blocked_reason: ''
+  cycle: 2
+---
+
+# TECH.md — A dispatched mutation run finishes and reports every case
+
+The **context engine and finite-state machine** for building this cycle. The YAML frontmatter above
+is the resume ground-truth (read it from the cycle worktree with
+`uv run --with pyyaml python "$KB/bin/factory/next_phase.py" spec/mutants-workflow-timeout/TECH.md`);
+the per-phase checklists below are the work. `code-build` executes the next actionable phase, runs its
+`verify:` command, updates state via `uv run --with pyyaml python "$KB/bin/factory/set_phase.py" …`,
+and makes one atomic code+state commit.
+
+- **Vision / requirements (locked):** [`GOAL.md`](GOAL.md) — R-IDs are the contract.
+- **Authoritative design:** [`PLAN.md`](PLAN.md).
+- **The frozen gate:** [`verify/mutants-gate.py`](verify/mutants-gate.py), one mode per requirement
+  (its docstring lists them). Never edit it to make a phase pass: a gate that is wrong is a stop and
+  a question for the foreman. `verify/shard-mutants.py` is written by P1 from PLAN § 6.2's decision
+  list (P2 adds the workflow's entries, additions only); from then on it is frozen too.
+- **Timing sample:** [`research/timing-sample.tsv`](research/timing-sample.tsv) (PLAN § 4).
+
+## Conventions (apply to every phase)
+
+- Commit conventions, code style, and load-bearing invariants come from the repo's `AGENTS.md` — it
+  is the constitution. Walk the sections of its § Invariants that this change touches; that is the
+  curated footgun checklist.
+- One phase per `code-build` invocation by default; one atomic commit containing **both** the code and
+  the `TECH.md` state change. The branch commit subject is code-build's (`$KB/skill/code-build.md` →
+  Step 6), not restated here; branch commits are squashed away at `code-publish` per the profile's
+  `landing`. Trailers follow the profile's `branch commits`.
+- The last phase carries the standing last-phase items: the deferral ledger (`code-plan` Step 6.8).
+  The previous cycle's last phase (`suite-ci-time-budget` P3) carried no other project-level item.
+- A CLI/feature change obeys the profile's `same-commit rules` (§ Conventions in `AGENTS.md`): the
+  help text, docs, or generated files it names change **in the same commit**.
+- **Dispatches.** Up to three `workflow_dispatch` runs of `mutants.yml` on
+  `ci/mutants-workflow-timeout` are approved (GOAL Q4): one each in P3, P4 and P5, never two at
+  once, and no other. Never
+  `gh run rerun`. P3, P4 and P5 wait on the hosted runner, so each is two runs (the foreman's "external
+  waits split the run"): Run A ends with the dispatch and hands back the run ids; the foreman holds
+  the wait; Run B reads the runs and closes the phase.
+- **The envelope** (GOAL Q6, the maintainer's answer):
+  - each job's `timeout-minutes` is 15, and the cases' step is capped at 12;
+  - the whole run is within 15 minutes from dispatch, queueing included;
+  - about 15 cases a shard, reading (B).
+
+  P3's run 1 decides whether the size stays (PLAN § 2.5). A refit changes every place row D1 lists,
+  together.
+- **The sibling cycle** `mutant-child-outlives-timeout` edits `tests/mutants.py`'s import block, its
+  run-child block, `run_child`, `run_case` and the `__main__` block. This cycle touches only the
+  docstring's Usage lines, the `typing` import line, the block between `self_check` and `main`, and
+  the top of `main` (PLAN § 2.1); its rows live in their own module, so `tests/test_mutations.py`,
+  which the sibling also edits, stays untouched. The `untouched` mode holds the rest byte-identical.
+
+---
+
+## Phase P1 — The runner splits the cases into shards and checks a shard report
+**Satisfies:** R1, R2, R3 (the selection and the ledger; the hosted proof is P3–P5) · **Depends on:** —
+**Goal:** `tests/mutants.py` can name the run's shards, run one, and check one's report, every case of
+the platform exactly once, each decision pinned by a row that kills a named mutant.
+
+- [x] In `tests/mutants.py`, between `self_check` and `main`: `SHARD_SIZE = 15`, `CONTROLS`,
+      `shard_count`, `shard_ids`, `parse_shard`, `report_violations`, `sharded`, as PLAN § 2.1
+      specifies (the names are the `untouched` mode's `NEW_TOP`; no other new top-level name).
+      `typing` gains `Iterable`; nothing else in the import block changes.
+- [x] `main`: the `--matrix`, `--shard NUMBER/COUNT` and `--ledger REPORT` options after
+      `--self-check`, and `status = sharded(parser, args, list(known))` / `if status is not None:` /
+      `return status` right after `known`: exactly the six lines the `untouched` mode's `MAIN_ADDED`
+      names, and nothing else in `main` changes. The docstring's Usage block gains the three forms.
+- [x] A new module `tests/test_mutant_shards.py` (SPDX header, a docstring, `unit` rows only, no
+      launch: `run_case` is faked) holding the eleven runner rows the `rows 1` mode names (PLAN
+      § 6.2's table, every row but the workflow's). `tests/test_mutations.py` is not touched.
+      `AGENTS.md` § Testing's module list gains one item for it, after `tests/test_mutations.py`.
+- [x] Write `spec/mutants-workflow-timeout/verify/shard-mutants.py`, mode `runner`: for each runner
+      mutant of PLAN § 6.2 (24 entries), plant it into a copy of the staged `tests/mutants.py` in a
+      fresh `mktemp -d` export of the index (never the working copy), run the killing row by id, and
+      require it red; then require the unplanted rows green. One pytest at a time; header states the
+      footprint. Each entry names its anchor and refuses one that is not found exactly once.
+- **Verify:** the frontmatter `verify:` (rows by id in both eras, `untouched 1`, the sweep, and
+  the three modules `tests/test_mutations.py`, `tests/test_mutant_shards.py` and `tests/test_hygiene.py`, the
+  last holding the spec-id and sandbox rails).
+- **Touches:** `tests/mutants.py`, `tests/test_mutant_shards.py`, `AGENTS.md` (§ Testing's module list),
+  `spec/mutants-workflow-timeout/verify/shard-mutants.py`.
+
+## Phase P2 — The workflow runs every shard to a ledger; the documents follow
+**Satisfies:** R1, R2, R3, R5 (and R4's row, its baseline pending) · **Depends on:** P1
+**Goal:** `.github/workflows/mutants.yml` is the plan job and the sharded matrix job of PLAN § 2.2;
+`AGENTS.md` states the dispatch state, the sharded run and the bound; the full suite is green.
+
+- [x] Rewrite `.github/workflows/mutants.yml` per PLAN § 2.2: header comment (dispatch state, the
+      shape, least privilege), `workflow_dispatch` only, `contents: read`, `plan` and `mutants`, both
+      `timeout-minutes: 15` on `ubuntu-24.04`, `fail-fast: false`, the matrix from `plan`'s output,
+      `SHARD` from `matrix.shard` and `strategy.job-total`, the shared steps verbatim as ci.yml's
+      `suite-legacy-1` carries them (checkout, setup-uv, the shells, `uv sync --locked`), the `run`
+      step (`timeout-minutes: 12`) and the always-run `ledger` step. No new `uses:`.
+- [x] Append the workflow row (`test_the_mutants_workflow_runs_each_shard_to_a_ledger`, matching each
+      step line for line, as PLAN § 7 finding 4 has it) to `tests/test_mutant_shards.py`.
+- [x] Extend `verify/shard-mutants.py` with mode `workflow`: PLAN § 6.2's nine workflow mutants,
+      each planted into the staged workflow and killed by the workflow row (additions only).
+- [x] `AGENTS.md` § Factory profile: the `mutants budget` row after `ci budget`, as PLAN § 2.3 words
+      it, ending `Baseline: pending`. § Testing, the mutation-runner bullet: the stale figure replaced
+      by a pointer to the row ("pending"), the usage block's three new forms, the closing sentences on
+      the sharded run and the dispatch state (R5).
+- [x] Run the gates, then the profile's full `verify` (the frontmatter's tail; ~26 min: run it in the
+      background) on the staged tree.
+- **Verify:** the frontmatter `verify:`.
+- **Touches:** `.github/workflows/mutants.yml`, `tests/test_mutant_shards.py`, `AGENTS.md`,
+  `spec/mutants-workflow-timeout/verify/shard-mutants.py`.
+
+## Phase P3 — The first hosted run
+**Satisfies:** R1, R2 (on the hosted runner) · **Depends on:** P2
+**Goal:** one dispatched run of the branch's workflow, read whole: every case reported once, every job
+within 600 − 310 s, the run within 900 s of its dispatch; any case not killed seeded. The run also
+decides whether the shard size stays (PLAN § 2.5). This phase waits on the hosted runner, so it is
+two runs.
+
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush`, `untouched 3` and `workflow` on the head; mark P3 `in_progress` with
+      the note "Run A: dispatched" in the TECH body below, commit, and note the head: it is the
+      measured commit `T1`.
+- [x] Push the branch. Before dispatching, check that no other run of the organisation is queued or
+      in progress (`gh run list --status in_progress` and `--status queued` on this repository), since
+      the Free plan's 20 jobs are shared (PLAN § 5); wait for it if one is. Then dispatch once:
+      `gh workflow run mutants.yml --ref ci/mutants-workflow-timeout`;
+      find the run (`gh run list --workflow mutants.yml --branch ci/mutants-workflow-timeout -e
+      workflow_dispatch --json databaseId,headSha -L 1`, whose `headSha` must be `T1`). Hand back
+      `T1` and the run id. Never dispatch again in this run.
+
+**Run B:** Run B: stopped at the cases not killed (seven; see Amendments, 2026-11-12, P3 run 1), then
+closed on the foreman's GOAL Q3 ruling: the seven seeded in four groups.
+- [x] Write `spec/mutants-workflow-timeout/runs.txt`: `sha <T1 full>`, `run <id>`.
+- [x] Run `mutants-gate.py runs --runs-file spec/mutants-workflow-timeout/runs.txt`. It prints:
+      - the run's wall from dispatch and the most jobs it ran at once;
+      - the cases not killed;
+      - the refit table and its proposed size (PLAN § 2.5).
+
+      **Stop**, and report the run, the job and the figure to the foreman with the refit table, if:
+      - the run took more than 900 s from dispatch (the envelope);
+      - a job ran over 600 − 310 s;
+      - a job was cancelled;
+      - a case was reported twice or never.
+
+      Do not resize, fix or re-dispatch inside this phase: the maintainer asked for the measured run
+      back (GOAL Q6), and the remaining two dispatches are his to place.
+- [x] Cases not killed (GOAL Q3): more than three, **stop** and hand the list to the foreman before
+      seeding. Three or fewer: each gets `issues/<slug>.md`, pre-shaped from the KB's `ISSUE.md`
+      template (`status: unshaped`, naming the run id, the case id, its `FAILED` reason and that it
+      was found by `mutants-workflow-timeout`), and a `ROADMAP.md` entry. No case, target or `why`
+      changes here (Non-goal 3).
+- [x] Stage, run the frontmatter `verify:`, mark P3 done, commit.
+- **Verify:** the frontmatter `verify:` (Run B).
+- **Touches:** `spec/mutants-workflow-timeout/runs.txt`; `issues/*.md` and `ROADMAP.md` only for
+  seeds.
+
+## Phase P4 — The second hosted run
+**Satisfies:** R1, R2 (on the hosted runner) · **Depends on:** P3
+**Goal:** the second counted run, read whole as P3 reads the first. The runs go one at a time: two
+runs dispatched together would share the organisation's 20 job slots, and each would miss the
+15-minute envelope (PLAN § 2.5). Two runs: Run A dispatches, Run B reads.
+
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush` and `untouched 4` on the head. The head is P3's closing commit, which
+      differs from `T1` only in `spec/`, `issues/` and `ROADMAP.md` (PLAN § 3 row D3). Mark P4
+      `in_progress` with the note "Run A: dispatched", commit, push.
+- [x] With no other run of the organisation queued or in progress (as in P3), dispatch once and find
+      the run id as P3 does. Hand it back. Never dispatch again in this run.
+
+**Run B:** Run B: read; held at the flaky case (see Amendments, 2026-11-12, P4 run 2), then closed
+with its seed.
+- [x] Append `run <id>` to `runs.txt`, and run `mutants-gate.py runs --runs-file
+      spec/mutants-workflow-timeout/runs.txt`. Its stops are P3's. Seed any new case not killed as P3
+      does: the same three-case limit counts across the runs.
+- [x] Stage, run the frontmatter `verify:`, mark P4 done, commit.
+- **Verify:** the frontmatter `verify:` (Run B).
+- **Touches:** `runs.txt`; seeds.
+
+## Phase P5 — The third hosted run, the budget row and the ledger
+**Satisfies:** R4, R3, R1, R2 · **Depends on:** P4
+**Goal:** the third counted run, then:
+- the `mutants budget` baseline and § Testing's measured cost, written from the three runs (the worst
+  of three);
+- the deferral ledger walked.
+
+Two runs: Run A dispatches, Run B records.
+
+**Run A (the brief authorises the push and one dispatch):** Run A: dispatched.
+- [x] `mutants-gate.py prepush` and `untouched 5` on the head, P4's closing commit, which still
+      differs from `T1` only in the records. Mark P5 `in_progress` with the note "Run A: dispatched",
+      commit, push.
+- [x] With no other run of the organisation queued or in progress, dispatch once and find the run id
+      as P3 does. Hand it back. This is the last dispatch Q4 allows.
+
+**Run B:** Run B: recorded; stopped at the verify, then closed under F2 (see Amendments, 2026-11-12,
+P5 run 3).
+- [x] Append `run <id>` to `runs.txt`. Run `mutants-gate.py runs --runs-file
+      spec/mutants-workflow-timeout/runs.txt --final`; a red result is a **stop**, as in P3. Seed any
+      new case not killed as P3 does.
+- [x] Put the printed baseline sentence in the `mutants budget` row, in place of `Baseline: pending`,
+      and add the measured mean per case on the worst job that the gate prints.
+- [x] In § Testing, replace "(… § Factory: pending)" with the cost the row holds ("N cases in S
+      shards, the run M:SS from dispatch, slowest job M:SS") and the pointer.
+- [x] Nothing else in `AGENTS.md` changes.
+- [x] **The deferral ledger** (`code-plan` Step 6.8): walk P1–P5's bodies here, PLAN § 5 and every
+      branch commit body for "do not fix here", "known limitation", "follow-up", "deferred" or
+      "not fixed". Each such item must name an `issues/` seed with a `ROADMAP.md` entry; the `prepush`
+      mode checks it. This plan files no new seed of its own.
+- [x] Stage, run the frontmatter `verify:`, mark P5 done, commit. The head differs from the measured
+      runs' commits only in:
+      - `AGENTS.md`'s row and § Testing sentence;
+      - `runs.txt` and the TECH state;
+      - seeds.
+
+**Review cycle 1 remediation** (reopened 2026-11-12; see Amendments). No code, workflow or bound
+changes; no dispatch.
+- [x] F-a: the `mutants budget` row gains, after the baseline, the figures its whole-run test needs:
+      the measured concurrency (20 jobs at once), the wave count (4 for the 78 shards), the time per
+      wave of the worst run, and where the run would cross 15:00, at the measured rate and at the
+      refit's worst-case rate. Figures only; the bound's wording stays.
+- [x] F-b: the row attributes each counted run to its own head commit and states that the three
+      measured the same code. The gate's baseline sentence stays verbatim, so `docs --final` reads
+      it unchanged.
+- [x] The review's two coverage observations, `ledger-empty-name` and `ledger-control-else`, seeded
+      together as `issues/mutants-ledger-guard-pins.md` with its `ROADMAP.md` entry in Part I's
+      Gates group, after the flaky case's; the Part I and Gates counts bumped; the seed/ROADMAP
+      pairing check empty.
+- [x] `remediation/F3-budget-row-figures.py` runs `runs --final` unchanged, then rebuilds both new
+      sentences from its output and the runs' head commits and requires the row to end with them.
+      P5's `verify:` runs F3 in place of `runs --final`.
+- **Verify:** the frontmatter `verify:` (Run B). Run A runs only `prepush` and `untouched 5`.
+- **Touches:** `AGENTS.md` (the row's baseline, § Testing's cost sentence; in remediation, the row's
+  run commits and wave figures), `runs.txt`; seeds; `remediation/F3-budget-row-figures.py`.
+
+## Amendments
+
+- **2026-11-10, rulings at the PLAN/TECH gate.** The foreman signed off the amended plan: five
+  phases, each job's timeout 15 minutes, the cases' step capped at 12, the 900 s envelope in R1.
+  The maintainer's (B), 15 cases a shard, stands; P3's first measured run decides whether the size
+  changes to fit the envelope, and the foreman resizes per the maintainer's instruction and reports.
+  Up to three `workflow_dispatch` runs are approved (GOAL Q4), none in P1 or P2.
+- **2026-11-10, P1 build.**
+  - The frozen gate pins no literal commit: its base is `git merge-base HEAD origin/develop` and its
+    plan commit the one that added `PLAN.md`, both read at run time, so the rebase onto `146cbc6`
+    left nothing stale and no wrapper under `remediation/` was needed. `untouched 1` was seen red on
+    a planted `run_child` change, then green on the restored tree.
+  - The module-list item for `tests/test_mutant_shards.py` sits after `tests/test_sdist_hygiene.py`,
+    not directly after `tests/test_mutations.py`: the sibling's built branch rewrites the
+    `tests/test_mutations.py` item, and an item inserted beside it conflicts in a 3-way merge. Placed
+    one item away, `AGENTS.md` and `tests/mutants.py` both merge clean with
+    `fix/mutant-child-outlives-timeout` (`git merge-file`, 2026-11-10).
+  - `parse_shard` refuses a malformed shard and a COUNT other than `shard_count(ids)`; the NUMBER's
+    range is refused once, by `shard_ids`, which `sharded` calls right after it. The CLI refuses
+    the same shards PLAN § 2.1 names, and each sweep anchor occurs once.
+  - `--matrix` prints the list of shard numbers as Python prints a list of ints, which is JSON: the
+    imports may gain only `Iterable`. Its "no mutation cases found" line goes to stderr, beside the
+    shard listing, so the plan job's log shows it.
+- **2026-11-10, P2 build.**
+  - `mutants.yml` is PLAN § 2.2's shape, every timing figure as recorded: both jobs
+    `timeout-minutes: 15`, the `run` step capped at 12, `SHARD_SIZE` 15 unchanged. The `plan` job
+    carries `name: plan` (the `runs` gate reads the job by that name), and the shard job's `name`
+    is `mutants (N of S)` from `matrix.shard` and `strategy.job-total`.
+  - Slots: at today's 1,164 Linux cases the matrix is 78 shard jobs plus `plan`. The organisation's
+    Free plan allows 20 concurrent jobs, shared by every repository, so a run takes all 20 for
+    about four waves (PLAN § 2.5). Not changed here; P3's run measures it.
+  - The workflow row holds the shard job's setup steps equal to `ci.yml`'s `suite-legacy-1`
+    (everything but its suite command), as the `workflow` gate does, so a later change to the
+    suite jobs' setup shows as a red row in the suite, not only at a dispatch.
+  - `verify/shard-mutants.py` gained the `workflow` mode by addition only: a `MODES['workflow']`
+    line after the `MODES` literal, which is left as P1 wrote it. Its nine mutants are killed.
+  - The `mutants budget` row adds one clause to PLAN § 2.3's wording: the run keeps fitting while
+    its shards, run in waves of the account's concurrent jobs, finish within the 15 minutes. Without
+    it the row's "a case added makes more shards, not a longer job" reads as if the envelope held
+    at any count, which § 2.5 shows it does not (R3: a cycle that adds cases can tell).
+  - `git merge-file` of `tests/mutants.py` and `AGENTS.md` against
+    `fix/mutant-child-outlives-timeout` at `5ed1a63`, base `146cbc6`: both clean (2026-11-10).
+- **2026-11-12, rebase onto `develop` at `2719b7a`** (the sibling `mutant-child-outlives-timeout`
+  landed as `32a85c3`, then the 0.2.0 release).
+  - One conflict, `ROADMAP.md`: develop's horizon line for this cycle's entry kept, with the seed's
+    status `adopted:mutants-workflow-timeout`. `tests/mutants.py` and `AGENTS.md` merged clean; this
+    cycle's own files are byte-identical to before the rebase.
+  - The figures P2 recorded stand: 1,164 Linux cases (1,165 on macOS, the same ids), `SHARD_SIZE`
+    15, 78 shards of 14–15. The sibling's stop realises the 310 s hang allowance: `LIMIT` 300 s, then
+    at most `GONE_WITHIN` 10 s for the run to be gone. A hung case is now reported `FAILED` with its
+    timeout and the shard goes on, so D1's landing-order caveat no longer applies.
+  - 2026-11-12 · foreman ruling: after the rebase onto develop, P1's re-gate runs `untouched 2`,
+    cumulative, in place of `untouched 1`, whose file list is P1's. No attempt is recorded.
+  - 2026-11-12 · foreman ruling: the frozen `controls` mode's "untouched run_child" control plants
+    on `timeout=300)`, which the sibling's `run_child` no longer holds (it waits with
+    `communicate(timeout=LIMIT)`), so its plant lands nowhere and the control reads BAD; the
+    `untouched` check itself is sound. Seen red first (`controls: 1 failed`, that control alone).
+    `remediation/F1-controls-anchor.py` runs the mode unchanged, accepts only that one BAD and only
+    while its anchor is absent, then re-runs the control with plants that land once each
+    (`communicate(timeout=LIMIT)` → `600`, wanting "run_child changed"; `LIMIT = 300` → `600`,
+    wanting "LIMIT changed"). P2's and P5's `verify:` run the wrapper in place of `controls`;
+    `verify/` is not edited.
+- **2026-11-12, P3 run 1 read (Run B): stopped, seven cases not killed.**
+  - Run `43255195424`, a `workflow_dispatch` at T1 `aff08bd`, attempt 1, conclusion failure. The
+    `runs` gate is green (`runs: ok`): every case of the 1,164 reported once, in 78 shards; no job
+    cancelled; every shard reached its ledger with its three controls passed.
+  - Figures: the run 513 s (8:33) from dispatch to its last job, within 900 s; 20 jobs at once at
+    most; `plan` done 18 s after dispatch (job 0:13). Slowest shards 37 (2:44), 2 (2:35), 6 (2:34),
+    3 and 4 (2:19); median 1:53; fastest 45 (1:11). Worst job 164 s, within 600 − 310 = 290 s
+    (headroom 436 s under 600 s, 126 s after one hung case). The refit measured 7.2 s a child
+    (slowest) and 46 s overhead (largest); at 15 a shard it projects 176 s a job and 722 s a run,
+    both bounds held, and proposes 30 (39 shards, 2 waves, run 587 s). Run 1 is within both bounds,
+    so the size stays at 15 (PLAN § 2.5).
+  - The run failed on seven shards, each with one case not killed and nothing else: 14
+    `script-reads-bashrc`, 17 `tpc-fd-59`, 39 `tpc-paths-not-functions`, 41
+    `tpc-paths-unset-in-posix-mode`, 47 `tpc-posix-kept`, 57 `fixed-script-reads-bashrc`, 60
+    `transfer-cause-unnamed`. Six survived with every target passing; `tpc-fd-59` had one target
+    pass (`[delegate-tree]`) and one fail for the wrong reason (`[ssh-bash-ignores-holding]`, no
+    "still running"). No timeout or step cap, no case reported twice or never, no setup error.
+  - Each of the seven, run alone on macOS at T1 (`tests/mutants.py CASE`), is killed with its
+    `why`: they survive only on the hosted Linux runner, whose `/bin/bash` and platform differ
+    from the development host's. They are Linux-only survivors, not runner faults.
+  - Seven is more than GOAL Q3's three: P3 stops before seeding and hands the list to the
+    foreman. The `runs` gate is green, so no attempt is recorded. P3 stays `in_progress`; no
+    seed, case, workflow or runner change is made here, and nothing is re-dispatched.
+- **2026-11-12 · foreman ruling under GOAL Q3: the seven survivors are Linux-only, seeded in four
+  groups; size stays 15, since run 1 held both bounds.** The seeds, each `unshaped`, `kind: test`,
+  with its `ROADMAP.md` entry in Part I's Gates group after this cycle's:
+  - `issues/mutants-linux-bashrc-norc.md`: `script-reads-bashrc`, `fixed-script-reads-bashrc`;
+  - `issues/mutants-linux-posix-paths.md`: `tpc-paths-not-functions`,
+    `tpc-paths-unset-in-posix-mode`, `tpc-posix-kept`;
+  - `issues/mutants-linux-fd-59.md`: `tpc-fd-59`;
+  - `issues/mutants-linux-transfer-cause.md`: `transfer-cause-unnamed`.
+
+  Each names run `43255195424` at `aff08bd`, its shard, the target rows that passed on Linux, the
+  macOS kill and an unverified likely cause, and suggests fix shapes without choosing one. No case,
+  target or `why` changes in this cycle (Non-goal 3). P3 closes; P4's dispatch is the foreman's.
+- **2026-11-12 · foreman ruling: across runs 2 and 3, only a survivor not already seeded counts
+  against the three-case limit.** A re-occurrence of the seven cases seeded after run 1 does not
+  count. A case not killed in one run and killed in another is reported as a flaky case.
+- **2026-11-12, P4 run 2 read (Run B).**
+  - Run `43260825655`, a `workflow_dispatch` at `32e1d5c` (T1 plus records only), attempt 1,
+    conclusion failure. The `runs` gate over both runs is green (`runs: ok`): every case once in
+    78 shards, no job cancelled, every shard at its ledger with its controls passed.
+  - Figures: the run 591 s (9:51) from dispatch, within 900 s; 20 jobs at once at most; worst job
+    shard 2 at 156 s, within 290 s; median 108 s. Over both runs the worst job is still shard 37 of
+    run 1 (2:44), the worst wall run 2's 9:51. The refit now measures 7.6 s a child and 50 s
+    overhead; at 15 a shard it projects 186 s a job and 762 s a run, both bounds held, and
+    proposes 20. Both runs held both bounds, so the size stays at 15.
+  - Eight shards failed, each on one case: the seven seeded after run 1 (shards 14, 17, 39, 41, 47,
+    57, 60), the same targets as in run 1, which do not count; and shard 3,
+    `ssh-returns-at-exit-status`. Its five other targets failed with its `why`, but
+    `test_ssh_exec.py::test_a_late_sentinel_still_counts_as_started[bashrc]` failed for another
+    reason (no "cut before its end records"). In run 1 the case was killed, every target with its
+    `why`, and on macOS at T1, run alone, it is killed in 10 s. It is a flaky case under the
+    ruling above, reported and not counted: the row caught the mutant both times, but on a
+    loaded runner the mutant's early return seems to end the row at another failure first
+    (unverified; the runner's line does not quote the failure).
+  - No stop fires. `runs --final` will require the flaky case named in an `issues/` seed, as every
+    case not killed in any run is; whether it gets one is the foreman's. P4 stays `in_progress`
+    until then; nothing is seeded, changed or dispatched here.
+  - 2026-11-12 · foreman ruling: the flaky case gets a seed of its own,
+    `issues/mutants-flaky-ssh-returns-at-exit-status.md`, with its `ROADMAP.md` entry in Part I's
+    Gates group after the four `mutants-linux-*` entries. P4 closes.
+- **2026-11-12, P5 run 3 read and recorded (Run B).**
+  - Run `43265827418`, a `workflow_dispatch` at `36bd540` (T1 plus records only), attempt 1,
+    conclusion failure: the run 494 s (8:14) from dispatch, 20 jobs at once at most, worst job
+    shard 6 at 191 s, median 109 s. Seven shards failed, each on one of the seven cases seeded
+    after run 1, which do not count; shard 3's flaky case was killed. `tpc-fd-59` had both targets
+    pass this time (in runs 1 and 2 one failed for the wrong reason); its seed and entry gain a
+    dated line, as does the flaky seed.
+  - `runs --final` is green over the three runs: every case not killed in any run (eight) is named
+    in a seed of this cycle. Worst of three: the run 9:51 from dispatch (run 2), within 900 s; the
+    slowest job 3:11 (shard 6, run 3), within 290 s, 12.7 s a case with its setup. The refit
+    measures 8.4 s a child and 50 s overhead: at 15 a shard it projects 201 s a job and 822 s a run,
+    both bounds held, and proposes 20. The size stays at 15, as measured.
+  - The printed baseline sentence is the `mutants budget` row's baseline, and § Testing states the
+    cost it holds (1,164 cases in 78 shards, the run 9:51 from dispatch, slowest job 3:11). The
+    deferral ledger is walked by `prepush` over P1–P5, PLAN § 5 and the commit bodies.
+  - P5's `verify:` is red at `remediation/F1-controls-anchor.py` alone: the frozen `controls` mode's
+    `docs final sound` and `docs final pending` controls plant by replacing `pending` in the staged
+    row, which now holds the baseline, so neither plant lands and both read BAD. With the pre-fill
+    `AGENTS.md` staged, the wrapper is green (`controls (re-anchored): ok`). `docs --final`,
+    `runs --final`, `prepush`, `untouched 5` and `workflow` are green on this tree. Stopped for the
+    foreman; no attempt is recorded, as with F1. P5 stays `in_progress`.
+  - 2026-11-12 · foreman ruling (code-build Step 1.3): `remediation/F2-docs-controls-prefill.py`
+    runs the F1 wrapper unchanged and accepts exactly the `docs final sound` and `docs final
+    pending` BADs, only while the staged row holds no `pending`. It re-runs those two controls,
+    built as the frozen mode builds them, on `AGENTS.md` at `36bd540` (the last commit with
+    `Baseline: pending`), with the plant asserted to land exactly once. Any other BAD or FAILED
+    line is red, and so are those two still failing on the pre-fill text. Seen red first on the
+    staged tree under F1 (`controls (re-anchored): 4 failed`). Under F2: green on the staged tree;
+    green with the pre-fill `AGENTS.md` staged; red (3 failed) with the row's `ubuntu-24.04`
+    dropped, naming `docs sound`. P5's `verify:` runs F2 in place of F1 (P2's keeps F1);
+    `verify/` is not edited. The run-3 lines added to `issues/mutants-linux-fd-59.md`,
+    `issues/mutants-flaky-ssh-returns-at-exit-status.md` and their `ROADMAP.md` entries are
+    accepted.
+- **2026-11-12, review cycle 1 remediation** (REVIEW.md, verdict changes-requested at `30231aa`;
+  the foreman's triage: F-a accepted as a finding, F-b fixed, the two coverage observations
+  seeded). P5 is reopened, the phase whose `satisfies` holds R3 and R4; no other phase is touched.
+  - **F-a, the arithmetic.** Every input is a measured figure of the three counted runs:
+    - concurrency: 20 jobs at once at most in each run (`runs` prints it per run; the review's
+      `waves.out` has the 21st, 41st and 61st shards starting at 95–114 s, 206–235 s and
+      312–384 s from dispatch, so the slots refill in waves of 20);
+    - shards ⌈1,164 ÷ 15⌉ = 78; waves ⌈78 ÷ 20⌉ = 4;
+    - time per wave: the worst run, 591 s (9:51, run 43260825655), over its 4 waves = 147.75 s,
+      about 2:28, with the plan and any queueing folded in. The measured gaps between wave starts,
+      100–149 s, sit at or under it;
+    - the measured rate: 6 waves project 6 × 147.75 = 886.5 s (14:47, 13.5 s inside 900 s), and 7
+      project 1,034.25 s (17:14). Six waves hold 6 × 20 = 120 shards, 120 × 15 = 1,800 cases, so the
+      run crosses 15:00 from the 121st shard, at case 1,801. The answer holds for any time per wave
+      above 900 ÷ 7 = 128.6 s and up to 900 ÷ 6 = 150 s; past 150 s, 5 waves are the most that fit
+      (100 shards, 1,500 cases);
+    - the worst-case rate, the refit `runs --final` prints (every job as slow as the slowest seen,
+      waves that never overlap): 8.4 s a child, 50 s of overhead, the plan done at 18 s, so a job of
+      50 + (15 + 3) × 8.4 ≈ 201 s and a run of 18 + W × 201 s: 4 waves 822 s (13:42), 5 waves 1,023 s
+      (17:03). Four waves hold 80 shards, 1,200 cases, so on this projection the run crosses from
+      the 81st shard, at case 1,201, 37 cases past today's 1,164.
+
+    The row states both crossings. Which rate a cycle plans against is the maintainer's to judge;
+    the bound's wording is unchanged.
+  - **F-b.** The runs' heads (`gh run view --json headSha`): 43255195424 at `aff08bd` (T1, the
+    measured commit `runs.txt` names), 43260825655 at `32e1d5c`, 43265827418 at `36bd540`. The
+    filtered diffs `git diff --stat aff08bd 32e1d5c -- . ':(exclude)spec/' ':(exclude)issues/'
+    ':(exclude)ROADMAP.md'` and the same for `aff08bd 36bd540` are both empty; unfiltered, the
+    later commits differ from T1 only in `ROADMAP.md`, the `issues/mutants-*` seeds, `TECH.md` and
+    `runs.txt`. The gate's baseline sentence, which names `aff08bd` as the measured commit, is kept
+    verbatim and the next sentence names each run's head, so `docs --final` and F2 read the row
+    unchanged and no wrapper of theirs is needed.
+  - **The checker.** `remediation/F3-budget-row-figures.py` (review cycle 1, F-a and F-b) runs the
+    frozen `runs --final` unchanged and requires `runs: ok`, then builds the two new sentences from
+    its printed figures and each run's head, checks the same-code claim by `git diff --name-only`,
+    and requires the staged row to end with the baseline and those two sentences. Its controls
+    plant the reviewed row, two heads swapped, a wrong wave count, a wrong crossing wave and a wrong
+    concurrency, each asserted to land once and be refused. Seen red first: with the reviewed row
+    in the index, the frozen mode green (`runs: ok`), F3 failed on the row ("does not end with the
+    baseline, each run's head and the wave figures"), and its plants, which need the new sentences,
+    landed nowhere. An earlier try stopped inside the frozen mode on a transient `gh run view`
+    error, which passed on retry. P5's `verify:` runs F3 in place of `runs --final`,
+    which F3 runs unchanged; `verify/` is not edited.
+  - **The coverage observations.** `ledger-empty-name` (drop `or not name`, `tests/mutants.py:6073`)
+    and `ledger-control-else` (`elif word != 'control'` → `else:`, `:6077`) each remove a guard that
+    never fires on a report the runner prints. Under the method's rule for a finished review (a
+    hand-made mutant that pins no R-ID's check and no reachable behaviour is a coverage observation,
+    and it is seeded), they are seeded together as `issues/mutants-ledger-guard-pins.md`, with a
+    `ROADMAP.md` entry in Part I's Gates group after the flaky case's. Part I goes from 33 entries
+    to 34 and Gates from sixteen to seventeen; the seed/ROADMAP pairing check is empty.
+  - **Gates run.** P5's `verify:` only, through its wrapper chain (F2 over F1 over the frozen
+    `controls`; F3 over `runs --final`). The profile's full `verify` is not re-run: nothing outside
+    `AGENTS.md`'s row, `ROADMAP.md`, `issues/` and `spec/` changes, and `git diff --name-only
+    d5e3be0` with those filtered out is empty.
+  - **Attempt 1, red, recorded.** The first run of the retuned `verify:` was red inside the
+    frozen `runs --final` alone: run 43265827418's shard 7 read as "0 verdicts" and no ledger line.
+    The gate's log fetch (`gh run view --log --job`, no exit check) had returned an empty log; the
+    same job's log, fetched again at once, holds all 469 lines and its 15 `killed` lines, and the
+    same mode was green on these runs minutes before (F3's red-first run). Every other step was
+    green, F3's row check and controls included. The runs are immutable, so the red is the fetch,
+    not the tree: the gate was re-run from its first step on the identical tree.
+
+---
+
+## How `code-build` drives this
+
+1. `next_phase.py` prints the next actionable phase (statuses are authoritative; the
+   `current_phase` pointer is reconciled against them).
+2. Pre-flight: the cycle worktree is clean, on `branch`, and `base` is reachable.
+3. Execute every `[ ]` in the phase (consult `PLAN.md` for detail).
+4. Run the phase's `verify:` command — never advance on a checkbox alone.
+5. Amend this file freely if reality diverges (regenerate frontmatter with `set_phase.py`; note the
+   amendment in the commit body). STOP and escalate only on a **`GOAL.md` contradiction**.
+6. Mark the phase `done`, advance `current_phase`, `--touch`; one `[ci]` commit; stop and report.

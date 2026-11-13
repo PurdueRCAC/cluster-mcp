@@ -4,8 +4,20 @@
 # The mutation runner (AGENTS.md § Testing), on demand only. Each case runs against a copy of every
 # workspace member's portion of the cluster_mcp namespace. It gates nothing: it never runs on
 # push or pull request, and publish does not read it. GitHub offers a manual run only for a
-# workflow file that exists on the default branch, so this one becomes dispatchable at the
-# release that first carries it to main.
+# workflow file that exists on the default branch; main carries this one, so a run can be
+# dispatched against any branch that has the file.
+#
+# The run is split into shards so that it finishes, with a verdict for every case, within the
+# bound the `mutants budget` row holds (AGENTS.md § Factory). `plan` asks the runner for this
+# commit's shards (`--matrix`): a shard holds at most the runner's SHARD_SIZE cases, so a case
+# added makes another shard, never a longer job, and the plan's log names every case of every
+# shard. Each `mutants` job runs one shard with the runner's controls, its step capped so that the
+# job's timeout leaves room for the ledger. The ledger always runs: it re-reads the shard's report
+# however the cases' step ended, and fails the job naming each case without exactly one kill and
+# each control that did not pass. No shard's failure cancels another.
+#
+# Least privilege: a read-only token, no secrets, no caches, no uploads, and every action pinned
+# to a full commit SHA, as ci.yml pins it.
 name: Mutants
 
 on:
@@ -19,10 +31,12 @@ defaults:
     shell: bash
 
 jobs:
-  mutants:
-    name: mutants
+  plan:
+    name: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    outputs:
+      shards: ${{ steps.shards.outputs.shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,13 +47,41 @@ jobs:
           python-version: '3.14'
           enable-cache: false
       - run: uv sync --locked
-      # Every case the file defines at this commit. An empty list would run only the runner's own
-      # controls and pass, so it fails here instead; the count check catches a lost report line.
-      - run: |
-          ids=$(uv run python -c "import sys; sys.path.insert(0, 'tests'); import mutants; print(*(c.id for c in mutants.CASES))")
-          test -n "$ids" || { echo 'no mutation cases found in tests/mutants.py' >&2; exit 1; }
-          read -ra cases <<< "$ids"
-          uv run python tests/mutants.py --self-check "${cases[@]}" | tee mutants-report.txt
-          killed=$(grep -c '^killed ' mutants-report.txt)
-          echo "killed ${killed} of ${#cases[@]} cases"
-          test "$killed" -eq "${#cases[@]}"
+      # The shard numbers, a JSON list, on stdout; each shard's cases on stderr, into this log. With no
+      # case found the runner exits 1, and the run fails here, before any shard.
+      - id: shards
+        run: |
+          shards=$(uv run python tests/mutants.py --matrix)
+          echo "shards=${shards}" >> "$GITHUB_OUTPUT"
+
+  mutants:
+    name: mutants (${{ matrix.shard }} of ${{ strategy.job-total }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.12.17'
+          python-version: '3.14'
+          enable-cache: false
+      # A login-shell row fails, rather than skips, when its shell is missing on CI.
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends zsh tcsh ksh csh
+      - run: uv sync --locked
+      # Unbuffered, so a step stopped at its cap leaves every line it printed in the report.
+      - name: run
+        timeout-minutes: 12
+        run: uv run python -u tests/mutants.py --self-check --shard "$SHARD" | tee mutants-report.txt
+      # A separate process, after the runner ended however it ended: a case it never reported is named.
+      - name: ledger
+        if: always()
+        run: uv run python tests/mutants.py --ledger mutants-report.txt --shard "$SHARD"

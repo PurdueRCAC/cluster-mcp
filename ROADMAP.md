@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-36 entries, each of which ships in the first release after it lands. **Part II** ships as
+42 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Thirty-six entries: every open hardening, robustness and safety item, and the rest of the rename in
+Forty-two entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,11 +84,12 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (thirteen), because every later gate rests on them: the mutation run and the pins its
-  stop path still lacks, the two gaps the skip check still leaves and the pins it still lacks, the
-  waits the timing rows still miss and the bounds two miss on hosted runners, an annotation check,
-  the test harnesses' leftovers, the marker wording, the image's init, and the surface pin's deeper
-  layers.
+- **Gates** (nineteen), because every later gate rests on them: the mutation run, the four kinds of
+  case only its hosted Linux run lets survive, its one flaky case, the two guards its shard ledger
+  leaves unpinned, the pins its stop path still lacks, the two gaps the skip check still leaves and
+  the pins it still lacks, the waits the timing rows still miss and the bounds two miss on hosted
+  runners, an annotation check, the test harnesses' leftovers, the marker wording, the image's init,
+  and the surface pin's deeper layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (eight): a capability load retried after an interrupt, a failed load's refusal
@@ -143,7 +144,71 @@ it gates nothing yet, and every later mutation gate rests on it.
 - 2026-11-02: `timeout-process-cleanup` adds 101 more (1,032 in all), about 11 minutes per era.
 
 *Horizon: Part I, gates first; before core extraction's review · Depends on: — · Refs: [`spec/capability-probe/`](spec/capability-probe/) (research 03 §5, PLAN §6)*
-**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: unshaped*
+**Seed:** [`issues/mutants-workflow-timeout.md`](issues/mutants-workflow-timeout.md) · *status: adopted:mutants-workflow-timeout*
+
+## Dropping `--norc` from a local stage survives the mutation run on Linux
+
+`script-reads-bashrc` and `fixed-script-reads-bashrc` drop `--norc` from a `local` stage. The hosted
+Linux runner let both survive: the row that counts `~/.bashrc` reads under an emulated sshd passed.
+On macOS each is killed. The likely cause, unverified, is bash's sshd heuristic, which differs
+between macOS's bash 3.2 and Ubuntu's 5.2. Found by `mutants-workflow-timeout`'s first hosted run,
+2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_launch.py` (`test_no_stage_reads_a_startup_file_under_sshd`); `core/executor/launch.py`*
+**Seed:** [`issues/mutants-linux-bashrc-norc.md`](issues/mutants-linux-bashrc-norc.md) · *status: unshaped*
+
+## The launch's path-function reset survives three mutants on Linux
+
+`tpc-paths-not-functions`, `tpc-paths-unset-in-posix-mode` and `tpc-posix-kept` break the prologue's
+`unset -f /bin/cat /bin/date /bin/sleep` after `+o posix`. The hosted Linux runner let all three
+survive, and on macOS each is killed. The likely cause, unverified, is that bash 5.2's POSIX mode
+treats functions named by a path differently from bash 3.2's. Found by `mutants-workflow-timeout`'s
+first hosted run, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_timeout_stop.py` (`test_a_profile_cannot_cut_the_watchdogs_wait_short`); `core/executor/launch.py`*
+**Seed:** [`issues/mutants-linux-posix-paths.md`](issues/mutants-linux-posix-paths.md) · *status: unshaped*
+
+## Renumbering the watchdog's descriptor to 59 survives on Linux
+
+`tpc-fd-59` moves the watchdog onto the descriptor the sentinel line points at the caller's stderr.
+On the hosted Linux runner one target passed and the other failed for the wrong reason in two runs;
+both passed in the third. On macOS both fail with "still running". The cause is unverified. Found by `mutants-workflow-timeout`'s first
+hosted run, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_timeout_stop.py` (`test_a_timed_out_command_is_stopped`); `core/executor/launch.py`*
+**Seed:** [`issues/mutants-linux-fd-59.md`](issues/mutants-linux-fd-59.md) · *status: unshaped*
+
+## A write's unnamed cause survives the mutation run on Linux
+
+`transfer-cause-unnamed` drops the executor's named cause from a failed write's error. The hosted
+Linux runner let it survive, and on macOS it is killed. The likely cause, unverified, is that the
+bare exception text already names the cause on Linux. Found by `mutants-workflow-timeout`'s first
+hosted run, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P3 run 1); `tests/test_ssh_exec.py` (`test_a_write_that_runs_out_of_room_keeps_the_file`); `core/executor/ssh.py`*
+**Seed:** [`issues/mutants-linux-transfer-cause.md`](issues/mutants-linux-transfer-cause.md) · *status: unshaped*
+
+## `ssh-returns-at-exit-status` is killed for its reason in one hosted run and not the next
+
+The case was killed on all six of its targets in the first hosted run and on macOS. In the second
+run, five were killed with its `why`, but `test_a_late_sentinel_still_counts_as_started[bashrc]`
+failed for another reason. In the third run it was killed again. The rows catch the mutant every
+time, but one row's reason varies with timing on a loaded runner (unverified). Found by
+`mutants-workflow-timeout`'s second hosted run, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (TECH Amendments, P4 run 2); `tests/test_ssh_exec.py` (`test_a_late_sentinel_still_counts_as_started`); the hosted-runner timing misses' seed on `develop`, a related cause*
+**Seed:** [`issues/mutants-flaky-ssh-returns-at-exit-status.md`](issues/mutants-flaky-ssh-returns-at-exit-status.md) · *status: unshaped*
+
+## Two of the shard ledger's guards are pinned by no row
+
+`report_violations`, the shard ledger `mutants-workflow-timeout` added, skips a verdict line with an
+empty name and keeps a `control` line outside `CONTROLS` out of the verdicts. The runner never prints
+either shape, so no row feeds them: the review's hand-made mutants that drop each guard passed every
+row in `tests/test_mutant_shards.py`. The code is correct; only the pins are missing. Found by that
+cycle's review, cycle 1, 2026-11-12.
+
+*Horizon: Part I, gates · Depends on: — · Refs: [`spec/mutants-workflow-timeout/`](spec/mutants-workflow-timeout/) (REVIEW cycle 1, mutation grading); `tests/mutants.py` (`report_violations`); `tests/test_mutant_shards.py`*
+**Seed:** [`issues/mutants-ledger-guard-pins.md`](issues/mutants-ledger-guard-pins.md) · *status: unshaped*
 
 ## The mutation runner's stop path is pinned for its main layer, not its deeper ones
 

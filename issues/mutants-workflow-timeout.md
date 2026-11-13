@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:mutants-workflow-timeout
 kind: ci
 appetite: small
 lane: public
