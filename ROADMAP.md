@@ -364,6 +364,18 @@ by that cycle's planning, seeded at its plan sign-off, 2026-11-12.
 *Horizon: Part I, safety · Depends on: — · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) (PLAN § 5, research 02); `AGENTS.md` § Invariants §7; `core/capabilities.py`*
 **Seed:** [`issues/capability-record-checks-metaclass-code.md`](issues/capability-record-checks-metaclass-code.md) · *status: unshaped*
 
+## The return-type rule's static-type exemption is decided by a flag capability code can set
+
+A tool's return type must hold classes that carry their own `__module__`, except a class without the
+heap-type flag, a static type such as `str`. A capability's own native code can clear that flag on a class
+of its own (`ctypes`), and then FastMCP's read of the class's `__module__` resolves along the MRO and runs
+the capability's code; a C extension's heap type with an undotted name is refused, though nothing of the
+capability's runs. Deciding the class as FastMCP's read resolves it, or naming the exempt static types,
+closes both. Not pre-existing: that cycle's rule. Found by its review cycle 3, 2026-11-13.
+
+*Horizon: Part I, safety · Depends on: capability-tool-objects-inert (the rule it tightens) · Refs: [`spec/capability-tool-objects-inert/`](spec/capability-tool-objects-inert/) REVIEW cycle 3, F1 and F2; `AGENTS.md` § Invariants §7; `core/capabilities.py`*
+**Seed:** [`issues/capability-return-type-heap-flag.md`](issues/capability-return-type-heap-flag.md) · *status: unshaped*
+
 ## One very large site file can cost every site rule
 
 The startup read takes each `/etc/agents.d/*.md` file whole, with no size limit, inside one 10 s

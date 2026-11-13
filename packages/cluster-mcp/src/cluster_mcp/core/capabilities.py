@@ -375,7 +375,8 @@ def _default_violation(value: object, info: FieldInfo) -> str | None:
 _RETURN_CLASSES: Final = (type, type(BaseModel), enum.EnumType, abc.ABCMeta, typing._TypedDictMeta)
 _RETURN_ALIASES: Final = (types.GenericAlias, typing.Union, typing._GenericAlias, typing._UnionGenericAlias,
                           typing._AnnotatedAlias, typing._LiteralGenericAlias)
-# `Py_TPFLAGS_HEAPTYPE`: set on every class a class statement or `type()` makes, never on one defined in C.
+# `Py_TPFLAGS_HEAPTYPE`: set on every class a class statement or `type()` makes, and on one a C extension makes
+# with `PyType_FromSpec`; clear on a static type, such as `str` or `dict`.
 _HEAP_TYPE: Final = 1 << 9
 
 
@@ -385,8 +386,9 @@ def _return_type_violation(value: object, info: FieldInfo) -> str | None:
     FastMCP reads it as it registers the tool (`isinstance`, its `__module__`, its origin and arguments).
     Accepted: None, no annotation, `typing.Any` and `...`; a class whose metaclass is exactly one of
     `_RETURN_CLASSES`, its namespace (read through `type`'s own descriptor) keyed exactly by `str` and
-    holding its own `__module__`, exactly a `str` (a class defined in C has none there: `type` reads its
-    module from its C name); and exactly one of `_RETURN_ALIASES`, its state read
+    holding its own `__module__`, exactly a `str` (a class without the heap-type flag, a static type such as
+    `str`, has none there and passes: `type` reads its module from its name; a heap type with none of its
+    own is refused, whatever made it, a C extension included); and exactly one of `_RETURN_ALIASES`, its state read
     through its instance dictionary when it has one, whose origin and arguments are accepted in turn, a
     `Literal`'s arguments exact scalars and an `Annotated`'s metadata exactly pydantic's `FieldInfo` or
     JSON-like. A class is not walked further: at a call, serializing the result through it is the call.

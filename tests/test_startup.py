@@ -739,7 +739,9 @@ def test_a_return_type_with_no_module_of_its_own_stops_startup_running_none_of_i
     # A tool's return type whose class holds no `__module__` of its own, of each metaclass the load accepts:
     # building a server reads the class's `__module__`, which on every metaclass but `type` finds its base's,
     # a `str` of the capability's own whose every operation exits 0. The start is refused naming the
-    # distribution, with stdout empty: had any of that code run, the start would have ended with exit 0.
+    # distribution, for this rule's cause, with stdout empty. Without the rule, a class of `type` or
+    # `TypedDict`'s metaclass loads (its read never reaches the base), and on the others the load's guard
+    # catches the exit at its scratch build and refuses with another cause: the cause check fails either way.
     root, named, cause = plant_unloadable(tmp_path / 'planted', f'tool-exact-return_type-no-own-module-{meta}')
     violations = refused_start_violations(root, named, cause, 'stdin-closed')
     assert violations == [], '\n'.join(violations)

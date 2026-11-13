@@ -4082,8 +4082,8 @@ CASES += (
     alternative('capability-tool-return-type-literal-float-refused', LOADER,
                 ((LITERAL_ITEM, LITERAL_ITEM.replace(' or type(item) is float', '')),),
                 SHAPES_ROWS, '', 'an inert tool of a shape the load accepts was refused'),
-    # A class with no `__module__` of its own: refused, of each metaclass the load accepts, unless it is defined
-    # in C, whose module `type` reads from its C name (the members' `str` and `dict`).
+    # A class with no `__module__` of its own: refused, of each metaclass the load accepts, unless it lacks the
+    # heap-type flag (a static type, such as the members' `str` and `dict`, whose module `type` reads from its name).
     Case('capability-tool-return-type-own-module-unrequired', LOADER, ((OWN_MODULE, '            elif False:\n'),),
          every_set(REFUSED_NAMING, *(f'tool-exact-return_type-no-own-module-{meta}'
                                      for meta in ('type', 'abc', 'model', 'enum', 'typed-dict'))), NOT_REFUSED),

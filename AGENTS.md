@@ -2869,9 +2869,12 @@ What each mode means:
     or a `dict` keyed exactly by `str`, no container twice); `return_type` None, no annotation,
     `typing.Any`, `...`, a class of a metaclass the load names (`type`, pydantic's, `enum`'s, `abc`'s,
     `TypedDict`'s) that holds its own `__module__`, exactly a `str`, in its own namespace (a class
-    defined in C, such as `str` or `dict`, has none there, and passes: its module is its C name), or
+    without the heap-type flag, a static type such as `str` or `dict`, has none there, and passes: `type`
+    reads its module from its name; a class statement or `type()` always sets the flag, and so does a C
+    extension's `PyType_FromSpec`, so a heap type with no `__module__` of its own is refused whatever
+    made it), or
     an alias it names (a generic, a union, `Annotated`, `Literal`) whose parts pass in turn, every class
-    at any depth held to the same rule (a class without its own `__module__` is refused,
+    at any depth held to the same rule (a heap type without its own `__module__` is refused,
     `… holds a class with no __module__ of its own`); `fn` exactly a function whose `__module__` is
     exactly a `str` (what it does when a request calls it is the capability's code, by design); every
     other field its declared default, node for node, as `@mcp_tool` leaves it. A field the installed
