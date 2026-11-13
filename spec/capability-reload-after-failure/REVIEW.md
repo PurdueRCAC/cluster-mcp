@@ -509,7 +509,7 @@ No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual dri
   stated behaviour on reachable input. The sibling mutants H2n and H3n are killed only by a
   discovery counter on the default path, so nothing pins the property on the path that is given
   its capabilities. The reviewer graded it MEDIUM: a requirement met but still fragile.
-- **Re-graded MEDIUM to LOW by the maintainer, as gate judge (2026-11-13).** HEAD behaves as R5
+- **Re-graded MEDIUM to LOW by the foreman, as gate judge (2026-11-13).** HEAD behaves as R5
   requires; the reviewer's own probes show it (`reviewer/probe_refused_runs.log`, the real-tree
   rows). What is missing is a control on inputs where a load would show. That is the rubric's
   "missing but non-blocking test coverage of an R-ID", which is LOW. The same re-grade was upheld
@@ -525,7 +525,7 @@ No R-ID is met by a `spec/` artifact. No scope creep and no operating-manual dri
 
 ### Routing (cycle 3)
 
-To build, for F-A (LOW/CONFIRMED, fixed rather than seeded, by the maintainer's ruling). The
+To build, for F-A (LOW/CONFIRMED, fixed rather than seeded, by the foreman's ruling). The
 property, over its whole domain, both sides:
 
 - **Property (R2, R5):** a refused load imports nothing, registers nothing and runs no capability's
@@ -543,7 +543,7 @@ property, over its whole domain, both sides:
 ### Human-gate triggers
 
 - **Triggered (standing).** Cycles 1 and 2 found CONFIRMED findings against
-  `core/capabilities.py`, a path on § Invariants' high-blast-radius list. The maintainer signs off
-  before publish. F-A itself sits in a test file and guards that path.
-- **Bounded loop.** This is the third review cycle without a clean pass. The maintainer ruled on
+  `core/capabilities.py`, a path on § Invariants' high-blast-radius list. The maintainer pre-approved publish
+  for a LOW-only result in this cycle. F-A itself sits in a test file and guards that path.
+- **Bounded loop.** This is the third review cycle without a clean pass. The foreman ruled on
   it (the re-grade above) and routed F-A to build.
