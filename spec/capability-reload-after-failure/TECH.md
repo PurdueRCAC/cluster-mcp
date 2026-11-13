@@ -3,10 +3,10 @@ slug: capability-reload-after-failure
 title: A capability load retried after a failure loads the healthy ones and names the broken one
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/capability-reload-after-failure
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-12'
 phases:
 - id: P1
@@ -26,7 +26,7 @@ phases:
   verify: export UV_PYTHON=3.14 && uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && uv run pytest -q tests/test_startup.py -k capabilit && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_capabilities.py tests/test_mutations.py tests/test_hygiene.py && CLUSTER_MCP_TEST_ERA=modern uv run pytest -q tests/test_startup.py -k capabilit && uv run python tests/mutants.py --self-check capability-retry-imports-nothing capability-retry-refusal-says-not-to-restart capability-own-refusal-read-as-the-loads capability-scratch-per-capability capability-refusal-keeps-registry capability-other-exception-escapes capability-other-exception-keeps-registry capability-load-failure-passes-re-raises
 - id: P2
   name: The mutation case for today's retry, the ledger, and the full gate
-  status: in_progress
+  status: done
   satisfies:
   - R6
   depends_on:
@@ -295,7 +295,10 @@ contract; every deferral is recorded; the profile's full `verify` is green.
       is gone with the design it recorded, the interrupt seed keeps its entry (restated), and the
       sweep's two survivors are seeded as `issues/capability-refusal-class-patched.md`. Part I is 31
       entries, Safety five.
-- [ ] Run the full `verify:` on the remediated tree (the foreman schedules it).
+- [x] Run the full `verify:` on the remediated tree. Green on `2bcfa50`, 2026-11-12, 27 min 34 s
+      wall: the eight cases killed with the runner's three controls reported, the lock check, both
+      eras' four suite commands (44, 154, 507 and 4909 passed, 14 skipped, in each), and the
+      sandboxed `cluster-mcp --help`.
 - **Verify:** the new case and the four re-planted ones with the runner's controls, then the
   profile's full `verify`, both eras and the sandboxed `cluster-mcp --help`.
 - **Touches:** `tests/mutants.py`; by the amendment, `tests/test_capabilities.py`, `AGENTS.md` and
