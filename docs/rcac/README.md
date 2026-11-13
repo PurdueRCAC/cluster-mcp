@@ -23,8 +23,9 @@ RCAC cluster runs Slurm: install `cluster-mcp[rcac]`, as in the [Quick Start](..
 - The [Slurm tools](../slurm/README.md), which `[rcac]` installs: several of its tools take a Slurm
   job id.
 
-If the cluster is missing either command, the server withholds the extra: none of its tools,
-resources or instructions are served. See
+If the cluster is missing either command, the server withholds the RCAC capability: none of its
+tools, resources or instructions are served. The Slurm tools `[rcac]` installs are judged on their
+own, by Slurm's commands, and are still served where the cluster has them. See
 [Which capabilities are served](../core/README.md#which-capabilities-are-served).
 
 ## How it behaves

@@ -36,7 +36,7 @@ SPEC = f'spec/{SLUG}/'
 ALLOWED = {
     'packages/cluster-mcp/pyproject.toml', 'uv.lock', 'tests/test_packaging.py',
     'README.md', 'packages/cluster-mcp/README.md', 'packages/cluster-mcp-rcac/README.md',
-    'docs/core/README.md', 'docs/rcac/README.md', 'AGENTS.md',
+    'docs/core/README.md', 'docs/rcac/README.md', 'docs/slurm/README.md', 'AGENTS.md',
     'tests/test_capabilities.py', 'tests/test_surface.py', 'ROADMAP.md', 'issues/site-extras.md',
 }
 FROZEN = ('tests/fixtures/served_surface.json', 'pyproject.toml', 'Dockerfile', 'compose.yml',
@@ -113,6 +113,11 @@ FORBIDDEN_PATTERNS = (
                r"[^.]{0,80}\bslurm\b", re.IGNORECASE),
     re.compile(r"--with\s+'?\"?cluster-mcp\[slurm\]", re.IGNORECASE),
     re.compile(r"\b(?:add|also install|install)\s+`?cluster-mcp\[slurm\]`?\s+(?:as well|too|also|beside|with)",
+               re.IGNORECASE),
+    # `[rcac]` paired with a second `[slurm]` requirement, either way round, in any words that join them.
+    re.compile(r"\[rcac\]`?(?:\s+extra)?\s+(?:together with|alongside|beside|with|and|plus)\s+`?(?:cluster-mcp)?\[slurm\]",
+               re.IGNORECASE),
+    re.compile(r"\[slurm\]`?(?:\s+extra)?\s+(?:together with|alongside|beside|with|plus)\s+`?(?:cluster-mcp)?\[rcac\]",
                re.IGNORECASE),
 )
 
@@ -217,9 +222,13 @@ def check_install_lines(base: str) -> list[str]:
             problems.append(f'{name} names both extras on other lines than the compat root\'s: '
                             f'unexpected {extra}, missing {gone}')
         flat = folded(text)
-        problems += [f'{name} still says {phrase!r}' for phrase in FORBIDDEN if phrase in flat]
+        # Any case: a sentence may start with the phrase.
+        problems += [f'{name} still says {phrase!r}' for phrase in FORBIDDEN if phrase.lower() in flat.lower()]
         if name.endswith(PROSE):
-            problems += [f'{name} says {m[0]!r}' for pattern in FORBIDDEN_PATTERNS for m in pattern.finditer(flat)]
+            # The compat root's own lines may name both extras; nothing else may pair them.
+            allowed = [folded(line) for line in COMBINED_LINES.get(name, [])]
+            problems += [f'{name} says {m[0]!r}' for pattern in FORBIDDEN_PATTERNS for m in pattern.finditer(flat)
+                         if not any(m[0] in line for line in allowed)]
     return problems
 
 

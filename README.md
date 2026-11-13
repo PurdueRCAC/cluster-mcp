@@ -44,7 +44,9 @@ cluster's rules in full, [raise both limits](docs/core/README.md#the-instruction
 | Slurm | `cluster-mcp[slurm]` | Slurm job and cluster-status tools | [docs/slurm](docs/slurm/README.md) |
 | RCAC | `cluster-mcp[rcac]` | Purdue RCAC storage, job, partition and account tools, with the Slurm tools. To search RCAC documentation, add the [RCAC documentation service](docs/rcac/README.md#rcac-documentation) | [docs/rcac](docs/rcac/README.md) |
 
-The server serves an extra only where the cluster has the commands it needs.
+The server serves each capability only where the cluster has the commands it needs, and judges each
+on its own: on a cluster without `findscratch` or `myquota`, `[rcac]` still serves its Slurm tools
+([Which capabilities are served](docs/core/README.md#which-capabilities-are-served)).
 
 ## Run modes
 

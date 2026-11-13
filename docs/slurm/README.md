@@ -21,8 +21,8 @@ argument per element (`extra_args=["--long"]`). A string is refused.
 - `sbatch`, `squeue`, `scancel`, `sacct`, `sinfo` and `scontrol`, found through the login shell the
   tools run in.
 
-If the cluster is missing any of them, the server withholds the extra: none of its tools,
-resources or instructions are served. See
+If the cluster is missing any of them, the server withholds the Slurm capability, whichever extra
+installed it: none of its tools, resources or instructions are served. See
 [Which capabilities are served](../core/README.md#which-capabilities-are-served).
 
 ## How it behaves

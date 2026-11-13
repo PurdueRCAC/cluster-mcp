@@ -51,7 +51,8 @@ Site context:
 - A login bash, `/bin/bash -l`. Every command runs in it.
 - In `ssh` mode, an SSH server with SFTP, and your SSH configuration (`~/.ssh/config` and keys).
 
-The core declares no commands of its own. An extra whose commands the cluster lacks is withheld;
+The core declares no commands of its own. A capability whose commands the cluster lacks is
+withheld, on its own and not with the extra that installed it;
 see [Which capabilities are served](#which-capabilities-are-served).
 
 ## How it behaves
@@ -175,6 +176,10 @@ resources or instructions. The server says so on stderr, one line for each:
 ```
 Capability cluster-mcp-slurm withheld: the cluster is missing sbatch, squeue, scancel, sacct, sinfo, scontrol
 ```
+
+Each capability is judged on its own, not the extra that installed it. `cluster-mcp[rcac]` installs
+the RCAC and Slurm capabilities: on a cluster without `findscratch` or `myquota` it still serves the
+Slurm tools, and on one without Slurm's commands it still serves the RCAC tools.
 
 - The lookup takes 10 s at most.
 - If it gives no answer in that time, or cannot run, every capability is served, with one line
