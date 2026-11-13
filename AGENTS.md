@@ -1067,6 +1067,47 @@ import has no effect.
     provider and answers a tokenless HTTP call. `typing.get_type_hints(cluster_mcp.core.auth)['AUTH_MODES']`
     resolves to `Final` of a mapping from `str` to `Callable[[], AuthProvider | None]`; a `slice`,
     `Callable[..., X]` and a factory taking an argument are rejected. A live OIDC flow is untested.
+  - `tests/test_annotations.py` (`unit`, `integration`): `workspace_violations`,
+    `annotation_positions`, `type_expression_violations`, `runtime_positions`. In every workspace
+    member's `src/`, outside any `if TYPE_CHECKING:` body, these annotations must resolve to a type:
+    a module variable or class attribute declared by a simple annotated name in a module or class
+    body; each annotated parameter and the return of every function and method, at any depth; and
+    the fields of a functional class form (`TypedDict`, `NamedTuple`, `make_dataclass`, a
+    three-argument `type`) written as one name assigned the call at module or class level, with its
+    fields written out as a literal. A functional class form written any other way (a call in a
+    function body or as a base class, a chained, tuple or attribute target, fields in a variable or
+    unpacked, the factory bound to another name or passed as a value, a `types.new_class` body
+    callback), a factory's name as a string (`getattr(typing, 'TypedDict')`), and `__annotations__`
+    or `__annotate__` outside a read `type` call's namespace, as a string, a name, an attribute, a
+    keyword, or the name a `def`, `class`, import or `match` pattern binds (`def __annotate__` in a
+    class body), is refused as unreadable, never passed. Not read: a function body's own variable
+    annotations, which Python never evaluates. Not read today, and not refused: a class whose
+    factory or annotations the source reaches only through names built at run time;
+    `issues/annotation-check-pin-gaps.md` holds them. `workspace_violations(root)` returns
+    the check's refusal lines for a workspace: it takes the members from the root `pyproject.toml`'s
+    `[tool.uv.workspace]` and their modules from each member's `src/`, so a member or module added
+    later is checked with no edit to the check. A refused annotation's line names its module, line,
+    qualified name, the text as written and why. A module refused whole (its import raised, it
+    loaded from another file, it does not parse) gets a line naming the module and the reason, and a
+    member with no `src/` one naming its directory. `annotation_positions(source, module, path)` returns the positions a module's
+    syntax tree holds, each unreadable form among them marked with why; it imports nothing. Each
+    position is evaluated as `typing.get_type_hints` evaluates a postponed annotation, and one that does not resolve (an undefined name, a name
+    imported only under `TYPE_CHECKING`) is refused there, before any type is examined.
+    `type_expression_violations(hint, kind)` takes what a position resolved to and the kind of
+    position, and returns the reasons it is not a valid type expression (a `slice`, a number, a
+    string left unresolved, a qualifier out of its place, `KW_ONLY` anywhere but at the top of a
+    class attribute), empty for a type; it names no position.
+    The module's docstrings hold the rules: what is read, what an annotation reading a class-body or
+    enclosing-function name gets, a `__main__` module, a failed import. The tree check,
+    `test_every_kept_annotation_in_the_workspace_is_a_type`, runs in a fresh
+    interpreter under `bin/sandbox.sh`, because in process the unit guard replaces
+    `subprocess.Popen` and an annotation naming it would resolve to the guard's refuser. There
+    `runtime_positions(modules)` imports each module and reads, with `annotationlib`, what Python
+    itself keeps: each module's annotations, those of every class reachable from it, and those of
+    every live function compiled from its file. Every position it finds must be one the syntax
+    reader read, so a reader that skips a kind of position the tree holds is red; it never calls
+    the reader. It does not replace `AUTH_MODES`'s exact-shape pin in `tests/test_auth_modes.py`,
+    which stays.
   - `tests/test_hygiene.py` (`unit`, `integration`): `sandbox_violations`,
     `stack_import_violations`, `spec_id_violations`, `skip_violations`,
     `sandbox_unset_violations`, `marker_statement_violations`, the suite's own rails. Every launch in every `tests/*.py` goes

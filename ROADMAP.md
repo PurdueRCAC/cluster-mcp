@@ -9,7 +9,7 @@ The project is on a three-release arc. **Part 0** is released: the 0.1.x release
 safe and useful as it stood, and **0.2.0** shipped `develop` as it stood on 2026-11-12, with the
 rename, the uv workspace, the capability extras and probe, and the hardening that had landed.
 **Part I** holds the hardening, robustness and safety items still open, and the rest of the rename;
-49 entries, each of which ships in the first release after it lands. **Part II** ships as
+50 entries, each of which ships in the first release after it lands. **Part II** ships as
 **0.3.0**: the capabilities behind package extras, each tool family defined so another
 implementation is a contribution; 14 entries, eleven cycles and three absorbed seeds. It starts
 once three Part I entries have landed (a fourth, the mutation run's hung child, is cleared: landed
@@ -73,7 +73,7 @@ Each cycle's account is its `spec/{slug}/`.
 
 # Part I — hardening, and the rename finished
 
-Forty-nine entries: every open hardening, robustness and safety item, and the rest of the rename in
+Fifty entries: every open hardening, robustness and safety item, and the rest of the rename in
 code and docs. No capability is reshaped here; that is Part II. Each entry ships in the first
 release after it lands.
 
@@ -84,15 +84,15 @@ They come in six groups, in this order:
   load every family registers through. Part II starts once all three have landed; the fourth it
   waited on, the mutation run's hung child, is cleared (landed on `develop` 2026-11-12). The
   mutation run's own job (the first gate below) lands before core extraction's review.
-- **Gates** (twenty-six), because every later gate rests on them: the mutation run, the four kinds
-  of case only its hosted Linux run lets survive, its one flaky case, the two guards its shard ledger
-  leaves unpinned, the pins its stop path still lacks and the case cleanup a signal can cut short,
-  the two gaps the skip check still leaves and the pins it still lacks, the waits the timing rows
-  still miss and the bounds two miss on hosted runners, an annotation check, the test harnesses'
-  leftovers and those of a sandbox killed outside them, the pins the sandbox sweep's listing guard
-  and its reopen's link guard lack, the marker wording, its check, the shapes its statement check
-  still misreads and the gaps in what enforces it, the image's init, and the surface pin's deeper
-  layers.
+- **Gates** (twenty-seven), because every later gate rests on them: the mutation run, the four kinds
+  of case only its hosted Linux run lets survive, its one flaky case, the two guards its shard
+  ledger leaves unpinned, the pins its stop path still lacks and the case cleanup a signal can cut
+  short, the two gaps the skip check still leaves and the pins it still lacks, the waits the timing
+  rows still miss and the bounds two miss on hosted runners, an annotation check and the pins it
+  still lacks, the test harnesses' leftovers and those of a sandbox killed outside them, the pins
+  the sandbox sweep's listing guard and its reopen's link guard lack, the marker wording, its check,
+  the shapes its statement check still misreads and the gaps in what enforces it, the image's init,
+  and the surface pin's deeper layers.
 - **The executor** (seven): what `ssh-reconnect-loop`, `capability-probe` and `timeout-process-cleanup`
   left on the SSH connection and the `local` launch, and the loopback SSH link that breaks under load.
 - **Safety** (eight): a capability load retried after an interrupt, a failed load's refusal
@@ -337,13 +337,32 @@ change is the maintainer's ruling. Found on CI, 2026-11-12.
 `auth.py`'s `AUTH_MODES` carried a slice inside its annotation's subscript for months:
 `typing.get_type_hints` and eager evaluation both accepted it, in a high-blast-radius module, and it
 was fixed only because `stack-upgrade` happened to rewrite the file (R7). Nothing in the suite or
-the gate checks any other annotation. A gate step or standing test that type-checks every member's
+the gate checks any other type annotation (Python's, not the MCP tool hints of Part II).
+A gate step or standing test that type-checks every member's
 `src/`, or at least rejects an annotation under `cluster_mcp` that resolves to a non-type, closes
 it; the tool is the plan's call. Found by `stack-upgrade`'s GOAL non-goals, carried at retirement,
 2026-10-17.
 
 *Horizon: Part I, gates · Depends on: — · Refs: runs where the gate runs, so CI picks it up through its mirror of the gate (`ci-workflow`; cleared: landed on `develop` 2026-10-18); [`spec/stack-upgrade/`](spec/stack-upgrade/) pins the one annotation*
-**Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: unshaped*
+**Seed:** [`issues/annotation-check.md`](issues/annotation-check.md) · *status: adopted:annotation-check*
+
+## The annotation check behaves correctly on shapes its rows do not pin
+
+`annotation-check`'s second review found 39 mutants of the check that pass every row while a planted
+defect of their shape goes unrefused; its remediation's tree-test oracle kills the nine whose shape
+the tree holds. Thirty remain: block kinds and `self`/`cls` in the reader, qualifier and generic
+arguments in the walker, binding forms in shadow detection, exception classes at resolution and at
+import, and the refusal line's text. The third review found six survivors in the unreadable-form
+detection, one of which its remediation kills, and that remediation's sweep one more (a
+`def __annotate__` with other parameters). The check behaves correctly on each; the fix is a planted row per shape and a sweep over each domain. The
+tree test's oracle also goes red on three valid shapes no file uses today (a `TypedDict` subclassing
+another, a functional form bound to another name or assigned in a class body): it fails closed. It
+also holds the forms the check does not read today: a factory or annotations reached only through
+names built at run time, which pass unrefused (none occurs today). Seeded by the cycle 2
+remediation, 2026-11-12; extended by the cycle 3 remediation, 2026-11-13.
+
+*Horizon: Part I, gates · Depends on: annotation-check · Refs: [`spec/annotation-check/`](spec/annotation-check/) (REVIEW cycle 2, N3–N7; cycle 3, N9, N11)*
+**Seed:** [`issues/annotation-check-pin-gaps.md`](issues/annotation-check-pin-gaps.md) · *status: unshaped*
 
 ## A sandbox killed with SIGKILL leaves its directory behind
 

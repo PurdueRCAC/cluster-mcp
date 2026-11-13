@@ -1,5 +1,5 @@
 ---
-status: unshaped
+status: adopted:annotation-check
 kind: ci
 appetite: small
 lane: public
@@ -21,6 +21,9 @@ It was fixed only because the `stack-upgrade` cycle happened to rewrite `auth.py
 ([`spec/stack-upgrade/`](../spec/stack-upgrade/), R7, seen red by a mutation case under R9). That
 pins one annotation in one module. Nothing in the suite or the release recipe's `gate` checks
 annotations anywhere else in `src/`, so the next one of the same kind would ship the same way.
+
+The annotations meant here are Python type annotations, not the MCP tool annotations
+(`readOnlyHint` and its kin) that [`tool-surface.md`](tool-surface.md) sets.
 
 ## Why it was deferred
 
