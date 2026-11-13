@@ -1021,7 +1021,9 @@ import has no effect.
     `serialization`, `canonical`, `surface_check`, `differences`, `version_source`).
     `tests/fixtures/served_surface.json` is the serialization of what the server serves, in both
     protocol eras (`legacy`, `modern`) and under every capability set in `test_capabilities.SETS`
-    (`both`, `both-reversed`, `core-only`, `rcac`, `slurm`), under `harness.SITE` and auth mode
+    (`both`, `both-reversed`, `core-only`, `rcac`, `slurm`; `rcac` is the RCAC member registered
+    alone, the state the startup probe leaves on a cluster without Slurm's client commands, not an
+    install, since `[rcac]` installs the Slurm member too), under `harness.SITE` and auth mode
     `none`, as `served_surface` records it, the raw JSON a client receives, so a key no SDK model
     declares is kept: the instructions; every entry of the `tools`, `resources`, `resourceTemplates`
     and `prompts` listings, every key at any depth (titles, annotations, `_meta`, argument

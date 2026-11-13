@@ -630,6 +630,11 @@ with storage quota and allocation balance (working names `site_quota` and `site_
 better ones; planning proposes the starting surface and names), are defined once and implemented in
 a center's extra. A site can also add custom tools that work with its `/etc/agents.d`.
 
+The rule for a center's extra is set: a center's extra installs every extra its center's clusters
+need (maintainer decision, 2026-11-12), so from 0.2.2 `[rcac]` brings `[slurm]`. Whether a center's
+extra must also implement the site interfaces every named center provides is this entry's to
+propose.
+
 *Horizon: 0.3.0, after `[files-xdu]` · Depends on: core-extraction, tool-surface · Refs: absorbs `generalize-storage-discovery`; `[rcac]` is its first implementation*
 **Seed:** [`issues/site-interfaces.md`](issues/site-interfaces.md) · *status: unshaped*
 
@@ -655,6 +660,10 @@ both a dependency alias and the home for the `cluster-mcp-rcac` member: Purdue's
 Purdue part of the instructions. Getting the boundary right here is what makes another center's
 extra a matter of contribution rather than redesign, so this cycle produces a documented pattern,
 not just a Purdue special case.
+
+From 0.2.2 `[rcac]` brings `[slurm]`: a center's extra installs every extra its center's clusters
+need (maintainer decision, 2026-11-12), and every RCAC cluster runs Slurm. The rest of the bundle
+stays here.
 
 *Horizon: 0.3.0, last · Depends on: slurm-capability, lmod-tool-group, files-xdu-extra, shell-extra, site-interfaces; capability-extras (strictly; cleared: landed on `develop` 2026-11-01) · Refs: adds member routes for the favicon from `issues/rename-leftover-identity-strings.md`; sets the pattern other centers copy*
 **Seed:** [`issues/site-extras.md`](issues/site-extras.md) · *status: unshaped*

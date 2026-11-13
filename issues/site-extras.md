@@ -100,3 +100,9 @@ plan should say plainly how they compose, because a contributor will ask.
   no Purdue path, quota figure or command (R2). The member declares `RCAC_INSTRUCTIONS` on its own
   capability record beside its tools, and no core constant holds it (R4). R1 is half met: the `rcac`
   extra exists but installs only the RCAC member, so the bundle alias stands, with R5 and R6.
+- 2026-11-13: the rule is set: a center's extra installs every extra its center's clusters need
+  (maintainer decision, 2026-11-12). From 0.2.2 the `rcac` extra lists both members,
+  `cluster-mcp-rcac` and `cluster-mcp-slurm`, so `cluster-mcp[rcac]` brings `[slurm]`
+  ([`spec/rcac-extra-brings-slurm/`](../spec/rcac-extra-brings-slurm/)); each member still depends
+  on the core alone. R1 and R7 still want `[lmod]`, `[files-xdu]` and `[shell]`, and R7 the site
+  interfaces.

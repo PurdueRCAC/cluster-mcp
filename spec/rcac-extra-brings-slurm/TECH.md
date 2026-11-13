@@ -3,10 +3,10 @@ slug: rcac-extra-brings-slurm
 title: cluster-mcp[rcac] alone brings the Slurm tools
 kind: fix
 appetite: small
-status: in_progress
+status: in_review
 branch: fix/rcac-extra-brings-slurm
 base: develop
-current_phase: P2
+current_phase: done
 last_updated: '2026-11-13'
 phases:
 - id: P1
@@ -25,7 +25,7 @@ phases:
   verify: sh spec/rcac-extra-brings-slurm/verify/gate.sh p1
 - id: P2
   name: The rcac set read as the RCAC member alone; ROADMAP and seed record the rule
-  status: pending
+  status: done
   satisfies:
   - R4
   - R7
@@ -124,19 +124,19 @@ alone; `ROADMAP.md`'s two entries and `issues/site-extras.md` state the rule, it
 release, by added lines only. R7 is met by committed documents: the orchestrator grades it from the
 ROADMAP and the seed, and this phase's `roadmap` check is their content gate.
 
-- [ ] `tests/test_capabilities.py`: the `SETS` comment says `rcac` is the RCAC member registered
+- [x] `tests/test_capabilities.py`: the `SETS` comment says `rcac` is the RCAC member registered
       alone, the state the startup probe leaves on a cluster without Slurm's client commands, and no
       install.
-- [ ] `tests/test_surface.py`: the module docstring says the same of the `rcac` set.
-- [ ] `AGENTS.md` § Testing, the `tests/test_surface.py` entry: the same, beside the list of sets.
-- [ ] `ROADMAP.md`: one paragraph in the site-interfaces entry and one in the `[rcac]` entry, each
+- [x] `tests/test_surface.py`: the module docstring says the same of the `rcac` set.
+- [x] `AGENTS.md` § Testing, the `tests/test_surface.py` entry: the same, beside the list of sets.
+- [x] `ROADMAP.md`: one paragraph in the site-interfaces entry and one in the `[rcac]` entry, each
       before its `*Horizon:*` line: the rule in the GOAL's words, "maintainer decision, 2026-11-12",
       and `[rcac]` brings `[slurm]` from 0.2.2. No other line of either entry changes.
-- [ ] `issues/site-extras.md`: a dated note appended under Notes, saying the same and what of its
+- [x] `issues/site-extras.md`: a dated note appended under Notes, saying the same and what of its
       R1 and R7 remains. `status:` stays `unshaped`.
-- [ ] The ledger: walk P1's and P2's bodies for postponed-work phrases (`text_checks.py ledger`
+- [x] The ledger: walk P1's and P2's bodies for postponed-work phrases (`text_checks.py ledger`
       reads them); each names an `issues/` seed and its ROADMAP entry. None is expected.
-- [ ] Stage by path, then run the gate.
+- [x] Stage by path, then run the gate.
 - **Verify:** `sh spec/rcac-extra-brings-slurm/verify/gate.sh p2` (18 s on the prototype): `files`, the
   `rcac` set's reading, the ROADMAP and seed, the ledger, then `tests/test_capabilities.py`,
   `tests/test_surface.py` and `tests/test_hygiene.py` (spec ids in the new comments).

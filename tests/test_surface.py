@@ -7,7 +7,9 @@
 protocol eras and under every capability set in `test_capabilities.SETS`, under the harness's site
 context and auth mode `none`, as `served_surface` records it: the instructions; every entry of the
 tool, resource, resource template and prompt listings, every key at any depth; the server info; and
-the advertised capabilities object. `serialization` lays it out field first, then era, then set
+the advertised capabilities object. The `rcac` set is the RCAC member registered alone, the state
+the startup probe leaves on a cluster without Slurm's client commands, not an install: the `rcac`
+extra installs the Slurm member too, so a `[rcac]` install serves the `both` set. `serialization` lays it out field first, then era, then set
 (`{listing: {identity: {era: {set: entry}}}}` and `{key: {era: {set: value}}}`), so a change to one
 entry shows in `git diff` under that entry's name, and `canonical` writes it indented with its keys
 sorted, so one served surface is always the same bytes.

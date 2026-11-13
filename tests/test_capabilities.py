@@ -81,7 +81,9 @@ STORAGE_URIS = ('cluster://storage', 'rcac://storage')
 # A tool's line in an instructions text.
 LISTED = re.compile(r'^- (\w+):', re.MULTILINE)
 
-# The capability sets every composition test serves, by capability name, in the order given.
+# The capability sets every composition test serves, by capability name, in the order given. `rcac`
+# is the RCAC member registered alone: the state the startup probe leaves on a cluster without
+# Slurm's client commands. It is no install, since the `rcac` extra installs the Slurm member too.
 SETS = [
     pytest.param((), id='core-only'),
     pytest.param(('slurm',), id='slurm'),
