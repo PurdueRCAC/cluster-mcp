@@ -3,11 +3,11 @@ slug: rcac-extra-brings-slurm
 title: cluster-mcp[rcac] alone brings the Slurm tools
 kind: fix
 appetite: small
-status: in_review
+status: done
 branch: fix/rcac-extra-brings-slurm
 base: develop
 current_phase: done
-last_updated: '2026-11-13'
+last_updated: '2026-11-25'
 phases:
 - id: P1
   name: The rcac extra installs the Slurm member, pinned, with every install line
